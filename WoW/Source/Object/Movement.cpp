@@ -916,7 +916,7 @@ void CMovement_C::SetUpdateInfo(uint32_t time, const CClientMoveUpdate* update, 
         this->FlushMoveQueue(0, 1);
         this->RemoveFromMoversList(0);
         this->m_spline->CopyFrom(update->m_moveSpline);
-        this->m_spline->m_spline.m_splineMode = (this->m_spline->m_flags & 0x42000) != 0;
+        this->m_spline->m_spline.splineMode = (this->m_spline->m_flags & 0x42000) != 0 ? MODE_CATMULLROM : MODE_LINEAR;
     } else {
         if (this->m_spline && (this->m_spline->m_flags & 0x800)) {
             this->m_unit->OnCollideFallLand(0, 1);

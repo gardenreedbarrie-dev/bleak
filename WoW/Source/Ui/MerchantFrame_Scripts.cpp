@@ -64,7 +64,7 @@ static int32_t Script_CanMerchantRepair(lua_State* L) {
 // VERIFY: 9422b5ea auto
 // OFFSET: 0x005843B0
 static int32_t Script_InRepairMode(lua_State* L) {
-    if (CursorGetResetMode() == 17) {
+    if (CursorGetResetMode() == REPAIR_CURSOR) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
@@ -180,9 +180,9 @@ static int32_t Script_GetMerchantItemLink(lua_State* L) {
 // VERIFY: ffebd45e auto
 // OFFSET: 0x00584390
 static int32_t Script_HideRepairCursor(lua_State* L) {
-    if (CursorGetResetMode() == 17) {
-        CursorSetResetMode(1);
-        CursorSetMode(1);
+    if (CursorGetResetMode() == REPAIR_CURSOR) {
+        CursorSetResetMode(POINT_CURSOR);
+        CursorSetMode(POINT_CURSOR);
     }
 
     return 0;
@@ -243,7 +243,7 @@ static int32_t Script_GetMerchantItemCostItem(lua_State* L) {
         return 2;
     }
 
-    const char* path = ClientDBStringLookup(3);
+    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     char texture[260];
     SStrPrintf(texture, sizeof(texture), "%s%s%s", path, *path ? "\\" : "", CGItem_C::GetInventoryArt(stats->m_displayId));
     lua_pushstring(L, texture);
@@ -263,8 +263,8 @@ static int32_t Script_ShowRepairCursor(lua_State* L) {
 
     if (unit && (unit->m_unit->m_unitNpcFlags & 0x1000)) {
         CGGameUI::ClearCursor(1, 1);
-        CursorSetResetMode(17);
-        CursorSetMode(17);
+        CursorSetResetMode(REPAIR_CURSOR);
+        CursorSetMode(REPAIR_CURSOR);
     }
 
     return 0;
@@ -299,7 +299,7 @@ static int32_t Script_GetMerchantItemInfo(lua_State* L) {
         lua_pushnil(L);
     }
 
-    const char* path = ClientDBStringLookup(3);
+    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     char texture[260];
     SStrPrintf(texture, sizeof(texture), "%s%s%s", path, *path ? "\\" : "", CGItem_C::GetInventoryArt(item->m_displayID));
     lua_pushstring(L, texture);
@@ -351,7 +351,7 @@ static int32_t Script_GetBuybackItemInfo(lua_State* L) {
         item->GetFullItemName(buffer, sizeof(buffer));
         lua_pushstring(L, buffer);
 
-        const char* path = ClientDBStringLookup(3);
+        const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
         SStrPrintf(buffer, sizeof(buffer), "%s%s%s", path, *path ? "\\" : "", item->GetInventoryArt());
         lua_pushstring(L, buffer);
         lua_pushnumber(L, player->GetBuybackPrice(slot - 74));
@@ -508,7 +508,7 @@ static int32_t Script_BuybackItem(lua_State* L) {
 // VERIFY: 7ad42e00 manual
 // OFFSET: 0x005856D0
 static int32_t Script_ShowMerchantSellCursor(lua_State* L) {
-    if (Spell_C_IsTargeting() || CursorGetResetMode() != 1) {
+    if (Spell_C_IsTargeting() || CursorGetResetMode() != POINT_CURSOR) {
         return 0;
     }
 
@@ -529,7 +529,7 @@ static int32_t Script_ShowMerchantSellCursor(lua_State* L) {
     }
 
     if (player->GetCoinage() < static_cast<uint32_t>(item->m_price)) {
-        CursorSetMode(29);
+        CursorSetMode(BUY_ERROR_CURSOR);
         return 0;
     }
 
@@ -537,19 +537,19 @@ static int32_t Script_ShowMerchantSellCursor(lua_State* L) {
     ItemStats_C* stats = g_itemDBCache.GetRecord(item->m_itemID, none, nullptr, nullptr, false);
 
     if (!stats) {
-        CursorSetMode(3);
+        CursorSetMode(BUY_CURSOR);
         return 0;
     }
 
     if (stats->m_requiredReputationFaction && GetRepListRepValue(stats->m_requiredReputationFaction) < CGReputationInfo::m_reactionThresholds[stats->m_requiredReputationRank]) {
-        CursorSetMode(29);
+        CursorSetMode(BUY_ERROR_CURSOR);
         return 0;
     }
 
     ItemExtendedCostRec* cost = g_itemExtendedCostDB.GetRecord(item->m_extendedCostID);
 
     if (!cost) {
-        CursorSetMode(3);
+        CursorSetMode(BUY_CURSOR);
         return 0;
     }
 
@@ -570,14 +570,14 @@ static int32_t Script_ShowMerchantSellCursor(lua_State* L) {
         unable = 1;
     }
 
-    CursorSetMode(unable ? 29 : 3);
+    CursorSetMode(unable ? BUY_ERROR_CURSOR : BUY_CURSOR);
     return 0;
 }
 
 // VERIFY: 26f78e7c manual
 // OFFSET: 0x00585890
 static int32_t Script_ShowBuybackSellCursor(lua_State* L) {
-    if (Spell_C_IsTargeting() || CursorGetResetMode() != 1) {
+    if (Spell_C_IsTargeting() || CursorGetResetMode() != POINT_CURSOR) {
         return 0;
     }
 
@@ -593,11 +593,11 @@ static int32_t Script_ShowBuybackSellCursor(lua_State* L) {
         uint32_t price = player->GetBuybackPrice(slot - 74);
 
         if (player->GetCoinage() >= price) {
-            CursorSetMode(3);
+            CursorSetMode(BUY_CURSOR);
             return 0;
         }
 
-        CursorSetMode(29);
+        CursorSetMode(BUY_ERROR_CURSOR);
     }
 
     return 0;

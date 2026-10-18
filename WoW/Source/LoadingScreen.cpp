@@ -1234,7 +1234,7 @@ static bool InitializeSpline(uint32_t path, int32_t leg) {
     C3Spline_CatmullRom spline;
     spline.SetPoints(points.m_data, count + 4);
 
-    int32_t segments = FloatToInt64(spline.m_length * 66.666672f);
+    int32_t segments = FloatToInt64(spline.cachedLength * 66.666672f);
 
     if (segments < 1) {
         segments = 1;

@@ -63,7 +63,7 @@ static void UnitSoundLoadDeathThuds() {
 // OFFSET: 0x00746540
 void CGUnit_C::SetImpactKitEffect(bool offhand, const ATTACKROUNDINFO* info, const C3Vector* position) {
     CGUnit_C* attacker = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(info->m_attacker, TYPEMASK_UNIT, __FILE__, __LINE__));
-    const CGUnitVirtualItem* weapon = attacker ? attacker->GetAttackingWeapon((info->m_hitInfo >> 2) & 1, false) : nullptr;
+    const CGUnitVirtualItem* weapon = attacker ? attacker->GetAttackingWeapon(static_cast<COMBATHAND>((info->m_hitInfo >> 2) & 1), false) : nullptr;
     const CGUnitVirtualItem* parry = this->GetParryingItem(offhand);
 
     if (parry) {
@@ -320,13 +320,13 @@ void CGUnit_C::KillCreatureLoopSound() {
 
 // VERIFY: f678b1e1 auto
 // OFFSET: 0x00746360
-bool CGUnit_C::GetWeaponSwingType(bool offhand, int32_t* swingType) const {
-    if (!this->GetVirtualItemDisplayID(offhand == false)) {
-        *swingType = 0;
+bool CGUnit_C::GetWeaponSwingType(bool offhand, WEAPONSWING_SOUNDTYPES* swingType) const {
+    if (!this->GetVirtualItemDisplayID(static_cast<VIRTUAL_MONSTER_SLOT>(offhand == false))) {
+        *swingType = WEAPONSWING_LIGHT;
         return true;
     }
 
-    const CGUnitVirtualItem* item = this->GetVirtualItem(offhand == false, false);
+    const CGUnitVirtualItem* item = this->GetVirtualItem(static_cast<VIRTUAL_MONSTER_SLOT>(offhand == false), false);
 
     if (!item || item->m_classID != 2) {
         return false;
@@ -335,7 +335,7 @@ bool CGUnit_C::GetWeaponSwingType(bool offhand, int32_t* swingType) const {
     const ItemSubClassRec* subClass = SDBItemSubclassGetSubClassRec(2, item->m_subclassID);
 
     if (subClass) {
-        *swingType = subClass->m_weaponSwingSize;
+        *swingType = static_cast<WEAPONSWING_SOUNDTYPES>(subClass->m_weaponSwingSize);
     }
 
     return subClass != nullptr;
@@ -389,23 +389,23 @@ int32_t CGUnit_C::GetNewNPCSoundCount(int32_t count, int32_t* soundKitId, int32_
 
     NPCSoundsRec* sounds = g_npcSoundsDB.GetRecord(this->m_displayInfo->m_npcsoundID);
 
-    if (!sounds || !sounds->m_soundID[0]) {
+    if (!sounds || !sounds->m_soundID[NPCSOUND_HELLO]) {
         return -1;
     }
 
     if (count < 5) {
-        *soundKitId = sounds->m_soundID[0];
+        *soundKitId = sounds->m_soundID[NPCSOUND_HELLO];
         *soundIndex = -1;
         return count + 1;
     }
 
-    if (count - 5 < SI2::GetNumSoundsInSoundKit(sounds->m_soundID[2])) {
+    if (count - 5 < SI2::GetNumSoundsInSoundKit(sounds->m_soundID[NPCSOUND_PISSED])) {
         *soundIndex = count - 5;
-        *soundKitId = sounds->m_soundID[2];
+        *soundKitId = sounds->m_soundID[NPCSOUND_PISSED];
         return count + 1;
     }
 
-    *soundKitId = sounds->m_soundID[0];
+    *soundKitId = sounds->m_soundID[NPCSOUND_HELLO];
     *soundIndex = -1;
     return 0;
 }

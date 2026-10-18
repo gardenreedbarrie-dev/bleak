@@ -1,4 +1,5 @@
 #include "Object_C.h"
+#include "WoW/Source/UIUtil/Types.h"
 #include "Engine/Source/Gx/Gx.h"
 #include "Engine/Source/Gx/CGxDevice/CGxDevice.h"
 #include "WoW/Source/Game/GameClient/ProjectTex.h"
@@ -958,17 +959,17 @@ int32_t CGObject_C::GetQuestGiverCursor(int32_t highlighted) {
         case 5:
         case 7:
         case 8:
-            return highlighted ? 49 : 23;
+            return highlighted ? QUEST_ERROR_CURSOR : QUEST_CURSOR;
 
         case 6:
-            return highlighted ? 50 : 24;
+            return highlighted ? QUEST_REPEATABLE_ERROR_CURSOR : QUEST_REPEATABLE_CURSOR;
 
         case 9:
         case 10:
-            return highlighted ? 51 : 25;
+            return highlighted ? QUEST_TURNIN_ERROR_CURSOR : QUEST_TURNIN_CURSOR;
 
         default:
-            return 0;
+            return NO_CURSOR;
     }
 }
 

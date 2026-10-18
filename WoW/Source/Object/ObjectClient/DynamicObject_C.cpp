@@ -88,7 +88,7 @@ void CGDynamicObject_C::PostInit(uint32_t time, const CClientObjCreate& create, 
 
     this->ObjectVisKitProc();
 
-    if (this->m_dynamicObject->m_bytes[0] != 2 || this->m_dynamicObject->m_caster != ClntObjMgrGetActivePlayer()) {
+    if (this->m_dynamicObject->m_bytes[0] != DYNAMIC_OBJECT_FARSIGHT_FOCUS || this->m_dynamicObject->m_caster != ClntObjMgrGetActivePlayer()) {
         return;
     }
 
@@ -300,9 +300,9 @@ void CGDynamicObject_C::ModelLoaded(CM2Model* model) {
         model->m_fFlags |= 0x4;
     }
 
-    uint8_t type = this->m_dynamicObject->m_bytes[0];
+    DYNAMIC_OBJECT_TYPE type = static_cast<DYNAMIC_OBJECT_TYPE>(this->m_dynamicObject->m_bytes[0]);
 
-    if (type != 2 && type != 1) {
+    if (type != DYNAMIC_OBJECT_FARSIGHT_FOCUS && type != DYNAMIC_OBJECT_AREA_SPELL) {
         CAaSphere sphere = this->GetObjectModel()->GetBoundingSphere();
 
         if (sphere.r > 0.001f) {

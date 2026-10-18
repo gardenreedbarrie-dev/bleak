@@ -18,10 +18,10 @@ struct BFSNODE : public TSLinkedNode<BFSNODE> {
     BFSNODE();
 };
 
-static CRect SmartScreenRectMoveUp(uint32_t grid, CRect rect);
-static CRect SmartScreenRectMoveLeft(uint32_t grid, CRect rect);
-static CRect SmartScreenRectMoveRight(uint32_t grid, CRect rect);
-static CRect SmartScreenRectMoveDown(uint32_t grid, CRect rect);
+static CRect SmartScreenRectMoveUp(SCREENRECTGRIDS grid, CRect rect);
+static CRect SmartScreenRectMoveLeft(SCREENRECTGRIDS grid, CRect rect);
+static CRect SmartScreenRectMoveRight(SCREENRECTGRIDS grid, CRect rect);
+static CRect SmartScreenRectMoveDown(SCREENRECTGRIDS grid, CRect rect);
 
 // STATIC: 0x00A23C08
 static int32_t s_searchDirections[9][4] = {
@@ -37,7 +37,7 @@ static int32_t s_searchDirections[9][4] = {
 };
 
 // STATIC: 0x00A23C98
-static CRect (*s_moveFunctions[4])(uint32_t grid, CRect rect) = {
+static CRect (*s_moveFunctions[4])(SCREENRECTGRIDS grid, CRect rect) = {
     SmartScreenRectMoveUp,
     SmartScreenRectMoveLeft,
     SmartScreenRectMoveRight,
@@ -50,8 +50,12 @@ static TSList<BFSNODE> s_searchQueue;
 // STATIC: 0x00AD27C0
 static TSList<BFSNODE> s_freeNodes;
 
+// 3.3.5 keeps three slots, but bulk clear/shutdown process only two.
+static const uint32_t SCREENRECTGRID_STORAGE_COUNT = 3;
+static const uint32_t SCREENRECTGRID_CLEAR_COUNT = 2;
+
 // STATIC: 0x00C25CAC
-static TSGrowableArray<CRect> s_grids[3];
+static TSGrowableArray<CRect> s_grids[SCREENRECTGRID_STORAGE_COUNT];
 
 // INLINED
 inline BFSNODE::BFSNODE() {
@@ -167,7 +171,7 @@ static void SmartScreenRectClipRect(CRect& rect) {
 
 // VERIFY: d59ec448 manual
 // OFFSET: 0x00615380
-static int32_t SmartScreenRectFindOverlap(uint32_t grid, const CRect& rect, uint32_t direction, float* distance) {
+static int32_t SmartScreenRectFindOverlap(SCREENRECTGRIDS grid, const CRect& rect, uint32_t direction, float* distance) {
     TSGrowableArray<CRect>& rects = s_grids[grid];
 
     for (uint32_t i = 0; i < rects.Count(); i++) {
@@ -201,7 +205,7 @@ static int32_t SmartScreenRectFindOverlap(uint32_t grid, const CRect& rect, uint
 
 // VERIFY: d7e69ac5 auto
 // OFFSET: 0x00615430
-static CRect SmartScreenRectMoveUp(uint32_t grid, CRect rect) {
+static CRect SmartScreenRectMoveUp(SCREENRECTGRIDS grid, CRect rect) {
     float distance;
 
     if (SmartScreenRectFindOverlap(grid, rect, 0, &distance)) {
@@ -214,7 +218,7 @@ static CRect SmartScreenRectMoveUp(uint32_t grid, CRect rect) {
 
 // VERIFY: 9eabe4b2 manual
 // OFFSET: 0x00615480
-static CRect SmartScreenRectMoveLeft(uint32_t grid, CRect rect) {
+static CRect SmartScreenRectMoveLeft(SCREENRECTGRIDS grid, CRect rect) {
     float distance;
 
     if (SmartScreenRectFindOverlap(grid, rect, 1, &distance)) {
@@ -227,7 +231,7 @@ static CRect SmartScreenRectMoveLeft(uint32_t grid, CRect rect) {
 
 // VERIFY: c917b611 manual
 // OFFSET: 0x00615520
-static CRect SmartScreenRectMoveRight(uint32_t grid, CRect rect) {
+static CRect SmartScreenRectMoveRight(SCREENRECTGRIDS grid, CRect rect) {
     float distance;
 
     if (SmartScreenRectFindOverlap(grid, rect, 2, &distance)) {
@@ -240,7 +244,7 @@ static CRect SmartScreenRectMoveRight(uint32_t grid, CRect rect) {
 
 // VERIFY: 9b0e0ff0 manual
 // OFFSET: 0x006155C0
-static CRect SmartScreenRectMoveDown(uint32_t grid, CRect rect) {
+static CRect SmartScreenRectMoveDown(SCREENRECTGRIDS grid, CRect rect) {
     float distance;
 
     if (SmartScreenRectFindOverlap(grid, rect, 3, &distance)) {
@@ -260,15 +264,15 @@ static void SmartScreenRectRecycleNodes() {
 // VERIFY: 642ef51a auto
 // OFFSET: 0x00615860
 void SmartScreenRectClearAllGrids() {
-    for (uint32_t i = 0; i < 2; i++) {
+    for (uint32_t i = 0; i < SCREENRECTGRID_CLEAR_COUNT; i++) {
         s_grids[i].SetCount(0);
     }
 }
 
 // VERIFY: a5840a2c auto
 // OFFSET: 0x00615890
-void SmartScreenRectClearGrid(uint32_t grid) {
-    if (grid <= 2) {
+void SmartScreenRectClearGrid(SCREENRECTGRIDS grid) {
+    if (grid <= SRECTGRID_UNKNOWN_2) {
         s_grids[grid].SetCount(0);
     }
 }
@@ -292,7 +296,7 @@ static BFSNODE* SmartScreenRectAllocNode() {
 
 // VERIFY: a1ae77d0 manual
 // OFFSET: 0x00615980
-static CRect SmartScreenRectFindFreeRect(uint32_t grid, const CRect& rect) {
+static CRect SmartScreenRectFindFreeRect(SCREENRECTGRIDS grid, const CRect& rect) {
     CRect result;
     result.minY = 0.0f;
     result.minX = 0.0f;
@@ -363,7 +367,7 @@ static CRect SmartScreenRectFindFreeRect(uint32_t grid, const CRect& rect) {
 
 // VERIFY: 392e628c auto
 // OFFSET: 0x00615C50
-static C2Vector SmartScreenRectFindPosition(uint32_t grid, const CRect& rect, int32_t* changed) {
+static C2Vector SmartScreenRectFindPosition(SCREENRECTGRIDS grid, const CRect& rect, int32_t* changed) {
     CRect found = SmartScreenRectFindFreeRect(grid, rect);
 
     *changed = found.minY != rect.minY || found.minX != rect.minX || found.maxY != rect.maxY || found.maxX != rect.maxX;
@@ -377,7 +381,7 @@ static C2Vector SmartScreenRectFindPosition(uint32_t grid, const CRect& rect, in
 
 // VERIFY: 9ea2ce49 manual
 // OFFSET: 0x00615CD0
-void SmartScreenRectPlace(uint32_t grid, CRect& rect) {
+void SmartScreenRectPlace(SCREENRECTGRIDS grid, CRect& rect) {
     float height = fabsf(rect.maxY - rect.minY);
     float halfWidth = fabsf(rect.maxX - rect.minX) * 0.5f;
     float halfHeight = height * 0.5f;
@@ -405,7 +409,7 @@ void SmartScreenRectPlace(uint32_t grid, CRect& rect) {
 
 // VERIFY: c9083189 manual
 // OFFSET: 0x00615E10
-void SmartScreenRectPositionFrame(uint32_t grid, CSimpleFrame* frame, CSimpleFrame* parent, const C3Vector& position, int32_t center) {
+void SmartScreenRectPositionFrame(SCREENRECTGRIDS grid, CSimpleFrame* frame, CSimpleFrame* parent, const C3Vector& position, int32_t center) {
     float halfWidth = frame->GetWidth();
     float height = frame->GetHeight();
     halfWidth = halfWidth * 0.5f;
@@ -449,7 +453,7 @@ void SmartScreenRectShutdown() {
     s_searchQueue.Clear();
     s_freeNodes.Clear();
 
-    for (uint32_t i = 0; i < 2; i++) {
+    for (uint32_t i = 0; i < SCREENRECTGRID_CLEAR_COUNT; i++) {
         s_grids[i].Clear();
     }
 }

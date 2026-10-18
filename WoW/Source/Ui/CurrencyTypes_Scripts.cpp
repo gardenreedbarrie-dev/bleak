@@ -86,7 +86,7 @@ static int32_t Script_GetBackpackCurrencyInfo(lua_State* L) {
         lua_pushnumber(L, extraCurrencyType);
     }
 
-    const char* path = ClientDBStringLookup(3);
+    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     char texture[260];
     SStrPrintf(texture, sizeof(texture), "%s%s%s", path, *path ? "\\" : "", CGItem_C::GetInventoryArt(stats->m_displayId));
     lua_pushstring(L, texture);
@@ -169,7 +169,7 @@ int32_t Script_GetCurrencyListInfo(lua_State* L) {
     ItemStats_C* stats = g_itemDBCache.GetRecord(entry->m_itemID, none, nullptr, nullptr, false);
 
     if (stats) {
-        const char* path = ClientDBStringLookup(3);
+        const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
         char texture[260];
         SStrPrintf(texture, sizeof(texture), "%s%s%s", path, *path ? "\\" : "", CGItem_C::GetInventoryArt(stats->m_displayId));
         lua_pushstring(L, texture);

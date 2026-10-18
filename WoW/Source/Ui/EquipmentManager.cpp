@@ -439,7 +439,7 @@ void CGEquipmentManager::GetFullIconPath(int32_t id, char* buffer, uint32_t size
         return;
     }
 
-    const char* path = ClientDBStringLookup(3);
+    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     const char* icon = set->m_icon;
 
     if (!icon || !*icon) {

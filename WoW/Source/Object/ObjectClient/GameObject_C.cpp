@@ -1063,7 +1063,7 @@ bool CGGameObject_C_Type_FishingNode::CanUse() const {
 // VERIFY: f61c006c auto
 // OFFSET: 0x0070B910
 int32_t CGGameObject_C_Type_GuildBank::CanChangeCursor() const {
-    return this->CanUseNow(nullptr, nullptr, nullptr) ? 3 : 29;
+    return this->CanUseNow(nullptr, nullptr, nullptr) ? BUY_CURSOR : BUY_ERROR_CURSOR;
 }
 
 // VERIFY: 1e1b3af8 auto
@@ -2814,7 +2814,7 @@ bool CGGameObject_C::IsValidTargetForSpell(const WOWGUID& item, int32_t spellId)
 // OFFSET: 0x0070CE10
 int32_t CGGameObject_C::CanChangeCursor() const {
     if (!this->m_typeData->CanUse()) {
-        return 0;
+        return NO_CURSOR;
     }
 
     if (!this->m_stats || !this->m_stats->m_iconName || !*this->m_stats->m_iconName) {
@@ -2830,7 +2830,7 @@ int32_t CGGameObject_C::CanChangeCursor() const {
     }
 
     int32_t mode = CursorGetModeFromName(name);
-    return mode ? mode : 53;
+    return mode ? mode : NUM_CURSOR_MODES;
 }
 
 // VERIFY: 9f6a62fd manual
@@ -3891,7 +3891,7 @@ int32_t CGGameObject_C_TypeBase::CanChangeCursor() const {
         }
     }
 
-    return canUse ? 5 : 31;
+    return canUse ? INTERACT_CURSOR : INTERACT_ERROR_CURSOR;
 }
 
 // VERIFY: 7a1f42bf manual

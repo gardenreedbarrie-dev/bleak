@@ -48,7 +48,7 @@ static int32_t Script_JumpOrAscendStart(lua_State* L) {
     uint32_t time = CSimpleTop::s_eventTime;
 
     if (mover->GetClientStandState()) {
-        mover->ChangeStandState(0);
+        mover->ChangeStandState(UNIT_STANDING);
     }
 
     if (ClntObjMgrGetActivePlayerObj()) {

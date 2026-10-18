@@ -1327,7 +1327,7 @@ void CMissile::HitTargetAreaEffect(const SpellRec* spell, const SpellVisualRec* 
 
             if (result && !(this->m_flags & 0x100) && !this->m_missileIndex) {
                 if (spell && !(spell->m_attributes & 0x100)) {
-                    unit->AddWorldText(this->m_casterGuid, result, spell, 0);
+                    unit->AddWorldText(this->m_casterGuid, static_cast<MISS_REASON>(result), spell, 0);
                     CGGameUI::ShowSpellMissFeedback(unit->m_obj->m_guid, result);
                 }
 
@@ -1863,7 +1863,7 @@ void CMissile::MissedTarget(CGUnit_C* target, const C3Vector* direction) {
             SpellRec spell;
 
             if (g_spellDB.GetRecord(this->m_spellID, &spell) && !(spell.m_attributes & 0x100) && !this->m_missileIndex) {
-                target->AddWorldText(this->m_casterGuid, this->GetHitResult(), &spell, 0);
+                target->AddWorldText(this->m_casterGuid, static_cast<MISS_REASON>(this->GetHitResult()), &spell, 0);
                 CGGameUI::ShowSpellMissFeedback(target->m_obj->m_guid, this->GetHitResult());
                 UnitCombatLogSpellMissed(this->m_casterGuid, target->m_obj->m_guid, this->m_spellID, this->GetHitResult(), 0, 0, 0);
             }

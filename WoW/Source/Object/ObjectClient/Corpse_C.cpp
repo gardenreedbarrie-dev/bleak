@@ -510,7 +510,7 @@ void CGCorpse_C::OnRightClick() {
                 return;
             }
 
-            player->ChangeStandState(0);
+            player->ChangeStandState(UNIT_STANDING);
         }
 
         player->SetAutoLoot(CGGameUI::IsAutoLooting());

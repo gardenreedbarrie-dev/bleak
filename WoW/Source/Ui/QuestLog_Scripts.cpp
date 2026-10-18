@@ -731,7 +731,7 @@ static int32_t Script_GetQuestLogRewardInfo(lua_State* L) {
         return 5;
     }
 
-    const char* path = ClientDBStringLookup(3);
+    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     SStrPrintf(s_texture, sizeof(s_texture), "%s%s%s", path, *path ? "\\" : "", CGItem_C::GetInventoryArt(stats->m_displayId));
     lua_pushstring(L, stats->GetName(0));
     lua_pushstring(L, s_texture);
@@ -774,7 +774,7 @@ static int32_t Script_GetQuestLogChoiceInfo(lua_State* L) {
         return 5;
     }
 
-    const char* path = ClientDBStringLookup(3);
+    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     SStrPrintf(s_texture, sizeof(s_texture), "%s%s%s", path, *path ? "\\" : "", CGItem_C::GetInventoryArt(stats->m_displayId));
     lua_pushstring(L, stats->GetName(0));
     lua_pushstring(L, s_texture);
@@ -1325,7 +1325,7 @@ static int32_t Script_GetQuestLogSpecialItemInfo(lua_State* L) {
     }
 
     lua_pushstring(L, CGTooltip::GetItemHyperlinkString(item));
-    const char* path = ClientDBStringLookup(3);
+    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     char texture[260];
     SStrPrintf(texture, sizeof(texture), "%s%s%s", path, *path ? "\\" : "", item->GetInventoryArt());
     lua_pushstring(L, texture);

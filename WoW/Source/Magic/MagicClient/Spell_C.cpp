@@ -1295,8 +1295,8 @@ void HandleSpellFailedOrGo(CGUnit_C* unit, PendingSpellCast* cast, const SpellRe
     if (cast == s_targetingSpell) {
         s_needTargets = 0;
         s_targetingSpell = nullptr;
-        CursorSetResetMode(1);
-        CursorSetMode(1);
+        CursorSetResetMode(POINT_CURSOR);
+        CursorSetMode(POINT_CURSOR);
         Spell_C_DestroySpellWorldObject();
         CGInputControl* input = CGInputControl::GetActive();
         input->m_mouseModeFlags &= ~0x10;
@@ -1972,7 +1972,7 @@ void PendingSpellCast::OnSpellGo(CDataStore* msg) {
                 CGUnit_C* target = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(misses.m_data[i], TYPEMASK_UNIT, __FILE__, __LINE__));
 
                 if (target) {
-                    target->AddWorldText(source, missReasons.m_data[i], &spell, false);
+                    target->AddWorldText(source, static_cast<MISS_REASON>(missReasons.m_data[i]), &spell, false);
                 }
 
                 CGGameUI::ShowSpellMissFeedback(misses.m_data[i], missReasons.m_data[i]);
@@ -1985,7 +1985,7 @@ void PendingSpellCast::OnSpellGo(CDataStore* msg) {
                     CGUnit_C* reflector = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(caster, TYPEMASK_UNIT, __FILE__, __LINE__));
 
                     if (reflector) {
-                        reflector->AddWorldText(source, reflectResults.m_data[i], &spell, false);
+                        reflector->AddWorldText(source, static_cast<MISS_REASON>(reflectResults.m_data[i]), &spell, false);
                     }
 
                     CGGameUI::ShowSpellMissFeedback(caster, reflectResults.m_data[i]);
@@ -2424,7 +2424,7 @@ const char* GetPowerString(POWER_TYPE powerType) {
 const SpellVisualRec* GetSpellVisual(const SpellRec* spell) {
     int32_t visualId = spell->m_spellVisualID[0];
 
-    if (ViolenceGetLevel() < 2 && spell->m_spellVisualID[1]) {
+    if (ViolenceGetLevel() < VIOLENCELEVEL_HIGH && spell->m_spellVisualID[1]) {
         visualId = spell->m_spellVisualID[1];
     }
 
@@ -7636,8 +7636,8 @@ void Spell_C::SendPendingCast(PendingSpellCast* cast, bool hideVisuals) {
         s_spellWorldModel = nullptr;
     }
 
-    CursorSetResetMode(1);
-    CursorSetMode(1);
+    CursorSetResetMode(POINT_CURSOR);
+    CursorSetMode(POINT_CURSOR);
     CGUnit_C* caster = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(cast->m_data.m_caster, TYPEMASK_UNIT, __FILE__, __LINE__));
 
     if (!caster) {
@@ -7687,7 +7687,7 @@ void Spell_C::SendPendingCast(PendingSpellCast* cast, bool hideVisuals) {
             return;
         }
 
-        caster->ChangeStandState(0);
+        caster->ChangeStandState(UNIT_STANDING);
     }
 
     if (!(spell.m_attributes & 0x1000000) && static_cast<int32_t>(caster->m_unit->m_unitFieldMountdisplayid) > 0 && !caster->MountedCombatAllowed() && caster->m_mountDisplayId > 0 && !(caster->m_clientFlags & 0x10000000)) {
@@ -8396,7 +8396,7 @@ bool Spell_C_CastSpell(CGUnit_C* caster, int32_t spellId, const CGItem_C* item, 
             CGItem_C* weapon = static_cast<CGItem_C*>(ClntObjMgrObjectPtr(WOWGUID{ static_cast<CGPlayer_C*>(unit)->m_bag.GetItemGuid(17) }, TYPEMASK_ITEM, __FILE__, __LINE__));
             usable = weapon && weapon->IsUsable();
         } else {
-            usable = unit->GetVirtualItem(2, false) != nullptr;
+            usable = unit->GetVirtualItem(VIRTUAL_MONSTER_SLOT_RANGED, false) != nullptr;
         }
 
         if (!usable) {
@@ -8473,8 +8473,8 @@ bool Spell_C_CastSpell(CGUnit_C* caster, int32_t spellId, const CGItem_C* item, 
         }
 
         s_targetingSpell = cast;
-        CursorSetResetMode(2);
-        CursorSetMode(28);
+        CursorSetResetMode(CAST_CURSOR);
+        CursorSetMode(CAST_ERROR_CURSOR);
         CGSpellBook::UpdateSelection();
         CGInputControl* input = CGInputControl::GetActive();
         input->m_mouseModeFlags |= 0x10;

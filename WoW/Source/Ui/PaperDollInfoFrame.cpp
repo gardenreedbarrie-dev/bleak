@@ -445,7 +445,7 @@ void CGCharacterInfo::PickupInventoryItem(int32_t slot) {
         return;
     }
 
-    if (item && CursorGetResetMode() == 17 && CGMerchantInfo::CanRepair()) {
+    if (item && CursorGetResetMode() == REPAIR_CURSOR && CGMerchantInfo::CanRepair()) {
         uint32_t cost = CGMerchantInfo::GetRepairCost(item);
 
         if (cost > player->GetCoinage()) {
@@ -490,7 +490,7 @@ void CGCharacterInfo::UseItem(int32_t slot, WOWGUID* target) {
 
     if (Spell_C_IsTargeting()) {
         CGGameUI::CastItemSpell(item->m_obj->m_guid, 0);
-    } else if (CursorGetResetMode() == 17 && CGMerchantInfo::CanRepair()) {
+    } else if (CursorGetResetMode() == REPAIR_CURSOR && CGMerchantInfo::CanRepair()) {
         uint32_t cost = CGMerchantInfo::GetRepairCost(item);
 
         if (cost <= player->GetCoinage()) {

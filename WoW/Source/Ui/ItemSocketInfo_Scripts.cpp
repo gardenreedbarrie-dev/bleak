@@ -71,7 +71,7 @@ static int32_t Script_GetSocketItemInfo(lua_State* L) {
     char name[256];
     item->GetFullItemName(name, sizeof(name));
     lua_pushstring(L, name);
-    const char* path = ClientDBStringLookup(3);
+    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     char texture[260];
     SStrPrintf(texture, sizeof(texture), "%s%s%s", path, *path ? "\\" : "", CGItem_C::GetInventoryArt(stats->m_displayId));
     lua_pushstring(L, texture);
@@ -122,7 +122,7 @@ static int32_t Script_GetNewSocketInfo(lua_State* L) {
     char name[256];
     CGItem_C::BuildItemName(name, sizeof(name), gem->m_obj->m_entryID, 0);
     lua_pushstring(L, name);
-    const char* path = ClientDBStringLookup(3);
+    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     char texture[260];
     SStrPrintf(texture, sizeof(texture), "%s%s%s", path, *path ? "\\" : "", CGItem_C::GetInventoryArt(stats->m_displayId));
     lua_pushstring(L, texture);
@@ -230,7 +230,7 @@ static int32_t Script_GetExistingSocketInfo(lua_State* L) {
     char name[256];
     CGItem_C::BuildItemName(name, sizeof(name), enchant->m_srcItemID, 0);
     lua_pushstring(L, name);
-    const char* path = ClientDBStringLookup(3);
+    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     char texture[260];
     SStrPrintf(texture, sizeof(texture), "%s%s%s", path, *path ? "\\" : "", CGItem_C::GetInventoryArt(stats->m_displayId));
     lua_pushstring(L, texture);

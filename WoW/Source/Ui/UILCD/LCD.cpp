@@ -948,7 +948,7 @@ void CGLCD::DisplayMeleeStats() {
 // VERIFY: a51aafb0 auto
 // OFFSET: 0x00849960
 void CGLCD::DisplayRangedStats() {
-    const CGUnitVirtualItem* ranged = CGLCD::m_player->GetVirtualItem(2, false);
+    const CGUnitVirtualItem* ranged = CGLCD::m_player->GetVirtualItem(VIRTUAL_MONSTER_SLOT_RANGED, false);
     float maxDamage = CGLCD::m_player->m_unit->m_unitFieldMaxrangeddamage;
     int32_t minDamage = static_cast<int32_t>(floor(CGLCD::m_player->m_unit->m_unitFieldMinrangeddamage));
 

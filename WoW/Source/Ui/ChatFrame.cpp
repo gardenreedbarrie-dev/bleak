@@ -1165,22 +1165,22 @@ void CGChat::AddChatMessage(const char* text, int32_t type, const char* senderNa
                 }
 
                 if (!SStrCmpUTF8I(word, text, STORM_MAX_STR)) {
-                    unit->RequestTalkEmote(4);
+                    unit->RequestTalkEmote(TALKANIM_LAUGH);
                     goto emoteDone;
                 }
             }
 
             if (type == CHAT_MSG_SAY || type == CHAT_MSG_YELL) {
-                int32_t animation = 0;
+                TALKANIMATION animation = TALKANIM_TALK;
                 uint32_t length = SStrLen(text);
 
                 if (type == CHAT_MSG_YELL) {
-                    animation = 3;
+                    animation = TALKANIM_SHOUT;
                 } else if (length) {
                     if (text[length - 1] == '?') {
-                        animation = 1;
+                        animation = TALKANIM_QUESTION;
                     } else if (text[length - 1] == '!') {
-                        animation = 2;
+                        animation = TALKANIM_EXCLAMATION;
                     }
                 }
 

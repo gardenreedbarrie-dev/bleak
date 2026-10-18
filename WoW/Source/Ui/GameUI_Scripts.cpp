@@ -2376,7 +2376,7 @@ static int32_t Script_GetTotemInfo(lua_State* L) {
 static int32_t Script_GetExistingLocales(lua_State* L) {
     int32_t count = 0;
 
-    for (int32_t i = 0; i < 12; i++) {
+    for (int32_t i = 0; i < NUM_DB_LOCALES; i++) {
         if (g_hasIsoLocale[i]) {
             lua_pushstring(L, g_localeNames[i]);
             count++;
@@ -2534,7 +2534,7 @@ static int32_t Script_GetMirrorTimerInfo(lua_State* L) {
 
     uint32_t index = static_cast<uint32_t>(lua_tonumber(L, 1)) - 1;
 
-    if (index > 2) {
+    if (index > UNIT_MIRROR_TIMER_FEIGNDEATH) {
         luaL_error(L, "ERROR: Invalid timer (Ex: \"BREATH\"");
         return 0;
     }
@@ -2667,7 +2667,7 @@ static int32_t Script_GetItemInfo(lua_State* L) {
 
     lua_pushnumber(L, stats->m_stackable);
     lua_pushstring(L, s_inventoryTypeTokens[stats->m_inventoryType]);
-    const char* path = ClientDBStringLookup(3);
+    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     const char* separator = *path ? "\\" : "";
     char texture[260];
     SStrPrintf(texture, sizeof(texture), "%s%s%s", path, separator, CGItem_C::GetInventoryArt(stats->m_displayId));
@@ -3055,9 +3055,9 @@ static int32_t Script_SitStandOrDescendStart(lua_State* L) {
     }
 
     if (!player->m_unit->m_unitFieldBytes1[0]) {
-        player->ChangeStandState(1);
+        player->ChangeStandState(UNIT_SITTING);
     } else {
-        player->ChangeStandState(0);
+        player->ChangeStandState(UNIT_STANDING);
     }
 
     return 0;
@@ -3067,11 +3067,11 @@ static int32_t Script_SitStandOrDescendStart(lua_State* L) {
 // OFFSET: 0x005104A0
 static int32_t Script_SetCursor(lua_State* L) {
     struct CursorName {
-        uint32_t m_mode;
+        CURSORMODE m_mode;
         const char* m_name;
     };
 
-    CursorName cursors[52] = { { 1, "POINT_CURSOR" }, { 2, "CAST_CURSOR" }, { 3, "BUY_CURSOR" }, { 4, "ATTACK_CURSOR" }, { 5, "INTERACT_CURSOR" }, { 6, "SPEAK_CURSOR" }, { 7, "INSPECT_CURSOR" }, { 8, "PICKUP_CURSOR" }, { 9, "TAXI_CURSOR" }, { 10, "TRAINER_CURSOR" }, { 11, "MINE_CURSOR" }, { 12, "SKIN_CURSOR" }, { 13, "GATHER_CURSOR" }, { 14, "LOCK_CURSOR" }, { 15, "MAIL_CURSOR" }, { 16, "LOOT_ALL_CURSOR" }, { 17, "REPAIR_CURSOR" }, { 18, "REPAIRNPC_CURSOR" }, { 19, "ITEM_CURSOR" }, { 20, "SKIN_HORDE_CURSOR" }, { 21, "SKIN_ALLIANCE_CURSOR" }, { 22, "INNKEEPER_CURSOR" }, { 23, "QUEST_CURSOR" }, { 24, "QUEST_REPEATABLE_CURSOR" }, { 25, "QUEST_TURNIN_CURSOR" }, { 26, "VEHICLE_CURSOR" }, { 27, "POINT_ERROR_CURSOR" }, { 28, "CAST_ERROR_CURSOR" }, { 29, "BUY_ERROR_CURSOR" }, { 30, "ATTACK_ERROR_CURSOR" }, { 31, "INTERACT_ERROR_CURSOR" }, { 32, "SPEAK_ERROR_CURSOR" }, { 33, "INSPECT_ERROR_CURSOR" }, { 34, "PICKUP_ERROR_CURSOR" }, { 35, "TAXI_ERROR_CURSOR" }, { 36, "TRAINER_ERROR_CURSOR" }, { 37, "MINE_ERROR_CURSOR" }, { 38, "SKIN_ERROR_CURSOR" }, { 39, "GATHER_ERROR_CURSOR" }, { 40, "LOCK_ERROR_CURSOR" }, { 41, "MAIL_ERROR_CURSOR" }, { 42, "LOOT_ALL_ERROR_CURSOR" }, { 43, "REPAIR_ERROR_CURSOR" }, { 44, "REPAIRNPC_ERROR_CURSOR" }, { 45, "ITEM_ERROR_CURSOR" }, { 46, "SKIN_HORDE_ERROR_CURSOR" }, { 47, "SKIN_ALLIANCE_ERROR_CURSOR" }, { 48, "INNKEEPER_ERROR_CURSOR" }, { 49, "QUEST_ERROR_CURSOR" }, { 50, "QUEST_REPEATABLE_ERROR_CURSOR" }, { 51, "QUEST_TURNIN_ERROR_CURSOR" }, { 52, "VEHICLE_ERROR_CURSOR" } };
+    CursorName cursors[52] = { { POINT_CURSOR, "POINT_CURSOR" }, { CAST_CURSOR, "CAST_CURSOR" }, { BUY_CURSOR, "BUY_CURSOR" }, { ATTACK_CURSOR, "ATTACK_CURSOR" }, { INTERACT_CURSOR, "INTERACT_CURSOR" }, { SPEAK_CURSOR, "SPEAK_CURSOR" }, { INSPECT_CURSOR, "INSPECT_CURSOR" }, { PICKUP_CURSOR, "PICKUP_CURSOR" }, { TAXI_CURSOR, "TAXI_CURSOR" }, { TRAINER_CURSOR, "TRAINER_CURSOR" }, { MINE_CURSOR, "MINE_CURSOR" }, { SKIN_CURSOR, "SKIN_CURSOR" }, { GATHER_CURSOR, "GATHER_CURSOR" }, { LOCK_CURSOR, "LOCK_CURSOR" }, { MAIL_CURSOR, "MAIL_CURSOR" }, { LOOT_ALL_CURSOR, "LOOT_ALL_CURSOR" }, { REPAIR_CURSOR, "REPAIR_CURSOR" }, { REPAIRNPC_CURSOR, "REPAIRNPC_CURSOR" }, { ITEM_CURSOR, "ITEM_CURSOR" }, { SKIN_HORDE_CURSOR, "SKIN_HORDE_CURSOR" }, { SKIN_ALLIANCE_CURSOR, "SKIN_ALLIANCE_CURSOR" }, { INNKEEPER_CURSOR, "INNKEEPER_CURSOR" }, { QUEST_CURSOR, "QUEST_CURSOR" }, { QUEST_REPEATABLE_CURSOR, "QUEST_REPEATABLE_CURSOR" }, { QUEST_TURNIN_CURSOR, "QUEST_TURNIN_CURSOR" }, { VEHICLE_CURSOR, "VEHICLE_CURSOR" }, { POINT_ERROR_CURSOR, "POINT_ERROR_CURSOR" }, { CAST_ERROR_CURSOR, "CAST_ERROR_CURSOR" }, { BUY_ERROR_CURSOR, "BUY_ERROR_CURSOR" }, { ATTACK_ERROR_CURSOR, "ATTACK_ERROR_CURSOR" }, { INTERACT_ERROR_CURSOR, "INTERACT_ERROR_CURSOR" }, { SPEAK_ERROR_CURSOR, "SPEAK_ERROR_CURSOR" }, { INSPECT_ERROR_CURSOR, "INSPECT_ERROR_CURSOR" }, { PICKUP_ERROR_CURSOR, "PICKUP_ERROR_CURSOR" }, { TAXI_ERROR_CURSOR, "TAXI_ERROR_CURSOR" }, { TRAINER_ERROR_CURSOR, "TRAINER_ERROR_CURSOR" }, { MINE_ERROR_CURSOR, "MINE_ERROR_CURSOR" }, { SKIN_ERROR_CURSOR, "SKIN_ERROR_CURSOR" }, { GATHER_ERROR_CURSOR, "GATHER_ERROR_CURSOR" }, { LOCK_ERROR_CURSOR, "LOCK_ERROR_CURSOR" }, { MAIL_ERROR_CURSOR, "MAIL_ERROR_CURSOR" }, { LOOT_ALL_ERROR_CURSOR, "LOOT_ALL_ERROR_CURSOR" }, { REPAIR_ERROR_CURSOR, "REPAIR_ERROR_CURSOR" }, { REPAIRNPC_ERROR_CURSOR, "REPAIRNPC_ERROR_CURSOR" }, { ITEM_ERROR_CURSOR, "ITEM_ERROR_CURSOR" }, { SKIN_HORDE_ERROR_CURSOR, "SKIN_HORDE_ERROR_CURSOR" }, { SKIN_ALLIANCE_ERROR_CURSOR, "SKIN_ALLIANCE_ERROR_CURSOR" }, { INNKEEPER_ERROR_CURSOR, "INNKEEPER_ERROR_CURSOR" }, { QUEST_ERROR_CURSOR, "QUEST_ERROR_CURSOR" }, { QUEST_REPEATABLE_ERROR_CURSOR, "QUEST_REPEATABLE_ERROR_CURSOR" }, { QUEST_TURNIN_ERROR_CURSOR, "QUEST_TURNIN_ERROR_CURSOR" }, { VEHICLE_ERROR_CURSOR, "VEHICLE_ERROR_CURSOR" } };
 
     if (lua_type(L, 1) == LUA_TNIL) {
         CursorResetMode();
@@ -4163,7 +4163,7 @@ static int32_t Script_GetItemIcon(lua_State* L) {
         return 0;
     }
 
-    const char* path = ClientDBStringLookup(3);
+    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     const char* separator = *path ? "\\" : "";
     char icon[260];
     SStrPrintf(icon, sizeof(icon), "%s%s%s", path, separator, CGItem_C::GetInventoryArt(item->m_displayInfoID));
@@ -4433,7 +4433,7 @@ static int32_t Script_GetMirrorTimerProgress(lua_State* L) {
 
     uint32_t index = CGGameUI::MirrorTimerToIndex(lua_tolstring(L, 1, nullptr));
 
-    if (index > 2) {
+    if (index > UNIT_MIRROR_TIMER_FEIGNDEATH) {
         luaL_error(L, "ERROR: Invalid timer (Ex: \"BREATH\"");
         return 0;
     }

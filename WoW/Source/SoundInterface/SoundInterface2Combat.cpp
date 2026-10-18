@@ -11,7 +11,7 @@
 static TSFixedArray<IMPACTSOUNDARRAY> s_impactSounds;
 
 // STATIC: 0x00B4AE88
-static int32_t s_swingSounds[3][2];
+static int32_t s_swingSounds[NUM_WEAPONSWINGSOUNDTYPES][2];
 
 // VERIFY: 647f0380 auto
 // OFFSET: 0x007DA1F0
@@ -43,7 +43,7 @@ void SI2::InitWeaponSwingCombatSounds() {
 
         WeaponSwingSounds2Rec* rec = (i < 0 || i >= g_weaponSwingSounds2DB.m_numRecords) ? nullptr : &g_weaponSwingSounds2DB.m_records[i];
 
-        if (rec && rec->m_swingType < 3 && rec->m_crit < 2) {
+        if (rec && rec->m_swingType < NUM_WEAPONSWINGSOUNDTYPES && rec->m_crit < 2) {
             s_swingSounds[rec->m_swingType][rec->m_crit != 0] = rec->m_soundID;
         }
     }
@@ -138,8 +138,8 @@ void SI2::PlayHitSound(const CGUnitVirtualItem* weapon, int32_t impactType, int3
 
 // VERIFY: 1275dcb8 manual
 // OFFSET: 0x004D0720
-int32_t SI2::PlayWeaponSwooshSound(int32_t type, int32_t crit, const C3Vector* position, int32_t quiet, int32_t self) {
-    if (type >= 3) {
+int32_t SI2::PlayWeaponSwooshSound(WEAPONSWING_SOUNDTYPES type, int32_t crit, const C3Vector* position, int32_t quiet, int32_t self) {
+    if (type >= NUM_WEAPONSWINGSOUNDTYPES) {
         return 0;
     }
 

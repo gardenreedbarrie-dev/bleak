@@ -1091,7 +1091,7 @@ const char* CGItem_C::GetInventoryArt(int32_t displayId) {
     ItemDisplayInfoRec display;
 
     if (g_itemDisplayInfoDB.GetRecord(displayId, &display)) {
-        const char* icon = ViolenceGetLevel() >= 2 || !*display.m_inventoryIcon[1] ? display.m_inventoryIcon[0] : display.m_inventoryIcon[1];
+        const char* icon = ViolenceGetLevel() >= VIOLENCELEVEL_HIGH || !*display.m_inventoryIcon[1] ? display.m_inventoryIcon[0] : display.m_inventoryIcon[1];
 
         if (icon) {
             if (*icon) {

@@ -4,6 +4,14 @@
 #include <cstddef>
 #include <cstdint>
 
+enum WEAPONSWING_SOUNDTYPES : int32_t {
+    WEAPONSWING_LIGHT = 0,
+    WEAPONSWING_MEDIUM = 1,
+    WEAPONSWING_HEAVY = 2,
+    NUM_WEAPONSWINGSOUNDTYPES = 3,
+    // WEAPONSWING_UNUSED = -1, // Unused reference member.
+};
+
 enum ITEMSOUNDTYPE : int32_t {
     ITEMSOUND_PICKUP = 0,
     ITEMSOUND_DROP = 1,

@@ -319,7 +319,7 @@ static int32_t Script_GetTradeTargetItemInfo(lua_State* L) {
     char name[256];
     CGItem_C::BuildItemName(name, sizeof(name), itemId, CGTradeInfo::m_targetRandomPropertyID[index]);
     lua_pushstring(L, name);
-    const char* path = ClientDBStringLookup(3);
+    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     char texture[260];
     SStrPrintf(texture, sizeof(texture), "%s%s%s", path, *path ? "\\" : "", CGItem_C::GetInventoryArt(stats->m_displayId));
     lua_pushstring(L, texture);
@@ -375,7 +375,7 @@ static int32_t Script_GetTradePlayerItemInfo(lua_State* L) {
     char name[256];
     item->GetFullItemName(name, sizeof(name));
     lua_pushstring(L, name);
-    const char* path = ClientDBStringLookup(3);
+    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     char texture[260];
     SStrPrintf(texture, sizeof(texture), "%s%s%s", path, *path ? "\\" : "", item->GetInventoryArt());
     lua_pushstring(L, texture);

@@ -5039,7 +5039,7 @@ static int32_t AddItemSocketLines(CGTooltip* tooltip, const ItemStats_C* stats, 
                 }
 
                 char texture[260];
-                const char* path = ClientDBStringLookup(3);
+                const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
                 SStrPrintf(texture, sizeof(texture), "%s%s%s", path, *path ? "\\" : "", CGItem_C::GetInventoryArt(gem->m_displayId));
                 CAaRect coords = { 0.0f, 0.0f, 1.0f, 1.0f };
                 uint32_t textureColor = 0xFFFFFFFF;
@@ -6645,7 +6645,7 @@ int32_t CGTooltip::SetItem(int32_t itemId, const WOWGUID* requester, const WOWGU
 
         int32_t refundable = item ? AddItemTradeLines(this, stats, item, player) : 0;
 
-        if (CursorGetResetMode() != 17 && !refundable && !this->m_itemSkipSellPrice && !skipSellPrice) {
+        if (CursorGetResetMode() != REPAIR_CURSOR && !refundable && !this->m_itemSkipSellPrice && !skipSellPrice) {
             AddItemSellPrice(this, stats, item, player);
         }
     }

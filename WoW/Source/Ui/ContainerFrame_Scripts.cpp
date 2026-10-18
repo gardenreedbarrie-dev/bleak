@@ -197,7 +197,7 @@ static int32_t Script_GetContainerItemInfo(lua_State* L) {
         return 0;
     }
 
-    const char* path = ClientDBStringLookup(3);
+    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     char texture[260];
     SStrPrintf(texture, sizeof(texture), "%s%s%s", path, *path ? "\\" : "", item->GetInventoryArt());
     lua_pushstring(L, texture);
@@ -310,7 +310,7 @@ static int32_t Script_UseContainerItem(lua_State* L) {
         return 0;
     }
 
-    if (CursorGetResetMode() == 17 && CGMerchantInfo::CanRepair()) {
+    if (CursorGetResetMode() == REPAIR_CURSOR && CGMerchantInfo::CanRepair()) {
         uint32_t cost = CGMerchantInfo::GetRepairCost(item);
 
         if (cost <= player->GetCoinage()) {
@@ -538,7 +538,7 @@ static int32_t Script_PickupContainerItem(lua_State* L) {
         Spell_C_StopTargeting();
     }
 
-    if (CursorGetResetMode() == 17 && CGMerchantInfo::CanRepair()) {
+    if (CursorGetResetMode() == REPAIR_CURSOR && CGMerchantInfo::CanRepair()) {
         uint32_t cost = CGMerchantInfo::GetRepairCost(item);
 
         if (cost <= player->GetCoinage()) {
@@ -578,7 +578,7 @@ static int32_t Script_PickupContainerItem(lua_State* L) {
 // VERIFY: 6deefa52 auto
 // OFFSET: 0x005D8BD0
 static int32_t Script_ShowContainerSellCursor(lua_State* L) {
-    if (Spell_C_IsTargeting() || CursorGetResetMode() != 1) {
+    if (Spell_C_IsTargeting() || CursorGetResetMode() != POINT_CURSOR) {
         return 0;
     }
 
@@ -601,7 +601,7 @@ static int32_t Script_ShowContainerSellCursor(lua_State* L) {
         return 0;
     }
 
-    CursorSetMode(3);
+    CursorSetMode(BUY_CURSOR);
     return 0;
 }
 
@@ -633,7 +633,7 @@ static int32_t Script_SetBagPortraitTexture(lua_State* L) {
         return 0;
     }
 
-    const char* path = ClientDBStringLookup(3);
+    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     char fileName[260];
     SStrPrintf(fileName, sizeof(fileName), "%s%s%s", path, *path ? "\\" : "", bag->GetInventoryArt());
     SetPortraitTexture(texture, fileName);
@@ -860,7 +860,7 @@ static bool BuildItemIconPath(int32_t itemId, char* buffer, uint32_t size) {
         return false;
     }
 
-    const char* path = ClientDBStringLookup(3);
+    const char* path = ClientDBStringLookup(SLOOKUP_INVENTORYICONPATH);
     SStrPrintf(buffer, size, "%s%s%s", path, *path ? "\\" : "", CGItem_C::GetInventoryArt(rec->m_displayInfoID));
     return true;
 }

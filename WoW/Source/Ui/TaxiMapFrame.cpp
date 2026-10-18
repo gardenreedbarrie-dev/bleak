@@ -608,7 +608,7 @@ void CGTaxiMap::SetupMap(const WOWGUID& unit, int32_t currentNode, const uint64_
     }
 
     if (player->GetClientStandState()) {
-        player->ChangeStandState(0);
+        player->ChangeStandState(UNIT_STANDING);
     }
 
     if (player->m_mountDisplayId > 0 && !(player->m_clientFlags & 0x10000000)) {

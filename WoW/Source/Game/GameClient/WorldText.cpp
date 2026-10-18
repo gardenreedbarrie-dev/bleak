@@ -407,7 +407,7 @@ bool WORLDTEXTSTRING::Update(uint32_t time) {
     rect.minX = x - this->m_halfWidth;
     rect.maxY = y - this->m_halfHeight;
     rect.maxX = x + this->m_halfWidth;
-    SmartScreenRectPlace(1, rect);
+    SmartScreenRectPlace(SRECTGRID_WORLDTEXT, rect);
 
     C3Vector stringPosition;
     stringPosition.x = DDCToNDCWidth((rect.maxX + rect.minX) * 0.5f) - this->m_halfWidth;

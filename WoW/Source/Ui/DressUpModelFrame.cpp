@@ -572,7 +572,7 @@ void CGDressUpModelFrame::SetModel(CM2Model* model) {
             }
         }
 
-        const CGUnitVirtualItem* mainHand = player->GetVirtualItem(0, true);
+        const CGUnitVirtualItem* mainHand = player->GetVirtualItem(VIRTUAL_MONSTER_SLOT_MAINHAND, true);
 
         if (mainHand) {
             this->m_mainHand = *mainHand;
@@ -580,7 +580,7 @@ void CGDressUpModelFrame::SetModel(CM2Model* model) {
             memset(&this->m_mainHand, 0, sizeof(this->m_mainHand));
         }
 
-        const CGUnitVirtualItem* offHand = player->GetVirtualItem(1, true);
+        const CGUnitVirtualItem* offHand = player->GetVirtualItem(VIRTUAL_MONSTER_SLOT_OFFHAND, true);
 
         if (offHand) {
             this->m_offHand = *offHand;

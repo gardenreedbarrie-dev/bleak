@@ -551,7 +551,7 @@ int32_t __stdcall CGInputControl::CanMove(CGUnit_C* unit) {
         return 0;
     }
 
-    return unit->m_unit->m_unitFieldHealth > 0 && !(unit->m_movement->m_flags & 0x100A00) && unit->m_unit->m_unitFieldBytes1[0] != 7 && !unit->HasVehicleTransport();
+    return unit->m_unit->m_unitFieldHealth > 0 && !(unit->m_movement->m_flags & 0x100A00) && unit->m_unit->m_unitFieldBytes1[0] != UNIT_DEAD && !unit->HasVehicleTransport();
 }
 
 // VERIFY: d0f5f494 auto
@@ -1074,7 +1074,7 @@ void CGInputControl::MovePlayer(uint32_t time, CGUnit_C* unit) {
     }
 
     if (unit->GetClientStandState()) {
-        unit->ChangeStandState(0);
+        unit->ChangeStandState(UNIT_STANDING);
         CGCamera* camera = CGWorldFrame::GetActiveCamera();
 
         if (this->CanSyncFreeLookFacing(unit)) {
@@ -1127,7 +1127,7 @@ void CGInputControl::StrafePlayer(uint32_t time, CGUnit_C* unit) {
     }
 
     if (unit->GetClientStandState()) {
-        unit->ChangeStandState(0);
+        unit->ChangeStandState(UNIT_STANDING);
     }
 
     if (ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPEMASK_PLAYER, __FILE__, __LINE__)) {
@@ -1159,7 +1159,7 @@ void CGInputControl::TurnPlayer(uint32_t time, CGUnit_C* unit) {
 
     if ((!(flags & INPUT_PLAYER_LOOK_MASK) || unit->IsStrafingDisabled()) && direction) {
         if (unit->GetClientStandState()) {
-            unit->ChangeStandState(0);
+            unit->ChangeStandState(UNIT_STANDING);
         }
 
         if (ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPEMASK_PLAYER, __FILE__, __LINE__)) {

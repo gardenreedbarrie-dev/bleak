@@ -814,7 +814,7 @@ void MathState::GetVariableValue(uint32_t op, MathStack* stack, const SpellRec* 
 
             case MATHOP_HANDS:
             case MATHOP_HANDS_UPPER:
-                value = CGUnit_C::IsTwoHanded(player->GetVirtualItem(0, false)) ? 2.0f : 1.0f;
+                value = CGUnit_C::IsTwoHanded(player->GetVirtualItem(VIRTUAL_MONSTER_SLOT_MAINHAND, false)) ? 2.0f : 1.0f;
                 break;
 
             case MATHOP_SPELL_POWER:
