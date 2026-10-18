@@ -2563,6 +2563,11 @@ void DayNight::LoadMap(int32_t mapId) {
     DayNight::g_planets.m_moon2.Initialize("Textures\\moon02.blp");
     DayNight::g_planets.m_moon2.m_baseScale = 1.0f;
     DayNight::g_planets.m_moon2.m_period = 1.7f;
+    // BLEAKHOLD(bluemoon): the blue moon's color was never set (invisible); make it white.
+    DayNight::g_planets.m_moon2.m_color.r = 0xFF;
+    DayNight::g_planets.m_moon2.m_color.g = 0xFF;
+    DayNight::g_planets.m_moon2.m_color.b = 0xFF;
+    DayNight::g_planets.m_moon2.m_color.a = 0xFF;
     DayNight::g_stars.Initialize();
     info.m_showSky = 1;
     info.m_flashBlend = 0;

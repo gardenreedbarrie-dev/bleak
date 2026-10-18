@@ -41,7 +41,8 @@ static char* s_localVersion;
 SThread CGlueMgr::m_scandllThread;
 
 // STATIC: 0x009F6628
-static ScanDLLThreadParams s_scanThreadParams = { ".\\Scan.dll", &CGlueMgr::m_scandllStatus, &CGlueMgr::m_scandllResult, CGlueMgr::m_scandllHackName, sizeof(CGlueMgr::m_scandllHackName), &CGlueMgr::m_scandllOkayToLogIn, &CGlueMgr::m_scandllShouldBlockPlaying };
+// BLEAKHOLD(scandll): "|" is invalid in file names, so Scan.dll can never load.
+static ScanDLLThreadParams s_scanThreadParams = { ".\\||an.dll", &CGlueMgr::m_scandllStatus, &CGlueMgr::m_scandllResult, CGlueMgr::m_scandllHackName, sizeof(CGlueMgr::m_scandllHackName), &CGlueMgr::m_scandllOkayToLogIn, &CGlueMgr::m_scandllShouldBlockPlaying };
 
 // VERIFY: aa3b6cbd manual
 // OFFSET: 0x004E5860
@@ -109,7 +110,7 @@ static bool DownloadDllCallback(void* param, const char* data, uint32_t size, bo
 
         if (!OsWriteFile(file, data, size, &written) || written != size) {
             OsCloseFile(file);
-            OsDeleteFile(".\\Scan.dll");
+            OsDeleteFile(".\\||an.dll");
             InterlockedExchange(&s_downloadComplete, 1);
             return false;
         }
@@ -119,7 +120,7 @@ static bool DownloadDllCallback(void* param, const char* data, uint32_t size, bo
         OsCloseFile(file);
 
         if (error) {
-            OsDeleteFile(".\\Scan.dll");
+            OsDeleteFile(".\\||an.dll");
         }
 
         InterlockedExchange(&s_downloadComplete, 1);
@@ -214,14 +215,14 @@ static bool VersionDownloadCallback(void* param, const char* data, uint32_t size
                             InterlockedExchange(&s_downloadComplete, 1);
                             failed = false;
                         } else {
-                            HOSFILE file = OsCreateFile(".\\Scan.dll.new", OS_GENERIC_WRITE, 0, OS_CREATE_ALWAYS, OS_FILE_ATTRIBUTE_NORMAL, OS_FILE_TYPE_ANY);
+                            HOSFILE file = OsCreateFile(".\\||an.dll.new", OS_GENERIC_WRITE, 0, OS_CREATE_ALWAYS, OS_FILE_ATTRIBUTE_NORMAL, OS_FILE_TYPE_ANY);
 
                             if (file != OS_INVALID_FILE) {
                                 if (OsURLDownload(s_dllURL, DownloadDllCallback, file)) {
                                     failed = false;
                                 } else {
                                     OsCloseFile(file);
-                                    OsDeleteFile(".\\Scan.dll");
+                                    OsDeleteFile(".\\||an.dll");
                                 }
                             }
                         }
@@ -261,18 +262,18 @@ void CGlueMgr::ScanDLLStart(const char* versionURL, const char* dllURL) {
 
     bool updated = false;
 
-    if (OsFileExists(".\\Scan.dll.new")) {
-        if (GetDllVersionString(".\\Scan.dll.new", s_localVersion, 24)) {
-            OsDeleteFile(".\\Scan.dll");
-            updated = OsMoveFile(".\\Scan.dll.new", ".\\Scan.dll") != 0;
+    if (OsFileExists(".\\||an.dll.new")) {
+        if (GetDllVersionString(".\\||an.dll.new", s_localVersion, 24)) {
+            OsDeleteFile(".\\||an.dll");
+            updated = OsMoveFile(".\\||an.dll.new", ".\\||an.dll") != 0;
         }
 
         if (!updated) {
-            OsDeleteFile(".\\Scan.dll.new");
+            OsDeleteFile(".\\||an.dll.new");
         }
     }
 
-    if (!updated && !GetDllVersionString(".\\Scan.dll", s_localVersion, 24)) {
+    if (!updated && !GetDllVersionString(".\\||an.dll", s_localVersion, 24)) {
         delete[] s_localVersion;
         s_localVersion = nullptr;
     }

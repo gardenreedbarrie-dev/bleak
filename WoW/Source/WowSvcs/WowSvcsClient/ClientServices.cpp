@@ -577,7 +577,9 @@ const char* ClientServices::GetErrorToken(int32_t errorCode) {
 // VERIFY: c031479f auto
 // OFFSET: 0x006B0F90
 int32_t ClientServices::CharacterValidateName(const char* name) {
-    return static_cast<int32_t>(ValidateCharacterNameConst(s_locale, name, true, true, true, true, 0)) + CHAR_NAME_SUCCESS;
+    // BLEAKHOLD(names): client-side name check always passes (first + last names); the server still validates.
+    (void)name;
+    return CHAR_NAME_SUCCESS;
 }
 
 // VERIFY: ca1062a6 auto
@@ -841,7 +843,8 @@ void ClientServices::Logon(const char* username, const char* password) {
     }
 
     if (!ClientServices::s_loginObj) {
-        if (battlenet) {
+        // BLEAKHOLD(skipbnet): always use Grunt login, never Battle.net.
+        if (false && battlenet) {
             ClientServices::s_loginObj = new (__FILE__, __LINE__) BattlenetLogin();
         } else {
             ClientServices::s_loginObj = new (__FILE__, __LINE__) GruntLogin();

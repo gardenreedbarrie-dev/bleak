@@ -220,10 +220,11 @@ bool CWorldParam::NearClipCallback(CVar* var, const char* oldValue, const char* 
 bool CWorldParam::HorizonFarClipScaleCallback(CVar* var, const char* oldValue, const char* value, void* arg) {
     float scale = SStrToFloat(value);
 
+    // BLEAKHOLD(horizon): max raised from 6 to 12.
     if (scale < 3.0f) {
         scale = 3.0f;
-    } else if (scale > 6.0f) {
-        scale = 6.0f;
+    } else if (scale > 12.0f) {
+        scale = 12.0f;
     }
 
     World::SetHorizonFarClipScale(scale);
@@ -377,9 +378,10 @@ bool CWorldParam::GroundEffectDensityCallback(CVar* var, const char* oldValue, c
 bool CWorldParam::GroundEffectDistCallback(CVar* var, const char* oldValue, const char* value, void* arg) {
     float dist = SStrToFloat(value);
 
-    if (dist < 0.0f || dist > 140.0f) {
+    // BLEAKHOLD(grounddist): max raised from 140 to 3166.67.
+    if (dist < 0.0f || dist > 3166.6667f) {
         char buffer[256];
-        sprintf(buffer, "Ground effect distance must be in range %0f to %0f.", 0.0, 140.0);
+        sprintf(buffer, "Ground effect distance must be in range %0f to %0f.", 0.0, 3166.6667);
         ConsoleWriteA(buffer, DEFAULT_COLOR);
 
         return false;
@@ -435,11 +437,7 @@ bool CWorldParam::FarClipOverrideCallback(CVar* var, const char* oldValue, const
 bool CWorldParam::EnvironmentDetailCallback(CVar* var, const char* oldValue, const char* value, void* arg) {
     float detail = SStrToFloat(value);
 
-    if (detail < 0.5f) {
-        detail = 0.5f;
-    } else if (detail > 1.5f) {
-        detail = 1.5f;
-    }
+    // BLEAKHOLD(envdetail): no 0.5-1.5 clamp, raw value is used.
 
     CWorldScene::ScaleFadeDist(detail);
 

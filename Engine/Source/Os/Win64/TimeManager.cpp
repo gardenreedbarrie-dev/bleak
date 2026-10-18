@@ -69,7 +69,8 @@ OsTimeManager::TimingMethod OsTimeManager::Calibrate() {
         OsSleep(0);
     }
 
-    if (!this->m_timingTestError) {
+    // BLEAKHOLD(timer): skip the 250 ms QPC-vs-GetTickCount test so the precise timer is never dropped.
+    if (false && !this->m_timingTestError) {
         DWORD now;
         do {
             now = GetTickCount();

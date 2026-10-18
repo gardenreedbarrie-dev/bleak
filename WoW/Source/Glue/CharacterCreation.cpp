@@ -394,14 +394,15 @@ int32_t CCharacterCreation::GetExistingClassIndex() {
 // VERIFY: 6c4329fd manual
 // OFFSET: 0x004E0F50
 int32_t CCharacterCreation::GetRandomClassID() {
-    int32_t classes[10];
+    // BLEAKHOLD(raceclass): room for 30 classes (was 10) for custom ChrClasses.dbc.
+    int32_t classes[30] = {};
     int32_t count = 0;
     uint8_t expansion = ClientServices::Connection()->m_accountExpansion;
 
     for (uint32_t i = 0; i < CCharacterCreation::m_classes.Count(); i++) {
         ChrClassesRec* rec = CCharacterCreation::m_classes.m_data[i];
 
-        if (expansion >= rec->m_requiredExpansion) {
+        if (expansion >= rec->m_requiredExpansion && count < 30) {
             classes[count++] = rec->m_id;
         }
     }
@@ -576,7 +577,9 @@ void CCharacterCreation::InitCharacterComponents(ComponentData* data, bool rando
 
     CCharacterCreation::m_character->Init(data, nullptr);
 
-    if (randomize) {
+    // BLEAKHOLD(charrandom): don't auto-randomize the look (the Randomize button still works).
+    (void)randomize;
+    if (false) {
         CCharacterCreation::m_character->SetRandomSkin(COMPONENT_CONTEXT_0);
         CCharacterCreation::m_character->SetRandomHairColor(COMPONENT_CONTEXT_0);
         CCharacterCreation::m_character->SetRandomHairStyle(COMPONENT_CONTEXT_0);

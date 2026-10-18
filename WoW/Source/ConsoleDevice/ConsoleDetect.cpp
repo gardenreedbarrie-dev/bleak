@@ -160,9 +160,7 @@ void ConsoleDetectSaveHardware(const Hardware& hardware, bool& changed) {
 // VERIFY: 7f8168dc manual
 // OFFSET: 0x0076BA30
 void ConsoleDetectDetectHardware(Hardware& hardware, bool& changed) {
-    if (OsIsRemoteSession()) {
-        ShowFatalMessageBox(12, "Running World of Warcraft through a Remote Desktop connection is not supported.  Exiting program.");
-    }
+    // BLEAKHOLD(skiprdp): allow running over Remote Desktop.
 
     g_videoHardwareDB.Load(__FILE__, __LINE__);
 

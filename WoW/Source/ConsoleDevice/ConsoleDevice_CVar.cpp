@@ -540,8 +540,8 @@ void RegisterGxCVars() {
     char value[260];
 
     s_cvWidescreen = CVar::Register("widescreen", "Allow widescreen support", 0, "1", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
-    s_cvGxWindow = CVar::Register("gxWindow", "toggle fullscreen/window", 3, window ? "1" : "0", CVGxWindowCallback, CATEGORY_GRAPHICS, false, nullptr, false);
-    s_cvGxMaximize = CVar::Register("gxMaximize", "maximize game window", 3, window ? "1" : "0", CVGxMaximizeCallback, CATEGORY_GRAPHICS, false, nullptr, false);
+    s_cvGxWindow = CVar::Register("gxWindow", "toggle fullscreen/window", 3, "1", /* BLEAKHOLD(window) */ CVGxWindowCallback, CATEGORY_GRAPHICS, false, nullptr, false);
+    s_cvGxMaximize = CVar::Register("gxMaximize", "maximize game window", 3, "1", /* BLEAKHOLD(maximize) */ CVGxMaximizeCallback, CATEGORY_GRAPHICS, false, nullptr, false);
 
     SStrPrintf(value, sizeof(value), "%s", s_formatToInt[format.m_colorFormat]);
     s_cvGxColorBits = CVar::Register("gxColorBits", "color bits", 3, value, CVGxColorBitsCallback, CATEGORY_GRAPHICS, false, nullptr, false);

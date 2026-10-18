@@ -2690,7 +2690,8 @@ void CGGameUI::ClearTarget(WOWGUID guid, int32_t a2) {
                 CGUnit_C* unit = static_cast<CGUnit_C*>(object);
                 PlayerNameTriggerColorUpdate(unit->m_nameDesc);
                 unit->UnregisterScript(0x1000);
-                unit->StopNamePlateSpellbar();
+                // BLEAKHOLD(castbars): keep cast bars running on all frames when the target changes.
+                // unit->StopNamePlateSpellbar();
             }
         }
     }
@@ -8150,7 +8151,8 @@ void CGGameUI::LeaveWorld() {
     CGTradeSkillInfo::ClearItemCallbacks();
     CGPetInfo::LeaveWorld();
     CGWorldMap::LeaveWorld();
-    CGReputationInfo::LeaveWorld();
+    // BLEAKHOLD(forcereaction): keep forced reactions across /reload.
+    // CGReputationInfo::LeaveWorld();
     CGDuelInfo::LeaveWorld();
     CGTabardCreationFrame::Close();
     CGGuildRegistrar::CloseRegistrar();

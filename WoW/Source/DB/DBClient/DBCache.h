@@ -15,6 +15,8 @@
 #include "Engine/Source/Storm/H/storm.h"
 #include "WoW/Source/WowSvcs/WowSvcsClient/ClientServices.h"
 
+class ItemStats_C;
+
 class CHashKeyGUID;
 class CWardenKey;
 
@@ -691,7 +693,8 @@ void DBCache<T, TKey, THashKey>::Idle() {
     }
 
     this->m_queriesSent = 0;
-    this->m_nextQueryTime = OsGetAsyncTimeMs() + 30000;
+    // BLEAKHOLD(itemcache): item cache re-queries immediately instead of waiting 30 s.
+    this->m_nextQueryTime = OsGetAsyncTimeMs() + (std::is_same<T, ItemStats_C>::value ? 0 : 30000);
 
     DBCACHEHASH* next;
 

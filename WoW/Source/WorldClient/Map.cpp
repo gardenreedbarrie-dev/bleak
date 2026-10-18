@@ -2451,8 +2451,8 @@ int32_t CMap::SafeOpen(const char* fileName, SFileImpl** file) {
         DebugLog("CMap::SafeOpen() failed %s\n", fileName);
 
         if (!--tries) {
-            SErrDisplayAppFatal("CMap::SafeOpen() failed %s", fileName);
-            return 0;
+            // BLEAKHOLD(wmocube): show an error cube instead of ERROR #134.
+            return SFileOpenFile("Spells\\ErrorCube.mdx", file);
         }
     }
 

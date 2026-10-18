@@ -1834,8 +1834,15 @@ static int32_t Script_GetCVarMax(lua_State* L) {
         } while (mode <= maxMode);
 
         lua_pushnumber(L, mode - 1);
+    // BLEAKHOLD(sliders): higher video-option slider maximums.
     } else if (!SStrCmpI(name, "farclip", STORM_MAX_STR)) {
-        lua_pushnumber(L, 1277.0);
+        lua_pushnumber(L, 2477.0);
+    } else if (!SStrCmpI(name, "environmentDetail", STORM_MAX_STR)) {
+        lua_pushnumber(L, 2.5);
+    } else if (!SStrCmpI(name, "groundEffectDist", STORM_MAX_STR)) {
+        lua_pushnumber(L, 250.0);
+    } else if (!SStrCmpI(name, "groundEffectDensity", STORM_MAX_STR)) {
+        lua_pushnumber(L, 256.0);
     } else {
         lua_pushnil(L);
     }

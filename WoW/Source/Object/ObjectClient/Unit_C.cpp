@@ -1593,8 +1593,11 @@ void CGUnit_C::PreAnimate(CGWorldFrame* frame) {
         }
 
         // WoWFix335 npc-turn-attack-anim: original calls UpdateBaseAnimation(0, -1) when CanPlayTurnAnim() is nonzero
+        // BLEAKHOLD(npcanim): players keep the turn/shuffle animation, only NPCs skip it.
         if (sequence != wanted) {
-            this->CanPlayTurnAnim();
+            if (this->CanPlayTurnAnim() && (this->m_obj->m_type & TYPEMASK_PLAYER)) {
+                this->UpdateBaseAnimation(false, -1);
+            }
         }
     }
 
@@ -7781,7 +7784,8 @@ void CGUnit_C::SetMaxAlpha(float alpha) {
             this->m_alphaScale = static_cast<uint8_t>(CMath::fint_(alpha * 255.0f));
         }
     } else {
-        this->m_alphaScale = static_cast<uint8_t>(CMath::fint_(alpha * 255.0f));
+        // BLEAKHOLD(notransparency): don't fade the unit when the camera zooms in close.
+        // this->m_alphaScale = static_cast<uint8_t>(CMath::fint_(alpha * 255.0f));
     }
 
     CVehicle_C* vehicle = this->m_vehicle;
@@ -19554,7 +19558,7 @@ void CGUnit_C::ChatBubbleShow(int32_t type, const char* text) {
 
             C3Vector delta = this->GetPosition() - player->GetPosition();
 
-            if (delta.y * delta.y + delta.z * delta.z + delta.x * delta.x <= 625.0f) {
+            if (delta.y * delta.y + delta.z * delta.z + delta.x * delta.x <= 2500.0f) { // BLEAKHOLD(bubblerange): 50 yd (was 25)
                 CImVector color = CGChat::GetChatColor(type);
                 this->ChatBubbleRemove();
                 this->m_chatBubble = CGChatBubbleFrame::GetNewChatBubble(CGWorldFrame::s_currentWorldFrame);
@@ -23691,6 +23695,12 @@ void CGUnit_C::OnReceiveMirrorImageDataFromServer(CDataStore* msg) {
 
         uint32_t guildId;
         msg->Get(guildId);
+
+        // BLEAKHOLD(mirrorfix): free the previous component first (leak -> crash on exit with mirror images).
+        if (this->m_characterComponent) {
+            CCharacterComponent::FreeComponent(this->m_characterComponent);
+            this->m_characterComponent = nullptr;
+        }
 
         this->m_characterComponent = CCharacterComponent::AllocComponent();
         data.m_model = this->m_worldModel;

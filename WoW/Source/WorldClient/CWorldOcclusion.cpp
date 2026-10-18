@@ -233,7 +233,7 @@ static C3Vector s_occlusionVolumeVerts61[4] = { C3Vector(-475.600006f, 2173.8000
 
 // STATIC: 0x00AF0040
 static OcclusionVolume s_occlusionVolumes[62] = {
-    { 0, 0, { CAaBox(C3Vector(0.0f, 0.0f, 0.0f), C3Vector(0.0f, 0.0f, 0.0f)), s_occlusionVolumeVerts0, 4 } },
+    { 99999, 0, { CAaBox(C3Vector(0.0f, 0.0f, 0.0f), C3Vector(0.0f, 0.0f, 0.0f)), s_occlusionVolumeVerts0, 4 } }, // BLEAKHOLD(occluder): was mapId 0 (Stormwind)
     { 571, 0, { CAaBox(C3Vector(0.0f, 0.0f, 0.0f), C3Vector(0.0f, 0.0f, 0.0f)), s_occlusionVolumeVerts1, 8 } },
     { 571, 2, { CAaBox(C3Vector(0.0f, 0.0f, 0.0f), C3Vector(0.0f, 0.0f, 0.0f)), s_occlusionVolumeVerts2, 6 } },
     { 571, 0, { CAaBox(C3Vector(0.0f, 0.0f, 0.0f), C3Vector(0.0f, 0.0f, 0.0f)), s_occlusionVolumeVerts3, 4 } },

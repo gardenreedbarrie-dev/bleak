@@ -163,7 +163,8 @@ bool OsUrlDownload::DownloadString(const char* url, OsURLDownloadCallback callba
     components.lpszUrlPath = urlPath;
     components.dwUrlPathLength = sizeof(urlPath);
 
-    if (!InternetCrackUrlA(url, 0, 0, &components)) {
+    // BLEAKHOLD(nohttp): no HTTP requests to Battle.net (news, help, terms).
+    if (true || !InternetCrackUrlA(url, 0, 0, &components)) {
         return false;
     }
 

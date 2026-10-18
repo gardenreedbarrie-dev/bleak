@@ -500,10 +500,10 @@ void CGGameUI::RegisterGameCVars() {
     CVar::Register("trackedQuests", "Internal cvar for saving tracked quests in order", 0x120, "", nullptr, CATEGORY_GAME, false, nullptr, false);
     CVar::Register("trackedAchievements", "Internal cvar for saving tracked achievements in order", 0x120, "", nullptr, CATEGORY_GAME, false, nullptr, false);
     CVar::Register("flaggedTutorials", "Internal cvar for saving compleated tutorials in order", 0x110, "", nullptr, CATEGORY_GAME, false, nullptr, false);
-    CVar::Register("advancedWorldMap", "Enables advanced World Map features", 0x20, "0", nullptr, CATEGORY_GAME, false, nullptr, false);
+    CVar::Register("advancedWorldMap", "Enables advanced World Map features", 0x20, "1", /* BLEAKHOLD(worldmap) */ nullptr, CATEGORY_GAME, false, nullptr, false);
     CVar::Register("worldMapOpacity", "Opacity for the world map when sized down", 0x20, "0", nullptr, CATEGORY_GAME, false, nullptr, false);
     CVar::Register("watchFrameWidth", "Controls objectives frame width", 0x0, "0", nullptr, CATEGORY_GAME, false, nullptr, false);
-    g_trackerSortingCVar = CVar::Register("trackerSorting", "sorting option for the objectives tracker", 0x20, "0", nullptr, CATEGORY_GAME, false, nullptr, false);
+    g_trackerSortingCVar = CVar::Register("trackerSorting", "sorting option for the objectives tracker", 0x20, "1", /* BLEAKHOLD(tracker) */ nullptr, CATEGORY_GAME, false, nullptr, false);
     CVar::Register("trackerFilter", "filter option for the objectives tracker", 0x20, "7", nullptr, CATEGORY_GAME, false, nullptr, false);
     g_profanityFilterCVar = CVar::Register("profanityFilter", "Whether to enable mature language filtering", 0x10, "1", nullptr, CATEGORY_GAME, false, nullptr, false);
     g_spamFilterCVar = CVar::Register("spamFilter", "Whether to enable spam filtering", 0x10, "1", nullptr, CATEGORY_GAME, false, nullptr, false);

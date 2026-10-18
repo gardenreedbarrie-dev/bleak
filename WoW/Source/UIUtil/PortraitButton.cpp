@@ -133,7 +133,8 @@ void PortraitInitialize() {
     if (s_rtAlphaSupported && (g_theGxDevicePtr->DeviceApi() == GxApi_OpenGl || g_theGxDevicePtr->DeviceApi() == GxApi_GLL)) {
         CGxTexFlags flags(GxTex_Linear, 0, 0, 0, 0, 0, 1);
         flags.m_renderTarget = 1;
-        s_portraitDepthTexture = TextureCreate(GxTex_2d, 64, 64, 24, GxTex_D24X8, GxTex_D24X8, flags, nullptr, PortraitDepthTextureCallback, "PortraitDepth", 1);
+        // BLEAKHOLD(hdportraits): depth target 256px to match the portrait render target (was 64).
+        s_portraitDepthTexture = TextureCreate(GxTex_2d, 256, 256, 24, GxTex_D24X8, GxTex_D24X8, flags, nullptr, PortraitDepthTextureCallback, "PortraitDepth", 1);
     }
 
     s_playerPortraitCache = nullptr;
@@ -680,7 +681,9 @@ void RenderPortraitTexture(CSimpleTexture* texture, CGUnit_C* unit) {
                 flags.m_renderTarget = 1;
             }
 
-            cache->m_texture = TextureCreate(64, 64, GxTex_Argb8888, GxTex_Argb8888, flags, s_rtAlphaSupported ? nullptr : &cache->m_texels, TextureUpdate, "Portrait1", 0);
+            // BLEAKHOLD(hdportraits): render-target path renders at 256px (was 64). CPU fallback path stays 64 (alpha mask is 64x64).
+            const uint32_t portraitSize = s_rtAlphaSupported ? 256 : 64;
+            cache->m_texture = TextureCreate(portraitSize, portraitSize, GxTex_Argb8888, GxTex_Argb8888, flags, s_rtAlphaSupported ? nullptr : &cache->m_texels, TextureUpdate, "Portrait1", 0);
         }
     }
 

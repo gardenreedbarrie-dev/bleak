@@ -541,9 +541,8 @@ void CGUnit_C::ClearAttackRound() {
 
     CGUnit_C* target = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(this->m_lastAttackRound.m_target, TYPEMASK_UNIT, __FILE__, __LINE__));
 
-    if (target) {
-        target->PlayVictimWorldFeedback(this->m_lastAttackRound);
-    }
+    // BLEAKHOLD(ghostattack): don't replay the stale stored hit (ghost attack after evade), just clear it.
+    (void)target;
 
     memset(&this->m_lastAttackRound, 0, sizeof(ATTACKROUNDINFO));
 }

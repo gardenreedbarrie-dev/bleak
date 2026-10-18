@@ -137,7 +137,7 @@ void CWorldScene::Initialize() {
 // OFFSET: 0x0078F570
 void CWorldScene::ScaleFadeDist(float scale) {
     CWorldView::s_fadeSize[0] = CWorldScene::s_fadeSizeDefault[0];
-    CWorldScene::s_fadeDist[0] = CWorldScene::s_fadeDistDefault[0];
+    CWorldScene::s_fadeDist[0] = CWorldScene::s_fadeDistDefault[0] * scale; // BLEAKHOLD(goscale)
     CWorldScene::s_fadeDistMin[0] = CWorldScene::s_fadeDist[0] - CWorldScene::s_fadeRangeDefault[0];
     CWorldView::s_fadeDistSqr[0] = CWorldScene::s_fadeDist[0] * CWorldScene::s_fadeDist[0];
     CWorldScene::s_fadeDistMinSqr[0] = CWorldScene::s_fadeDistMin[0] * CWorldScene::s_fadeDistMin[0];
@@ -161,7 +161,7 @@ void CWorldScene::ScaleFadeDist(float scale) {
     CWorldScene::s_fadeDistMinSqr[3] = CWorldScene::s_fadeDistMin[3] * CWorldScene::s_fadeDistMin[3];
 
     CWorldView::s_fadeSize[4] = CWorldScene::s_fadeSizeDefault[4];
-    CWorldScene::s_fadeDist[4] = CWorldScene::s_fadeDistDefault[4];
+    CWorldScene::s_fadeDist[4] = CWorldScene::s_fadeDistDefault[4] * scale; // BLEAKHOLD(goscale)
     CWorldScene::s_fadeDistMin[4] = CWorldScene::s_fadeDist[4] - CWorldScene::s_fadeRangeDefault[4];
     CWorldView::s_fadeDistSqr[4] = CWorldScene::s_fadeDist[4] * CWorldScene::s_fadeDist[4];
     CWorldScene::s_fadeDistMinSqr[4] = CWorldScene::s_fadeDistMin[4] * CWorldScene::s_fadeDistMin[4];

@@ -154,9 +154,9 @@ void SI2::RegisterSoundEngineCVars() {
     CVar::Register("EnableVoiceChat", "Enables the voice chat feature.", 0, "0", EnableVoiceChatHandler, 5, false, nullptr, false);
     CVar::Register("VoiceChatSelfMute", "Turn off your ability to talk.", 0, "0", SelfMuteHandler, 5, false, nullptr, false);
     CVar::Register("PushToTalkButton", "String representation of the Push-To-Talk button.", 0, "`", PushToTalkButtonHandler, 5, false, nullptr, false);
-    CVar::Register("Sound_OutputQuality", "sound quality, default 1 (medium)", 0, "1", nullptr, 7, false, nullptr, false);
-    CVar::Register("Sound_NumChannels", "number of sound channels", 0, "32", nullptr, 7, false, nullptr, false);
-    CVar::Register("Sound_EnableReverb", "", 0, "0", EnableReverbHandler, 7, false, nullptr, false);
+    CVar::Register("Sound_OutputQuality", "sound quality, default 1 (medium)", 0, "2", /* BLEAKHOLD(sound) */ nullptr, 7, false, nullptr, false);
+    CVar::Register("Sound_NumChannels", "number of sound channels", 0, "64", /* BLEAKHOLD(sound) */ nullptr, 7, false, nullptr, false);
+    CVar::Register("Sound_EnableReverb", "", 0, "1", /* BLEAKHOLD(sound) */ EnableReverbHandler, 7, false, nullptr, false);
     CVar::Register("Sound_EnableSoftwareHRTF", "", 0, "0", nullptr, 7, false, nullptr, false);
     CVar::Register("Sound_VoiceChatInputDriverIndex", "", 0, "0", VoiceChatInputDriverIndexHandler, 7, false, nullptr, false);
     CVar::Register("Sound_VoiceChatInputDriverName", "", 0, "Primary Sound Capture Driver", nullptr, 7, false, nullptr, false);
@@ -165,7 +165,7 @@ void SI2::RegisterSoundEngineCVars() {
     CVar::Register("Sound_OutputDriverIndex", "", 0, "0", OutputDriverIndexHandler, 7, false, nullptr, false);
     CVar::Register("Sound_OutputDriverName", "", 0, "Primary Sound Driver", nullptr, 7, false, nullptr, false);
     CVar::Register("Sound_DSPBufferSize", "sound buffer size, default 0", 0, "0", nullptr, 7, false, nullptr, false);
-    CVar::Register("Sound_EnableHardware", "Enables Hardware", 0, "0", nullptr, 7, false, nullptr, false);
+    CVar::Register("Sound_EnableHardware", "Enables Hardware", 0, "1", /* BLEAKHOLD(sound) */ nullptr, 7, false, nullptr, false);
     CVar::Register("Sound_EnableMode2", "test", 0, "0", nullptr, 7, false, nullptr, false);
     CVar::Register("Sound_EnableMixMode2", "test", 0, "0", nullptr, 7, false, nullptr, false);
 }

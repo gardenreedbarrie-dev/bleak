@@ -176,7 +176,7 @@ bool CGChatBubbleFrame::Update(CGUnit_C* player, CGUnit_C* unit) {
     C3Vector position = unit->IsInVehicle() ? unit->m_vehiclePassenger->ComputeInterpolatedUnitPosition() : unit->GetPosition();
     C3Vector delta = player->GetPosition() - position;
 
-    if (World::QueryObjectVisible(entity) && delta.y * delta.y + delta.x * delta.x + delta.z * delta.z < 625.0f) {
+    if (World::QueryObjectVisible(entity) && delta.y * delta.y + delta.x * delta.x + delta.z * delta.z < 2500.0f) { // BLEAKHOLD(bubblerange): 50 yd (was 25)
         if (this->GetEffectiveAlpha() != 255) {
             this->FadeIn();
         }

@@ -1167,17 +1167,7 @@ int32_t CGlueMgr::Idle(const void* data, void* param) {
             }
 
             case 6: {
-                const char* fileName = ClientServices::LoginConnection()->m_fileName;
-
-                if (!SStrCmpI(fileName, "Patch", STORM_MAX_STR)) {
-                    CGlueMgr::PatchDownloadStart();
-                    return 1;
-                }
-
-                if (!SStrCmpI(fileName, "Survey", STORM_MAX_STR)) {
-                    CGlueMgr::SurveyDownloadStart();
-                }
-
+                // BLEAKHOLD(noserverpatch, nosurvey): never download client patches or hardware surveys from the server.
                 return 1;
             }
 

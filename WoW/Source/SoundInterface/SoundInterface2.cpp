@@ -1320,9 +1320,9 @@ int32_t SI2::Init(int32_t restart) {
 
     static CVar* s_numChannels = CVar::Lookup("Sound_NumChannels");
 
-    if (s_numChannels) {
-        numChannels = s_numChannels->m_intValue;
-    }
+    // BLEAKHOLD(sound): fixed 126 software channels (OpenAL).
+    (void)s_numChannels;
+    numChannels = 126;
 
     int32_t outputDriverIndex = 0;
     const char* outputDriverName = "";

@@ -1,0 +1,88 @@
+# Bleakhold client — exe patch port map
+
+Source: current patched `Wow.exe` (St0nys-AIO-WoW-EXE-Patcher selection + 2 custom patches), diffed and mapped to wowdecomp source via `// OFFSET:` tags.
+Each patch must be re-implemented in C++ (byte patches don't apply to the x64 build).
+
+Status: [ ] todo  [x] done  [-] not needed
+
+## Not needed in x64 build
+| Patch | Why |
+|---|---|
+| [-] laa (4GB) | x64 has no 4GB limit |
+| [-] glue (custom GlueXML) | covered by `WOWDECOMP_DISABLE_SIGNATURE_CHECKS` (`FrameXML_CheckSignature`, LoadXML.cpp) |
+| [-] awesome (AwesomeWotlkLib.dll) | already reverted in current Wow.exe; 32-bit DLL can't load in x64 anyway |
+
+## 1. Graphics / HD look — port first
+| Patch | What | Source |
+|---|---|---|
+| [x] farclip | farclip max 10000 | WorldParam_CVar.cpp — `FarClipCallback` |
+| [x] horizon | horizonFarclipScale max 12 | WorldParam_CVar.cpp — `HorizonFarClipScaleCallback` |
+| [x] envdetail | environmentDetail no 1.5 cap | WorldParam_CVar.cpp — `EnvironmentDetailCallback` |
+| [x] grounddist | groundEffectDist max 3166 | WorldParam_CVar.cpp — `GroundEffectDistCallback` |
+| [x] sliders | higher graphics slider max | GlueScriptEvents_Scripts.cpp + GameUI_Scripts.cpp — `Script_GetCVarMax` |
+| [x] goscale | GameObject cat 0/4 view dist scales w/ envDetail | WorldScene.cpp — `CWorldScene::ScaleFadeDist` |
+| [x] hdportraits | portraits 256px instead of 64 (render-target path; CPU fallback stays 64) | PortraitButton.cpp (`RTAlphaSupported` area) |
+| [ ] iconsnap | sharp inline icons | GxuFontUtil.cpp — `ParseEmbeddedTexture` |
+| [ ] glyphfix | garbled font glyphs | GxuFontMiscClasses.cpp — `RenderBatch`, `TEXTURECACHEROW::CreateNewDesc` |
+| [x] occluder | Stormwind occluder fix | occluder table (World/Map code) |
+| [x] bluemoon | blue moon in sky | data table @ 0x9D07C0 |
+| [x] notransparency | no char fade on zoom-in | Unit_C.cpp — `CGUnit_C::SetMaxAlpha` |
+| [ ] **CUSTOM lght** (side table of 4 extra point lights per M2 + 5 lights for map chunks, uploaded to VS constants c236+; only works with matching custom shaders) | more dynamic lights (new `.lght` section, light arrays enlarged) | CGxDevice.cpp (`InitLights`, `Light`, `LightEnable`, `LightSet`), CGxDeviceD3d/D3d9Ex/OpenGl `IStateSyncLights`, GxuLight.cpp, MapObj.cpp (`SetRenderModeLight`, `SetupLighting`), MapRenderChunk.cpp `SetVertexShader`, M2Scene.cpp `SelectLights`, M2Light.cpp (`AddLight`, `CameraSpace`, `SetupGxLights`), ShaderEffect.cpp `SetLocalLighting` |
+
+## 2. Custom (not from St0ny)
+| Patch | What | Source |
+|---|---|---|
+| [x] **CUSTOM names** | client name check always OK (returns 87) | ClientServices.cpp — `CharacterValidateName` |
+| [-] **CUSTOM Lexara.dll loader** (file missing, loader was a no-op) | loads `Lexara.dll` at startup | WinMain.cpp `start`, StormRtl.cpp `StormRtlInitialize` — needs x64 Lexara.dll or port into source |
+
+## 3. Character creation
+| Patch | What | Source |
+|---|---|---|
+| [x] raceclass | >10 classes (random class) | CharacterCreation.cpp — `GetRandomClassID` |
+| [x] charrandom | no auto-randomized look | CharacterCreation.cpp — `InitCharacterComponents` |
+| [x] level101 | lvl 101+ druid stats, barber for all | tables.cpp — `GetGameTableValue` |
+
+## 4. Gameplay / stability
+| Patch | What | Source |
+|---|---|---|
+| [x] itemcache | refresh item cache immediately | DanceCache.cpp area (0x6695FD) |
+| [x] timer | always precise timer | Win64/TimeManager.cpp — `Calibrate` |
+| [x] mirrorfix | Mirror Image leak/crash | Unit_C.cpp — `OnReceiveMirrorImageDataFromServer` |
+| [x] wmocube | missing WMO → error cube, not #134 | Map.cpp — `CMap::SafeOpen` |
+| [x] areatrigger | 50 ms area trigger check | Player_C.cpp — `AreaTriggerCheck` |
+| [x] swing (already in decomp) | no swing on right-click | Player_C.cpp — `MeleeModeEnter` |
+| [x] npcanim | no NPC attack anim on turn | Unit_C.cpp — `PreAnimate` |
+| [x] spellanim (already in decomp) | anim fix after cancelled channel | Unit_C.cpp — `OnChannelSpellChanged` |
+| [x] ghostattack | ghost attack on evade | UnitCombat_C.cpp — `ClearAttackRound` |
+| [x] naked | naked character bug | Player_C.cpp — `IsXRayVisionActive` area |
+| [x] forcereaction | keep force reaction on /reload | GameUI.cpp — `LeaveWorld` |
+| [x] mail | no 60s new-mail wait | MailInfo_Scripts.cpp — `Script_CheckInbox` |
+| [x] deadchat | chat commands while dead | ChatFrame_Scripts.cpp — `Script_SendChatMessage` |
+
+## 5. UI / window / sound
+| Patch | What | Source |
+|---|---|---|
+| [x] tracker | auto-sort quest tracker | GameUI_CVar.cpp — `RegisterGameCVars` |
+| [x] worldmap | advanced world map default | GameUI_CVar.cpp — `RegisterGameCVars` |
+| [x] castbars | cast bars on all frames | GameUI.cpp — `ClearTarget` area |
+| [x] bubblerange | chat bubble range 50 yd | ChatBubbleFrame.cpp `Update`, Unit_C.cpp `ChatBubbleShow` |
+| [x] window / maximize | windowed + maximized default | ConsoleDevice_CVar.cpp — `RegisterGxCVars` |
+| [x] windowfix (already in decomp) | no black screen to windowed | Client_CVar.cpp — `DesktopGammaCallback` |
+| [ ] mouse | mouse flicker / camera jump | Win64/Input.cpp — `DispatchMouseButtonChanges`, `CenterMouse`, `OsWindowProc` |
+| [x] sound | optimized sound settings | SoundInterface2.cpp `Init`, SoundInterface2_CVar.cpp |
+
+## 6. Security / login
+| Patch | What | Source |
+|---|---|---|
+| [x] scandll | disable Scan.dll | ScanDLLGlue.cpp |
+| [x] noserverpatch / nosurvey | block server patches / hw survey | CGlueMgr.cpp — `CGlueMgr::Idle` |
+| [x] skipbnet | skip Battle.net login | ClientServices.cpp — `Logon` |
+| [x] skiprdp | skip RDP check | ConsoleDetect.cpp — `ConsoleDetectDetectHardware` |
+| [x] nohttp | no HTTP to Battle.net | Win64/OsURLDownload.cpp — `DownloadString` |
+
+## Still open
+- mouse (CenterMouse rewrite + OsWindowProc cursor tracking)
+- glyphfix, iconsnap (font cache hooks)
+- CUSTOM lght (needs the custom shader MPQ it was built for)
+
+All Bleakhold changes are marked `BLEAKHOLD(<patch>)` in the source: `grep -rn BLEAKHOLD` lists them.
