@@ -23,6 +23,7 @@ ITEM_QUALITY_COLORS
 # FrameXML functions (3.3.5a)
 ChatFrame_AddMessageEventFilter
 ChatEdit_InsertLink
+ChatFrame_SendTell
 DressUpItemLink
 GetMinimapShape
 # Optional addons (always checked for nil before use)

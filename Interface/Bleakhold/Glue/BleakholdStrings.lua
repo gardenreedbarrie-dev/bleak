@@ -9,6 +9,10 @@ BLEAKHOLD_COMMUNITY_URL = BLEAKHOLD_URL
 
 BLEAKHOLD_SUBTITLE = "Wrath of the Lich King Extra"
 
+-- true: character creation has a First Name and a Last Name box (the server's mod-two-names accepts "First
+-- Last"); false: the stock single name box.
+BLEAKHOLD_TWO_NAMES = true
+
 -- true: accept the stock EULA, Terms of Use and the other agreement screens without showing them. The login
 -- itself needs the EULA and the Terms of Use accepted (CGlueMgr::LoginServerLogin); with false the stock
 -- agreement screen asks once, as before.
@@ -35,3 +39,7 @@ RACE_INFO_HIGHELF = RACE_INFO_HIGHELF or "When Silvermoon turned to fel magic to
 HIGHELF_DISABLED = HIGHELF_DISABLED or "Your account cannot create a High Elf."
 RACE_INFO_EREDAR = RACE_INFO_EREDAR or "Not every eredar who stayed on Argus bowed to Sargeras. Some broke from the Legion on their own terms, trusting neither the naaru nor their draenei kin. The Horde, which knows the price of fel power better than most, judges them by their deeds rather than their blood, and the exiles have repaid that trust with iron discipline and a hard-won mastery of their own strength."
 EREDAR_DISABLED = EREDAR_DISABLED or "Your account cannot create an Eredar."
+
+-- Character creation: the name boxes (BleakholdNames.lua).
+BLEAKHOLD_FIRST_NAME = BLEAKHOLD_FIRST_NAME or "First Name"
+BLEAKHOLD_LAST_NAME = BLEAKHOLD_LAST_NAME or "Last Name"

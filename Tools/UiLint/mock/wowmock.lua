@@ -529,6 +529,13 @@ return function(opts)
         local c = (M.companions[kind] or {})[i]
         if c then return c.creatureID, c.name, c.spellID, c.icon, c.active end
     end
+    M.said = {}
+    env.SendChatMessage = function(msg, chatType, language, target)
+        assert(type(msg) == "string", "Usage: SendChatMessage(\"text\" [,\"type\" [,language [,\"target\"]]])")
+        assert(#msg <= 255, "SendChatMessage: message longer than 255 bytes")
+        if chatType == "WHISPER" then assert(type(target) == "string" and target ~= "", "SendChatMessage: WHISPER needs a target") end
+        M.said[#M.said + 1] = { msg = msg, chatType = chatType, language = language, target = target }
+    end
     env.SendAddonMessage = function(prefix, msg, chatType, target)
         assert(type(prefix) == "string" and type(msg) == "string", "Usage: SendAddonMessage(\"prefix\", \"text\", \"type\" [, \"target\"])")
         assert(not prefix:find("\t"), "SendAddonMessage: prefix with a tab")
@@ -574,6 +581,7 @@ return function(opts)
         table.insert(M.chatFilters[event], fn)
     end
     env.ChatEdit_InsertLink = function(link) M.insertedLink = link return true end
+    env.ChatFrame_SendTell = function(name) M.tellOpened = name end
     env.DressUpItemLink = function(link) M.dressedUp = link end
     -- GetMinimapShape, DragonUI*, DBM: absent unless a test sets them
 

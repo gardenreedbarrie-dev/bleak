@@ -16,6 +16,9 @@ PLAYERS
 What you get:
 - the Bleakhold login screen and character creation with High Elf and Eredar
   (Data\Interface\Bleakhold\Glue)
+- First Name and Last Name boxes in character creation; the server needs the mod-two-names module for
+  two-word names (the last name can be left empty). In game, whisper a two-word name by clicking it, with /r,
+  or with /w2 First Last message
 - the Bleakhold interface (Interface\AddOns\Bleakhold): type /bh in game, /bh help for commands,
   /bh demo to look at every window with sample data
 - High Elf and Eredar characters also need the race file patch-R.MPQ in Data (see below; your server

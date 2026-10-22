@@ -218,15 +218,18 @@ sends through the module, and fuzzes the parser under AddressSanitizer.
 The client loads `Interface\Bleakhold\Glue\BleakholdGlue.toc` right after the stock
 `Interface\GlueXML\GlueXML.toc` on every glue load (BLEAKHOLD(loginui), `CGlueMgr::Resume`). Those files
 restyle and extend the stock screens from Lua: the Bleakhold login screen, a restyled dialog with a connecting
-progress bar, and character creation with the High Elf and Eredar races. No Blizzard file is replaced, so this
-works with signature checks on or off.
+progress bar, and character creation with the High Elf and Eredar races and a First Name and a Last Name box
+(the server's mod-two-names accepts "First Last"; the last name is optional). No Blizzard file is replaced, so
+this works with signature checks on or off.
 
 - Install: copy `Interface/Bleakhold/Glue` from this repository to `<client>\Data\Interface\Bleakhold\Glue\`
   (or `<client>\Interface\Bleakhold\Glue\`), or pack it into a `Data\patch-?.MPQ` under the same path, before
   starting the client. Without it the stock screens appear. Do not use `<client>\Interface\GlueXML`: the client
   renames that folder on every glue load.
-- Settings (links, skipping the agreement screens, the Login button waiting for both fields) are at the top of
-  `BleakholdStrings.lua`.
+- Settings (links, skipping the agreement screens, the Login button waiting for both fields, two names on or
+  off) are at the top of `BleakholdStrings.lua`.
+- Tests: `Tools/UiLint/glue/run.sh` runs the login, race and name scenarios against a mock of the glue API
+  (part of `Tools/UiLint/check.sh`).
 - Fonts: Marcellus and Marcellus SC, SIL Open Font License 1.1 (`Fonts/OFL.txt`).
 - Art: `Tools/BlpConvert/make_login_art.py` draws the login art (needs Pillow);
   `Tools/BlpConvert/blpconvert.py IN OUT.blp [--format dxt1|dxt5|bgra] [--size WxH|--pad]` converts any picture

@@ -22,6 +22,25 @@ test("chat: a tag can be hidden per chat window", function(M, ns)
     H.ok(M.FilterChat("CHAT_MSG_SYSTEM", M.env.ChatFrame2, "[Season] back"))
 end)
 
+test("chat: /w2 whispers a two-word name, or opens a whisper to it", function(M, ns)
+    local w2 = M.env.SlashCmdList.BLEAKHOLDTELL
+    H.eq(M.env.SLASH_BLEAKHOLDTELL1, "/w2")
+    w2("  Arthas Menethil   the throne awaits  ")
+    H.eq(#M.said, 1)
+    H.eq(M.said[1].msg, "the throne awaits")
+    H.eq(M.said[1].chatType, "WHISPER")
+    H.eq(M.said[1].target, "Arthas Menethil")
+    w2("Jaina Proudmoore")
+    H.eq(M.tellOpened, "Jaina Proudmoore", "no message: whisper opened")
+    H.eq(#M.said, 1)
+    w2("Thrall")
+    H.eq(#M.said, 1, "one word: usage, nothing sent")
+    w2("A B " .. string.rep("x", 300))
+    H.eq(#M.said[2].msg, 255, "long message cut to 255 bytes")
+    H.eq(ns.Chat.FitBytes("ab\195\169", 3), "ab", "never cuts a UTF-8 letter")
+    H.eq(ns.Chat.FitBytes("ab\195\169", 4), "ab\195\169")
+end)
+
 ------------------------------------------------------------------------------------------------------
 -- Toast
 ------------------------------------------------------------------------------------------------------
