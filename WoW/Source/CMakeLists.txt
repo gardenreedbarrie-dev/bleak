@@ -40,6 +40,7 @@ target_link_libraries(Wow
     PRIVATE
         BLPFile
         Base
+        BleakFx
         BlizzardCore
         ComSat
         ConsoleBase

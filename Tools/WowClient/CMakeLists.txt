@@ -42,6 +42,7 @@ target_link_libraries(WowClient
     PRIVATE
         BLPFile
         Base
+        BleakFx
         BlizzardCore
         ComSat
         ConsoleBase

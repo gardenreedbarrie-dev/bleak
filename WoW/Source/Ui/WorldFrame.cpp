@@ -4,6 +4,7 @@
 #include <typeinfo>
 #include "Engine/Source/Base/Coordinate.h"
 #include "Engine/Source/Base/Status.h"
+#include "Engine/Source/BleakFx/BleakFx.h"
 #include "Engine/Source/ConsoleBase/ConsoleVar.h"
 #include "Engine/Source/Event/CKeyEvent.h"
 #include "Engine/Source/Event/CMouseEvent.h"
@@ -931,6 +932,12 @@ void CGWorldFrame::UpdateScreenEffectParams() {
 
     float glow = DayNight::GetInfo()->m_bands.m_glow * 255.0f + 512.0f;
     uint8_t glowLevel = *reinterpret_cast<uint32_t*>(&glow) >> 14;
+
+    // BLEAKHOLD(bleakfx): BleakFx's bloom replaces the glow; the underwater and drunk blur stay.
+    if (BleakFx::ReplacesStockGlow()) {
+        glowLevel = 0;
+    }
+
     int32_t underwater = 0;
     uint8_t minimum = 0;
     uint8_t level = minimum;
@@ -1254,6 +1261,8 @@ CGWorldFrame::CGWorldFrame(CSimpleFrame* parent) : CSimpleFrame(parent) {
 
     EventRegisterEx(EVENT_ID_IDLE, CGWorldFrame::Update, this, -1000.0f);
     FFX::Init();
+    // BLEAKHOLD(bleakfx): the bleakFx* settings.
+    BleakFx::Init();
 
     CGWorldFrame::ffxEffectGlow = new (__FILE__, __LINE__) EffectGlow();
     CGWorldFrame::ffxEffectDeath = new (__FILE__, __LINE__) EffectDeath();
@@ -1673,6 +1682,8 @@ void CGWorldFrame::OnWorldRender() {
     GxRsSet(GxRs_Multisample, 1);
     CGWorldFrame::UpdateScreenEffectParams();
     FFX::Start();
+    // BLEAKHOLD(bleakfx): the readable depth buffer before the world clears and draws into it.
+    BleakFx::BeginWorld();
 
     CRect fullViewport = { 0.0f, 0.0f, 1.0f, 1.0f };
 
@@ -1787,6 +1798,17 @@ void CGWorldFrame::OnWorldRender() {
     }
 
     g_theGxDevicePtr->RsPop();
+
+    // BLEAKHOLD(bleakfx): post-processing of the world, before the chat and emoji bubbles and the interface.
+    DayNight::DNInfo* dayNight = DayNight::GetInfo();
+    BleakFx::WorldLight light;
+    light.zoneGlow = dayNight->m_bands.m_glow;
+    light.sunDirection = DayNight::g_planets.m_sun.m_position - dayNight->m_cameraPos;
+    light.sunDirection.NormalizeSafe();
+    light.sunColor = dayNight->m_bands.m_sunCloudColors[0];
+    light.fogEnd = dayNight->m_fog.m_end;
+    BleakFx::RenderWorld(light);
+
     SmartScreenRectClearGrid(1);
     CGChatBubbleFrame::OnWorldRender(this);
     // BLEAKHOLD(emoji): after the chat bubbles, whose rects the emoji bubbles stack above.
@@ -2534,4 +2556,6 @@ CGWorldFrame::~CGWorldFrame() {
     }
 
     FFX::Destroy();
+    // BLEAKHOLD(bleakfx): its textures and shaders, and the automatic depth buffer back.
+    BleakFx::Destroy();
 }

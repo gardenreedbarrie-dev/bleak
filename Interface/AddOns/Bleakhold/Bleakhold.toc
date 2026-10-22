@@ -27,4 +27,5 @@ Collections.lua
 Animations.lua
 Season.lua
 Leaderboards.lua
+Graphics.lua
 Demo.lua

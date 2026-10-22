@@ -64,6 +64,7 @@ add_subdirectory(ThirdParty/WarcraftXL)
 
 add_subdirectory(Engine/Source/BLPFile)
 add_subdirectory(Engine/Source/Base)
+add_subdirectory(Engine/Source/BleakFx)
 add_subdirectory(Engine/Source/BlizzardCore)
 add_subdirectory(Engine/Source/ComSat)
 add_subdirectory(Engine/Source/ConsoleBase)

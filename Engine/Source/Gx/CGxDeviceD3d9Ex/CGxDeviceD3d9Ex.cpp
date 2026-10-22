@@ -4,6 +4,7 @@
 #include <malloc.h>
 #include <new>
 #include "Engine/Source/Gx/CGxDeviceD3d9Ex/CGxDeviceD3d9Ex.h"
+#include "Engine/Source/Gx/BleakDepthD3d9.h"
 #include "Engine/Source/Gx/Blit.h"
 #include "Engine/Source/Gx/CGxBuf.h"
 #include "Engine/Source/Gx/CGxPool.h"
@@ -1524,6 +1525,11 @@ void CGxDeviceD3d9Ex::ISetTexture(uint32_t tmu, CGxTex* texId) {
         return;
     }
 
+    // BLEAKHOLD(bleakfx): the readable depth buffer (BleakDepth.h) has no texture of its own to create or upload.
+    if (BleakDepthBindTexture(this, tmu, texId)) {
+        return;
+    }
+
     if (texId) {
         bool acquired = false;
 
@@ -2625,6 +2631,9 @@ int32_t CGxDeviceD3d9Ex::ICreateD3dDevice(const CGxFormat& format) {
 // VERIFY: 22679807 manual
 // OFFSET: 0x006A1CE0
 void CGxDeviceD3d9Ex::IReleaseD3dResources(int32_t freeTextures) {
+    // BLEAKHOLD(bleakfx): the automatic depth buffer back in m_defDepthSurface, the INTZ texture freed before Reset.
+    BleakDepthDetach(this);
+
     this->ITexForceRecreation(freeTextures);
     this->IReleaseD3dShaders(freeTextures);
     this->IReleaseD3dPools(freeTextures);

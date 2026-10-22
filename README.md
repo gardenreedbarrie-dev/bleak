@@ -82,6 +82,7 @@ logger off in `WowClient` with `-DWOWCLIENT_CRASH_LOG=OFF`.
 | `WOWCLIENT_CRASH_LOG` | `ON` | Build `WowClient` with the crash logger |
 | `WOWCLIENT_OUTPUT_OVERRIDE` | empty | Name the `WowClient` executable something other than `WowClient64` / `WowClient32` |
 | `WOW_OUTPUT_OVERRIDE` | empty | Name the `Wow` executable something other than `Wow64` / `Wow32` |
+| `BLEAKFX_REQUIRE_SHADERS` | `OFF` | Stop the configure when the Windows SDK's `fxc` is missing, instead of building BleakFx without its shaders (CI turns it on) |
 
 ## Running
 
@@ -244,6 +245,32 @@ ignore the packet.
   `Interface/Bleakhold/Emoji`); the text emotes are drawn with the Bangers font (SIL Open Font License 1.1).
   `Interface/Bleakhold/Emoji/NOTICE.md` names the source of every file.
 
+## Graphics (BleakFx)
+
+The Bleakhold client post-processes the 3D world after it is drawn and before the interface
+(BLEAKHOLD(bleakfx), `Engine/Source/BleakFx`): ambient occlusion and light shafts from the depth buffer, bloom,
+clarity (local contrast), colour grading with a filmic contrast curve, vignette, FXAA and contrast-adaptive
+sharpening. The interface, chat and emoji bubbles stay sharp on top. In game, `/bh graphics` (or a key binding
+in Key Bindings > Bleakhold) opens the settings window with presets (Off, Classic+, Bleakhold, Cinematic) and a
+slider for each effect; they are the `bleakFx*` CVars, saved in `Config.wtf`.
+
+- Needs the Direct3D 9 renderer (the default, `gxApi d3d9` or `d3d9ex`) and shader model 3; with anything else
+  the frame is drawn exactly as by the stock client. Ambient occlusion and light shafts also need Multisampling
+  1x: an INTZ depth texture stands in for the back buffer's depth buffer (`Engine/Source/Gx/BleakDepth.h`), and
+  INTZ cannot be multisampled. FXAA replaces the multisampling.
+- The bloom stands in for the stock full screen glow; the underwater and drunk blur stay. Zones whose light
+  settings make them glowier get a little more bloom.
+- Shaders: `Engine/Source/BleakFx/Shaders/*.hlsl` (ps_3_0 and vs_3_0) are compiled with the Windows SDK's `fxc`
+  during the build and embedded in the executable, so they need no game files. Without `fxc` the client builds
+  without them and BleakFx stays off.
+- CVars: `bleakFx` (on/off), `bleakFxAO`, `bleakFxAORadius`, `bleakFxSunShafts`, `bleakFxBloom`,
+  `bleakFxBloomThreshold`, `bleakFxClarity`, `bleakFxContrast`, `bleakFxSaturation`, `bleakFxVibrance`,
+  `bleakFxWarmth`, `bleakFxBrightness`, `bleakFxShadows`, `bleakFxVignette`, `bleakFxAA` (0 off, 1 FXAA) and
+  `bleakFxSharpen`; each one's description gives its range.
+- Methods: ambient occlusion after Scalable Ambient Obscurance (McGuire, Mara and Luebke, 2012), bloom after
+  Jimenez's downsample and upsample filters (2014), FXAA after Timothy Lottes' FXAA 3.11, sharpening after AMD
+  FidelityFX CAS (MIT). The shaders are written for this client; none is copied from those sources.
+
 ## Login screen and character creation
 
 The client loads `Interface\Bleakhold\Glue\BleakholdGlue.toc` right after the stock
@@ -286,6 +313,7 @@ this works with signature checks on or off.
 | `docs/BleakholdProtocol.md` | Message protocol between the Bleakhold server module and the UI |
 | `Server/mod-bleakhold-ui/` | AzerothCore module: server side of the Bleakhold UI protocol |
 | `Engine/Source/ModernAssets/` | Runs those conversions on the files the client opens |
+| `Engine/Source/BleakFx/` | Post-processing of the 3D world (ambient occlusion, light shafts, bloom, grading, FXAA, sharpening) and its HLSL shaders |
 | `Tools/WowClient/` | The `WowClient` executable target |
 | `Tools/XvidDecoder/` | x64 movie decoder that replaces the original 32-bit `DivxDecoder.dll` |
 
