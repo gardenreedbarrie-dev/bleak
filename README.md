@@ -344,7 +344,7 @@ this works with signature checks on or off.
 | `Engine/Source/ModernAssets/` | Runs those conversions on the files the client opens |
 | `Engine/Source/BleakFx/` | Post-processing of the 3D world (ambient occlusion, light shafts, bloom, grading, FXAA, sharpening), the water shaders and their HLSL sources |
 | `Tools/WowClient/` | The `WowClient` executable target |
-| `Tools/XvidDecoder/` | x64 movie decoder that replaces the original 32-bit `DivxDecoder.dll` |
+| `Tools/XvidDecoder/` | x64 movie decoder that replaces the original 32-bit `DivxDecoder.dll`, linked into the executables (the client ships no DLL) |
 
 ## Special thanks
 

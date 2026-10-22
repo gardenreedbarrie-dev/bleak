@@ -39,13 +39,14 @@ jobs:
         run: |
           $p = "package/Bleakhold"
           New-Item -ItemType Directory -Force "$p/Data/Interface/Bleakhold", "$p/Interface/AddOns", "$p/Tools" | Out-Null
-          Copy-Item bin/Win/*.exe, bin/Win/*.dll $p
+          Copy-Item bin/Win/*.exe $p
           Copy-Item -Recurse Interface/Bleakhold/Glue "$p/Data/Interface/Bleakhold/Glue"
           Copy-Item -Recurse Interface/Bleakhold/Emoji "$p/Data/Interface/Bleakhold/Emoji"
           Copy-Item -Recurse Interface/AddOns/Bleakhold "$p/Interface/AddOns/Bleakhold"
           Copy-Item build/raceforge/dist/BleakholdRaceForge.exe "$p/Tools"
           Copy-Item Tools/Package/INSTALL.txt $p
           if (-not (Test-Path "$p/Bleakhold.exe")) { throw "Bleakhold.exe missing from the package" }
+          if (Get-ChildItem -Recurse $p -Filter *.dll) { throw "the package must not contain DLLs" }
           if (-not (Test-Path "$p/Data/Interface/Bleakhold/Emoji/Emoji000.blp")) { throw "emoji art missing from the package" }
 
       - name: Upload package
