@@ -19,11 +19,9 @@ namespace BleakFx {
     struct WorldLight {
         // The glow band of the current light, 0..1: zones Blizzard made glowier get a little more bloom.
         float zoneGlow;
-        // World-space direction towards the sun, and the colour of its light. sunVisible: the sky shows the sun (no
-        // zone skybox covers it).
+        // World-space direction towards the sun, and the colour of its light.
         C3Vector sunDirection;
         CImVector sunColor;
-        bool sunVisible;
         // Distance (yards) where the fog is complete; the ambient occlusion fades out before it.
         float fogEnd;
         // The sky overhead and at the horizon: what the water reflects where nothing is in the way.
@@ -38,6 +36,8 @@ namespace BleakFx {
         // The stock fog of the draw (Liquid::VSConstants m_fog x and y): fog = saturate(view z * scale + offset).
         float fogScale;
         float fogOffset;
+        // The sky shows the sun (DayNight::BleakSunDrawn): no skybox of the zone or of the WMO covers it.
+        bool sunVisible;
     };
 
     // Registers the console variables. Called by every world frame; registering twice keeps the values.
@@ -72,8 +72,9 @@ namespace BleakFx {
     void SetGrassWind(const C3Vector& camera, const C3Vector* player);
 
     // After the world is drawn, before the interface: processes the back buffer. Only a world that fills the window
-    // is processed; one drawn into part of it (a resized WorldFrame) stays as drawn.
-    void RenderWorld();
+    // is processed; one drawn into part of it (a resized WorldFrame) stays as drawn. sunVisible: the sky showed the
+    // sun (DayNight::BleakSunDrawn, after the world is drawn: a WMO's skybox is chosen while it is drawn).
+    void RenderWorld(bool sunVisible);
 }
 
 #endif

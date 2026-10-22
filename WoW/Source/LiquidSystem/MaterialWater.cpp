@@ -1,5 +1,6 @@
 #include "Liquid.h"
 #include "Engine/Source/BleakFx/BleakFx.h"
+#include "WoW/Source/WorldClient/DayNight.h"
 #include "Engine/Source/Gx/CGxDevice/CGxDevice.h"
 #include "Engine/Source/Gx/Gx.h"
 #include "Engine/Source/Model2/M2Light.h"
@@ -190,6 +191,7 @@ void Liquid::CMaterialWater::Render(Liquid::IEnvironment* environment, Liquid::I
     water.cameraPos = cameraPos;
     water.fogScale = Liquid::s_vsConstants.m_fog.x;
     water.fogOffset = Liquid::s_vsConstants.m_fog.y;
+    water.sunVisible = DayNight::BleakSunDrawn();
 
     if (!BleakFx::BindWater(water)) {
         g_theGxDevicePtr->RsSet(GxRs_VertexShader, Liquid::CMaterialWater::s_vertexShaders[lightCount]);
@@ -277,6 +279,7 @@ void Liquid::CMaterialWaterNoSpec::Render(Liquid::IEnvironment* environment, Liq
     water.cameraPos = cameraPos;
     water.fogScale = Liquid::s_vsConstants.m_fog.x;
     water.fogOffset = Liquid::s_vsConstants.m_fog.y;
+    water.sunVisible = DayNight::BleakSunDrawn();
 
     if (!BleakFx::BindWater(water)) {
         g_theGxDevicePtr->RsSet(GxRs_VertexShader, Liquid::CMaterialWaterNoSpec::s_vertexShaders[lightCount]);

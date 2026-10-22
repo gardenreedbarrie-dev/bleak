@@ -140,6 +140,12 @@ namespace {
     C44Matrix s_view;
     BleakFx::WorldLight s_light;
 
+    // From RenderWorld: the sky showed the sun.
+    bool s_sunVisible;
+
+    // A pass could not draw into its target this frame: the passes after it do not draw either.
+    bool s_passFailed;
+
     // From BeginLiquids: the water may draw this frame (the frame is copied), and with depth.
     bool s_waterReady;
     bool s_waterDepthReady;
@@ -349,7 +355,19 @@ namespace {
     // Draws the full-screen quad with pixel shader `ps` into `output` (nullptr: the back buffer), with `inputs` on
     // texture stages 0.. and their texel sizes in c222 - N.
     void RunPass(PixelShader ps, const Target* output, const Target* const* inputs, uint32_t count) {
+        // After a failed pass the next ones would read a target holding nothing.
+        if (s_passFailed) {
+            return;
+        }
+
         GxRenderTargetSet(GxBuffers_Color, output ? output->tex : nullptr, 0);
+
+        // The device makes a target when it is first set; when it cannot, it draws into the back buffer instead.
+        if (output && (output->tex->m_needsCreation || (!output->tex->m_apiSpecificData && !output->tex->m_apiSpecificData2))) {
+            s_passFailed = true;
+            return;
+        }
+
         GxXformSetViewport(0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f);
 
         float width = static_cast<float>(output ? output->width : s_width);
@@ -403,8 +421,9 @@ namespace {
         return minX <= slack && minY <= slack && maxX >= 1.0f - slack && maxY >= 1.0f - slack;
     }
 
+    // The depth effects, and the water's reflections, foam and soft shoreline.
     bool WantsDepth() {
-        return CVarFloat(s_cvarAo, 0.0f, 1.0f) > 0.0f || CVarFloat(s_cvarSunShafts, 0.0f, 1.0f) > 0.0f;
+        return CVarFloat(s_cvarAo, 0.0f, 1.0f) > 0.0f || CVarFloat(s_cvarSunShafts, 0.0f, 1.0f) > 0.0f || (s_cvarWater && s_cvarWater->m_intValue);
     }
 
     // Where the sun is on the screen: uv in x and y, and in z how strongly it shines into the view (0 when it is
@@ -476,7 +495,7 @@ namespace {
         SunOnScreen(light.sunDirection, sun);
 
         bool ao = settings.ao > 0.0f;
-        bool rays = settings.sunShafts > 0.0f && light.sunVisible && sun[2] > 0.0f;
+        bool rays = settings.sunShafts > 0.0f && s_sunVisible && sun[2] > 0.0f;
 
         if ((!ao && !rays) || !SetDepthConstants(p, s_worldMinZ, s_worldMaxZ)) {
             return false;
@@ -836,11 +855,20 @@ void BleakFx::BeginLiquids() {
 
     const Target* inputs[1] = { &depth };
     SetDepthConstants(s_projection, minZ, maxZ);
+    s_passFailed = false;
     RunPass(Ps_DepthCopy, &s_waterDepth, inputs, 1);
 
     g_theGxDevicePtr->RsPop();
     GxRenderTargetSet(GxBuffers_Color, nullptr, 0);
     GxXformSetViewport(minX, maxX, minY, maxY, minZ, maxZ);
+
+    // Without its target the water goes on without depth (not tried again until the targets are made again).
+    if (s_passFailed) {
+        DestroyTarget(s_waterDepth);
+        s_passFailed = false;
+        return;
+    }
+
     s_waterDepthReady = true;
 }
 
@@ -866,7 +894,8 @@ bool BleakFx::BindWater(const WaterDraw& draw) {
     g_theGxDevicePtr->RsSet(GxRs_Texture3, s_waterDepthReady ? s_waterDepth.tex : s_waterScene.tex);
     g_theGxDevicePtr->RsSet(GxRs_Texture4, ripples);
 
-    double seconds = (OsGetAsyncTimeMs() % 3600000u) / 1000.0;
+    // The ripple speeds below make whole cycles in 1000 seconds, so the clock wraps there without a jump.
+    double seconds = (OsGetAsyncTimeMs() % 1000000u) / 1000.0;
     bool reflections = s_cvarWaterReflections && s_cvarWaterReflections->m_intValue;
     SetPsVector(kPsWater + 0, static_cast<float>(seconds), s_waterDepthReady ? 1.0f : 0.0f, 0.04f, reflections ? 1.0f : 0.0f);
 
@@ -875,7 +904,7 @@ bool BleakFx::BindWater(const WaterDraw& draw) {
     float sx = sun.x * v.a0 + sun.y * v.b0 + sun.z * v.c0;
     float sy = sun.x * v.a1 + sun.y * v.b1 + sun.z * v.c1;
     float sz = sun.x * v.a2 + sun.y * v.b2 + sun.z * v.c2;
-    SetPsVector(kPsWater + 1, sx, sy, sz, s_light.sunVisible ? Clamp(sun.z * 6.0f, 0.0f, 1.0f) : 0.0f);
+    SetPsVector(kPsWater + 1, sx, sy, sz, draw.sunVisible ? Clamp(sun.z * 6.0f, 0.0f, 1.0f) : 0.0f);
     SetPsVector(kPsWater + 2, Linear(s_light.sunColor.r), Linear(s_light.sunColor.g), Linear(s_light.sunColor.b), 0.6f);
     SetPsVector(kPsWater + 3, Linear(s_light.skyZenith.r), Linear(s_light.skyZenith.g), Linear(s_light.skyZenith.b), 0.0f);
     SetPsVector(kPsWater + 4, Linear(s_light.skyHorizon.r), Linear(s_light.skyHorizon.g), Linear(s_light.skyHorizon.b), 0.0f);
@@ -978,8 +1007,9 @@ void BleakFx::BeginWorld(const WorldLight& light) {
     }
 }
 
-void BleakFx::RenderWorld() {
+void BleakFx::RenderWorld(bool sunVisible) {
     s_bloomRan = false;
+    s_sunVisible = sunVisible;
 
     // The frame copy is this world pass's; nothing drawn after it may use it.
     s_waterReady = false;
@@ -1032,10 +1062,21 @@ void BleakFx::RenderWorld() {
     GxRsSet(GxRs_ClipPlaneMask, 0);
     GxRsSet(GxRs_VertexShader, s_vertexShader);
 
+    s_passFailed = false;
     RenderChain(settings, s_light);
-    s_bloomRan = settings.bloom > 0.0f;
+    s_bloomRan = settings.bloom > 0.0f && !s_passFailed;
 
     g_theGxDevicePtr->RsPop();
     GxRenderTargetSet(GxBuffers_Color, nullptr, 0);
     GxXformSetViewport(minX, maxX, minY, maxY, minZ, maxZ);
+
+    // A target the device could not make: the frame stays as the world drew it, and BleakFx stays off until the
+    // window size changes.
+    if (s_passFailed) {
+        DestroyTargets();
+        s_width = width;
+        s_height = height;
+        s_targetsFailed = true;
+        s_passFailed = false;
+    }
 }

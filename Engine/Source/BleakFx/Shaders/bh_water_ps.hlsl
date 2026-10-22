@@ -119,9 +119,12 @@ float4 main(PSIn i) : COLOR {
     float3 nA = rippleA.xyz * 2.0 - 1.0;
     float3 nB = rippleB.xyz * 2.0 - 1.0;
     float strength = g_water1.x * saturate(1.3 - distance / 400.0);
-    float2 slope = (nA.xy + nB.xy) * strength;
-    float3 tangent = normalize(i.tangent);
-    float3 bitangent = normalize(i.bitangent);
+    // Layer B's slope turned back from its turned coordinates into world x and y.
+    float2 slopeB = float2(dot(nB.xy, g_rippleRot.xz), dot(nB.xy, g_rippleRot.yw));
+    float2 slope = (nA.xy + slopeB) * strength;
+    // The ripples lie along world x and y (also on a turned WMO's water): the world axes, seen from the camera.
+    float3 tangent = float3(g_viewToWorld[0].x, g_viewToWorld[1].x, g_viewToWorld[2].x);
+    float3 bitangent = float3(g_viewToWorld[0].y, g_viewToWorld[1].y, g_viewToWorld[2].y);
     float3 n = normalize(up + tangent * slope.x + bitangent * slope.y);
 
     float2 screen = (i.pixel + 0.5) * g_sceneTexel.xy;
@@ -152,6 +155,8 @@ float4 main(PSIn i) : COLOR {
     float4 gradient = tex2Dlod(s_depthGradient, float4(i.uv.w > 0.5 ? 0.75 : 0.25, depthCoord, 0.0, 0.0));
     float3 waterColor = ToLinear(gradient.rgb * i.color.rgb);
     float3 body = lerp(refracted, waterColor, gradient.a);
+    // The share of the refracted frame in the colour: the frame is fogged already.
+    float seeThrough = 1.0 - gradient.a;
 
     // Reflection: what the ripples point at on the screen, else the sky.
     float3 r = reflect(-v, n);
@@ -163,7 +168,9 @@ float4 main(PSIn i) : COLOR {
 
     float cosN = saturate(dot(n, v));
     float fresnel = (0.02 + 0.98 * pow(1.0 - cosN, 5.0)) * g_water1.w;
-    float3 color = lerp(body, reflection, below ? 0.0 : fresnel);
+    float reflected = below ? 0.0 : fresnel;
+    float3 color = lerp(body, reflection, reflected);
+    seeThrough *= 1.0 - reflected;
 
     // Sun glints (GGX).
     float3 l = g_sunView.xyz;
@@ -181,10 +188,12 @@ float4 main(PSIn i) : COLOR {
     float foam = shore * shore * foamPattern * g_water1.y;
     float3 foamColor = waterColor * 0.3 + (g_sunColor.rgb * nl * g_sunView.w + g_skyZenith.rgb) * 0.6;
     color = lerp(color, foamColor, saturate(foam));
+    seeThrough *= 1.0 - saturate(foam);
 
-    // The stock fog (FFP fog does not apply to ps_3_0).
+    // The stock fog (FFP fog does not apply to ps_3_0), on the water's own light only.
     float fog = saturate(p.z * g_fog.x + g_fog.y);
-    color = lerp(ToLinear(g_fogColor.rgb), color, fog);
+    float3 through = refracted * seeThrough;
+    color = through + lerp(ToLinear(g_fogColor.rgb) * (1.0 - seeThrough), color - through, fog);
 
     // Soft shoreline: the water fades out over its last few inches.
     float alpha = haveDepth ? saturate(vertical * 5.0) : 1.0;

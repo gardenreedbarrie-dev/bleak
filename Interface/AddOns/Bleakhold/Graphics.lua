@@ -95,10 +95,14 @@ end
 
 local ON_OFF = { { 0, "off" }, { 1, "on" } }
 
--- The state of a button's variable (the first state when the value is none of them), and the next one.
+-- The state of a button's variable (the first state when the value is none of them), and the next one. On/off
+-- buttons read any value but 0 as on, like the client.
 function G.ToggleState(t)
     local states = t.states or ON_OFF
     local value = cvarNumber(t.cvar, states[#states][1])
+    if not t.states then
+        value = value ~= 0 and 1 or 0
+    end
     for i, state in ipairs(states) do
         if state[1] == value then
             return state, states[i % #states + 1]

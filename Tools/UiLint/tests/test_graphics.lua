@@ -105,6 +105,11 @@ test("graphics: defaults are the Bleakhold preset; presets and sliders set the v
     G.frame.toggles[2]:Click()
     H.eq(M.cvars.bleakFxWater, "0")
     H.eq(G.frame.toggles[2].label:GetText(), "Modern water: off")
+    M.cvars.bleakFxWater = "2"
+    G.Refresh()
+    H.eq(G.frame.toggles[2].label:GetText(), "Modern water: on", "any value but 0 is on")
+    G.frame.toggles[2]:Click()
+    H.eq(M.cvars.bleakFxWater, "0")
     G.frame.toggles[4]:Click()
     H.eq(M.cvars.bleakFxGrassParting, "0")
     H.eq(G.frame.toggles[4].label:GetText(), "Grass parting: off")

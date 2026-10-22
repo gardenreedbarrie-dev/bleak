@@ -1,6 +1,7 @@
 // BleakFx shared definitions.
-// Pixel constants c192-c223 belong to BleakFx; the stock shaders only use low registers. BleakFx sets c223 to the
-// target's texel size and c222 - N to the texel size of the texture on stage N before each pass.
+// Pixel constants c180-c223 belong to BleakFx (c180-c195 the water); the stock shaders only use low registers.
+// BleakFx sets c223 to the target's texel size and c222 - N to the texel size of the texture on stage N before
+// each pass.
 #ifndef BH_COMMON_HLSLI
 #define BH_COMMON_HLSLI
 
