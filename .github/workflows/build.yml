@@ -22,13 +22,35 @@ jobs:
       - name: Build
         run: cmake --build build/x64 --config Release --target WowClient Wow --parallel
 
-      - name: Upload zip
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build RaceForge
+        run: |
+          python -m pip install pyinstaller==6.11.1
+          python -m PyInstaller --onefile --name BleakholdRaceForge --add-data "Tools/RaceForge/races.json;." --paths Tools/RaceForge --paths Tools/MpqPack --hidden-import mpqpack --distpath build/raceforge/dist --workpath build/raceforge/work Tools/RaceForge/raceforge.py
+
+      # One folder the player copies over a 3.3.5a client: the executables, the glue screens, the UI addon
+      # and RaceForge. No game data.
+      - name: Package
+        shell: pwsh
+        run: |
+          $p = "package/Bleakhold"
+          New-Item -ItemType Directory -Force "$p/Data/Interface/Bleakhold", "$p/Interface/AddOns", "$p/Tools" | Out-Null
+          Copy-Item bin/Win/*.exe, bin/Win/*.dll $p
+          Copy-Item -Recurse Interface/Bleakhold/Glue "$p/Data/Interface/Bleakhold/Glue"
+          Copy-Item -Recurse Interface/AddOns/Bleakhold "$p/Interface/AddOns/Bleakhold"
+          Copy-Item build/raceforge/dist/BleakholdRaceForge.exe "$p/Tools"
+          Copy-Item Tools/Package/INSTALL.txt $p
+          if (-not (Test-Path "$p/Bleakhold.exe")) { throw "Bleakhold.exe missing from the package" }
+
+      - name: Upload package
         uses: actions/upload-artifact@v4
         with:
           name: bleakhold-client-x64
-          path: |
-            bin/Win/*.exe
-            bin/Win/*.dll
+          path: package/
           if-no-files-found: error
           retention-days: 30
 
@@ -41,3 +63,21 @@ jobs:
             build/x64/**/*.map
           if-no-files-found: warn
           retention-days: 30
+
+  # Checks that run on Linux: the Bleakhold Lua (lint against the 3.3.5a API, unit tests) and the Python tools.
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y libxml2-utils
+
+      - name: Lua lint and tests
+        run: bash Tools/UiLint/check.sh
+
+      - name: RaceForge and MpqPack tests
+        run: |
+          python3 -I Tools/MpqPack/tests/run_tests.py
+          python3 -I Tools/RaceForge/tests/run_tests.py

@@ -26,6 +26,13 @@ UI as well: the stock GlueXML has 10 race buttons and stops with "Too many races
 races. Install the races together with that glue UI. The new races use the template races' models; HD models are a
 later step.
 
+## The easy way
+
+The CI package (`Tools\BleakholdRaceForge.exe`, no Python needed) and `raceforge.py` without a command both
+run the same build: double-click it and drag your DBC folder into the window, or drop the folder onto it. The
+output goes to `Bleakhold-RaceForge-Output` next to that folder (running it again replaces it), with the archive
+`client\patch-R.MPQ`, the server DBCs and SQL, and `report.txt`.
+
 ## Step by step (Windows)
 
 The examples assume the decompilation in `C:\bleakhold\wowdecomp`, the client in `C:\WoW335`, AzerothCore in

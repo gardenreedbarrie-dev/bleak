@@ -1,0 +1,46 @@
+BLEAKHOLD CLIENT - HOW TO INSTALL
+=================================
+
+This package holds everything Bleakhold adds to a World of Warcraft 3.3.5a (12340) client. It contains no
+Blizzard game files: you need your own 3.3.5a client.
+
+
+PLAYERS
+-------
+1. Copy everything in this folder into your WoW 3.3.5a folder (the one with Wow.exe and the Data folder).
+   Say yes if Windows asks to merge folders.
+2. Set your realm in Data\enUS\realmlist.wtf (or your language folder), for example:
+       set realmlist logon.bleakhold.com
+3. Start Bleakhold.exe.
+
+What you get:
+- the Bleakhold login screen and character creation with High Elf and Eredar
+  (Data\Interface\Bleakhold\Glue)
+- the Bleakhold interface (Interface\AddOns\Bleakhold): type /bh in game, /bh help for commands,
+  /bh demo to look at every window with sample data
+- High Elf and Eredar characters also need the race file patch-R.MPQ in Data (see below; your server
+  gives it to you)
+
+
+SERVER OWNER: THE RACE FILES (ONCE)
+-----------------------------------
+High Elf and Eredar must exist in the same game data on the server and in every client.
+
+1. Double-click Tools\BleakholdRaceForge.exe.
+2. Drag your server's data\dbc folder into the window and press Enter.
+   (Or drag the dbc folder onto BleakholdRaceForge.exe.)
+3. A folder "Bleakhold-RaceForge-Output" appears next to the dbc folder:
+   - client\patch-R.MPQ             give this to every player: it goes into their game's Data folder
+   - server\dbc\*.dbc               copy into the server's data\dbc folder (keep a backup first)
+   - server\sql\bleakhold_races.sql run on the world database
+   - report.txt                     every check RaceForge ran; all must say PASS
+4. Restart the server.
+
+Use the dbc folder your server really runs with, so your own changes are kept. Run RaceForge again
+whenever you change those files.
+
+
+SERVER OWNER: THE SERVER MODULE
+-------------------------------
+The Bleakhold interface shows data only when the server answers it. The messages the server module
+sends and accepts are described in docs/BleakholdProtocol.md in the source repository.

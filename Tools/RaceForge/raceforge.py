@@ -4,6 +4,7 @@
     python3 -I raceforge.py build --dbc <your DBFilesClient folder> --out <output folder> [--mpq]
     python3 -I raceforge.py validate --dbc <same folder> --out <output folder>
     python3 -I raceforge.py schemas --check
+    python3 -I raceforge.py [<DBC folder>]       (double-click or drop a folder: builds next to it)
 
 RaceForge ships no game data: it reads the DBC files of your own client and writes patched copies of the tables it
 changes, the AzerothCore SQL and a report. See README.md.
@@ -246,7 +247,62 @@ def cmd_schemas(args) -> int:
     return 0
 
 
+EASY_OUT = "Bleakhold-RaceForge-Output"
+COMMANDS = ("build", "validate", "schemas", "-h", "--help")
+
+
+def easy_mode(argv: list[str]) -> int:
+    """Double-click or drag and drop: no command given. The DBC folder is the dropped folder, or asked for;
+    the output goes next to it, in a folder RaceForge owns, so running it again replaces its own output."""
+    print("Bleakhold RaceForge: adds High Elf and Eredar to your own DBC files.\n")
+
+    if argv and os.path.isdir(argv[0]):
+        dbc = argv[0]
+    else:
+        try:
+            dbc = input("Drag your DBC folder (the client's DBFilesClient, or the server's data\\dbc) into this window and press Enter:\n> ")
+        except EOFError:
+            dbc = ""
+
+        dbc = dbc.strip().strip('"')
+
+    if not os.path.isdir(dbc):
+        print(f"error: '{dbc}' is not a folder", file=sys.stderr)
+        return 1
+
+    out = os.path.join(os.path.dirname(os.path.abspath(dbc)), EASY_OUT)
+    args = argparse.Namespace(dbc=dbc, out=out, config=DEFAULT_CONFIG, mpq=DEFAULT_MPQ, mpq_extra=None, force=True)
+
+    try:
+        result = cmd_build(args)
+    except (configmod.ConfigError, ForgeError, DbcError, OSError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+
+    if result == 0:
+        print(f"Done. Everything is in {out}:")
+        print(f"  client\\{DEFAULT_MPQ}            -> copy into the game's Data folder")
+        print("  server\\dbc\\*.dbc              -> copy into the server's data\\dbc folder")
+        print("  server\\sql\\bleakhold_races.sql -> run on the world database")
+    else:
+        print(f"Some checks failed; see {os.path.join(out, 'report.txt')}. Nothing needs to be copied yet.")
+
+    return result
+
+
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+
+    if not argv or argv[0] not in COMMANDS:
+        result = easy_mode(argv)
+
+        # A double-clicked window closes as soon as the program ends; keep it open to read the result.
+        if sys.stdin and sys.stdin.isatty() and (getattr(sys, "frozen", False) or os.name == "nt"):
+            input("\nPress Enter to close.")
+
+        return result
+
     parser = argparse.ArgumentParser(prog="raceforge.py", description="Add the Bleakhold races to your own 3.3.5a DBCs and write the AzerothCore SQL.")
     sub = parser.add_subparsers(dest="command", required=True)
 

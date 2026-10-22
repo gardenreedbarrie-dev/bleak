@@ -89,6 +89,13 @@ logger off in `WowClient` with `-DWOWCLIENT_CRASH_LOG=OFF`.
 2. Point `Data/<locale>/realmlist.wtf` at the server you want to connect to.
 3. Start `bin/Win/WowClient64.exe` (or `Wow64.exe`).
 
+## Download
+
+The CI build (`Build Bleakhold Client`, artifact `bleakhold-client-x64`) is one folder to copy over a 3.3.5a
+client: `Bleakhold.exe`, the glue screens in `Data\Interface\Bleakhold\Glue`, the UI addon in
+`Interface\AddOns\Bleakhold`, `Tools\BleakholdRaceForge.exe` and `INSTALL.txt` (from `Tools/Package`), which
+explains the steps for players and for the server owner. It holds no game data.
+
 ## Modern (HD) assets
 
 The client also loads models, map objects, terrain and textures made for newer clients (Legion and
@@ -158,6 +165,8 @@ data is in this repository:
 ```powershell
 py -3 -I Tools\RaceForge\raceforge.py build --dbc C:\azerothcore\data\dbc --out C:\bleakhold\raceforge-out --mpq
 ```
+
+Or double-click `Tools\BleakholdRaceForge.exe` from the CI package and drag the dbc folder into it.
 
 - Client: copy `raceforge-out\client\patch-R.MPQ` into the client's `Data` folder. The client reads DBC files
   only from MPQ archives; `Tools/MpqPack` builds them.
