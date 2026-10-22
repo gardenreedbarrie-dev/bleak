@@ -97,6 +97,20 @@ static int32_t s_gxTexCacheMaxSize;
 // STATIC: 0x00B49CA0
 static uint32_t s_asyncLoadBufferUsed;
 
+// BLEAKHOLD(hdtextures): the byte size of s_mipBits. The client fills s_mipBits with a whole mip chain and
+// never checked that the chain fits; the buffer now grows before a chain larger than it is filled in.
+static uint32_t s_mipBitsSize;
+
+#if defined(WOWDECOMP_ARCH_64)
+// BLEAKHOLD(hdtextures): the mip scratch is made for 2048 x 2048 chains up front on x64, and the budget for
+// texture files being read in the background is 32 MB instead of 4 MB.
+static const uint32_t s_mipBitsInitialEdge = 2048;
+static const uint32_t s_asyncLoadBufferMax = 0x2000000;
+#else
+static const uint32_t s_mipBitsInitialEdge = 1024;
+static const uint32_t s_asyncLoadBufferMax = 0x400000;
+#endif
+
 // STATIC: 0x00B49CA4
 static TSHashTableReuse<CTexture, HASHKEY_TEXTUREFILE> s_textureCache;
 
@@ -204,9 +218,48 @@ int32_t TextureBuildAliasPath(char* buffer, const char* fileName) {
     return 1;
 }
 
+// BLEAKHOLD(hdtextures): grows s_mipBits to hold a whole ARGB8888 chain of `width` x `height` (the largest
+// texel format, so any format of that size fits). The old buffer stays in place when the new one cannot be
+// allocated.
+static int32_t EnsureMipBits(uint32_t width, uint32_t height) {
+    uint32_t size = MippedImgCalcSize(PIXEL_ARGB8888, width, height);
+
+    if (s_mipBits && size <= s_mipBitsSize) {
+        return 1;
+    }
+
+    MipBits* bits = static_cast<MipBits*>(SMemAlloc(size, __FILE__, __LINE__, 0));
+
+    if (!bits) {
+        return 0;
+    }
+
+    if (s_mipBits) {
+        SMemFree(s_mipBits, __FILE__, __LINE__, 0);
+    }
+
+    s_mipBits = bits;
+    s_mipBitsSize = size;
+
+    return 1;
+}
+
+// BLEAKHOLD(hdtextures): whether a texture file of `size` bytes may start reading now. A file larger than the
+// whole budget used to wait for room that could never exist, so its texture never loaded; it now reads once
+// nothing else is in flight.
+static int32_t AsyncTextureBudgetAllows(uint32_t size) {
+    if (!s_asyncLoadBufferUsed) {
+        return 1;
+    }
+
+    return s_asyncLoadBufferUsed <= s_asyncLoadBufferMax && s_asyncLoadBufferMax - s_asyncLoadBufferUsed >= size;
+}
+
 // VERIFY: a6ae9dde manual
 // OFFSET: 0x004B5280
 MipBits* GetDefaultTexture(uint32_t width, uint32_t height) {
+    EnsureMipBits(width, height); // BLEAKHOLD(hdtextures)
+
     MipBits* images = s_mipBits;
     MipBits* level = images;
 
@@ -715,6 +768,11 @@ int32_t TextureLoadBlpMips(char* fileName, char* extension, int32_t flags, MipBi
         *pixelFormat = pixels;
     }
 
+    // BLEAKHOLD(hdtextures): the chain is written into s_mipBits without a size check.
+    if (images == &s_mipBits && !EnsureMipBits(imageWidth, imageHeight)) {
+        return 0;
+    }
+
     if (!image.LockChain(pixels, *images, bestMip)) {
         return 0;
     }
@@ -1207,14 +1265,13 @@ void FillInSolidTexture(const CImVector& color, CTexture* texture) {
 // VERIFY: f77dd4dd manual
 // OFFSET: 0x004B69E0
 void AsyncTextureHandler() {
-    uint32_t available = 0x400000 - s_asyncLoadBufferUsed;
-
+    // BLEAKHOLD(hdtextures): AsyncTextureProcess adds each started file to s_asyncLoadBufferUsed, so the
+    // budget is asked per file instead of being counted down here.
     for (CAsyncObject* object = s_asyncLoadList.Head(); !s_asyncLoadList.IsEnd(object); ) {
         CAsyncObject* next = s_asyncLoadList.RawNext(object);
 
-        if (available >= object->m_size) {
+        if (AsyncTextureBudgetAllows(object->m_size)) {
             AsyncTextureProcess(object, 0);
-            available -= object->m_size;
         }
 
         object = next;
@@ -1223,9 +1280,8 @@ void AsyncTextureHandler() {
     for (CAsyncObject* object = s_asyncTextureList.Head(); !s_asyncTextureList.IsEnd(object); ) {
         CAsyncObject* next = s_asyncTextureList.RawNext(object);
 
-        if (available >= object->m_size) {
+        if (AsyncTextureBudgetAllows(object->m_size)) {
             AsyncTextureProcess(object, 0);
-            available -= object->m_size;
         }
 
         object = next;
@@ -1705,6 +1761,7 @@ void UpdateTgaTexture(EGxTexCommand command, uint32_t width, uint32_t height, ui
     switch (command) {
         case GxTex_Lock:
             if (!s_pumping) {
+                EnsureMipBits(width, height); // BLEAKHOLD(hdtextures)
                 char* extension = texture->m_filename + SStrLen(texture->m_filename);
                 int32_t result = LoadTgaMips(texture->m_filename, extension, texture->m_flags & 2, &s_mipBits, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
                 *extension = '\0';
@@ -1795,6 +1852,8 @@ int32_t PumpBlpTextureAsync(CTexture* texture, void* data) {
     TextureGetTextureFormats(pixelFormat, gxTexFormat, static_cast<PIXEL_FORMAT>(image.m_header.m_preferredFormat), image.m_header.m_alphaSize);
 
     s_pumping = 1;
+
+    EnsureMipBits(width, height); // BLEAKHOLD(hdtextures)
 
     if (!image.LockChain2(texture->m_filename, pixelFormat, s_mipBits, texture->m_bestMip, 1)) {
         s_pumping = 0;
@@ -1890,7 +1949,8 @@ int32_t AsyncTextureStatus() {
 // VERIFY: f4a9a3e6 manual
 // OFFSET: 0x004B7F80
 void TextureInitialize() {
-    s_mipBits = static_cast<MipBits*>(SMemAlloc(MippedImgCalcSize(PIXEL_ARGB8888, 1024, 1024), __FILE__, __LINE__, 0));
+    s_mipBitsSize = MippedImgCalcSize(PIXEL_ARGB8888, s_mipBitsInitialEdge, s_mipBitsInitialEdge); // BLEAKHOLD(hdtextures): was 1024
+    s_mipBits = static_cast<MipBits*>(SMemAlloc(s_mipBitsSize, __FILE__, __LINE__, 0));
     AsyncFileReadAddPollHandler(AsyncTextureHandler);
     AsyncFileReadAddStatusHandler(AsyncTextureStatus);
     s_currentTime = OsGetAsyncTimeMs();
@@ -2041,6 +2101,7 @@ void TextureDestroy() {
     s_gxTexCacheFree.Clear();
     SMemFree(s_mipBits, __FILE__, __LINE__, 0);
     s_mipBits = nullptr;
+    s_mipBitsSize = 0;
 
     for (int32_t x = 0; x < 6; x++) {
         for (int32_t y = 0; y < 6; y++) {
@@ -2242,7 +2303,7 @@ CTexture* CreateBlpAsync(char* extension, const char* fileName, uint32_t flags, 
 
     CAsyncObject* object = texture->m_asyncObject;
 
-    if (0x400000 - s_asyncLoadBufferUsed < object->m_size) {
+    if (!AsyncTextureBudgetAllows(object->m_size)) { // BLEAKHOLD(hdtextures)
         s_asyncTextureList.LinkNode(object, 2, nullptr);
     } else {
         AsyncTextureProcess(object, 0);

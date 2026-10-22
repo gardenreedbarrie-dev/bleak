@@ -55,6 +55,8 @@ target_link_libraries(WowClient
         Gxu
         Images
         Model2
+        ModernAssets
+        WarcraftXL
         Os
         Scrn
         Services

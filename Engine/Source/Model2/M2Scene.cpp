@@ -10,6 +10,7 @@
 #include "Engine/Source/Model2/M2Cache.h"
 #include "Engine/Source/Model2/M2Light.h"
 #include "Engine/Source/Model2/M2Model.h"
+#include "Engine/Source/Model2/M2Modern.h"
 #include "Engine/Source/Model2/M2Shared.h"
 #include "Engine/Source/Model2/CM2SceneRender.h"
 #include "Engine/Source/Services/GfxSingletonManager.h"
@@ -653,7 +654,7 @@ M2HitRec* CM2Scene::HitTestGeometry(const CM2Model* model, uint32_t pass, const 
             this->TransformHitTestVerticesBlend(model, skinData, section, pass, dir, d);
         }
 
-        const uint16_t* indices = &skinData->m_indices[section->m_indexStart];
+        const uint16_t* indices = &skinData->m_indices[M2SkinSectionIndexStart(*section, skinData->m_indices.m_count)]; // BLEAKHOLD(modernassets)
         best = this->IntersectHitTestTriangles(indices, indices + section->m_indexCount, section->m_vertexStart, start, pass, rec, t, best);
     }
 

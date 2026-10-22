@@ -32,6 +32,8 @@ Status: [ ] todo  [x] done  [-] not needed
 ## 2. Custom (not from St0ny)
 | Patch | What | Source |
 |---|---|---|
+| [x] **CUSTOM modernassets** | Legion+ models, skins, animations, WMOs, split ADTs and BLPs converted as they are opened (WarcraftXL, GPL-3.0-or-later); bone-budget split, skin material rebuild, index starts past 65535, alpha-key cutoff for converted models, crash on modern shader ids | ThirdParty/WarcraftXL, Engine/Source/ModernAssets, SFile2-Core.cpp `SFile::OpenEx`, M2Modern.cpp, M2Shared.cpp, M2Model.cpp, CM2SceneRender.cpp, M2Scene.cpp |
+| [x] **CUSTOM hdtextures** | textures over 4 MB never loaded (async budget); mip scratch overrun by chains over 1024; 2048 scratch and 32 MB budget on x64 | Texture.cpp — `AsyncTextureHandler`, `CreateBlpAsync`, `TextureInitialize`, `TextureLoadBlpMips` |
 | [x] **CUSTOM branding** | "Bleakhold" window title, popup captions and error log title; CI builds the player exe as `Bleakhold.exe` | Client.cpp, ConsoleDetect.cpp, ConsoleDevice.cpp, WoW/Source/CMakeLists.txt (`WOW_OUTPUT_OVERRIDE`) |
 | [x] **CUSTOM names** | client name check always OK (returns 87) | ClientServices.cpp — `CharacterValidateName` |
 | [-] **CUSTOM Lexara.dll loader** (file missing, loader was a no-op) | loads `Lexara.dll` at startup | WinMain.cpp `start`, StormRtl.cpp `StormRtlInitialize` — needs x64 Lexara.dll or port into source |

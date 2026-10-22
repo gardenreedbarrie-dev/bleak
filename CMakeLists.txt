@@ -59,6 +59,9 @@ if (EXISTS ${CMAKE_SOURCE_DIR}/ThirdParty/CMakeLists.txt)
     add_subdirectory(ThirdParty)
 endif ()
 
+# BLEAKHOLD(modernassets): WarcraftXL's modern-asset transforms (GPL-3.0-or-later).
+add_subdirectory(ThirdParty/WarcraftXL)
+
 add_subdirectory(Engine/Source/BLPFile)
 add_subdirectory(Engine/Source/Base)
 add_subdirectory(Engine/Source/BlizzardCore)
@@ -75,6 +78,7 @@ add_subdirectory(Engine/Source/Images)
 add_subdirectory(Engine/Source/jpeg)
 add_subdirectory(Engine/Source/lua-5.1)
 add_subdirectory(Engine/Source/Model2)
+add_subdirectory(Engine/Source/ModernAssets)
 add_subdirectory(Engine/Source/Os)
 add_subdirectory(Engine/Source/pcre)
 add_subdirectory(Engine/Source/Scrn)

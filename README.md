@@ -89,6 +89,58 @@ logger off in `WowClient` with `-DWOWCLIENT_CRASH_LOG=OFF`.
 2. Point `Data/<locale>/realmlist.wtf` at the server you want to connect to.
 3. Start `bin/Win/WowClient64.exe` (or `Wow64.exe`).
 
+## Modern (HD) assets
+
+The client also loads models, map objects, terrain and textures made for newer clients (Legion and
+later), converting each file to the 3.3.5a format as it is opened. Files already in the 3.3.5a format are
+loaded exactly as before. The conversions come from [WarcraftXL](https://github.com/WarcraftXL); see
+`ThirdParty/WarcraftXL/README.md`.
+
+| Files | What is converted |
+|---|---|
+| `.m2` | Chunked (`MD21`) and plain models of versions 272-274: textures named by FileDataID, split skeletons (`.skel`), cameras, particles, ribbons, animation ids |
+| `.anim` | The `AFM2` wrapper of external animation files |
+| `.skin` | The material contract a modern skin leaves out is rebuilt when the model loads, and sections drawing with more bones than the GPU holds per draw are split (this applies to every model) |
+| `.wmo` | Root and group files: modern-only chunks, shaders, material ids, FileDataID textures and doodads |
+| `.adt`, `.wdt`, `.wdl` | Split terrain tiles (`_tex0`, `_obj0`) merged into one 3.3.5a tile, with FileDataID textures and placements; the map's WDT and WDL reshaped to match |
+| `.blp` | Uncompressed (BGRA) textures re-encoded to DXT5, retail character component textures converted for the 3.3.5a compositor, world textures and textures of modern assets larger than 2048 reduced to 2048 |
+
+Skins with more than 65535 indices (retail character models) are drawn correctly, and textures larger than
+1024 load: before, a texture file over 4 MB never finished loading and a chain over 1024 overran the mip
+scratch buffer.
+
+### Adding modern assets
+
+1. Export the files from a retail installation with their paths, for example with
+   [wow.export](https://github.com/Kruithne/wow.export) or CASC Explorer. The client looks up a model's
+   skins and animations by name (`<model>00.skin`, `<model><anim>-<variation>.anim`), so keep the names
+   the tools give them.
+2. Pack them into a patch archive in `Data`, for example `Data/patch-Z.MPQ`, with the paths the client
+   asks for (`Creature\...`, `World\...`). The CI build already accepts unsigned archives
+   (`WOWDECOMP_DISABLE_SIGNATURE_CHECKS`).
+3. Put the community listfile (`listfile.csv`, `id;path` per line) next to the executable, in `Data`, or
+   inside an archive. Modern assets name many of their files by FileDataID; without the listfile those
+   textures and placements fall back to placeholders. A listfile trimmed to the files you ship loads faster.
+4. Point the game data at the new files (`CreatureDisplayInfo.dbc`, `ItemDisplayInfo.dbc`, ...) as usual.
+
+The client writes what it converted, and what it could not, to `Logs/ModernAssets.log`. Set the environment
+variable `WXL_VERBOSE_ASSET_LOGS=1` to log every converted file.
+
+### Not supported yet
+
+- Animations stored in the `.anim` files of a `.skel`-based model (`AFSB`/`AFSA` chunks) do not play, and a
+  `.skel` that names a parent skeleton is not followed.
+- Character models from the Shadowlands customization system need game data the 3.3.5a client does not
+  have; the Warlords of Draenor era HD character models are the usual choice.
+- Rendering features newer clients add: four-layer WMO materials, height-blended terrain, more than four
+  terrain layers (layers 5-8 are dropped), WMO-to-outdoor visibility through open-sided spaces.
+
+### License
+
+The conversion code is GPL-3.0-or-later (`ThirdParty/WarcraftXL`, `Engine/Source/ModernAssets`,
+`Engine/Source/Model2/M2Modern.*`). Whoever distributes a client built with it must make the corresponding
+source code available under the same license.
+
 ## Layout
 
 | Path | Contents |
@@ -97,11 +149,14 @@ logger off in `WowClient` with `-DWOWCLIENT_CRASH_LOG=OFF`.
 | `WoW/Source/` | Game modules: objects, world rendering, UI, networking, database, glue screens |
 | `WoW/Common/` | Code shared by the game modules |
 | `ThirdParty/` | Libraries linked from their upstream sources |
+| `ThirdParty/WarcraftXL/` | WarcraftXL's modern-asset conversions (GPL-3.0-or-later) |
+| `Engine/Source/ModernAssets/` | Runs those conversions on the files the client opens |
 | `Tools/WowClient/` | The `WowClient` executable target |
 | `Tools/XvidDecoder/` | x64 movie decoder that replaces the original 32-bit `DivxDecoder.dll` |
 
 ## Special thanks
 
+- [WarcraftXL](https://github.com/WarcraftXL), for the modern-asset conversions
 - [binana](https://github.com/thunderbrewhq/binana)
 - [thunderbrew](https://github.com/thunderbrewhq/thunderbrew)
 - [whoa](https://github.com/whoahq/whoa)

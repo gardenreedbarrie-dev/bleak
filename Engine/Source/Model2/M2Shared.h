@@ -72,6 +72,8 @@ class CM2Shared {
     /* 0198 */ uint16_t m_billboardBoneCount;
     /* 019C */ uint32_t m_lastUsedTime;
     /* 01A0 */ TSLink<CM2Shared> m_updateLink;
+    // BLEAKHOLD(modernassets): M2MODERN_* flags (M2Modern.h), set when the model is parsed.
+    uint32_t m_modernFlags;
 
     static void LoadFailedCallback(void* param);
     static void LoadSucceededCallback(void* param);

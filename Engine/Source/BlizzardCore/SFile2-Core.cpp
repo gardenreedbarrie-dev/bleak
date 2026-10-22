@@ -17,6 +17,7 @@
 #include "Engine/Source/BlizzardCore/Source/System/String/String.h"
 #include "Engine/Source/BlizzardCore/Source/System/Thread/Thread.h"
 #include "Engine/Source/BlizzardCore/Source/Packages/Util/Hash.h"
+#include "Engine/Source/ModernAssets/ModernAssets.h"
 #include "Engine/Source/Storm/H/storm.h"
 #include "Engine/Source/Storm/Source/MD5.h"
 
@@ -1105,6 +1106,7 @@ int32_t STORMAPI SFile::OpenEx(SArchive* archive, const char* name, uint32_t fla
     }
 
     if (!(flags & 0x20000)) {
+        ModernAssetsFilterOpenedFile(name, *result); // BLEAKHOLD(modernassets)
         return opened;
     }
 
@@ -1117,6 +1119,8 @@ int32_t STORMAPI SFile::OpenEx(SArchive* archive, const char* name, uint32_t fla
 
     (*result)->m_type = SFILE_MEMORY;
     (*result)->m_position = 0;
+
+    ModernAssetsFilterOpenedFile(name, *result); // BLEAKHOLD(modernassets)
 
     return opened;
 
