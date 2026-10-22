@@ -1,7 +1,7 @@
 // BLEAKHOLD(grasswind): wind in the grass and blades that part around the player, for the stock detail-doodad
 // vertex shaders (CDetailDoodad). Ported from WarcraftXL's wxl-grasswind (GrassWind.cpp, by iThorgrim): the stock
 // vs_3_0 bytecode gets a motion block after the view transform; it displaces each blade in the world plane by two
-// travelling sine waves and a push away from the player, weighted by the blade's own height (its texture v).
+// travelling sine waves and a push away from the player, both bending the blade from its base by its texture v.
 //
 // Copyright (C) 2026 WarcraftXL (grass motion), Bleakhold (bytecode patching, client integration)
 //

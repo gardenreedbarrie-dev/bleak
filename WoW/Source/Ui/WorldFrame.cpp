@@ -1691,6 +1691,8 @@ void CGWorldFrame::OnWorldRender() {
     light.sunDirection = DayNight::g_planets.m_sun.m_position - dayNight->m_cameraPos;
     light.sunDirection.NormalizeSafe();
     light.sunColor = dayNight->m_bands.m_sunCloudColors[0];
+    light.ambient = dayNight->m_bands.m_ambient;
+    light.diffuse = dayNight->m_bands.m_diffuse;
     light.fogEnd = dayNight->m_fog.m_end;
     light.skyZenith = dayNight->m_bands.m_skyColors[0];
     light.skyHorizon = dayNight->m_bands.m_skyColors[5];
@@ -1811,7 +1813,7 @@ void CGWorldFrame::OnWorldRender() {
     g_theGxDevicePtr->RsPop();
 
     // BLEAKHOLD(bleakfx): post-processing of the world, before the chat and emoji bubbles and the interface.
-    BleakFx::RenderWorld(DayNight::BleakSunDrawn());
+    BleakFx::RenderWorld(DayNight::BleakSunDrawn(), DayNight::GetInfo()->m_showSky != 0);
 
     SmartScreenRectClearGrid(1);
     CGChatBubbleFrame::OnWorldRender(this);

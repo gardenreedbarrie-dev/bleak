@@ -1,5 +1,6 @@
-// Edge-aware blur of the ambient occlusion, one direction per pass: a Gaussian whose taps lose their weight where
-// the depth jumps, so the occlusion of a wall does not bleed onto the character in front of it.
+// Edge-aware blur of the ambient occlusion (red) and the contact shadows (green), one direction per pass: a Gaussian
+// whose taps lose their weight where the depth jumps, so the occlusion of a wall does not bleed onto the character in
+// front of it.
 #include "bh_common.hlsli"
 
 sampler2D s_ao : register(s0);
@@ -10,7 +11,7 @@ static const float kWeights[5] = { 0.2270270, 0.1945946, 0.1216216, 0.0540541, 0
 
 float4 main(float2 uv : TEXCOORD0) : COLOR {
     float z = LinearDepth(Fetch(s_depth, uv).r);
-    float sum = Fetch(s_ao, uv).r * kWeights[0];
+    float2 sum = Fetch(s_ao, uv).rg * kWeights[0];
     float weight = kWeights[0];
 
     [unroll]
@@ -20,10 +21,10 @@ float4 main(float2 uv : TEXCOORD0) : COLOR {
         float zB = LinearDepth(Fetch(s_depth, uv - offset).r);
         float wA = kWeights[i] * saturate(1.0 - abs(zA - z) / (z * g_blur.z));
         float wB = kWeights[i] * saturate(1.0 - abs(zB - z) / (z * g_blur.z));
-        sum += Fetch(s_ao, uv + offset).r * wA + Fetch(s_ao, uv - offset).r * wB;
+        sum += Fetch(s_ao, uv + offset).rg * wA + Fetch(s_ao, uv - offset).rg * wB;
         weight += wA + wB;
     }
 
-    float ao = sum / weight;
-    return float4(ao, ao, ao, 1.0);
+    float2 result = sum / weight;
+    return float4(result, 1.0, 1.0);
 }

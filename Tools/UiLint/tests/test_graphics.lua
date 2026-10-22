@@ -5,7 +5,7 @@ local DEFAULTS = {
     bleakFxSaturation = "1.05", bleakFxVibrance = "0.25", bleakFxWarmth = "0.3", bleakFxBrightness = "1",
     bleakFxShadows = "0.012", bleakFxVignette = "0.18", bleakFxSharpen = "0.25", gxMultisample = "1",
     bleakFxWater = "1", bleakFxWaterReflections = "1", bleakFxWaterRipples = "0.12",
-    bleakFxGrassWind = "1", bleakFxGrassParting = "1",
+    bleakFxGrassWind = "1", bleakFxGrassParting = "1", bleakFxContactShadows = "0.6",
 }
 
 -- Registers the client's variables with their defaults (Engine/Source/BleakFx/BleakFx.cpp).

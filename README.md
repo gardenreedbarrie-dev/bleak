@@ -248,18 +248,24 @@ ignore the packet.
 
 ## Graphics (BleakFx)
 
-The Bleakhold client post-processes the 3D world after it is drawn and before the interface
-(BLEAKHOLD(bleakfx), `Engine/Source/BleakFx`): ambient occlusion and light shafts from the depth buffer, bloom,
+The Bleakhold client post-processes the 3D world after it is drawn and before the interface (BLEAKHOLD(bleakfx),
+`Engine/Source/BleakFx`): ambient occlusion, contact shadows and light shafts from the depth buffer, bloom,
 clarity (local contrast), colour grading with a filmic contrast curve, vignette, FXAA and contrast-adaptive
 sharpening; it draws water with reflections, refraction and colour by depth, and the wind moves the grass. The
-interface, chat and emoji bubbles stay sharp on top. In game, `/bh graphics` (or a key binding
-in Key Bindings > Bleakhold) opens the settings window with presets (Off, Classic+, Bleakhold, Cinematic) and a
-slider for each effect; they are the `bleakFx*` CVars, saved in `Config.wtf`.
+interface, chat and emoji bubbles stay sharp on top. In game, `/bh graphics` (or a key binding in Key Bindings >
+Bleakhold) opens the settings window with presets (Off, Classic+, Bleakhold, Cinematic) and a slider for each
+effect; they are the `bleakFx*` CVars, saved in `Config.wtf`.
 
 - Needs the Direct3D 9 renderer (the default, `gxApi d3d9` or `d3d9ex`) and shader model 3; with anything else
-  the frame is drawn exactly as by the stock client. Ambient occlusion and light shafts also need Multisampling
-  1x: an INTZ depth texture stands in for the back buffer's depth buffer (`Engine/Source/Gx/BleakDepth.h`), and
-  INTZ cannot be multisampled. SMAA or FXAA replaces the multisampling.
+  the frame is drawn exactly as by the stock client. Ambient occlusion, contact shadows and light shafts also
+  need Multisampling 1x: an INTZ depth texture stands in for the back buffer's depth buffer
+  (`Engine/Source/Gx/BleakDepth.h`), and INTZ cannot be multisampled. SMAA or FXAA replaces the multisampling.
+- Contact shadows: a short ray from each pixel towards the sun, marched through the depth buffer at half size,
+  shadows what stands in its way within 2.5 yards: under and beside characters, props and buildings, which the
+  stock client draws without shadows. A shadow leaves the ambient part of the zone's light (its ambient and
+  diffuse colours), so it is weaker at night and in dim zones; there are none indoors (where no sky is drawn) or
+  when the sun stands low, and they fade out on surfaces seen edge-on and beyond 80 yards. Like all screen-space
+  effects, they only know what is on the screen.
 - Only a world that fills the window is processed; one that an addon draws into part of the window (a resized
   WorldFrame) stays as the stock client draws it.
 - The bloom stands in for the stock full screen glow; the underwater and drunk blur stay. Zones whose light
@@ -285,11 +291,12 @@ slider for each effect; they are the `bleakFx*` CVars, saved in `Config.wtf`.
 - Shaders: `Engine/Source/BleakFx/Shaders/*.hlsl` (ps_3_0 and vs_3_0) are compiled with the Windows SDK's `fxc`
   during the build and embedded in the executable, so they need no game files. Without `fxc` the client builds
   without them and BleakFx stays off.
-- CVars: `bleakFx` (on/off), `bleakFxAO`, `bleakFxAORadius`, `bleakFxSunShafts`, `bleakFxBloom`,
-  `bleakFxBloomThreshold`, `bleakFxClarity`, `bleakFxContrast`, `bleakFxSaturation`, `bleakFxVibrance`,
-  `bleakFxWarmth`, `bleakFxBrightness`, `bleakFxShadows`, `bleakFxVignette`, `bleakFxAA` (0 off, 1 FXAA, 2 SMAA),
-  `bleakFxSharpen`, `bleakFxWater` (0 the stock water), `bleakFxWaterReflections`, `bleakFxWaterRipples`,
-  `bleakFxGrassWind` (0 still - 2) and `bleakFxGrassParting`; each one's description gives its range.
+- CVars: `bleakFx` (on/off), `bleakFxAO`, `bleakFxAORadius`, `bleakFxContactShadows`, `bleakFxSunShafts`,
+  `bleakFxBloom`, `bleakFxBloomThreshold`, `bleakFxClarity`, `bleakFxContrast`, `bleakFxSaturation`,
+  `bleakFxVibrance`, `bleakFxWarmth`, `bleakFxBrightness`, `bleakFxShadows`, `bleakFxVignette`, `bleakFxAA` (0
+  off, 1 FXAA, 2 SMAA), `bleakFxSharpen`, `bleakFxWater` (0 the stock water), `bleakFxWaterReflections`,
+  `bleakFxWaterRipples`, `bleakFxGrassWind` (0 still - 2) and `bleakFxGrassParting`; each one's description gives
+  its range.
 - Anti-aliasing: SMAA 1x (`bleakFxAA 2`, the default) is the reference implementation of SMAA by Jimenez et al.
   (MIT, `ThirdParty/SMAA`): luma edges, the High preset, compiled for shader model 3; FXAA (`bleakFxAA 1`) is the
   cheaper choice.

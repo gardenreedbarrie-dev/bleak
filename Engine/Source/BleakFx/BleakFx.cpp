@@ -79,6 +79,7 @@ namespace {
         float ao;
         float aoRadius;
         float sunShafts;
+        float contactShadows;
     };
 
     CVar* s_cvarEnable;
@@ -97,6 +98,7 @@ namespace {
     CVar* s_cvarAo;
     CVar* s_cvarAoRadius;
     CVar* s_cvarSunShafts;
+    CVar* s_cvarContactShadows;
     CVar* s_cvarWater;
     CVar* s_cvarWaterRipples;
     CVar* s_cvarWaterReflections;
@@ -140,8 +142,9 @@ namespace {
     C44Matrix s_view;
     BleakFx::WorldLight s_light;
 
-    // From RenderWorld: the sky showed the sun.
+    // From RenderWorld: the sky showed the sun; the sky was drawn at all.
     bool s_sunVisible;
+    bool s_skyShown;
 
     // A pass could not draw into its target this frame: the passes after it do not draw either.
     bool s_passFailed;
@@ -216,12 +219,14 @@ namespace {
         }
 #undef BLEAKFX_SHADER
 
-        // Valid() creates the Direct3D shader the first time and again after a device reset.
-        if (!s_vertexShader->Valid() || !s_waterVertexShader->Valid()) {
+        // Valid() creates the Direct3D shader the first time and again after a device reset. These are the shaders
+        // of the post-processing; the water's and SMAA's are checked where they are used, so that a driver refusing
+        // one of them only turns that off.
+        if (!s_vertexShader->Valid()) {
             return false;
         }
 
-        for (uint32_t i = 0; i < Ps_Count; i++) {
+        for (uint32_t i = 0; i <= Ps_DepthFx; i++) {
             if (!s_pixelShaders[i]->Valid()) {
                 return false;
             }
@@ -231,6 +236,14 @@ namespace {
 #else
         return false;
 #endif
+    }
+
+    bool WaterShadersValid() {
+        return ShadersValid() && s_waterVertexShader->Valid() && s_pixelShaders[Ps_Water]->Valid() && s_pixelShaders[Ps_DepthCopy]->Valid();
+    }
+
+    bool SmaaShadersValid() {
+        return ShadersValid() && s_pixelShaders[Ps_Clear]->Valid() && s_pixelShaders[Ps_SmaaEdge]->Valid() && s_pixelShaders[Ps_SmaaWeights]->Valid() && s_pixelShaders[Ps_SmaaBlend]->Valid();
     }
 
     bool DeviceSupported() {
@@ -352,6 +365,12 @@ namespace {
         GxShaderConstantsSet(GxSh_Pixel, reg, value, 1);
     }
 
+    // The device makes a target when it is first set as the render target; when it cannot, it draws into the back
+    // buffer instead.
+    bool TargetMade(CGxTex* tex) {
+        return !tex->m_needsCreation && (tex->m_apiSpecificData || tex->m_apiSpecificData2);
+    }
+
     // Draws the full-screen quad with pixel shader `ps` into `output` (nullptr: the back buffer), with `inputs` on
     // texture stages 0.. and their texel sizes in c222 - N.
     void RunPass(PixelShader ps, const Target* output, const Target* const* inputs, uint32_t count) {
@@ -362,8 +381,7 @@ namespace {
 
         GxRenderTargetSet(GxBuffers_Color, output ? output->tex : nullptr, 0);
 
-        // The device makes a target when it is first set; when it cannot, it draws into the back buffer instead.
-        if (output && (output->tex->m_needsCreation || (!output->tex->m_apiSpecificData && !output->tex->m_apiSpecificData2))) {
+        if (output && !TargetMade(output->tex)) {
             s_passFailed = true;
             return;
         }
@@ -413,6 +431,7 @@ namespace {
         settings.ao = CVarFloat(s_cvarAo, 0.0f, 1.0f);
         settings.aoRadius = CVarFloat(s_cvarAoRadius, 0.25f, 5.0f);
         settings.sunShafts = CVarFloat(s_cvarSunShafts, 0.0f, 1.0f);
+        settings.contactShadows = CVarFloat(s_cvarContactShadows, 0.0f, 1.0f);
     }
 
     // Whether a viewport (0 - 1 of the window, as GxXformViewport gives it) covers the whole window.
@@ -423,7 +442,8 @@ namespace {
 
     // The depth effects, and the water's reflections, foam and soft shoreline.
     bool WantsDepth() {
-        return CVarFloat(s_cvarAo, 0.0f, 1.0f) > 0.0f || CVarFloat(s_cvarSunShafts, 0.0f, 1.0f) > 0.0f || (s_cvarWater && s_cvarWater->m_intValue);
+        return CVarFloat(s_cvarAo, 0.0f, 1.0f) > 0.0f || CVarFloat(s_cvarSunShafts, 0.0f, 1.0f) > 0.0f || CVarFloat(s_cvarContactShadows, 0.0f, 1.0f) > 0.0f
+            || (s_cvarWater && s_cvarWater->m_intValue);
     }
 
     // Where the sun is on the screen: uv in x and y, and in z how strongly it shines into the view (0 when it is
@@ -482,7 +502,8 @@ namespace {
         return true;
     }
 
-    // Ambient occlusion and light shafts into s_post. Returns false (and draws nothing) when there is nothing to do.
+    // Ambient occlusion, contact shadows and light shafts into s_post. Returns false (and draws nothing) when there is
+    // nothing to do.
     bool RenderDepthEffects(const Settings& settings, const BleakFx::WorldLight& light) {
         Target depth = { GxBleakDepthTexture(), s_width, s_height };
         const C44Matrix& p = s_projection;
@@ -497,19 +518,36 @@ namespace {
         bool ao = settings.ao > 0.0f;
         bool rays = settings.sunShafts > 0.0f && s_sunVisible && sun[2] > 0.0f;
 
-        if ((!ao && !rays) || !SetDepthConstants(p, s_worldMinZ, s_worldMaxZ)) {
+        // Contact shadows outdoors (also behind a skybox, which hides the sun's disc but not its light), fading out
+        // as the sun nears the horizon (where the rays would streak) and gone below it.
+        float sunHeight = Clamp(light.sunDirection.z * 4.0f, 0.0f, 1.0f);
+        bool shadows = settings.contactShadows > 0.0f && s_skyShown && sunHeight > 0.0f;
+        bool occlusion = ao || shadows;
+
+        if ((!occlusion && !rays) || !SetDepthConstants(p, s_worldMinZ, s_worldMaxZ)) {
             return false;
         }
 
         const Target* inputs[3];
 
-        if (ao) {
+        if (occlusion) {
             float fadeEnd = light.fogEnd > 0.0f && light.fogEnd * 0.8f < 160.0f ? light.fogEnd * 0.8f : 160.0f;
             float pixelsPerYard = 0.5f * s_height * fabsf(p.b1);
 
+            // Towards the sun in view space: a direction has no translation, only the 3x3 part of the row-vector view.
+            const C44Matrix& v = s_view;
+            const C3Vector& d = light.sunDirection;
+            float sx = d.x * v.a0 + d.y * v.b0 + d.z * v.c0;
+            float sy = d.x * v.a1 + d.y * v.b1 + d.z * v.c1;
+            float sz = d.x * v.a2 + d.y * v.b2 + d.z * v.c2;
+            float length = sqrtf(sx * sx + sy * sy + sz * sz);
+            length = length > 0.0f ? length : 1.0f;
+
             inputs[0] = &depth;
-            SetPsVector(kPsParams + 0, settings.aoRadius, 1.6f, 0.0012f, pixelsPerYard);
+            SetPsVector(kPsParams + 0, settings.aoRadius, ao ? 1.6f : 0.0f, 0.0012f, pixelsPerYard);
             SetPsVector(kPsParams + 1, fadeEnd * 0.4f, fadeEnd, 0.0f, 0.0f);
+            SetPsVector(kPsParams + 2, sx / length, sy / length, sz / length, shadows ? 1.0f : 0.0f);
+            SetPsVector(kPsParams + 3, 2.5f, 0.8f, 0.015f, fadeEnd < 80.0f ? fadeEnd : 80.0f);
             RunPass(Ps_Ao, &s_ao[0], inputs, 1);
 
             inputs[1] = &depth;
@@ -539,13 +577,26 @@ namespace {
 
         // An unused input still needs a texture; its strength is 0.
         inputs[0] = &s_scene;
-        inputs[1] = ao ? &s_ao[0] : &s_scene;
+        inputs[1] = occlusion ? &s_ao[0] : &s_scene;
         inputs[2] = rays ? &s_rays[0] : &s_scene;
         float r = light.sunColor.r / 255.0f;
         float g = light.sunColor.g / 255.0f;
         float b = light.sunColor.b / 255.0f;
-        SetPsVector(kPsParams + 0, ao ? settings.ao : 0.0f, rays ? settings.sunShafts : 0.0f, 0.0f, 0.0f);
+
+        // What a contact shadow leaves of the light: its ambient part, per channel (linear).
+        float shade[3];
+        const uint8_t ambient[3] = { light.ambient.r, light.ambient.g, light.ambient.b };
+        const uint8_t diffuse[3] = { light.diffuse.r, light.diffuse.g, light.diffuse.b };
+
+        for (uint32_t i = 0; i < 3; i++) {
+            float a = (ambient[i] / 255.0f) * (ambient[i] / 255.0f);
+            float l = (diffuse[i] / 255.0f) * (diffuse[i] / 255.0f);
+            shade[i] = a + l > 1e-4f ? Clamp(a / (a + l), 0.25f, 1.0f) : 1.0f;
+        }
+
+        SetPsVector(kPsParams + 0, ao ? settings.ao : 0.0f, rays ? settings.sunShafts : 0.0f, shadows ? settings.contactShadows * sunHeight : 0.0f, 0.0f);
         SetPsVector(kPsParams + 1, r * r, g * g, b * b, 1.0f);
+        SetPsVector(kPsParams + 2, shade[0], shade[1], shade[2], 1.0f);
         RunPass(Ps_DepthFx, &s_post, inputs, 3);
         return true;
     }
@@ -624,7 +675,7 @@ namespace {
 
     // SMAA's resources for the current targets; false when they cannot be made (FXAA then stands in).
     bool EnsureSmaa() {
-        if (s_smaaFailed) {
+        if (s_smaaFailed || !SmaaShadersValid()) {
             return false;
         }
 
@@ -640,6 +691,16 @@ namespace {
 
         if (!s_smaaWeights.tex) {
             CreateTarget(s_smaaWeights, s_width, s_height, "BleakFx::SmaaWeights");
+        }
+
+        // Set it once here: a target the device cannot make (too little video memory) then leaves FXAA in SMAA's
+        // place instead of stopping the whole chain. The next pass sets its own target.
+        if (s_smaaWeights.tex) {
+            GxRenderTargetSet(GxBuffers_Color, s_smaaWeights.tex, 0);
+
+            if (!TargetMade(s_smaaWeights.tex)) {
+                DestroyTarget(s_smaaWeights);
+            }
         }
 
         s_smaaFailed = !s_smaaArea || !s_smaaSearch || !s_smaaWeights.tex;
@@ -770,6 +831,7 @@ void BleakFx::Init() {
     s_cvarSharpen = CVar::Register("bleakFxSharpen", "Contrast-adaptive sharpening (0 - 1, 0 = off)", 0x1, "0.25", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
     s_cvarAo = CVar::Register("bleakFxAO", "Ambient occlusion strength (0 - 1, 0 = off; needs multisampling off)", 0x1, "0.6", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
     s_cvarAoRadius = CVar::Register("bleakFxAORadius", "Ambient occlusion radius in yards (0.25 - 5)", 0x1, "1.5", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
+    s_cvarContactShadows = CVar::Register("bleakFxContactShadows", "Short shadows from the sun where things meet the ground and each other (0 - 1, 0 = off; needs multisampling off)", 0x1, "0.6", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
     s_cvarSunShafts = CVar::Register("bleakFxSunShafts", "Light shafts from the sun (0 - 1, 0 = off; needs multisampling off)", 0x1, "0.4", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
     s_cvarWater = CVar::Register("bleakFxWater", "Water with reflections, refraction and colour by depth (1 on, 0 the stock water)", 0x1, "1", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
     s_cvarWaterRipples = CVar::Register("bleakFxWaterRipples", "Water ripple strength (0 - 0.4)", 0x1, "0.12", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
@@ -808,7 +870,7 @@ void BleakFx::BeginLiquids() {
     s_waterReady = false;
     s_waterDepthReady = false;
 
-    if (!Enabled() || !s_cvarWater || !s_cvarWater->m_intValue || !ShadersValid()) {
+    if (!Enabled() || !s_cvarWater || !s_cvarWater->m_intValue || !WaterShadersValid()) {
         return;
     }
 
@@ -873,7 +935,7 @@ void BleakFx::BeginLiquids() {
 }
 
 bool BleakFx::BindWater(const WaterDraw& draw) {
-    if (!s_waterReady || !Enabled() || !s_cvarWater || !s_cvarWater->m_intValue || !ShadersValid()) {
+    if (!s_waterReady || !Enabled() || !s_cvarWater || !s_cvarWater->m_intValue || !WaterShadersValid()) {
         return false;
     }
 
@@ -957,6 +1019,8 @@ void BleakFx::PatchGrassShaders(CGxShader** shaders, uint32_t count) {
         if (BleakGrassWindPatch(shader->m_code.m_data, shader->m_code.Count(), patched)) {
             shader->m_code.SetCount(static_cast<uint32_t>(patched.size()));
             memcpy(shader->m_code.m_data, patched.data(), patched.size());
+        } else {
+            CGxDevice::Log("BleakFx: grass shader %u (%u bytes) is not the expected stock vs_3_0 shader; no grass wind", i, shader->m_code.Count());
         }
     }
 }
@@ -1007,9 +1071,10 @@ void BleakFx::BeginWorld(const WorldLight& light) {
     }
 }
 
-void BleakFx::RenderWorld(bool sunVisible) {
+void BleakFx::RenderWorld(bool sunVisible, bool skyShown) {
     s_bloomRan = false;
     s_sunVisible = sunVisible;
+    s_skyShown = skyShown;
 
     // The frame copy is this world pass's; nothing drawn after it may use it.
     s_waterReady = false;

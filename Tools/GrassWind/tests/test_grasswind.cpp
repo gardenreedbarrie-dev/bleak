@@ -176,6 +176,10 @@ int main(int argc, char** argv) {
     std::vector<uint32_t> truncated(minimal.begin(), minimal.end() - 4);
     Check(!Patches(truncated), "no end token: left alone");
 
+    std::vector<uint32_t> nopAtEnd(minimal.begin(), minimal.end() - 1);
+    nopAtEnd.push_back(0x00000000);
+    Check(!Patches(nopAtEnd), "no end token after a last instruction without operands: left alone");
+
     std::vector<uint32_t> cut(minimal.begin(), minimal.begin() + 9);
     Check(!Patches(cut), "an instruction runs past the end: left alone");
 

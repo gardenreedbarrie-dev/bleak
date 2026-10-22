@@ -22,6 +22,9 @@ namespace BleakFx {
         // World-space direction towards the sun, and the colour of its light.
         C3Vector sunDirection;
         CImVector sunColor;
+        // The ambient and the direct (diffuse) light of the outdoors: their ratio is what a contact shadow leaves.
+        CImVector ambient;
+        CImVector diffuse;
         // Distance (yards) where the fog is complete; the ambient occlusion fades out before it.
         float fogEnd;
         // The sky overhead and at the horizon: what the water reflects where nothing is in the way.
@@ -73,8 +76,9 @@ namespace BleakFx {
 
     // After the world is drawn, before the interface: processes the back buffer. Only a world that fills the window
     // is processed; one drawn into part of it (a resized WorldFrame) stays as drawn. sunVisible: the sky showed the
-    // sun (DayNight::BleakSunDrawn, after the world is drawn: a WMO's skybox is chosen while it is drawn).
-    void RenderWorld(bool sunVisible);
+    // sun (DayNight::BleakSunDrawn, after the world is drawn: a WMO's skybox is chosen while it is drawn); skyShown:
+    // the sky was drawn at all (outdoors), so the sun lights the world even behind a skybox.
+    void RenderWorld(bool sunVisible, bool skyShown);
 }
 
 #endif

@@ -172,7 +172,10 @@ def main():
         force = (0.0 - 0.5) * t + 0.5
         rep = dxy / dist[:, None] * (force * (dist < 2.0) * cone)[:, None]
         viewz = (p - cam) @ M[:, 2]
-        weight = np.clip((1 - uv[:, 1] - 0.3) / 0.7, 0, 1) ** 2 / (1 + np.abs(viewz) * 0.015)
+        # both bend the blade from its base (Bleakhold's change: upstream moves the whole blade for the parting)
+        bend = np.clip((1 - uv[:, 1] - 0.3) / 0.7, 0, 1) ** 2
+        rep = rep * bend[:, None]
+        weight = bend / (1 + np.abs(viewz) * 0.015)
         jit = np.mod(p[:, 0] * 0.737 + p[:, 1] * 1.311, 1.0)
         weight = weight * ((1 - 0.3) + 0.6 * jit)
         s1 = np.sin(k1 * (p[:, :2] @ d1) + jit * 1.7 + ph1)

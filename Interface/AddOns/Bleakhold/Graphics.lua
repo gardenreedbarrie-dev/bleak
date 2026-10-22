@@ -18,6 +18,8 @@ G.SLIDERS = {
       help = "Soft shadows where surfaces meet. Needs multisampling off." },
     { cvar = "bleakFxAORadius", label = "Occlusion radius", min = 0.25, max = 5, step = 0.25, unit = " yd",
       help = "How far the ambient occlusion reaches." },
+    { cvar = "bleakFxContactShadows", label = "Contact shadows", min = 0, max = 1, step = 0.05,
+      help = "Short shadows from the sun where things meet the ground and each other. Needs multisampling off." },
     { cvar = "bleakFxSunShafts", label = "Light shafts", min = 0, max = 1, step = 0.05,
       help = "Rays of sunlight through trees and buildings. Needs multisampling off." },
     { cvar = "bleakFxBloom", label = "Bloom", min = 0, max = 2, step = 0.05,
@@ -66,18 +68,21 @@ G.PRESETS = {
     { key = "classic", text = "Classic+", values = {
         bleakFx = 1, bleakFxAA = 1, bleakFxWater = 1, bleakFxWaterReflections = 1, bleakFxWaterRipples = 0.1,
         bleakFxGrassWind = 0.7, bleakFxGrassParting = 1, bleakFxAO = 0.4, bleakFxAORadius = 1.25,
+        bleakFxContactShadows = 0.35,
         bleakFxSunShafts = 0.25, bleakFxBloom = 0.2, bleakFxClarity = 0.2, bleakFxContrast = 0.08,
         bleakFxSaturation = 1, bleakFxVibrance = 0.1, bleakFxWarmth = 0.1, bleakFxBrightness = 1, bleakFxShadows = 0,
         bleakFxVignette = 0.08, bleakFxSharpen = 0.2 } },
     { key = "bleakhold", text = "Bleakhold", values = {
         bleakFx = 1, bleakFxAA = 2, bleakFxWater = 1, bleakFxWaterReflections = 1, bleakFxWaterRipples = 0.12,
         bleakFxGrassWind = 1, bleakFxGrassParting = 1, bleakFxAO = 0.6, bleakFxAORadius = 1.5,
+        bleakFxContactShadows = 0.6,
         bleakFxSunShafts = 0.4, bleakFxBloom = 0.35, bleakFxClarity = 0.35, bleakFxContrast = 0.18,
         bleakFxSaturation = 1.05, bleakFxVibrance = 0.25, bleakFxWarmth = 0.3, bleakFxBrightness = 1,
         bleakFxShadows = 0.012, bleakFxVignette = 0.18, bleakFxSharpen = 0.25 } },
     { key = "cinematic", text = "Cinematic", values = {
         bleakFx = 1, bleakFxAA = 2, bleakFxWater = 1, bleakFxWaterReflections = 1, bleakFxWaterRipples = 0.16,
         bleakFxGrassWind = 1.3, bleakFxGrassParting = 1, bleakFxAO = 0.85, bleakFxAORadius = 2,
+        bleakFxContactShadows = 0.8,
         bleakFxSunShafts = 0.7, bleakFxBloom = 0.6, bleakFxClarity = 0.45, bleakFxContrast = 0.3,
         bleakFxSaturation = 1.1, bleakFxVibrance = 0.35, bleakFxWarmth = 0.4, bleakFxBrightness = 1,
         bleakFxShadows = 0.02, bleakFxVignette = 0.3, bleakFxSharpen = 0.35 } },
@@ -303,8 +308,8 @@ function G.Refresh()
     if not available then
         f.note:SetText("This client has no Bleakhold graphics. Install the Bleakhold client to use them.")
     elseif on and (tonumber(GetCVar("gxMultisample") or "1") or 1) > 1 then
-        f.note:SetText("Ambient occlusion, light shafts and water reflections need multisampling off: Video options, "
-            .. "Multisampling 1x. Anti-aliasing here replaces it.")
+        f.note:SetText("Ambient occlusion, contact shadows, light shafts and water reflections need multisampling "
+            .. "off: Video options, Multisampling 1x. Anti-aliasing here replaces it.")
     else
         f.note:SetText("")
     end

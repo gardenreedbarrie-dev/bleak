@@ -48,7 +48,8 @@ namespace {
 
     // The motion block of wxl-grasswind (GrassWind.cpp, kMotionInject) with Bleakhold's changes: the constants
     // moved to c240 - c248 (c248.x = 1 replaces the stock shader's c13.y), the wave phases are reduced to
-    // [-pi, pi) before sincos, the distance fade uses |view z|, and no instruction reads two constant registers.
+    // [-pi, pi) before sincos, the distance fade uses |view z|, the parting bends the blade from its base like the
+    // wind does (upstream moves the whole blade), and no instruction reads two constant registers.
     // pos is the view-space position (r0), uv the texture coordinate input, t0 - t3 free temporaries.
     //   c240 xyz camera (world)                c241 1/cone height, 1/radius, minimum height, epsilon
     //   c242 xyz player (world), w lean        c243 x edge - centre force, y centre force, z radius, w phase 1
@@ -81,11 +82,13 @@ namespace {
         "mul t1.y, t1.y, t2.z",
         "mul t1.y, t1.y, t0.w",
         "mul t0.xy, t0, t1.y",
-        // Wind weight: 0 at the blade's base (v = 1), squared towards the tip, above the anchor; less far away.
+        // Bend weight: 0 at the blade's base (v = 1), squared towards the tip, above the anchor; it bends the parting
+        // and (less far away) the wind.
         "add t3.z, c248.x, -uv.y",
         "add t3.z, t3.z, c247.z",
         "mul_sat t3.z, t3.z, c247.w",
         "mul t3.z, t3.z, t3.z",
+        "mul t0.xy, t0, t3.z",
         "abs t3.w, pos.z",
         "mul t3.w, t3.w, c246.w",
         "add t3.w, t3.w, c248.x",
@@ -383,7 +386,7 @@ bool BleakGrassWindPatch(const uint8_t* code, uint32_t size, std::vector<uint8_t
             return false;
         }
 
-        const uint32_t* params = &tokens[i + 1];
+        const uint32_t* params = tokens.data() + i + 1;
 
         if (opcode == kOpDcl) {
             if (length != 2) {
