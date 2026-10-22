@@ -9,7 +9,7 @@ Status: [ ] todo  [x] done  [-] not needed
 | Patch | Why |
 |---|---|
 | [-] laa (4GB) | x64 has no 4GB limit |
-| [-] glue (custom GlueXML) | covered by `WOWDECOMP_DISABLE_SIGNATURE_CHECKS` (`FrameXML_CheckSignature`, LoadXML.cpp) |
+| [-] glue (custom GlueXML) | covered by `WOWDECOMP_DISABLE_SIGNATURE_CHECKS` (`FrameXML_CheckSignature`, LoadXML.cpp), which only matters for modified copies of GlueXML.toc; Bleakhold's own glue (CUSTOM loginui) needs neither |
 | [-] awesome (AwesomeWotlkLib.dll) | already reverted in current Wow.exe; 32-bit DLL can't load in x64 anyway |
 
 ## 1. Graphics / HD look — port first
@@ -38,6 +38,7 @@ Status: [ ] todo  [x] done  [-] not needed
 | [x] **CUSTOM hdtextures** | textures over 4 MB never loaded (async budget); mip scratch overrun by chains over 1024; 2048 scratch and 32 MB budget on x64 | Texture.cpp — `AsyncTextureHandler`, `CreateBlpAsync`, `TextureInitialize`, `TextureLoadBlpMips` |
 | [x] **CUSTOM races** | race ids up to 31 (High Elf 22, Eredar 23): race-indexed arrays sized to 32, unknown races allowed in IsRaceClassRestricted, Lua stack checked before the race and class lists, CharSections and facial hair rows for unknown races skipped, Bleakhold races borrow Blood Elf and Draenei scenes, emote voices, Death Knight filters and portraits when the data has none of their own | WoW/Common/BleakholdRaces.h, CharacterCreation.cpp (`Initialize`, `Shutdown`), CharacterCreation_Scripts.cpp, CharacterSelection_Scripts.cpp, SoundInterface2Emotes.cpp, SoundInterface2.cpp `DK_GetPlayerFilterName`, ComponentUtils.cpp, PortraitButton.cpp `SetPortraitTexture` |
 | [x] **CUSTOM fix** | addon chat prefix and message copied with no bound into 3000-byte stack buffers; emote sound lookups kept pointers into an array that could move | ChatFrame.cpp (addon message receive), SoundInterface2Emotes.cpp `InitEmoteSounds` |
+| [x] **CUSTOM loginui** | Bleakhold glue TOC loaded after GlueXML.toc (optional; no Blizzard files replaced): Bleakhold login screen, restyled dialog with a connecting progress bar, 12-race character creation | CGlueMgr.cpp — `CGlueMgr::Resume`; Interface/Bleakhold/Glue; Tools/BlpConvert |
 | [x] **CUSTOM branding** | "Bleakhold" window title, popup captions and error log title; CI builds the player exe as `Bleakhold.exe` | Client.cpp, ConsoleDetect.cpp, ConsoleDevice.cpp, WoW/Source/CMakeLists.txt (`WOW_OUTPUT_OVERRIDE`) |
 | [x] **CUSTOM names** | client name check always OK (returns 87) | ClientServices.cpp — `CharacterValidateName` |
 | [-] **CUSTOM Lexara.dll loader** (file missing, loader was a no-op) | loads `Lexara.dll` at startup | WinMain.cpp `start`, StormRtl.cpp `StormRtlInitialize` — needs x64 Lexara.dll or port into source |

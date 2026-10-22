@@ -758,6 +758,16 @@ void CGlueMgr::Resume() {
             }
 #endif
 
+            // BLEAKHOLD(loginui): after the stock glue files, load Bleakhold's own glue TOC, which restyles and extends
+            // the stock screens from Lua instead of replacing Blizzard files. It is optional: when no loose file or
+            // archive has it, nothing is loaded or logged. It keeps its own digest, so the stock signature check above
+            // is unchanged, and it lives outside Interface\GlueXML, which DeleteInterfaceFiles moves away.
+            if (SFile::FileExistsEx("Interface\\Bleakhold\\Glue\\BleakholdGlue.toc", 1)) {
+                MD5_CTX bleakholdMd5;
+                MD5Init(&bleakholdMd5);
+                FrameXML_CreateFrames("Interface\\Bleakhold\\Glue\\BleakholdGlue.toc", nullptr, &bleakholdMd5, &status);
+            }
+
             FrameScript_SignalEvent(GLUE_EVENT_FRAMES_LOADED, nullptr);
             CGlueMgr::InitializeFFX();
 

@@ -149,6 +149,25 @@ The conversion code is GPL-3.0-or-later (`ThirdParty/WarcraftXL`, `Engine/Source
 `Engine/Source/Model2/M2Modern.*`, `WoW/Source/WorldClient/MapTerrainTiling.*`). Whoever distributes a client built with it must make the corresponding
 source code available under the same license.
 
+## Login screen and character creation
+
+The client loads `Interface\Bleakhold\Glue\BleakholdGlue.toc` right after the stock
+`Interface\GlueXML\GlueXML.toc` on every glue load (BLEAKHOLD(loginui), `CGlueMgr::Resume`). Those files
+restyle and extend the stock screens from Lua: the Bleakhold login screen, a restyled dialog with a connecting
+progress bar, and character creation with the High Elf and Eredar races. No Blizzard file is replaced, so this
+works with signature checks on or off.
+
+- Install: copy `Interface/Bleakhold/Glue` from this repository to `<client>\Data\Interface\Bleakhold\Glue\`
+  (or `<client>\Interface\Bleakhold\Glue\`), or pack it into a `Data\patch-?.MPQ` under the same path, before
+  starting the client. Without it the stock screens appear. Do not use `<client>\Interface\GlueXML`: the client
+  renames that folder on every glue load.
+- Settings (links, skipping the agreement screens, the Login button waiting for both fields) are at the top of
+  `BleakholdStrings.lua`.
+- Fonts: Marcellus and Marcellus SC, SIL Open Font License 1.1 (`Fonts/OFL.txt`).
+- Art: `Tools/BlpConvert/make_login_art.py` draws the login art (needs Pillow);
+  `Tools/BlpConvert/blpconvert.py IN OUT.blp [--format dxt1|dxt5|bgra] [--size WxH|--pad]` converts any picture
+  to a BLP the client loads. Textures must be powers of two.
+
 ## Layout
 
 | Path | Contents |

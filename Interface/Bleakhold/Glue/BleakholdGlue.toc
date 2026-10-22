@@ -1,0 +1,9 @@
+## Interface: 30300
+## Title: Bleakhold Glue
+## Notes: Bleakhold login screen and character creation. Loaded by the client after Interface\GlueXML\GlueXML.toc (BLEAKHOLD(loginui) in WoW/Source/Glue/CGlueMgr.cpp); restyles and extends the stock glue screens without replacing Blizzard files.
+# Lines starting with # are skipped. Paths are relative to this file. No blank or space-only lines are needed.
+BleakholdStrings.lua
+BleakholdGlueCore.lua
+BleakholdCharacterCreate.lua
+BleakholdDialog.lua
+BleakholdLogin.lua
