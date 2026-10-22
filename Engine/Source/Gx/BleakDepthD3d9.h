@@ -54,15 +54,14 @@ void BleakDepthDetach(Device* device) {
             current->Release();
         }
 
+        // The stages the device last bound the depth handle to (GetTexture does not work on a pure device). Sent
+        // again on the next draw that uses them.
         for (uint32_t i = 0; i < 16; i++) {
-            IDirect3DBaseTexture9* bound = nullptr;
+            EGxRenderState stage = static_cast<EGxRenderState>(GxRs_Texture0 + i);
 
-            if (SUCCEEDED(device->m_d3dDevice->GetTexture(i, &bound)) && bound) {
-                if (bound == depth.texture) {
-                    device->m_d3dDevice->SetTexture(i, nullptr);
-                }
-
-                bound->Release();
+            if (g_bleakDepthHandle && device->m_hwRenderStates[stage].m_data.p == g_bleakDepthHandle) {
+                device->m_d3dDevice->SetTexture(i, nullptr);
+                device->IRsForceUpdate(stage);
             }
         }
     }

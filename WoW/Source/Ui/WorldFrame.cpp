@@ -1806,6 +1806,7 @@ void CGWorldFrame::OnWorldRender() {
     light.sunDirection = DayNight::g_planets.m_sun.m_position - dayNight->m_cameraPos;
     light.sunDirection.NormalizeSafe();
     light.sunColor = dayNight->m_bands.m_sunCloudColors[0];
+    light.sunVisible = DayNight::BleakSunDrawn();
     light.fogEnd = dayNight->m_fog.m_end;
     BleakFx::RenderWorld(light);
 

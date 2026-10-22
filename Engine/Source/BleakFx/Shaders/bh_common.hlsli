@@ -44,13 +44,16 @@ float Ign(float2 pixel) {
 }
 
 // Depth: the hardware depth buffer (INTZ, z/w in red) and the camera's projection in c218:
-// x = 1 / proj[0][0], y = 1 / proj[1][1], z = proj[2][2], w = proj[3][2] (Direct3D, row vectors, w = view z).
+// x = 1 / proj[0][0], y = 1 / proj[1][1], z and w: the depth buffer holds z + w / (view z) (Direct3D, row vectors,
+// w = view z), proj[2][2] and proj[3][2] mapped into the depth range of the world's viewport.
 float4 g_proj : register(c218);
-// x: depth buffer value from which a pixel counts as open sky (far away or never drawn).
+// x: depth buffer value from which a pixel counts as open sky (far away, or no world at all);
+// y: from which a pixel holds no world (the horizon and the sky lie beyond the world's depth range).
 float4 g_sky : register(c217);
 
+// View depth in yards; very far for anything beyond the world's depth range.
 float LinearDepth(float d) {
-    return g_proj.w / (d - g_proj.z);
+    return d < g_proj.z ? g_proj.w / (d - g_proj.z) : 1.0e6;
 }
 
 // View-space position (camera at the origin, looking along +z) of the pixel at uv with view depth z.

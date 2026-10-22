@@ -258,6 +258,8 @@ slider for each effect; they are the `bleakFx*` CVars, saved in `Config.wtf`.
   the frame is drawn exactly as by the stock client. Ambient occlusion and light shafts also need Multisampling
   1x: an INTZ depth texture stands in for the back buffer's depth buffer (`Engine/Source/Gx/BleakDepth.h`), and
   INTZ cannot be multisampled. FXAA replaces the multisampling.
+- Only a world that fills the window is processed; one that an addon draws into part of the window (a resized
+  WorldFrame) stays as the stock client draws it.
 - The bloom stands in for the stock full screen glow; the underwater and drunk blur stay. Zones whose light
   settings make them glowier get a little more bloom.
 - Shaders: `Engine/Source/BleakFx/Shaders/*.hlsl` (ps_3_0 and vs_3_0) are compiled with the Windows SDK's `fxc`

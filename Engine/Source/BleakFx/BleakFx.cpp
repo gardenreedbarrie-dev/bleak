@@ -84,6 +84,8 @@ namespace {
     CVar* s_cvarAoRadius;
     CVar* s_cvarSunShafts;
 
+    // Created once and kept as long as the device: CGxDevice::ShaderDestroy frees a CGxShader but not its Direct3D
+    // shader, and the device recreates the Direct3D shaders after a reset by itself.
     CGxShader* s_vertexShader;
     CGxShader* s_pixelShaders[Ps_Count];
     bool s_shadersCreated;
@@ -107,6 +109,10 @@ namespace {
     bool s_depthReady;
     C44Matrix s_projection;
     C44Matrix s_view;
+
+    // From RenderWorld: the depth range of the world's viewport.
+    float s_worldMinZ;
+    float s_worldMaxZ;
 
     // The full-screen quad in clip space, as a strip: top left, top right, bottom left, bottom right.
     C3Vector s_quadPos[4] = { C3Vector(-1.0f, 1.0f, 0.0f), C3Vector(1.0f, 1.0f, 0.0f), C3Vector(-1.0f, -1.0f, 0.0f), C3Vector(1.0f, -1.0f, 0.0f) };
@@ -142,20 +148,6 @@ namespace {
         return shader;
     }
 #endif
-
-    void DestroyShaders() {
-        if (s_vertexShader) {
-            g_theGxDevicePtr->ShaderDestroy(s_vertexShader);
-        }
-
-        for (uint32_t i = 0; i < Ps_Count; i++) {
-            if (s_pixelShaders[i]) {
-                g_theGxDevicePtr->ShaderDestroy(s_pixelShaders[i]);
-            }
-        }
-
-        s_shadersCreated = false;
-    }
 
     bool ShadersValid() {
 #if BLEAKFX_HAVE_SHADERS
@@ -351,6 +343,12 @@ namespace {
         settings.sunShafts = CVarFloat(s_cvarSunShafts, 0.0f, 1.0f);
     }
 
+    // Whether a viewport (0 - 1 of the window, as GxXformViewport gives it) covers the whole window.
+    bool FillsWindow(float minX, float maxX, float minY, float maxY) {
+        const float slack = 0.001f;
+        return minX <= slack && minY <= slack && maxX >= 1.0f - slack && maxY >= 1.0f - slack;
+    }
+
     bool WantsDepth() {
         return CVarFloat(s_cvarAo, 0.0f, 1.0f) > 0.0f || CVarFloat(s_cvarSunShafts, 0.0f, 1.0f) > 0.0f;
     }
@@ -385,13 +383,34 @@ namespace {
         result[2] = Clamp((1.6f - offScreen) / 0.6f, 0.0f, 1.0f) * Clamp(direction.z * 6.0f, 0.0f, 1.0f);
     }
 
+    // Sets c218 and c217 of the depth shaders (bh_common.hlsli) for projection p and a world drawn into the depth range
+    // [minZ, maxZ] of its viewport. Returns false when p cannot turn depth back into distance (a perspective
+    // projection with a far plane is needed).
+    bool SetDepthConstants(const C44Matrix& p, float minZ, float maxZ) {
+        if (p.a0 == 0.0f || p.b1 == 0.0f || p.d3 != 0.0f || fabsf(1.0f - p.c2) < 1e-6f || !(maxZ > minZ)) {
+            return false;
+        }
+
+        // The projection gives c2 + d2 / z for view depth z, which the viewport maps into [minZ, maxZ]: the world is
+        // drawn into [0, 0.94] (CWorld::s_unk_ADEEE4), the horizon and the sky beyond it. The depth buffer then holds
+        // c2' + d2' / z.
+        float range = maxZ - minZ;
+        float c2 = minZ + range * p.c2;
+        float d2 = range * p.d2;
+        float farPlane = p.d2 / (1.0f - p.c2);
+        SetPsVector(kPsProjection, 1.0f / p.a0, 1.0f / p.b1, c2, d2);
+
+        // Open sky: beyond 60% of the far plane, or no world at all (horizon, sky, never drawn: maxZ and up).
+        SetPsVector(kPsSky, c2 + d2 / (0.6f * farPlane), maxZ, 0.0f, 0.0f);
+        return true;
+    }
+
     // Ambient occlusion and light shafts into s_post. Returns false (and draws nothing) when there is nothing to do.
     bool RenderDepthEffects(const Settings& settings, const BleakFx::WorldLight& light) {
         Target depth = { GxBleakDepthTexture(), s_width, s_height };
         const C44Matrix& p = s_projection;
 
-        // A perspective projection with a far plane is needed to turn depth back into distance.
-        if (!depth.tex || p.a0 == 0.0f || p.b1 == 0.0f || p.d3 != 0.0f || fabsf(1.0f - p.c2) < 1e-6f) {
+        if (!depth.tex) {
             return false;
         }
 
@@ -399,16 +418,11 @@ namespace {
         SunOnScreen(light.sunDirection, sun);
 
         bool ao = settings.ao > 0.0f;
-        bool rays = settings.sunShafts > 0.0f && sun[2] > 0.0f;
+        bool rays = settings.sunShafts > 0.0f && light.sunVisible && sun[2] > 0.0f;
 
-        if (!ao && !rays) {
+        if ((!ao && !rays) || !SetDepthConstants(p, s_worldMinZ, s_worldMaxZ)) {
             return false;
         }
-
-        // Depth = c2 + d2 / z for view depth z. Open sky: never drawn, or beyond 60% of the far plane.
-        float farPlane = p.d2 / (1.0f - p.c2);
-        SetPsVector(kPsProjection, 1.0f / p.a0, 1.0f / p.b1, p.c2, p.d2);
-        SetPsVector(kPsSky, p.c2 + p.d2 / (0.6f * farPlane), 0.0f, 0.0f, 0.0f);
 
         const Target* inputs[3];
 
@@ -553,7 +567,6 @@ void BleakFx::Init() {
 
 void BleakFx::Destroy() {
     DestroyTargets();
-    DestroyShaders();
     GxBleakDepthSet(false);
     GxBleakDepthDestroyHandle();
     s_bloomRan = false;
@@ -566,7 +579,7 @@ bool BleakFx::ReplacesStockGlow() {
 
 void BleakFx::BeginWorld() {
     bool enabled = Enabled();
-    s_depthReady = GxBleakDepthSet(enabled && WantsDepth());
+    s_depthReady = GxBleakDepthSet(enabled && WantsDepth() && ShadersValid());
 
     if (s_depthReady) {
         s_projection = g_theGxDevicePtr->m_projNative;
@@ -593,6 +606,14 @@ void BleakFx::RenderWorld(const WorldLight& light) {
     int32_t width = static_cast<int32_t>(window.maxX - window.minX);
     int32_t height = static_cast<int32_t>(window.maxY - window.minY);
 
+    // The world's viewport: the effects map the whole window.
+    float minX, maxX, minY, maxY, minZ, maxZ;
+    GxXformViewport(minX, maxX, minY, maxY, minZ, maxZ);
+
+    if (!FillsWindow(minX, maxX, minY, maxY)) {
+        return;
+    }
+
     if (width < kMinTargetSize || height < kMinTargetSize || !ShadersValid() || !EnsureTargets(width, height)) {
         return;
     }
@@ -606,9 +627,8 @@ void BleakFx::RenderWorld(const WorldLight& light) {
 
     Settings settings;
     ReadSettings(settings, light.zoneGlow);
-
-    float minX, maxX, minY, maxY, minZ, maxZ;
-    GxXformViewport(minX, maxX, minY, maxY, minZ, maxZ);
+    s_worldMinZ = minZ;
+    s_worldMaxZ = maxZ;
 
     g_theGxDevicePtr->RsPush();
     GxRsSet(GxRs_BlendingMode, GxBlend_Opaque);

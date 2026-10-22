@@ -16,9 +16,11 @@ namespace BleakFx {
     struct WorldLight {
         // The glow band of the current light, 0..1: zones Blizzard made glowier get a little more bloom.
         float zoneGlow;
-        // World-space direction towards the sun, and the colour of its light.
+        // World-space direction towards the sun, and the colour of its light. sunVisible: the sky shows the sun (no
+        // zone skybox covers it).
         C3Vector sunDirection;
         CImVector sunColor;
+        bool sunVisible;
         // Distance (yards) where the fog is complete; the ambient occlusion fades out before it.
         float fogEnd;
     };
@@ -26,7 +28,8 @@ namespace BleakFx {
     // Registers the console variables. Called by every world frame; registering twice keeps the values.
     void Init();
 
-    // Frees the textures and shaders and puts the automatic depth buffer back (the world frame goes away).
+    // Frees the textures and puts the automatic depth buffer back (the world frame goes away). The shaders stay for
+    // the next world frame.
     void Destroy();
 
     // Whether the bloom stands in for the stock full screen glow (CGWorldFrame then sets the stock glow amount to
@@ -36,7 +39,8 @@ namespace BleakFx {
     // Before the world is drawn: switches the readable depth buffer on or off and notes the camera.
     void BeginWorld();
 
-    // After the world is drawn, before the interface: processes the back buffer.
+    // After the world is drawn, before the interface: processes the back buffer. Only a world that fills the window
+    // is processed; one drawn into part of it (a resized WorldFrame) stays as drawn.
     void RenderWorld(const WorldLight& light);
 }
 
