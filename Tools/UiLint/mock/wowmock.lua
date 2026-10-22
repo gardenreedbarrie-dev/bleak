@@ -273,7 +273,7 @@ return function(opts)
     function IMPL.GetRight(self) return (self.__cx or 512) + self.__w / 2 end
     function IMPL.GetTop(self) return (self.__cy or 384) + self.__h / 2 end
     function IMPL.GetBottom(self) return (self.__cy or 384) - self.__h / 2 end
-    function IMPL.IsMouseOver() return nil end
+    function IMPL.IsMouseOver(self) return self.__mouseOver and 1 or nil end
     function IMPL.SetFrameStrata(self, s) assert(STRATA[s], "SetFrameStrata: invalid strata " .. tostring(s)); self.__strata = s end
     function IMPL.GetFrameStrata(self) return self.__strata end
     function IMPL.SetFrameLevel(self, l) self.__level = num(l, "SetFrameLevel") end
@@ -439,6 +439,11 @@ return function(opts)
     function IMPL.GetVerticalScrollRange(self) return 0 end
 
     function IMPL.SetUnit(self, unit) self.__unit = unit end
+    function IMPL.SetSequence(self, id)
+        -- CSimpleModel_Scripts.cpp: a number in 0 - 505, else a Lua error
+        assert(type(id) == "number" and id >= 0 and id < 506, "SetSequence(sequence) exceeds valid range of 0 - 506")
+        self.__sequence = math.floor(id)
+    end
     function IMPL.Undress(self) M.tryOn = {} end
     function IMPL.TryOn(self, item) M.tryOn[#M.tryOn + 1] = item end
     function IMPL.SetFacing(self, f) self.__facing = num(f, "SetFacing") end
@@ -512,7 +517,27 @@ return function(opts)
     env.IsControlKeyDown = function() return nil end
     env.IsAltKeyDown = function() return nil end
     env.IsModifiedClick = function() return nil end
-    env.GetCursorPosition = function() return 512, 384 end
+    M.cursorX, M.cursorY = 512, 384
+    env.GetCursorPosition = function() return M.cursorX, M.cursorY end
+    -- Emotes and key bindings (ChatFrame_Scripts.cpp, UIBindings_Scripts.cpp)
+    M.emotes, M.bindings, M.savedBindings = {}, {}, 0
+    env.DoEmote = function(token, unit)
+        assert(type(token) == "string" and token ~= "", "Usage: DoEmote(\"emote\" [, \"target\"])")
+        M.emotes[#M.emotes + 1] = token
+    end
+    env.GetBindingKey = function(action)
+        for key, a in pairs(M.bindings) do
+            if a == action then return key end
+        end
+    end
+    env.GetBindingAction = function(key) return M.bindings[key] or "" end
+    env.SetBinding = function(key, action)
+        assert(not M.combat, "SetBinding in combat")
+        M.bindings[key] = action
+        return 1
+    end
+    env.GetCurrentBindingSet = function() return 1 end
+    env.SaveBindings = function(which) M.savedBindings = M.savedBindings + 1 end
     env.GetScreenWidth = function() return 1024 end
     env.GetScreenHeight = function() return 768 end
     env.PlaySound = function(s) M.sounds[#M.sounds + 1] = s end

@@ -89,7 +89,7 @@ function FX.openEverything(M, ns)
         M.Advance(0.3)
     end
     ns.UI.Open("collections")
-    for _, tab in ipairs({ "transmog", "later", "legacy", "mounts", "pets" }) do
+    for _, tab in ipairs({ "transmog", "later", "legacy", "mounts", "pets", "animations" }) do
         ns.Collections.ShowTab(tab)
     end
     ns.UI.Open("season")

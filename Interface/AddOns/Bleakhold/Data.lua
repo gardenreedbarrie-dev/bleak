@@ -153,6 +153,54 @@ defs.R = {}
 -- Fallback seasons reward icons (glyph names in the art atlas).
 Data.rewardGlyphs = { "check", "chest", "mount", "banner" }
 
+-- Animations every 3.3.5a character has: DoEmote token, the English slash command, the AnimationData id the
+-- preview plays (WoW/Source/Object/ObjectClient/Types.h, ANIM_*), the category and the glyph (UI.EMOTE_GLYPHS).
+-- "pose" animations hold until the character moves. Server dances are added to these (Animations.lua).
+Data.animationCategories = {
+    { key = "dance", label = "Dances" },
+    { key = "emote", label = "Emotes" },
+    { key = "talk", label = "Talk" },
+    { key = "pose", label = "Poses" },
+}
+Data.emotes = {
+    { key = "dance", name = "Dance", token = "DANCE", cmd = "/dance", anim = 69, cat = "dance", glyph = "dance", text = "Your race's own dance." },
+    { key = "wave", name = "Wave", token = "WAVE", cmd = "/wave", anim = 67, cat = "emote", glyph = "wave" },
+    { key = "bow", name = "Bow", token = "BOW", cmd = "/bow", anim = 66, cat = "emote", glyph = "bow" },
+    { key = "cheer", name = "Cheer", token = "CHEER", cmd = "/cheer", anim = 68, cat = "emote", glyph = "cheer" },
+    { key = "applaud", name = "Applaud", token = "APPLAUD", cmd = "/applaud", anim = 80, cat = "emote", glyph = "clap" },
+    { key = "laugh", name = "Laugh", token = "LAUGH", cmd = "/laugh", anim = 70, cat = "emote", glyph = "laugh" },
+    { key = "flex", name = "Flex", token = "FLEX", cmd = "/flex", anim = 82, cat = "emote", glyph = "flex" },
+    { key = "kiss", name = "Blow a Kiss", token = "KISS", cmd = "/kiss", anim = 76, cat = "emote", glyph = "kiss" },
+    { key = "salute", name = "Salute", token = "SALUTE", cmd = "/salute", anim = 113, cat = "emote", glyph = "salute" },
+    { key = "roar", name = "Roar", token = "ROAR", cmd = "/roar", anim = 74, cat = "emote", glyph = "roar" },
+    { key = "point", name = "Point", token = "POINT", cmd = "/point", anim = 84, cat = "emote", glyph = "point" },
+    { key = "chicken", name = "Chicken", token = "CHICKEN", cmd = "/chicken", anim = 78, cat = "emote", glyph = "chicken" },
+    { key = "cry", name = "Cry", token = "CRY", cmd = "/cry", anim = 77, cat = "emote", glyph = "cry" },
+    { key = "shy", name = "Shy", token = "SHY", cmd = "/shy", anim = 83, cat = "emote", glyph = "shy" },
+    { key = "beg", name = "Beg", token = "BEG", cmd = "/beg", anim = 79, cat = "emote", glyph = "beg" },
+    { key = "rude", name = "Rude", token = "RUDE", cmd = "/rude", anim = 73, cat = "emote", glyph = "rude" },
+    { key = "nod", name = "Nod", token = "NOD", cmd = "/nod", anim = 185, cat = "emote", glyph = "yes" },
+    { key = "no", name = "No", token = "NO", cmd = "/no", anim = 186, cat = "emote", glyph = "no" },
+    { key = "eat", name = "Eat", token = "EAT", cmd = "/eat", anim = 61, cat = "emote", glyph = "eat" },
+    { key = "train", name = "Train", token = "TRAIN", cmd = "/train", anim = 195, cat = "emote", glyph = "train" },
+    { key = "talk", name = "Talk", token = "TALK", cmd = "/talk", anim = 60, cat = "talk", glyph = "talk" },
+    { key = "talkex", name = "Exclaim", token = "TALKEX", cmd = "/talkex", anim = 64, cat = "talk", glyph = "shout" },
+    { key = "talkq", name = "Question", token = "TALKQ", cmd = "/talkq", anim = 65, cat = "talk", glyph = "question" },
+    { key = "shout", name = "Shout", token = "SHOUT", cmd = "/shout", anim = 81, cat = "talk", glyph = "shout" },
+    { key = "sit", name = "Sit", token = "SIT", cmd = "/sit", anim = 97, cat = "pose", glyph = "sit" },
+    { key = "kneel", name = "Kneel", token = "KNEEL", cmd = "/kneel", anim = 115, cat = "pose", glyph = "kneel" },
+    { key = "sleep", name = "Sleep", token = "SLEEP", cmd = "/sleep", anim = 100, cat = "pose", glyph = "sleep" },
+    { key = "stand", name = "Stand", token = "STAND", cmd = "/stand", anim = 0, cat = "pose", glyph = "stand" },
+}
+
+-- The emote wheel a character starts with: four pages of eight slots (keys of Data.emotes).
+Data.defaultWheel = {
+    { "dance", "wave", "cheer", "laugh", "bow", "flex", "kiss", "roar" },
+    { "salute", "applaud", "point", "rude", "chicken", "cry", "shy", "beg" },
+    { "talk", "talkex", "talkq", "shout", "nod", "no", "train", "eat" },
+    { "sit", "kneel", "sleep", "stand" },
+}
+
 -- Legacy set chat/tooltip tags.
 Data.chatTags = {
     { tag = "Raid Legacy", color = "E5C07B", key = "legacy" },

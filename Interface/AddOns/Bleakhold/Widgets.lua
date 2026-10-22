@@ -37,6 +37,19 @@ for i, name in ipairs(UI.GLYPHS) do
     GLYPH_INDEX[name] = i - 1
 end
 
+-- Emote atlas cells, same order as EMOTE_GLYPHS in Tools/UiLint/make_art.py (8 x 4 cells).
+UI.EMOTE_GLYPHS = {
+    "dance", "wave", "bow", "cheer", "clap", "laugh", "flex", "kiss",
+    "cry", "chicken", "beg", "roar", "rude", "salute", "shy", "point",
+    "talk", "shout", "question", "kneel", "sit", "sleep", "eat", "train",
+    "yes", "no", "music", "wheel", "sparkle", "stand", "plus", "shrug",
+}
+local EMOTE_INDEX = {}
+for i, name in ipairs(UI.EMOTE_GLYPHS) do
+    EMOTE_INDEX[name] = i - 1
+end
+UI.EMOTE_INDEX = EMOTE_INDEX
+
 ------------------------------------------------------------------------------------------------------
 -- Basics
 ------------------------------------------------------------------------------------------------------
@@ -120,6 +133,14 @@ function UI.SetGlyph(t, name)
     local i = GLYPH_INDEX[name] or GLYPH_INDEX.dot
     local c, r = i % 8, floor(i / 8)
     t:SetTexture(UI.ART .. "Glyphs")
+    t:SetTexCoord(c / 8, (c + 1) / 8, r / 4, (r + 1) / 4)
+end
+
+-- An emote glyph; unknown names show the music note.
+function UI.SetEmoteGlyph(t, name)
+    local i = EMOTE_INDEX[name] or EMOTE_INDEX.music
+    local c, r = i % 8, floor(i / 8)
+    t:SetTexture(UI.ART .. "Emotes")
     t:SetTexCoord(c / 8, (c + 1) / 8, r / 4, (r + 1) / 4)
 end
 

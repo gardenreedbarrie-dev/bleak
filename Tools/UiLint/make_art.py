@@ -330,6 +330,47 @@ GLYPHS = [
     ("shards", "M12 3l4 6-4 12-4-12zM8 9h8"),
 ]
 
+# Emote atlas: 512x256, 8 x 4 cells like the glyph atlas; Widgets.lua has the same list (UI.EMOTE_GLYPHS).
+# Stick figures share one body: head at the top, torso, two arms, two legs.
+def figure(head, torso, arms, legs):
+    return circle_path(head[0], head[1], 2) + torso + arms + legs
+
+
+EMOTE_GLYPHS = [
+    ("dance", figure((13, 4), "M13 7L11 13", "M12.6 8.6L17 5.5M12.4 9.2L7.5 11", "M11 13l3.5 3.5-1 4.5M11 13l-3 7.5")),
+    ("wave", figure((9, 5), "M9 8v7", "M9 9.5l4.5-3 1-4M9 9.5l-3 4.5", "M9 15l-2 6M9 15l2 6") + "M17 2.5a4 4 0 012.5 3.5M16.5 6.5a2 2 0 011 1.5"),
+    ("bow", circle_path(16.5, 9.5, 2) + "M9 12l5-3M14 9.5v5M9 12v9M9 12l2.5 9"),
+    ("cheer", figure((12, 6), "M12 9v6", "M12 10L7.5 4M12 10l4.5-6", "M12 15l-3 6M12 15l3 6")),
+    ("clap", "M6 20l3.5-9.5a1.6 1.6 0 013 1L11 16M18 20l-3.5-9.5a1.6 1.6 0 00-3 1L13 16M12 6V3M7.5 7.5l-2-2M16.5 7.5l2-2"),
+    ("laugh", circle_path(12, 12, 9) + "M8 10a1 1 0 012 0M14 10a1 1 0 012 0M7.5 13.5h9a4.5 4.5 0 01-9 0z"),
+    ("flex", "M4 18h8l3-9M4 14c2-2.5 5-2.5 7-1" + circle_path(15.5, 6.5, 2)),
+    ("kiss", "M12 20s-7-4.5-7-10a4 4 0 017-2.5A4 4 0 0119 10c0 5.5-7 10-7 10z"),
+    ("cry", circle_path(12, 12, 9) + "M8 9.5l2 1M16 9.5l-2 1M9 17a3 3 0 016 0M9 12.5l-.8 2a.8.8 0 001.6 0z"),
+    ("chicken", "M7 12c0 4 3 7 6 7s5-3 5-6V9a3 3 0 00-6 0v2c-2-1-4-1-5 1zM18 10l3 1.5-3 1M11 19v2.5M14 19v2.5M15.5 8.5h.01"),
+    ("beg", figure((13, 5), "M13 8l-1 6", "M12.6 9.6L9 7.5M12.6 9.6l-2.5-3", "M12 14l4 1 -1 6M12 14l-4 6")),
+    ("roar", circle_path(10, 12, 7) + "M7 10.5h6v4.5H7zM8 8h.01M12 8h.01M19 8.5a5 5 0 010 7M21.5 6a8.5 8.5 0 010 12"),
+    ("rude", circle_path(12, 12, 9) + "M8.5 10h.01M15.5 10h.01M9 14.5h6M11 14.5v2a1 1 0 002 0v-2"),
+    ("salute", figure((12, 5), "M12 8v7", "M12 9.5l3.5-.5-2-3.5M12 9.5l-2.5 4.5", "M12 15l-2 6M12 15l2 6")),
+    ("shy", circle_path(12, 12, 9) + "M9 11h.01M15 11h.01M11 15.5h2M6.5 13.5l1.5-.5M17.5 13.5l-1.5-.5"),
+    ("point", figure((6, 5), "M6 8v7", "M6 9.5h7M6 9.5l-2 4", "M6 15l-2 6M6 15l2 6") + "M16 9.5h4.5M19 8l1.5 1.5L19 11"),
+    ("talk", "M4 5h16v10H10l-4 4v-4H4z"),
+    ("shout", "M4 5h16v10H10l-4 4v-4H4zM12 7.5v3.5M12 13h.01"),
+    ("question", "M4 5h16v10H10l-4 4v-4H4zM10 8.5a2 2 0 112.5 2c-.5.3-.5.8-.5 1.2M12 13.5h.01"),
+    ("kneel", figure((10, 4.5), "M10 7.5v6", "M10 9l3 3M10 9l-2 3.5", "M10 13.5h5v6.5M10 13.5L8 20H4")),
+    ("sit", figure((9, 5), "M9 8v6", "M9 9.5l4 2.5M9 9.5l-2 3.5", "M9 14h7v6M9 14l-1 6") + "M3 20h18"),
+    ("sleep", "M4 9h5l-5 6h5M12 4h4l-4 5h4M16 13h3l-3 4h3"),
+    ("eat", "M6 3v5a2 2 0 004 0V3M8 10v11M16 21V3c2.5 2 3 6 3 9h-3"),
+    ("train", "M6 4h12a2 2 0 012 2v9a2 2 0 01-2 2H6a2 2 0 01-2-2V6a2 2 0 012-2zM4 11h16M8 20l-2 2M16 20l2 2M8 14h.01M16 14h.01"),
+    ("yes", circle_path(12, 12, 9) + "M8 12.5l3 3 5-6"),
+    ("no", circle_path(12, 12, 9) + "M9 9l6 6M15 9l-6 6"),
+    ("music", "M9 18V6l10-2v12" + circle_path(7, 18, 2) + circle_path(17, 16, 2)),
+    ("wheel", circle_path(12, 12, 9) + circle_path(12, 12, 3) + "M12 3v6M12 15v6M3 12h6M15 12h6"),
+    ("sparkle", "M12 3l2 7 7 2-7 2-2 7-2-7-7-2 7-2z"),
+    ("stand", figure((12, 4.5), "M12 7.5V15", "M12 9l-3 5M12 9l3 5", "M12 15l-2 6M12 15l2 6")),
+    ("plus", "M12 6v12M6 12h12"),
+    ("shrug", figure((12, 5), "M12 8v7", "M12 10l-4-1-2-3M12 10l4-1 2-3", "M12 15l-2 6M12 15l2 6")),
+]
+
 DIGITS = [
     "M12 4C5 4 4 14 4 20s1 16 8 16 8-10 8-16-1-16-8-16z",
     "M8 9l5-5v32M8 36h10",
@@ -348,6 +389,16 @@ def make_glyphs():
     cols, rows, cell = 8, 4, 64
     cv = Canvas(cols * cell, rows * cell)
     for idx, (_, d) in enumerate(GLYPHS):
+        cx, cy = (idx % cols) * cell, (idx // cols) * cell
+        scale = cell / 24.0
+        cv.stroke(parse_path(d), scale, cx, cy, 1.9 * scale)
+    return cv
+
+
+def make_emotes():
+    cols, rows, cell = 8, 4, 64
+    cv = Canvas(cols * cell, rows * cell)
+    for idx, (_, d) in enumerate(EMOTE_GLYPHS):
         cx, cy = (idx % cols) * cell, (idx // cols) * cell
         scale = cell / 24.0
         cv.stroke(parse_path(d), scale, cx, cy, 1.9 * scale)
@@ -407,6 +458,7 @@ def make_white():
 ART = {
     "White": make_white,
     "Glyphs": make_glyphs,
+    "Emotes": make_emotes,
     "Digits": make_digits,
     "Disc": make_disc,
     "Ring": make_ring,
@@ -425,6 +477,8 @@ def main():
     if a.list_glyphs:
         for i, (name, _) in enumerate(GLYPHS):
             print(i, name)
+        for i, (name, _) in enumerate(EMOTE_GLYPHS):
+            print("emote", i, name)
         return 0
     os.makedirs(a.out, exist_ok=True)
     if a.preview:

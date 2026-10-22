@@ -11,4 +11,10 @@
 	<Binding name="BLEAKHOLD_LEADERBOARDS">
 		BleakholdToggle("leaderboards")
 	</Binding>
+	<Binding name="BLEAKHOLD_EMOTEWHEEL" runOnUp="true">
+		BleakholdEmoteWheel(keystate)
+	</Binding>
+	<Binding name="BLEAKHOLD_ANIMATIONS">
+		BleakholdToggle("animations")
+	</Binding>
 </Bindings>

@@ -18,6 +18,18 @@ test("glyph names in Widgets.lua match the atlas order in make_art.py", function
     H.ok(#names <= 32, "fits the 8 x 4 atlas")
 end)
 
+test("emote glyph names in Widgets.lua match the emote atlas order in make_art.py", function(M, ns)
+    local py = host_readfile(repo .. "/Tools/UiLint/make_art.py")
+    local block = py:match("EMOTE_GLYPHS = %[(.-)\n%]")
+    local names = {}
+    for name in block:gmatch('\n    %(%"([%w_]+)%",') do names[#names + 1] = name end
+    H.eq(#names, #ns.UI.EMOTE_GLYPHS, "emote glyph count")
+    for i, n in ipairs(names) do
+        H.eq(ns.UI.EMOTE_GLYPHS[i], n, "emote glyph " .. i)
+    end
+    H.ok(#names <= 32, "fits the 8 x 4 atlas")
+end)
+
 test("every texture the addon sets exists, and fonts are stock client fonts", function(M, ns)
     M.env.SlashCmdList.BLEAKHOLD("demo")
     M.Advance(1)

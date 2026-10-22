@@ -248,7 +248,7 @@ this works with signature checks on or off.
 | `Tools/RaceForge/` | Python tool that adds the Bleakhold races (High Elf, Eredar) to your own DBCs and writes the AzerothCore SQL |
 | `Tools/BlpConvert/` | Python tool that converts pictures to BLP textures; draws the login art |
 | `Interface/Bleakhold/Glue/` | Bleakhold login screen and character creation (glue Lua, art, fonts) |
-| `Interface/AddOns/Bleakhold/` | Bleakhold UI addon (Activities, Mythic+, Rift, Collections, Season, Leaderboards) |
+| `Interface/AddOns/Bleakhold/` | Bleakhold UI addon (Activities, Mythic+, Rift, Collections with Animations, emote wheel, Season, Leaderboards) |
 | `Tools/UiLint/` | Lint and unit tests for the Bleakhold Lua (host Lua built from the client's own source) |
 | `docs/BleakholdProtocol.md` | Message protocol between the Bleakhold server module and the UI |
 | `Server/mod-bleakhold-ui/` | AzerothCore module: server side of the Bleakhold UI protocol |

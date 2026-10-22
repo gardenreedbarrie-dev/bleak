@@ -23,6 +23,7 @@ Rift.lua
 KeyTracker.lua
 Countdown.lua
 Collections.lua
+Animations.lua
 Season.lua
 Leaderboards.lua
 Demo.lua

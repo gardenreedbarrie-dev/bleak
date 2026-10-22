@@ -1,4 +1,5 @@
--- Bleakhold: Collections window. Tabs Transmog / Looks of Later Ages / Legacy Sets / Mounts / Pets.
+-- Bleakhold: Collections window. Tabs Transmog / Looks of Later Ages / Legacy Sets / Mounts / Pets /
+-- Animations (built by Animations.lua).
 -- Legacy Sets: eras rail, set pieces grid (hover = item tooltip, click = try on, shift-click = link),
 -- where the set drops, and a DressUpModel preview. Collected state and the outfit unlock come from
 -- the server (SET); Save outfit is an intent (OUTFIT) the server checks.
@@ -69,14 +70,11 @@ local tabDefs = {
     { key = "legacy", label = "Legacy Sets" },
     { key = "mounts", label = "Mounts" },
     { key = "pets", label = "Pets" },
+    { key = "animations", label = "Animations" },
 }
 CO.tabs = {}
-local tx = 16
 for i, d in ipairs(tabDefs) do
-    local w = (d.key == "later") and 210 or 140
-    local b = UI.Button(tabBar, w, 30, d.label, "tab", 13)
-    b:SetPoint("LEFT", tabBar, "LEFT", tx, 0)
-    tx = tx + w + 6
+    local b = UI.Button(tabBar, 120, 30, d.label, "tab", 13)
     b.key = d.key
     b:SetScript("OnClick", function()
         CO.ShowTab(d.key)
@@ -84,11 +82,33 @@ for i, d in ipairs(tabDefs) do
     CO.tabs[i] = b
 end
 
+-- Each tab is as wide as its label (with the count); when they do not fit the bar, all shrink alike.
+local TAB_GAP, TAB_MIN, TAB_PAD = 6, 84, 28
+function CO.LayoutTabs()
+    local widths, total = {}, 0
+    for i, b in ipairs(CO.tabs) do
+        widths[i] = max(TAB_MIN, floor(b.label:GetStringWidth() + TAB_PAD))
+        total = total + widths[i]
+    end
+    local room = CO.W - 2 - 32 - TAB_GAP * (#CO.tabs - 1)
+    local scale = total > room and room / total or 1
+    local x = 16
+    for i, b in ipairs(CO.tabs) do
+        local w = floor(widths[i] * scale)
+        b:SetWidth(w)
+        b:ClearAllPoints()
+        b:SetPoint("LEFT", tabBar, "LEFT", x, 0)
+        x = x + w + TAB_GAP
+    end
+end
+CO.LayoutTabs()
+
 local body = CreateFrame("Frame", nil, win.content)
 body:SetPoint("TOPLEFT", tabBar, "BOTTOMLEFT", 0, 0)
 body:SetPoint("BOTTOMRIGHT", win.content, "BOTTOMRIGHT", 0, 0)
 CO.body = body
 local BW, BH = CO.W - 2, CO.H - 4 - 46 - 44 - 2
+CO.BW, CO.BH = BW, BH
 
 ------------------------------------------------------------------------------------------------------
 -- Legacy Sets
@@ -679,6 +699,7 @@ function CO.RefreshTabs()
         legacy = coll and countText(coll.setsOwned, coll.setsTotal) or "",
         mounts = tostring(GetNumCompanions and GetNumCompanions("MOUNT") or 0),
         pets = tostring(GetNumCompanions and GetNumCompanions("CRITTER") or 0),
+        animations = ns.Animations and tostring(#ns.Animations.List()) or "",
     }
     for i, b in ipairs(CO.tabs) do
         local d = tabDefs[i]
@@ -686,6 +707,7 @@ function CO.RefreshTabs()
         b:SetLabel(d.label .. ((cnt and cnt ~= "") and ("  |cff8C877D" .. cnt .. "|r") or ""))
         b:SetStyle(CO.tab == d.key and "tabOn" or "tab")
     end
+    CO.LayoutTabs()
 end
 
 function CO.Refresh()
@@ -696,8 +718,15 @@ function CO.Refresh()
     legacy:Hide()
     summary:Hide()
     companions:Hide()
+    local A = ns.Animations
+    if A and CO.tab ~= "animations" then
+        A.HideTab()
+    end
+    search.hint:SetText(CO.tab == "animations" and "Search dances and emotes" or "Search sets, pieces, dungeons")
     local coll = S.coll
-    if CO.tab == "legacy" then
+    if CO.tab == "animations" and A then
+        A.ShowTab()
+    elseif CO.tab == "legacy" then
         legacy:Show()
         CO.RefreshLegacy()
     elseif CO.tab == "mounts" or CO.tab == "pets" then
