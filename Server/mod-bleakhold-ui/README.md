@@ -62,7 +62,8 @@ You should see `mod-bleakhold-ui` in CMake's list of modules.
 Nothing to do if your `worldserver.conf` has `Updates.EnableDatabases = 7` (the default): the
 worldserver applies them itself at the next start. Otherwise import the files by hand, in name order,
 into those databases (HeidiSQL: File > Run SQL file). The files can be run again safely; rows you edited
-are kept.
+are kept. Rows you delete come back when a module update changes a starting-rows file, so to retire a starting
+row, change it instead (for a season, set `state` to 0) or set `BleakholdUi.Season.Id`.
 
 **Step 4. Configuration.** The build installs `mod_bleakhold_ui.conf.dist` next to your other module
 configs (Linux: `etc/modules/`, Windows: `configs/modules/`). Copy it to `mod_bleakhold_ui.conf` in the same

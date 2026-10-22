@@ -38,6 +38,7 @@ namespace
         BleakholdPlayerScript() : PlayerScript("BleakholdPlayerScript", {
             PLAYERHOOK_ON_LOGIN,
             PLAYERHOOK_ON_LOGOUT,
+            PLAYERHOOK_ON_DELETE_FROM_DB,
             PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT,
             PLAYERHOOK_CAN_PLAYER_USE_GROUP_CHAT,
             PLAYERHOOK_CAN_PLAYER_USE_GUILD_CHAT,
@@ -53,6 +54,12 @@ namespace
         void OnPlayerLogout(Player* player) override
         {
             Mgr::Instance().OnLogout(player);
+        }
+
+        // every way a character is deleted for good (the client, the purge of old deleted characters, commands)
+        void OnPlayerDeleteFromDB(CharacterDatabaseTransaction /*trans*/, uint32 guid) override
+        {
+            Data::Instance().ForgetCharacter(guid);
         }
 
         // Player::Whisper -> here for every whisper, addon whispers included.

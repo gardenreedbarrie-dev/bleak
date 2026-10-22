@@ -389,10 +389,12 @@ namespace Bleakhold
                 uint32_t const part = f[2].Get<uint32>();
                 uint64_t const points = f[3].Get<uint64>();
                 _weTotals[season][part] += points;
-                _wePlayers[season][guid] += points;
+                if (guid)   // guid 0: points of deleted characters (ForgetCharacter), in the totals only
+                    _wePlayers[season][guid] += points;
                 ++weRows;
             } while (r->NextRow());
 
+        _charactersLoaded = true;
         LOG_INFO("server.loading", ">> Bleakhold: {} leaderboard rows, {} server firsts, {} war effort rows", _lb.size(), _firsts.size(), weRows);
     }
 
@@ -491,9 +493,11 @@ namespace Bleakhold
     {
         if (_seasonOverride)
             return _seasonOverride;
-        for (SeasonRow const& s : _seasons)
-            if (s.state == static_cast<uint8_t>(SeasonStateId::Current))
-                return s.id;
+        // the newest current season (highest id): a starting row that a module update put back as current
+        // (01_bleakhold_world_seed.sql) does not replace the season you made current
+        for (auto it = _seasons.rbegin(); it != _seasons.rend(); ++it)
+            if (it->state == static_cast<uint8_t>(SeasonStateId::Current))
+                return it->id;
         return 0;
     }
 
@@ -1004,6 +1008,50 @@ namespace Bleakhold
             return 0;
         auto p = s->second.find(lowGuid);
         return p == s->second.end() ? 0 : p->second;
+    }
+
+    void Data::ForgetCharacter(uint32_t lowGuid)
+    {
+        if (!lowGuid)
+            return;
+        bool loaded = false;
+        {
+            std::lock_guard<std::mutex> guard(_lock);
+            loaded = _charactersLoaded;
+            for (LbRow& r : _lb)
+            {
+                auto it = std::find(r.memberGuids.begin(), r.memberGuids.end(), lowGuid);
+                if (it == r.memberGuids.end())
+                    continue;
+                r.memberGuids.erase(it);
+                r.teamKey += "x";   // a team key is guids and '-': no later group matches this row any more
+            }
+            for (auto& [season, players] : _wePlayers)
+                players.erase(lowGuid);
+        }
+        CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+        // the same in the table: the guid leaves member_guids ("1,2,3"), the team key gets the mark
+        trans->Append("UPDATE `bleakhold_leaderboard` SET `member_guids` = TRIM(BOTH ',' FROM REPLACE(CONCAT(',', "
+            "`member_guids`, ','), ',{},', ',')), `team_key` = CONCAT(`team_key`, 'x') "
+            "WHERE FIND_IN_SET('{}', `member_guids`)", lowGuid, lowGuid);
+        // the war effort points move to guid 0, so the totals stay the same after a restart
+        if (QueryResult r = CharacterDatabase.Query(
+                "SELECT `season_id`, `part_id`, `points` FROM `bleakhold_war_effort` WHERE `guid` = {}", lowGuid))
+            do
+            {
+                Field* f = r->Fetch();
+                uint64_t const points = f[2].Get<uint64>();
+                trans->Append("INSERT INTO `bleakhold_war_effort` (`season_id`, `guid`, `part_id`, `points`) "
+                    "VALUES ({}, 0, {}, {}) ON DUPLICATE KEY UPDATE `points` = `points` + {}", f[0].Get<uint32>(),
+                    f[1].Get<uint32>(), points, points);
+            } while (r->NextRow());
+        trans->Append("DELETE FROM `bleakhold_war_effort` WHERE `guid` = {}", lowGuid);
+        // its own transaction (an error here never stops the character delete); before LoadAll (the startup purge
+        // of old deleted characters) at once, so the load reads the result
+        if (loaded)
+            CharacterDatabase.CommitTransaction(trans);
+        else
+            CharacterDatabase.DirectCommitTransaction(trans);
     }
 
     void Data::HandIn(Player* player, Intent const& intent)

@@ -71,6 +71,9 @@ namespace Bleakhold
         bool RecordFirst(std::string_view firstId, std::string_view kindKey, std::string_view text, std::string_view who);
         void WarEffortAdd(Player* player, uint32_t partId, uint32_t points);
         uint64_t WarEffortPoints(uint32_t lowGuid);
+        // A character was deleted: AzerothCore can give its guid to a new character after a restart, so the guid
+        // leaves the leaderboard rows (they keep the names) and its war effort points stay only in the totals.
+        void ForgetCharacter(uint32_t lowGuid);
 
         struct Counts { std::size_t defs = 0, schedule = 0, seasons = 0, sets = 0, lbRows = 0, firsts = 0, weRows = 0; };
         Counts GetCounts();
@@ -128,6 +131,7 @@ namespace Bleakhold
         // characters tables
         std::vector<LbRow> _lb;
         uint32_t _nextLbId = 1;
+        bool _charactersLoaded = false;
         std::vector<FirstRow> _firsts;
         std::map<uint32_t, std::map<uint32_t, uint64_t>> _weTotals;                       // season -> part -> points
         std::map<uint32_t, std::unordered_map<uint32_t, uint64_t>> _wePlayers;           // season -> guid -> points

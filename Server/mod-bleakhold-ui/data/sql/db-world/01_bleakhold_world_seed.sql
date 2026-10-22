@@ -1,4 +1,6 @@
 -- mod-bleakhold-ui: starting rows for the world tables (INSERT IGNORE: rows you changed are kept).
+-- Never change this file after a release: the database updater runs a changed file again, and rows you deleted
+-- come back. New starting rows go into a new file (02_bleakhold_world_seed.sql, ...).
 -- Names and texts are the Bleakhold UI's own built-in texts, so nothing changes on screen until you edit them.
 -- Not filled on purpose (they are your game rules): bleakhold_week_schedule, bleakhold_war_effort_part, the
 -- min_points of the ranks and the points_required of the rewards. Examples are at the end of this file.

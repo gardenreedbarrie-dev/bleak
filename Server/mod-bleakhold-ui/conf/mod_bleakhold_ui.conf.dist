@@ -68,7 +68,8 @@ BleakholdUi.DataVersion = 0
 
 #
 #    BleakholdUi.Season.Id
-#        Description: Current season id. 0 = the bleakhold_season row with state 1.
+#        Description: Current season id. 0 = the bleakhold_season row with state 1 (the highest id if several
+#                     rows have state 1).
 #        Default:     0
 
 BleakholdUi.Season.Id = 0
