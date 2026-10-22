@@ -1,5 +1,6 @@
 -- Bleakhold: graphics settings. The Bleakhold client draws the world through its own post-processing
--- (Engine/Source/BleakFx: ambient occlusion, light shafts, bloom, clarity, colour grading, FXAA, sharpening);
+-- (Engine/Source/BleakFx: ambient occlusion, light shafts, bloom, clarity, colour grading, FXAA, sharpening) and
+-- draws water with reflections, refraction and colour by depth;
 -- this window sets its bleakFx* console variables, with presets. The client saves them in Config.wtf. A stock
 -- client has none of these variables: the window then only says so.
 local ADDON, ns = ...
@@ -39,21 +40,33 @@ G.SLIDERS = {
       help = "Darker screen corners." },
     { cvar = "bleakFxSharpen", label = "Sharpening", min = 0, max = 1, step = 0.05,
       help = "Contrast-adaptive sharpening: crisper textures without halos." },
+    { cvar = "bleakFxWaterRipples", label = "Water ripples", min = 0, max = 0.4, step = 0.02,
+      help = "How rough the water's surface is: calm mirror to choppy." },
+}
+
+-- On/off buttons: console variable, label, help.
+G.TOGGLES = {
+    { cvar = "bleakFxAA", label = "Anti-aliasing",
+      help = "Smooths jagged edges after the world is drawn (FXAA). Works with multisampling off." },
+    { cvar = "bleakFxWater", label = "Modern water",
+      help = "Water with reflections, refraction and colour by depth. Off: the stock water." },
+    { cvar = "bleakFxWaterReflections", label = "Water reflections",
+      help = "The water reflects trees, hills and buildings, not only the sky. Needs multisampling off." },
 }
 
 -- Presets set every slider plus the master switch and anti-aliasing. "bleakhold" is the client default.
 G.PRESETS = {
     { key = "off", text = "Off (stock look)", values = { bleakFx = 0 } },
     { key = "classic", text = "Classic+", values = {
-        bleakFx = 1, bleakFxAA = 1, bleakFxAO = 0.4, bleakFxAORadius = 1.25, bleakFxSunShafts = 0.25, bleakFxBloom = 0.2,
+        bleakFx = 1, bleakFxAA = 1, bleakFxWater = 1, bleakFxWaterReflections = 1, bleakFxWaterRipples = 0.1, bleakFxAO = 0.4, bleakFxAORadius = 1.25, bleakFxSunShafts = 0.25, bleakFxBloom = 0.2,
         bleakFxClarity = 0.2, bleakFxContrast = 0.08, bleakFxSaturation = 1, bleakFxVibrance = 0.1, bleakFxWarmth = 0.1,
         bleakFxBrightness = 1, bleakFxShadows = 0, bleakFxVignette = 0.08, bleakFxSharpen = 0.2 } },
     { key = "bleakhold", text = "Bleakhold", values = {
-        bleakFx = 1, bleakFxAA = 1, bleakFxAO = 0.6, bleakFxAORadius = 1.5, bleakFxSunShafts = 0.4, bleakFxBloom = 0.35,
+        bleakFx = 1, bleakFxAA = 1, bleakFxWater = 1, bleakFxWaterReflections = 1, bleakFxWaterRipples = 0.12, bleakFxAO = 0.6, bleakFxAORadius = 1.5, bleakFxSunShafts = 0.4, bleakFxBloom = 0.35,
         bleakFxClarity = 0.35, bleakFxContrast = 0.18, bleakFxSaturation = 1.05, bleakFxVibrance = 0.25, bleakFxWarmth = 0.3,
         bleakFxBrightness = 1, bleakFxShadows = 0.012, bleakFxVignette = 0.18, bleakFxSharpen = 0.25 } },
     { key = "cinematic", text = "Cinematic", values = {
-        bleakFx = 1, bleakFxAA = 1, bleakFxAO = 0.85, bleakFxAORadius = 2, bleakFxSunShafts = 0.7, bleakFxBloom = 0.6,
+        bleakFx = 1, bleakFxAA = 1, bleakFxWater = 1, bleakFxWaterReflections = 1, bleakFxWaterRipples = 0.16, bleakFxAO = 0.85, bleakFxAORadius = 2, bleakFxSunShafts = 0.7, bleakFxBloom = 0.6,
         bleakFxClarity = 0.45, bleakFxContrast = 0.3, bleakFxSaturation = 1.1, bleakFxVibrance = 0.35, bleakFxWarmth = 0.4,
         bleakFxBrightness = 1, bleakFxShadows = 0.02, bleakFxVignette = 0.3, bleakFxSharpen = 0.35 } },
 }
@@ -130,7 +143,7 @@ end
 ------------------------------------------------------------------------------------------------------
 -- Window
 ------------------------------------------------------------------------------------------------------
-local W, H = 640, 560
+local W, H = 640, 640
 local f = UI.Window("BleakholdGraphics", W, H, "Graphics", "star")
 f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 G.frame = f
@@ -147,14 +160,19 @@ f.preset = UI.Dropdown(content, 190, function(value)
 end)
 f.preset:SetPoint("LEFT", presetLabel, "RIGHT", 10, 0)
 
-f.aa = UI.Button(content, 150, 26, "", "dark", 12)
-f.aa:SetPoint("LEFT", f.preset, "RIGHT", 12, 0)
-f.aa:SetScript("OnClick", function()
-    G.Set("bleakFxAA", cvarNumber("bleakFxAA", 1) == 1 and 0 or 1)
-    G.Refresh()
-end)
-f.aa.tooltip = function()
-    return { "Anti-aliasing (FXAA)", "Smooths jagged edges after the world is drawn. Works with multisampling off." }
+f.toggles = {}
+for i, t in ipairs(G.TOGGLES) do
+    local b = UI.Button(content, 190, 26, "", "dark", 12)
+    b:SetPoint("TOPLEFT", content, "TOPLEFT", 20 + (i - 1) * 200, -50)
+    b:SetScript("OnClick", function()
+        G.Set(t.cvar, cvarNumber(t.cvar, 1) == 1 and 0 or 1)
+        G.Refresh()
+    end)
+    b.tooltip = function()
+        return { t.label, t.help }
+    end
+    b.def = t
+    f.toggles[i] = b
 end
 
 f.reset = UI.Button(content, 110, 26, "Defaults", "ghost", 12)
@@ -164,8 +182,8 @@ f.reset:SetScript("OnClick", function()
 end)
 
 f.note = UI.Text(content, 12, C.orange, "body", "LEFT")
-f.note:SetPoint("TOPLEFT", content, "TOPLEFT", 20, -50)
-f.note:SetPoint("TOPRIGHT", content, "TOPRIGHT", -20, -50)
+f.note:SetPoint("TOPLEFT", content, "TOPLEFT", 20, -84)
+f.note:SetPoint("TOPRIGHT", content, "TOPRIGHT", -20, -84)
 f.note:SetHeight(32)
 
 f.sliders = {}
@@ -174,7 +192,7 @@ for i, s in ipairs(G.SLIDERS) do
     local col, row = (i - 1) % COLS, floor((i - 1) / COLS)
     local holder = CreateFrame("Frame", nil, content)
     holder:SetSize(COL_W, ROW_H)
-    holder:SetPoint("TOPLEFT", content, "TOPLEFT", 20 + col * (COL_W + 40), -92 - row * ROW_H)
+    holder:SetPoint("TOPLEFT", content, "TOPLEFT", 20 + col * (COL_W + 40), -124 - row * ROW_H)
     holder.label = UI.Text(holder, 12, C.mid)
     holder.label:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
     holder.label:SetText(s.label)
@@ -247,13 +265,15 @@ function G.Refresh()
     f.preset:SetValue(G.CurrentPreset() or "custom", true)
     f.preset:SetActive(available)
     f.reset:SetActive(available)
-    f.aa:SetActive(on)
-    f.aa:SetLabel(cvarNumber("bleakFxAA", 1) == 1 and "Anti-aliasing: on" or "Anti-aliasing: off")
+    for _, b in ipairs(f.toggles) do
+        b:SetActive(on)
+        b:SetLabel(b.def.label .. (cvarNumber(b.def.cvar, 1) == 1 and ": on" or ": off"))
+    end
     if not available then
         f.note:SetText("This client has no Bleakhold graphics. Install the Bleakhold client to use them.")
     elseif on and (tonumber(GetCVar("gxMultisample") or "1") or 1) > 1 then
-        f.note:SetText("Ambient occlusion and light shafts need multisampling off: Video options, Multisampling 1x. "
-            .. "Anti-aliasing here replaces it.")
+        f.note:SetText("Ambient occlusion, light shafts and water reflections need multisampling off: Video options, "
+            .. "Multisampling 1x. Anti-aliasing here replaces it.")
     else
         f.note:SetText("")
     end

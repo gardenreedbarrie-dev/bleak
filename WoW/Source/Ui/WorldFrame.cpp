@@ -1682,8 +1682,20 @@ void CGWorldFrame::OnWorldRender() {
     GxRsSet(GxRs_Multisample, 1);
     CGWorldFrame::UpdateScreenEffectParams();
     FFX::Start();
-    // BLEAKHOLD(bleakfx): the readable depth buffer before the world clears and draws into it.
-    BleakFx::BeginWorld();
+
+    // BLEAKHOLD(bleakfx): the readable depth buffer before the world clears and draws into it, and this frame's
+    // light (OnWorldUpdate has set the camera and DayNight) for the water and the post-processing.
+    DayNight::DNInfo* dayNight = DayNight::GetInfo();
+    BleakFx::WorldLight light;
+    light.zoneGlow = dayNight->m_bands.m_glow;
+    light.sunDirection = DayNight::g_planets.m_sun.m_position - dayNight->m_cameraPos;
+    light.sunDirection.NormalizeSafe();
+    light.sunColor = dayNight->m_bands.m_sunCloudColors[0];
+    light.sunVisible = DayNight::BleakSunDrawn();
+    light.fogEnd = dayNight->m_fog.m_end;
+    light.skyZenith = dayNight->m_bands.m_skyColors[0];
+    light.skyHorizon = dayNight->m_bands.m_skyColors[5];
+    BleakFx::BeginWorld(light);
 
     CRect fullViewport = { 0.0f, 0.0f, 1.0f, 1.0f };
 
@@ -1800,15 +1812,7 @@ void CGWorldFrame::OnWorldRender() {
     g_theGxDevicePtr->RsPop();
 
     // BLEAKHOLD(bleakfx): post-processing of the world, before the chat and emoji bubbles and the interface.
-    DayNight::DNInfo* dayNight = DayNight::GetInfo();
-    BleakFx::WorldLight light;
-    light.zoneGlow = dayNight->m_bands.m_glow;
-    light.sunDirection = DayNight::g_planets.m_sun.m_position - dayNight->m_cameraPos;
-    light.sunDirection.NormalizeSafe();
-    light.sunColor = dayNight->m_bands.m_sunCloudColors[0];
-    light.sunVisible = DayNight::BleakSunDrawn();
-    light.fogEnd = dayNight->m_fog.m_end;
-    BleakFx::RenderWorld(light);
+    BleakFx::RenderWorld();
 
     SmartScreenRectClearGrid(1);
     CGChatBubbleFrame::OnWorldRender(this);

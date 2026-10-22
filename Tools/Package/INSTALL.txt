@@ -28,9 +28,10 @@ What you get:
   emote wheel; everyone nearby sees it pop up over your head (art in Data\Interface\Bleakhold\Emoji).
   /bh emoji joy sends one, /bh emojis off hides all emoji bubbles. The realm needs the mod-bleakhold-ui module.
 - Bleakhold graphics: ambient occlusion, light shafts, bloom, colour grading, anti-aliasing and sharpening on
-  the 3D world. /bh graphics opens the settings with presets (Off, Classic+, Bleakhold, Cinematic).
-  Ambient occlusion and light shafts need Multisampling 1x in the Video options (the graphics anti-aliasing
-  replaces it). They need a graphics card with shader model 3 and the Direct3D 9 renderer (the default).
+  the 3D world, and water with reflections, refraction and colour by depth. /bh graphics opens the settings
+  with presets (Off, Classic+, Bleakhold, Cinematic). Ambient occlusion, light shafts and the water's
+  reflections of the world need Multisampling 1x in the Video options (the graphics anti-aliasing replaces it).
+  They need a graphics card with shader model 3 and the Direct3D 9 renderer (the default).
 - High Elf and Eredar characters also need the race file patch-R.MPQ in Data (see below; your server
   gives it to you)
 

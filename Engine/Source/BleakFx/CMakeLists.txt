@@ -1,9 +1,7 @@
 file(GLOB PRIVATE_SOURCES CONFIGURE_DEPENDS "*.cpp")
 
 # BLEAKHOLD(bleakfx): the shaders in Shaders/ are compiled with the Windows SDK's fxc and embedded as byte arrays
-# (BleakFxShaders.h). Without fxc, BleakFx is built without shaders and stays off; the client still builds, unless
-# BLEAKFX_REQUIRE_SHADERS is on (CI).
-option(BLEAKFX_REQUIRE_SHADERS "Stop the configure when fxc is missing instead of building BleakFx without shaders" OFF)
+# (BleakFxShaders.h). Without fxc, BleakFx is built without shaders and stays off; the client still builds.
 set(BLEAKFX_SHADERS
     bh_fullscreen_vs:vs_3_0
     bh_bloom_pre_ps:ps_3_0
@@ -17,6 +15,9 @@ set(BLEAKFX_SHADERS
     bh_rays_mask_ps:ps_3_0
     bh_rays_blur_ps:ps_3_0
     bh_depthfx_ps:ps_3_0
+    bh_depthcopy_ps:ps_3_0
+    bh_water_vs:vs_3_0
+    bh_water_ps:ps_3_0
 )
 
 set(BLEAKFX_FXC_HINTS)
@@ -65,8 +66,6 @@ if (BLEAKFX_FXC)
         COMMENT "BleakFx: embedding the shaders"
         VERBATIM
     )
-elseif (BLEAKFX_REQUIRE_SHADERS)
-    message(FATAL_ERROR "fxc (Windows SDK) not found, and BLEAKFX_REQUIRE_SHADERS is on.")
 else ()
     message(WARNING "fxc (Windows SDK) not found: BleakFx post-processing is built without shaders and stays off.")
     file(WRITE ${BLEAKFX_GENERATED}

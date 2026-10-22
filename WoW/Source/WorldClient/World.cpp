@@ -6,6 +6,7 @@
 #include "Engine/Source/BlizzardCore/SFile2-Core.h"
 #include "Engine/Source/BlizzardCore/Source/Packages/Streaming/Streaming.h"
 #include "Engine/Source/Base/Handle.h"
+#include "Engine/Source/BleakFx/BleakFx.h"
 #include "Engine/Source/Base/RCString.h"
 #include "Engine/Source/ConsoleBase/ConsoleCommand.h"
 #include "Engine/Source/ConsoleBase/ConsoleVar.h"
@@ -1923,6 +1924,8 @@ void CWorldScene::RenderLiquidPass() {
     CWorldScene::ApplyFogState();
 
     if ((CWorld::enables & Enable_Water) && CWorldScene::s_liquidRenderer) {
+        // BLEAKHOLD(bleakfx): the frame and its depth as the water sees them, before it is drawn.
+        BleakFx::BeginLiquids();
         CWorldScene::s_liquidRenderer->Flush(CWorldScene::s_activeWorldView, 1);
     }
 

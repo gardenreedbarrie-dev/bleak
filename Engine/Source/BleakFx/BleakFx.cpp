@@ -2,6 +2,7 @@
 #include <cmath>
 #include <cstring>
 #include "BleakFxShaders.h"
+#include "Engine/Source/BleakFx/BleakFxRipples.h"
 #include "Engine/Source/ConsoleBase/ConsoleVar.h"
 #include "Engine/Source/ConsoleBase/Types.h"
 #include "Engine/Source/Gx/BleakDepth.h"
@@ -10,6 +11,7 @@
 #include "Engine/Source/Gx/CGxTex.h"
 #include "Engine/Source/Gx/CGxTexFlags.h"
 #include "Engine/Source/Gx/Gx.h"
+#include "Engine/Source/Os/TimeManager.h"
 #include "Engine/Source/Tempest/C2iVector.h"
 #include "Engine/Source/Tempest/C2Vector.h"
 #include "Engine/Source/Tempest/C44Matrix.h"
@@ -17,6 +19,7 @@
 
 namespace {
     // Shader constant registers, as in Shaders/bh_common.hlsli and bh_fullscreen_vs.hlsl.
+    const uint32_t kPsWater = 180;
     const uint32_t kPsParams = 200;
     const uint32_t kPsSky = 217;
     const uint32_t kPsProjection = 218;
@@ -40,6 +43,8 @@ namespace {
         Ps_RaysMask,
         Ps_RaysBlur,
         Ps_DepthFx,
+        Ps_DepthCopy,
+        Ps_Water,
         Ps_Count,
     };
 
@@ -83,10 +88,14 @@ namespace {
     CVar* s_cvarAo;
     CVar* s_cvarAoRadius;
     CVar* s_cvarSunShafts;
+    CVar* s_cvarWater;
+    CVar* s_cvarWaterRipples;
+    CVar* s_cvarWaterReflections;
 
     // Created once and kept as long as the device: CGxDevice::ShaderDestroy frees a CGxShader but not its Direct3D
     // shader, and the device recreates the Direct3D shaders after a reset by itself.
     CGxShader* s_vertexShader;
+    CGxShader* s_waterVertexShader;
     CGxShader* s_pixelShaders[Ps_Count];
     bool s_shadersCreated;
 
@@ -97,6 +106,10 @@ namespace {
     Target s_bloomUp[kMaxBloomLevels];
     Target s_ao[2];
     Target s_rays[2];
+    // The frame and its view depth before the transparent liquids, for the water.
+    Target s_waterScene;
+    Target s_waterDepth;
+    CGxTex* s_rippleTex;
     uint32_t s_bloomLevels;
     int32_t s_width;
     int32_t s_height;
@@ -105,10 +118,15 @@ namespace {
     // Whether the last frame went through the chain with bloom, which then stands in for the stock glow.
     bool s_bloomRan;
 
-    // From BeginWorld: the readable depth buffer is in use, and the camera the world is drawn with.
+    // From BeginWorld: the readable depth buffer is in use, the camera the world is drawn with, and its light.
     bool s_depthReady;
     C44Matrix s_projection;
     C44Matrix s_view;
+    BleakFx::WorldLight s_light;
+
+    // From BeginLiquids: the water may draw this frame (the frame is copied), and with depth.
+    bool s_waterReady;
+    bool s_waterDepthReady;
 
     // From RenderWorld: the depth range of the world's viewport.
     float s_worldMinZ;
@@ -166,11 +184,14 @@ namespace {
             s_pixelShaders[Ps_RaysMask] = CreateShader(GxSh_Pixel, "BleakFx:RaysMask", BLEAKFX_SHADER(bh_rays_mask_ps));
             s_pixelShaders[Ps_RaysBlur] = CreateShader(GxSh_Pixel, "BleakFx:RaysBlur", BLEAKFX_SHADER(bh_rays_blur_ps));
             s_pixelShaders[Ps_DepthFx] = CreateShader(GxSh_Pixel, "BleakFx:DepthFx", BLEAKFX_SHADER(bh_depthfx_ps));
+            s_pixelShaders[Ps_DepthCopy] = CreateShader(GxSh_Pixel, "BleakFx:DepthCopy", BLEAKFX_SHADER(bh_depthcopy_ps));
+            s_pixelShaders[Ps_Water] = CreateShader(GxSh_Pixel, "BleakFx:Water", BLEAKFX_SHADER(bh_water_ps));
+            s_waterVertexShader = CreateShader(GxSh_Vertex, "BleakFx:WaterVs", BLEAKFX_SHADER(bh_water_vs));
         }
 #undef BLEAKFX_SHADER
 
         // Valid() creates the Direct3D shader the first time and again after a device reset.
-        if (!s_vertexShader->Valid()) {
+        if (!s_vertexShader->Valid() || !s_waterVertexShader->Valid()) {
             return false;
         }
 
@@ -227,16 +248,19 @@ namespace {
             DestroyTarget(s_rays[i]);
         }
 
+        DestroyTarget(s_waterScene);
+        DestroyTarget(s_waterDepth);
+
         s_bloomLevels = 0;
         s_width = 0;
         s_height = 0;
         s_targetsFailed = false;
     }
 
-    bool CreateTarget(Target& target, int32_t width, int32_t height, const char* name) {
-        CGxTexFlags flags(GxTex_Linear, GxTex_Clamp, GxTex_Clamp, 0, 0, 1, 1);
+    bool CreateTarget(Target& target, int32_t width, int32_t height, const char* name, EGxTexFormat format = GxTex_Argb8888, EGxTexFilter filter = GxTex_Linear) {
+        CGxTexFlags flags(filter, GxTex_Clamp, GxTex_Clamp, 0, 0, 1, 1);
 
-        if (!GxTexCreate(GxTex_NonPow2, width, height, 0, GxTex_Argb8888, GxTex_Argb8888, flags, nullptr, NullTexUserFunc, name, target.tex)) {
+        if (!GxTexCreate(GxTex_NonPow2, width, height, 0, format, format, flags, nullptr, NullTexUserFunc, name, target.tex)) {
             target.tex = nullptr;
             return false;
         }
@@ -259,6 +283,7 @@ namespace {
 
         // The depth effects run at half (ambient occlusion) and quarter (light shafts) size.
         bool ok = CreateTarget(s_scene, width, height, "BleakFx::Scene") && CreateTarget(s_post, width, height, "BleakFx::Post")
+            && CreateTarget(s_waterScene, width, height, "BleakFx::WaterScene")
             && width / 4 >= kMinTargetSize && height / 4 >= kMinTargetSize
             && CreateTarget(s_ao[0], width / 2, height / 2, "BleakFx::Ao") && CreateTarget(s_ao[1], width / 2, height / 2, "BleakFx::Ao")
             && CreateTarget(s_rays[0], width / 4, height / 4, "BleakFx::Rays") && CreateTarget(s_rays[1], width / 4, height / 4, "BleakFx::Rays");
@@ -276,6 +301,11 @@ namespace {
 
             ok = CreateTarget(s_bloomDown[s_bloomLevels], levelWidth, levelHeight, "BleakFx::BloomDown") && CreateTarget(s_bloomUp[s_bloomLevels], levelWidth, levelHeight, "BleakFx::BloomUp");
             s_bloomLevels++;
+        }
+
+        // The water's depth copy is optional (R32F render targets).
+        if (ok && g_theGxDevicePtr->Caps().m_rttFormat[GxTex_R32F]) {
+            CreateTarget(s_waterDepth, width, height, "BleakFx::WaterDepth", GxTex_R32F, GxTex_Nearest);
         }
 
         if (!ok || s_bloomLevels < 2) {
@@ -383,11 +413,15 @@ namespace {
         result[2] = Clamp((1.6f - offScreen) / 0.6f, 0.0f, 1.0f) * Clamp(direction.z * 6.0f, 0.0f, 1.0f);
     }
 
+    // A perspective projection with a far plane is needed to turn depth back into distance.
+    bool PerspectiveProjection(const C44Matrix& p) {
+        return p.a0 != 0.0f && p.b1 != 0.0f && p.d3 == 0.0f && fabsf(1.0f - p.c2) >= 1e-6f;
+    }
+
     // Sets c218 and c217 of the depth shaders (bh_common.hlsli) for projection p and a world drawn into the depth range
-    // [minZ, maxZ] of its viewport. Returns false when p cannot turn depth back into distance (a perspective
-    // projection with a far plane is needed).
+    // [minZ, maxZ] of its viewport. Returns false when p cannot turn depth back into distance.
     bool SetDepthConstants(const C44Matrix& p, float minZ, float maxZ) {
-        if (p.a0 == 0.0f || p.b1 == 0.0f || p.d3 != 0.0f || fabsf(1.0f - p.c2) < 1e-6f || !(maxZ > minZ)) {
+        if (!PerspectiveProjection(p) || !(maxZ > minZ)) {
             return false;
         }
 
@@ -544,6 +578,45 @@ namespace {
             RunPass(Ps_Cas, nullptr, inputs, 1);
         }
     }
+
+    void RippleTexUserFunc(EGxTexCommand command, uint32_t width, uint32_t height, uint32_t face, uint32_t level, void* userArg, uint32_t& texelStrideInBytes, const void*& texels) {
+        if (command != GxTex_Latch) {
+            return;
+        }
+
+        uint32_t clamped = level < BleakFxRipples::kLevels ? level : BleakFxRipples::kLevels - 1;
+        texels = BleakFxRipples::Levels() + BleakFxRipples::LevelOffset(clamped);
+        texelStrideInBytes = BleakFxRipples::LevelSize(clamped) * 4;
+    }
+
+    // The ripple texture, made the first time the water draws (a managed texture: it survives device resets).
+    CGxTex* RippleTexture() {
+        if (!s_rippleTex) {
+            CGxTexFlags flags(GxTex_LinearMipLinear, GxTex_Wrap, GxTex_Wrap, 0, 0, 0, 1);
+
+            if (!GxTexCreate(GxTex_2d, BleakFxRipples::kSize, BleakFxRipples::kSize, 0, GxTex_Argb8888, GxTex_Argb8888, flags, nullptr, RippleTexUserFunc, "BleakFx::Ripples", s_rippleTex)) {
+                s_rippleTex = nullptr;
+            }
+        }
+
+        return s_rippleTex;
+    }
+
+    bool WindowSize(int32_t& width, int32_t& height) {
+        const CRect& window = g_theGxDevicePtr->DeviceDefWindow();
+        width = static_cast<int32_t>(window.maxX - window.minX);
+        height = static_cast<int32_t>(window.maxY - window.minY);
+        return width >= kMinTargetSize && height >= kMinTargetSize;
+    }
+
+    float Linear(uint8_t channel) {
+        float c = channel / 255.0f;
+        return c * c;
+    }
+
+    double Fraction(double value) {
+        return value - floor(value);
+    }
 }
 
 void BleakFx::Init() {
@@ -563,21 +636,161 @@ void BleakFx::Init() {
     s_cvarAo = CVar::Register("bleakFxAO", "Ambient occlusion strength (0 - 1, 0 = off; needs multisampling off)", 0x1, "0.6", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
     s_cvarAoRadius = CVar::Register("bleakFxAORadius", "Ambient occlusion radius in yards (0.25 - 5)", 0x1, "1.5", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
     s_cvarSunShafts = CVar::Register("bleakFxSunShafts", "Light shafts from the sun (0 - 1, 0 = off; needs multisampling off)", 0x1, "0.4", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
+    s_cvarWater = CVar::Register("bleakFxWater", "Water with reflections, refraction and colour by depth (1 on, 0 the stock water)", 0x1, "1", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
+    s_cvarWaterRipples = CVar::Register("bleakFxWaterRipples", "Water ripple strength (0 - 0.4)", 0x1, "0.12", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
+    s_cvarWaterReflections = CVar::Register("bleakFxWaterReflections", "Water reflects the world, not only the sky (1 on, 0 off; needs multisampling off)", 0x1, "1", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
 }
 
 void BleakFx::Destroy() {
     DestroyTargets();
+
+    if (s_rippleTex) {
+        GxTexDestroy(s_rippleTex);
+        s_rippleTex = nullptr;
+    }
+
+    s_waterReady = false;
+    s_waterDepthReady = false;
     GxBleakDepthSet(false);
     GxBleakDepthDestroyHandle();
     s_bloomRan = false;
     s_depthReady = false;
 }
 
+void BleakFx::BeginLiquids() {
+    s_waterReady = false;
+    s_waterDepthReady = false;
+
+    if (!Enabled() || !s_cvarWater || !s_cvarWater->m_intValue || !ShadersValid()) {
+        return;
+    }
+
+    // The world draws into the back buffer and fills the window (the water maps the whole window); never copy
+    // anything else.
+    CGxTex* renderTarget;
+    g_theGxDevicePtr->DeviceGetRenderTarget(GxBuffers_Color, renderTarget);
+    float minX, maxX, minY, maxY, minZ, maxZ;
+    GxXformViewport(minX, maxX, minY, maxY, minZ, maxZ);
+    int32_t width, height;
+
+    if (renderTarget || !FillsWindow(minX, maxX, minY, maxY) || !WindowSize(width, height) || !EnsureTargets(width, height)) {
+        return;
+    }
+
+    C2iVector origin = { 0, 0 };
+    C2iVector size = { width, height };
+
+    if (!GxTexCopy(s_waterScene.tex, origin, origin, size, 0, 0)) {
+        return;
+    }
+
+    s_waterReady = true;
+
+    // The depth as view depth in yards, from the readable depth buffer (which stays bound for the world).
+    Target depth = { GxBleakDepthTexture(), s_width, s_height };
+
+    if (!s_depthReady || !depth.tex || !s_waterDepth.tex || !PerspectiveProjection(s_projection) || !(maxZ > minZ)) {
+        return;
+    }
+
+    g_theGxDevicePtr->RsPush();
+    GxRsSet(GxRs_BlendingMode, GxBlend_Opaque);
+    GxRsSet(GxRs_AlphaRef, 0);
+    GxRsSet(GxRs_DepthTest, 0);
+    GxRsSet(GxRs_DepthWrite, 0);
+    GxRsSet(GxRs_ColorWrite, 15);
+    GxRsSet(GxRs_Culling, 0);
+    GxRsSet(GxRs_Fog, 0);
+    GxRsSet(GxRs_Lighting, 0);
+    GxRsSet(GxRs_ScissorTest, 0);
+    GxRsSet(GxRs_ClipPlaneMask, 0);
+    GxRsSet(GxRs_VertexShader, s_vertexShader);
+
+    const Target* inputs[1] = { &depth };
+    SetDepthConstants(s_projection, minZ, maxZ);
+    RunPass(Ps_DepthCopy, &s_waterDepth, inputs, 1);
+
+    g_theGxDevicePtr->RsPop();
+    GxRenderTargetSet(GxBuffers_Color, nullptr, 0);
+    GxXformSetViewport(minX, maxX, minY, maxY, minZ, maxZ);
+    s_waterDepthReady = true;
+}
+
+bool BleakFx::BindWater(const WaterDraw& draw) {
+    if (!s_waterReady || !Enabled() || !s_cvarWater || !s_cvarWater->m_intValue || !ShadersValid()) {
+        return false;
+    }
+
+    CGxTex* ripples = RippleTexture();
+
+    if (!ripples) {
+        return false;
+    }
+
+    C44Matrix v;
+    GxXformView(v);
+    const C44Matrix& p = g_theGxDevicePtr->m_projNative;
+
+    // Stages 0 and 1 hold the stock textures (depth gradient, animated surface).
+    g_theGxDevicePtr->RsSet(GxRs_VertexShader, s_waterVertexShader);
+    g_theGxDevicePtr->RsSet(GxRs_PixelShader, s_pixelShaders[Ps_Water]);
+    g_theGxDevicePtr->RsSet(GxRs_Texture2, s_waterScene.tex);
+    g_theGxDevicePtr->RsSet(GxRs_Texture3, s_waterDepthReady ? s_waterDepth.tex : s_waterScene.tex);
+    g_theGxDevicePtr->RsSet(GxRs_Texture4, ripples);
+
+    double seconds = (OsGetAsyncTimeMs() % 3600000u) / 1000.0;
+    bool reflections = s_cvarWaterReflections && s_cvarWaterReflections->m_intValue;
+    SetPsVector(kPsWater + 0, static_cast<float>(seconds), s_waterDepthReady ? 1.0f : 0.0f, 0.04f, reflections ? 1.0f : 0.0f);
+
+    // Directions have no translation: the 3x3 part of the row-vector view matrix.
+    const C3Vector& sun = s_light.sunDirection;
+    float sx = sun.x * v.a0 + sun.y * v.b0 + sun.z * v.c0;
+    float sy = sun.x * v.a1 + sun.y * v.b1 + sun.z * v.c1;
+    float sz = sun.x * v.a2 + sun.y * v.b2 + sun.z * v.c2;
+    SetPsVector(kPsWater + 1, sx, sy, sz, s_light.sunVisible ? Clamp(sun.z * 6.0f, 0.0f, 1.0f) : 0.0f);
+    SetPsVector(kPsWater + 2, Linear(s_light.sunColor.r), Linear(s_light.sunColor.g), Linear(s_light.sunColor.b), 0.6f);
+    SetPsVector(kPsWater + 3, Linear(s_light.skyZenith.r), Linear(s_light.skyZenith.g), Linear(s_light.skyZenith.b), 0.0f);
+    SetPsVector(kPsWater + 4, Linear(s_light.skyHorizon.r), Linear(s_light.skyHorizon.g), Linear(s_light.skyHorizon.b), 0.0f);
+    SetPsVector(kPsWater + 5, 1.0f / s_width, 1.0f / s_height, static_cast<float>(s_width), static_cast<float>(s_height));
+    SetPsVector(kPsWater + 6, p.a0, p.b1, 0.0f, 0.0f);
+    SetPsVector(kPsWater + 7, CVarFloat(s_cvarWaterRipples, 0.0f, 0.4f), 1.0f, 4.67f, 1.0f);
+
+    float upLength = sqrtf(v.c0 * v.c0 + v.c1 * v.c1 + v.c2 * v.c2);
+    upLength = upLength > 0.0f ? upLength : 1.0f;
+    SetPsVector(kPsWater + 8, v.c0 / upLength, v.c1 / upLength, v.c2 / upLength, 0.0f);
+
+    // View to world: the transpose of the view rotation (orthonormal).
+    SetPsVector(kPsWater + 9, v.a0, v.b0, v.c0, 0.0f);
+    SetPsVector(kPsWater + 10, v.a1, v.b1, v.c1, 0.0f);
+    SetPsVector(kPsWater + 11, v.a2, v.b2, v.c2, 0.0f);
+
+    // Two ripple layers in world space; the shader adds the camera-relative part, so the large world
+    // coordinates are reduced here, in double precision.
+    const double scaleA = 1.0 / 7.0;
+    const double scaleB = 1.0 / 4.3;
+    const double angle = 0.9;
+    double cosB = cos(angle);
+    double sinB = sin(angle);
+    double camX = draw.cameraPos.x;
+    double camY = draw.cameraPos.y;
+    double turnedX = camX * cosB + camY * sinB;
+    double turnedY = -camX * sinB + camY * cosB;
+    SetPsVector(kPsWater + 12, static_cast<float>(Fraction(camX * scaleA + seconds * 0.031)), static_cast<float>(Fraction(camY * scaleA + seconds * 0.017)), static_cast<float>(scaleA), 0.0f);
+    SetPsVector(kPsWater + 13, static_cast<float>(Fraction(turnedX * scaleB - seconds * 0.023)), static_cast<float>(Fraction(turnedY * scaleB + seconds * 0.041)), static_cast<float>(scaleB), 0.0f);
+    SetPsVector(kPsWater + 14, static_cast<float>(cosB), static_cast<float>(sinB), static_cast<float>(-sinB), static_cast<float>(cosB));
+    SetPsVector(kPsWater + 15, draw.fogScale, draw.fogOffset, 0.0f, 0.0f);
+    return true;
+}
+
 bool BleakFx::ReplacesStockGlow() {
     return s_bloomRan;
 }
 
-void BleakFx::BeginWorld() {
+void BleakFx::BeginWorld(const WorldLight& light) {
+    s_light = light;
+    s_waterReady = false;
+    s_waterDepthReady = false;
+
     bool enabled = Enabled();
     s_depthReady = GxBleakDepthSet(enabled && WantsDepth() && ShadersValid());
 
@@ -587,8 +800,12 @@ void BleakFx::BeginWorld() {
     }
 }
 
-void BleakFx::RenderWorld(const WorldLight& light) {
+void BleakFx::RenderWorld() {
     s_bloomRan = false;
+
+    // The frame copy is this world pass's; nothing drawn after it may use it.
+    s_waterReady = false;
+    s_waterDepthReady = false;
 
     if (!Enabled()) {
         return;
@@ -602,19 +819,13 @@ void BleakFx::RenderWorld(const WorldLight& light) {
         return;
     }
 
-    const CRect& window = g_theGxDevicePtr->DeviceDefWindow();
-    int32_t width = static_cast<int32_t>(window.maxX - window.minX);
-    int32_t height = static_cast<int32_t>(window.maxY - window.minY);
+    int32_t width, height;
 
     // The world's viewport: the effects map the whole window.
     float minX, maxX, minY, maxY, minZ, maxZ;
     GxXformViewport(minX, maxX, minY, maxY, minZ, maxZ);
 
-    if (!FillsWindow(minX, maxX, minY, maxY)) {
-        return;
-    }
-
-    if (width < kMinTargetSize || height < kMinTargetSize || !ShadersValid() || !EnsureTargets(width, height)) {
+    if (!FillsWindow(minX, maxX, minY, maxY) || !WindowSize(width, height) || !ShadersValid() || !EnsureTargets(width, height)) {
         return;
     }
 
@@ -626,7 +837,7 @@ void BleakFx::RenderWorld(const WorldLight& light) {
     }
 
     Settings settings;
-    ReadSettings(settings, light.zoneGlow);
+    ReadSettings(settings, s_light.zoneGlow);
     s_worldMinZ = minZ;
     s_worldMaxZ = maxZ;
 
@@ -643,7 +854,7 @@ void BleakFx::RenderWorld(const WorldLight& light) {
     GxRsSet(GxRs_ClipPlaneMask, 0);
     GxRsSet(GxRs_VertexShader, s_vertexShader);
 
-    RenderChain(settings, light);
+    RenderChain(settings, s_light);
     s_bloomRan = settings.bloom > 0.0f;
 
     g_theGxDevicePtr->RsPop();
