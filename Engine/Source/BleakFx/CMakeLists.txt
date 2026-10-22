@@ -18,6 +18,17 @@ set(BLEAKFX_SHADERS
     bh_depthcopy_ps:ps_3_0
     bh_water_vs:vs_3_0
     bh_water_ps:ps_3_0
+    bh_clear_ps:ps_3_0
+    bh_smaa_edge_ps:ps_3_0
+    bh_smaa_weights_ps:ps_3_0
+    bh_smaa_blend_ps:ps_3_0
+)
+
+# What the shaders include.
+set(BLEAKFX_SHADER_INCLUDES
+    ${CMAKE_CURRENT_SOURCE_DIR}/Shaders/bh_common.hlsli
+    ${CMAKE_CURRENT_SOURCE_DIR}/Shaders/bh_smaa_common.hlsli
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../ThirdParty/SMAA/SMAA.hlsl
 )
 
 set(BLEAKFX_FXC_HINTS)
@@ -50,7 +61,7 @@ if (BLEAKFX_FXC)
         add_custom_command(
             OUTPUT ${object}
             COMMAND ${BLEAKFX_FXC} /nologo /T ${profile} /E main /O3 /Fo ${object} ${CMAKE_CURRENT_SOURCE_DIR}/Shaders/${name}.hlsl
-            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Shaders/${name}.hlsl ${CMAKE_CURRENT_SOURCE_DIR}/Shaders/bh_common.hlsli
+            DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/Shaders/${name}.hlsl ${BLEAKFX_SHADER_INCLUDES}
             COMMENT "BleakFx: compiling ${name}.hlsl (${profile})"
             VERBATIM
         )

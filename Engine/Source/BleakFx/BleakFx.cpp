@@ -18,6 +18,8 @@
 #include "Engine/Source/Tempest/C2Vector.h"
 #include "Engine/Source/Tempest/C44Matrix.h"
 #include "Engine/Source/Tempest/CRect.h"
+#include "ThirdParty/SMAA/AreaTex.h"
+#include "ThirdParty/SMAA/SearchTex.h"
 
 namespace {
     // Shader constant registers, as in Shaders/bh_common.hlsli and bh_fullscreen_vs.hlsl.
@@ -47,6 +49,10 @@ namespace {
         Ps_DepthFx,
         Ps_DepthCopy,
         Ps_Water,
+        Ps_Clear,
+        Ps_SmaaEdge,
+        Ps_SmaaWeights,
+        Ps_SmaaBlend,
         Ps_Count,
     };
 
@@ -68,6 +74,7 @@ namespace {
         float brightness;
         float shadows;
         bool fxaa;
+        bool smaa;
         float sharpen;
         float ao;
         float aoRadius;
@@ -114,6 +121,11 @@ namespace {
     Target s_waterScene;
     Target s_waterDepth;
     CGxTex* s_rippleTex;
+    // SMAA: its blending weights (full size), and its area and search textures. Made when SMAA is first used.
+    Target s_smaaWeights;
+    CGxTex* s_smaaArea;
+    CGxTex* s_smaaSearch;
+    bool s_smaaFailed;
     uint32_t s_bloomLevels;
     int32_t s_width;
     int32_t s_height;
@@ -190,6 +202,10 @@ namespace {
             s_pixelShaders[Ps_DepthFx] = CreateShader(GxSh_Pixel, "BleakFx:DepthFx", BLEAKFX_SHADER(bh_depthfx_ps));
             s_pixelShaders[Ps_DepthCopy] = CreateShader(GxSh_Pixel, "BleakFx:DepthCopy", BLEAKFX_SHADER(bh_depthcopy_ps));
             s_pixelShaders[Ps_Water] = CreateShader(GxSh_Pixel, "BleakFx:Water", BLEAKFX_SHADER(bh_water_ps));
+            s_pixelShaders[Ps_Clear] = CreateShader(GxSh_Pixel, "BleakFx:Clear", BLEAKFX_SHADER(bh_clear_ps));
+            s_pixelShaders[Ps_SmaaEdge] = CreateShader(GxSh_Pixel, "BleakFx:SmaaEdge", BLEAKFX_SHADER(bh_smaa_edge_ps));
+            s_pixelShaders[Ps_SmaaWeights] = CreateShader(GxSh_Pixel, "BleakFx:SmaaWeights", BLEAKFX_SHADER(bh_smaa_weights_ps));
+            s_pixelShaders[Ps_SmaaBlend] = CreateShader(GxSh_Pixel, "BleakFx:SmaaBlend", BLEAKFX_SHADER(bh_smaa_blend_ps));
             s_waterVertexShader = CreateShader(GxSh_Vertex, "BleakFx:WaterVs", BLEAKFX_SHADER(bh_water_vs));
         }
 #undef BLEAKFX_SHADER
@@ -254,6 +270,8 @@ namespace {
 
         DestroyTarget(s_waterScene);
         DestroyTarget(s_waterDepth);
+        DestroyTarget(s_smaaWeights);
+        s_smaaFailed = false;
 
         s_bloomLevels = 0;
         s_width = 0;
@@ -370,7 +388,9 @@ namespace {
         settings.warmth = CVarFloat(s_cvarWarmth, -1.0f, 1.0f);
         settings.brightness = CVarFloat(s_cvarBrightness, 0.5f, 1.5f);
         settings.shadows = CVarFloat(s_cvarShadows, -0.05f, 0.1f);
-        settings.fxaa = s_cvarAntiAliasing && s_cvarAntiAliasing->m_intValue == 1;
+        int32_t antiAliasing = s_cvarAntiAliasing ? s_cvarAntiAliasing->m_intValue : 0;
+        settings.fxaa = antiAliasing == 1;
+        settings.smaa = antiAliasing == 2;
         settings.sharpen = CVarFloat(s_cvarSharpen, 0.0f, 1.0f);
         settings.ao = CVarFloat(s_cvarAo, 0.0f, 1.0f);
         settings.aoRadius = CVarFloat(s_cvarAoRadius, 0.25f, 5.0f);
@@ -535,6 +555,78 @@ namespace {
         }
     }
 
+    // SMAA's area texture (two channels) and search texture (one channel) as A8R8G8B8, bytes b, g, r, a: the data
+    // in red and green (bh_smaa_common.hlsli).
+    void SmaaAreaTexUserFunc(EGxTexCommand command, uint32_t width, uint32_t height, uint32_t face, uint32_t level, void* userArg, uint32_t& texelStrideInBytes, const void*& texels) {
+        static uint8_t s_texels[AREATEX_WIDTH * AREATEX_HEIGHT * 4];
+        static bool s_made;
+
+        if (command != GxTex_Latch) {
+            return;
+        }
+
+        if (!s_made) {
+            for (uint32_t i = 0; i < AREATEX_WIDTH * AREATEX_HEIGHT; i++) {
+                s_texels[i * 4 + 0] = 0;
+                s_texels[i * 4 + 1] = areaTexBytes[i * 2 + 1];
+                s_texels[i * 4 + 2] = areaTexBytes[i * 2 + 0];
+                s_texels[i * 4 + 3] = 255;
+            }
+
+            s_made = true;
+        }
+
+        texels = s_texels;
+        texelStrideInBytes = AREATEX_WIDTH * 4;
+    }
+
+    void SmaaSearchTexUserFunc(EGxTexCommand command, uint32_t width, uint32_t height, uint32_t face, uint32_t level, void* userArg, uint32_t& texelStrideInBytes, const void*& texels) {
+        static uint8_t s_texels[SEARCHTEX_WIDTH * SEARCHTEX_HEIGHT * 4];
+        static bool s_made;
+
+        if (command != GxTex_Latch) {
+            return;
+        }
+
+        if (!s_made) {
+            for (uint32_t i = 0; i < SEARCHTEX_WIDTH * SEARCHTEX_HEIGHT; i++) {
+                s_texels[i * 4 + 0] = 0;
+                s_texels[i * 4 + 1] = 0;
+                s_texels[i * 4 + 2] = searchTexBytes[i];
+                s_texels[i * 4 + 3] = 255;
+            }
+
+            s_made = true;
+        }
+
+        texels = s_texels;
+        texelStrideInBytes = SEARCHTEX_WIDTH * 4;
+    }
+
+    // SMAA's resources for the current targets; false when they cannot be made (FXAA then stands in).
+    bool EnsureSmaa() {
+        if (s_smaaFailed) {
+            return false;
+        }
+
+        CGxTexFlags flags(GxTex_Linear, GxTex_Clamp, GxTex_Clamp, 0, 0, 0, 1);
+
+        if (!s_smaaArea && !GxTexCreate(GxTex_NonPow2, AREATEX_WIDTH, AREATEX_HEIGHT, 0, GxTex_Argb8888, GxTex_Argb8888, flags, nullptr, SmaaAreaTexUserFunc, "BleakFx::SmaaArea", s_smaaArea)) {
+            s_smaaArea = nullptr;
+        }
+
+        if (!s_smaaSearch && !GxTexCreate(GxTex_2d, SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT, 0, GxTex_Argb8888, GxTex_Argb8888, flags, nullptr, SmaaSearchTexUserFunc, "BleakFx::SmaaSearch", s_smaaSearch)) {
+            s_smaaSearch = nullptr;
+        }
+
+        if (!s_smaaWeights.tex) {
+            CreateTarget(s_smaaWeights, s_width, s_height, "BleakFx::SmaaWeights");
+        }
+
+        s_smaaFailed = !s_smaaArea || !s_smaaSearch || !s_smaaWeights.tex;
+        return !s_smaaFailed;
+    }
+
     void RenderChain(const Settings& settings, const BleakFx::WorldLight& light) {
         // The frame is in s_scene; each pass writes into the other of s_scene and s_post, the last one into the back
         // buffer.
@@ -553,7 +645,9 @@ namespace {
         }
 
         bool sharpen = settings.sharpen > 0.0f;
-        const Target* inputs[2];
+        bool smaa = settings.smaa && EnsureSmaa();
+        bool fxaa = settings.fxaa || (settings.smaa && !smaa);
+        const Target* inputs[3];
 
         // Without the pyramid the frame stands in for it; bloom and clarity are then 0 and do not read it.
         inputs[0] = frame;
@@ -565,11 +659,29 @@ namespace {
         SetPsVector(kPsParams + 2, lift, lift, lift * 1.5f, 0.0f);
         SetPsVector(kPsParams + 3, settings.brightness, settings.brightness, settings.brightness, 1.0f);
         SetPsVector(kPsParams + 4, 1.0f + warm, 1.0f, 1.0f - warm, 1.0f);
-        RunPass(Ps_Composite, settings.fxaa || sharpen ? spare : nullptr, inputs, 2);
+        RunPass(Ps_Composite, fxaa || smaa || sharpen ? spare : nullptr, inputs, 2);
 
         Target* composed = spare;
 
-        if (settings.fxaa) {
+        if (smaa) {
+            // The edges go into the frame's target, free after the composite. The edge pass discards the pixels
+            // without an edge, so the target is cleared first.
+            RunPass(Ps_Clear, frame, inputs, 0);
+            inputs[0] = composed;
+            RunPass(Ps_SmaaEdge, frame, inputs, 1);
+
+            Target area = { s_smaaArea, AREATEX_WIDTH, AREATEX_HEIGHT };
+            Target search = { s_smaaSearch, SEARCHTEX_WIDTH, SEARCHTEX_HEIGHT };
+            inputs[0] = frame;
+            inputs[1] = &area;
+            inputs[2] = &search;
+            RunPass(Ps_SmaaWeights, &s_smaaWeights, inputs, 3);
+
+            inputs[0] = composed;
+            inputs[1] = &s_smaaWeights;
+            RunPass(Ps_SmaaBlend, sharpen ? frame : nullptr, inputs, 2);
+            composed = frame;
+        } else if (fxaa) {
             inputs[0] = composed;
             SetPsVector(kPsParams, 0.75f, 0.125f, 0.0312f, 0.0f);
             RunPass(Ps_Fxaa, sharpen ? frame : nullptr, inputs, 1);
@@ -635,7 +747,7 @@ void BleakFx::Init() {
     s_cvarWarmth = CVar::Register("bleakFxWarmth", "Colour temperature (-1 cool - 1 warm)", 0x1, "0.3", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
     s_cvarBrightness = CVar::Register("bleakFxBrightness", "Midtone brightness (0.5 - 1.5, 1 = unchanged)", 0x1, "1", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
     s_cvarShadows = CVar::Register("bleakFxShadows", "Shadow lift (-0.05 - 0.1)", 0x1, "0.012", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
-    s_cvarAntiAliasing = CVar::Register("bleakFxAA", "Post-process anti-aliasing (0 off, 1 FXAA)", 0x1, "1", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
+    s_cvarAntiAliasing = CVar::Register("bleakFxAA", "Post-process anti-aliasing (0 off, 1 FXAA, 2 SMAA)", 0x1, "2", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
     s_cvarSharpen = CVar::Register("bleakFxSharpen", "Contrast-adaptive sharpening (0 - 1, 0 = off)", 0x1, "0.25", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
     s_cvarAo = CVar::Register("bleakFxAO", "Ambient occlusion strength (0 - 1, 0 = off; needs multisampling off)", 0x1, "0.6", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
     s_cvarAoRadius = CVar::Register("bleakFxAORadius", "Ambient occlusion radius in yards (0.25 - 5)", 0x1, "1.5", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
@@ -653,6 +765,16 @@ void BleakFx::Destroy() {
     if (s_rippleTex) {
         GxTexDestroy(s_rippleTex);
         s_rippleTex = nullptr;
+    }
+
+    if (s_smaaArea) {
+        GxTexDestroy(s_smaaArea);
+        s_smaaArea = nullptr;
+    }
+
+    if (s_smaaSearch) {
+        GxTexDestroy(s_smaaSearch);
+        s_smaaSearch = nullptr;
     }
 
     s_waterReady = false;

@@ -259,7 +259,7 @@ slider for each effect; they are the `bleakFx*` CVars, saved in `Config.wtf`.
 - Needs the Direct3D 9 renderer (the default, `gxApi d3d9` or `d3d9ex`) and shader model 3; with anything else
   the frame is drawn exactly as by the stock client. Ambient occlusion and light shafts also need Multisampling
   1x: an INTZ depth texture stands in for the back buffer's depth buffer (`Engine/Source/Gx/BleakDepth.h`), and
-  INTZ cannot be multisampled. FXAA replaces the multisampling.
+  INTZ cannot be multisampled. SMAA or FXAA replaces the multisampling.
 - Only a world that fills the window is processed; one that an addon draws into part of the window (a resized
   WorldFrame) stays as the stock client draws it.
 - The bloom stands in for the stock full screen glow; the underwater and drunk blur stay. Zones whose light
@@ -287,12 +287,16 @@ slider for each effect; they are the `bleakFx*` CVars, saved in `Config.wtf`.
   without them and BleakFx stays off.
 - CVars: `bleakFx` (on/off), `bleakFxAO`, `bleakFxAORadius`, `bleakFxSunShafts`, `bleakFxBloom`,
   `bleakFxBloomThreshold`, `bleakFxClarity`, `bleakFxContrast`, `bleakFxSaturation`, `bleakFxVibrance`,
-  `bleakFxWarmth`, `bleakFxBrightness`, `bleakFxShadows`, `bleakFxVignette`, `bleakFxAA` (0 off, 1 FXAA),
+  `bleakFxWarmth`, `bleakFxBrightness`, `bleakFxShadows`, `bleakFxVignette`, `bleakFxAA` (0 off, 1 FXAA, 2 SMAA),
   `bleakFxSharpen`, `bleakFxWater` (0 the stock water), `bleakFxWaterReflections`, `bleakFxWaterRipples`,
   `bleakFxGrassWind` (0 still - 2) and `bleakFxGrassParting`; each one's description gives its range.
+- Anti-aliasing: SMAA 1x (`bleakFxAA 2`, the default) is the reference implementation of SMAA by Jimenez et al.
+  (MIT, `ThirdParty/SMAA`): luma edges, the High preset, compiled for shader model 3; FXAA (`bleakFxAA 1`) is the
+  cheaper choice.
 - Methods: ambient occlusion after Scalable Ambient Obscurance (McGuire, Mara and Luebke, 2012), bloom after
   Jimenez's downsample and upsample filters (2014), FXAA after Timothy Lottes' FXAA 3.11, sharpening after AMD
-  FidelityFX CAS (MIT). The shaders are written for this client; none is copied from those sources.
+  FidelityFX CAS (MIT). Apart from SMAA, the shaders are written for this client; none is copied from those
+  sources.
 
 ## Login screen and character creation
 
@@ -325,6 +329,7 @@ this works with signature checks on or off.
 | `WoW/Common/` | Code shared by the game modules |
 | `ThirdParty/` | Libraries linked from their upstream sources |
 | `ThirdParty/WarcraftXL/` | WarcraftXL's modern-asset conversions (GPL-3.0-or-later) |
+| `ThirdParty/SMAA/` | SMAA, the anti-aliasing of BleakFx (MIT) |
 | `Tools/MpqPack/` | Python tool that packs files into an MPQ patch archive the client loads (`Data\patch-<letter>.MPQ`) |
 | `Tools/RaceForge/` | Python tool that adds the Bleakhold races (High Elf, Eredar) to your own DBCs and writes the AzerothCore SQL |
 | `Tools/BlpConvert/` | Python tool that converts pictures to BLP textures; draws the login art |

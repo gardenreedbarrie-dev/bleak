@@ -46,10 +46,12 @@ G.SLIDERS = {
       help = "How strongly the wind moves the grass: 0 still, 1 a breeze, 2 a strong wind." },
 }
 
--- On/off buttons: console variable, label, help.
+-- Buttons that step through a variable's states (on and off when a button names none): console variable, label,
+-- states, help.
 G.TOGGLES = {
-    { cvar = "bleakFxAA", label = "Anti-aliasing",
-      help = "Smooths jagged edges after the world is drawn (FXAA). Works with multisampling off." },
+    { cvar = "bleakFxAA", label = "Anti-aliasing", states = { { 0, "off" }, { 1, "FXAA" }, { 2, "SMAA" } },
+      help = "Smooths jagged edges after the world is drawn: FXAA is the fastest, SMAA the sharpest. Works with "
+          .. "multisampling off." },
     { cvar = "bleakFxWater", label = "Modern water",
       help = "Water with reflections, refraction and colour by depth. Off: the stock water." },
     { cvar = "bleakFxWaterReflections", label = "Reflections",
@@ -68,13 +70,13 @@ G.PRESETS = {
         bleakFxSaturation = 1, bleakFxVibrance = 0.1, bleakFxWarmth = 0.1, bleakFxBrightness = 1, bleakFxShadows = 0,
         bleakFxVignette = 0.08, bleakFxSharpen = 0.2 } },
     { key = "bleakhold", text = "Bleakhold", values = {
-        bleakFx = 1, bleakFxAA = 1, bleakFxWater = 1, bleakFxWaterReflections = 1, bleakFxWaterRipples = 0.12,
+        bleakFx = 1, bleakFxAA = 2, bleakFxWater = 1, bleakFxWaterReflections = 1, bleakFxWaterRipples = 0.12,
         bleakFxGrassWind = 1, bleakFxGrassParting = 1, bleakFxAO = 0.6, bleakFxAORadius = 1.5,
         bleakFxSunShafts = 0.4, bleakFxBloom = 0.35, bleakFxClarity = 0.35, bleakFxContrast = 0.18,
         bleakFxSaturation = 1.05, bleakFxVibrance = 0.25, bleakFxWarmth = 0.3, bleakFxBrightness = 1,
         bleakFxShadows = 0.012, bleakFxVignette = 0.18, bleakFxSharpen = 0.25 } },
     { key = "cinematic", text = "Cinematic", values = {
-        bleakFx = 1, bleakFxAA = 1, bleakFxWater = 1, bleakFxWaterReflections = 1, bleakFxWaterRipples = 0.16,
+        bleakFx = 1, bleakFxAA = 2, bleakFxWater = 1, bleakFxWaterReflections = 1, bleakFxWaterRipples = 0.16,
         bleakFxGrassWind = 1.3, bleakFxGrassParting = 1, bleakFxAO = 0.85, bleakFxAORadius = 2,
         bleakFxSunShafts = 0.7, bleakFxBloom = 0.6, bleakFxClarity = 0.45, bleakFxContrast = 0.3,
         bleakFxSaturation = 1.1, bleakFxVibrance = 0.35, bleakFxWarmth = 0.4, bleakFxBrightness = 1,
@@ -89,6 +91,20 @@ end
 local function cvarNumber(name, default)
     local v = G.Available() and tonumber(GetCVar(name)) or nil
     return v or default
+end
+
+local ON_OFF = { { 0, "off" }, { 1, "on" } }
+
+-- The state of a button's variable (the first state when the value is none of them), and the next one.
+function G.ToggleState(t)
+    local states = t.states or ON_OFF
+    local value = cvarNumber(t.cvar, states[#states][1])
+    for i, state in ipairs(states) do
+        if state[1] == value then
+            return state, states[i % #states + 1]
+        end
+    end
+    return states[1], states[2]
 end
 
 -- Rounded to the slider's step, so that saved values stay short ("0.35", not "0.3500001").
@@ -175,7 +191,8 @@ for i, t in ipairs(G.TOGGLES) do
     local b = UI.Button(content, 145, 26, "", "dark", 12)
     b:SetPoint("TOPLEFT", content, "TOPLEFT", 20 + (i - 1) * 150, -50)
     b:SetScript("OnClick", function()
-        G.Set(t.cvar, cvarNumber(t.cvar, 1) == 1 and 0 or 1)
+        local _, nextState = G.ToggleState(t)
+        G.Set(t.cvar, nextState[1])
         G.Refresh()
     end)
     b.tooltip = function()
@@ -277,7 +294,7 @@ function G.Refresh()
     f.reset:SetActive(available)
     for _, b in ipairs(f.toggles) do
         b:SetActive(on)
-        b:SetLabel(b.def.label .. (cvarNumber(b.def.cvar, 1) == 1 and ": on" or ": off"))
+        b:SetLabel(b.def.label .. ": " .. G.ToggleState(b.def)[2])
     end
     if not available then
         f.note:SetText("This client has no Bleakhold graphics. Install the Bleakhold client to use them.")

@@ -1,6 +1,6 @@
 -- Graphics window: the bleakFx* console variables of the Bleakhold client.
 local DEFAULTS = {
-    bleakFx = "1", bleakFxAA = "1", bleakFxAO = "0.6", bleakFxAORadius = "1.5", bleakFxSunShafts = "0.4",
+    bleakFx = "1", bleakFxAA = "2", bleakFxAO = "0.6", bleakFxAORadius = "1.5", bleakFxSunShafts = "0.4",
     bleakFxBloom = "0.35", bleakFxBloomThreshold = "0.8", bleakFxClarity = "0.35", bleakFxContrast = "0.18",
     bleakFxSaturation = "1.05", bleakFxVibrance = "0.25", bleakFxWarmth = "0.3", bleakFxBrightness = "1",
     bleakFxShadows = "0.012", bleakFxVignette = "0.18", bleakFxSharpen = "0.25", gxMultisample = "1",
@@ -92,9 +92,16 @@ test("graphics: defaults are the Bleakhold preset; presets and sliders set the v
     H.eq(M.cvars.bleakFxClarity, "0.2")
     H.eq(G.CurrentPreset(), "classic")
 
+    H.eq(G.frame.toggles[1].label:GetText(), "Anti-aliasing: FXAA", "Classic+ uses FXAA")
+    G.frame.toggles[1]:Click()
+    H.eq(M.cvars.bleakFxAA, "2")
+    H.eq(G.frame.toggles[1].label:GetText(), "Anti-aliasing: SMAA")
     G.frame.toggles[1]:Click()
     H.eq(M.cvars.bleakFxAA, "0")
     H.eq(G.frame.toggles[1].label:GetText(), "Anti-aliasing: off")
+    M.cvars.bleakFxAA = "7"
+    G.Refresh()
+    H.eq(G.frame.toggles[1].label:GetText(), "Anti-aliasing: off", "an unknown value reads as the first state")
     G.frame.toggles[2]:Click()
     H.eq(M.cvars.bleakFxWater, "0")
     H.eq(G.frame.toggles[2].label:GetText(), "Modern water: off")
@@ -106,7 +113,7 @@ test("graphics: defaults are the Bleakhold preset; presets and sliders set the v
     H.eq(G.CurrentPreset(), "custom")
     G.frame.reset:Click()
     H.eq(G.CurrentPreset(), "bleakhold")
-    H.eq(M.cvars.bleakFxAA, "1")
+    H.eq(M.cvars.bleakFxAA, "2")
     H.eq(M.cvars.bleakFxWater, "1")
     H.eq(M.cvars.bleakFxGrassWind, "1")
     H.eq(M.cvars.bleakFxGrassParting, "1")

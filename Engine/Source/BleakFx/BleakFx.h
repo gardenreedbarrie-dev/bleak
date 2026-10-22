@@ -8,7 +8,7 @@
 class CGxShader;
 
 // BLEAKHOLD(bleakfx): post-processing of the 3D world after it is drawn and before the interface: ambient occlusion
-// and light shafts from the depth buffer, bloom, clarity (local contrast), colour grading, vignette, FXAA and
+// and light shafts from the depth buffer, bloom, clarity (local contrast), colour grading, vignette, SMAA or FXAA and
 // contrast-adaptive sharpening; and water with reflections, refraction and colour by depth. The shaders
 // (Shaders/*.hlsl, ps_3_0 and vs_3_0) are compiled with fxc at build time and created from memory, so they need no
 // game files. Runs on the Direct3D 9 devices with shader model 3 only;
