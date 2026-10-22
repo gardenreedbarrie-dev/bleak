@@ -154,9 +154,10 @@ variable `WXL_VERBOSE_ASSET_LOGS=1` to log every converted file.
 
 ### License
 
-The conversion code is GPL-3.0-or-later (`ThirdParty/WarcraftXL`, `Engine/Source/ModernAssets`,
-`Engine/Source/Model2/M2Modern.*`, `WoW/Source/WorldClient/MapTerrainTiling.*`). Whoever distributes a client built with it must make the corresponding
-source code available under the same license.
+The conversion code (`ThirdParty/WarcraftXL`, `Engine/Source/ModernAssets`, `Engine/Source/Model2/M2Modern.*`,
+`WoW/Source/WorldClient/MapTerrainTiling.*`) and the grass wind (`Engine/Source/Gx/BleakGrassWind.*`) are
+GPL-3.0-or-later. Whoever distributes a client built with them must make the corresponding source code available
+under the same license.
 
 ## Bleakhold races
 
@@ -250,8 +251,8 @@ ignore the packet.
 The Bleakhold client post-processes the 3D world after it is drawn and before the interface
 (BLEAKHOLD(bleakfx), `Engine/Source/BleakFx`): ambient occlusion and light shafts from the depth buffer, bloom,
 clarity (local contrast), colour grading with a filmic contrast curve, vignette, FXAA and contrast-adaptive
-sharpening; and it draws water with reflections, refraction and colour by depth. The interface, chat and emoji
-bubbles stay sharp on top. In game, `/bh graphics` (or a key binding
+sharpening; it draws water with reflections, refraction and colour by depth, and the wind moves the grass. The
+interface, chat and emoji bubbles stay sharp on top. In game, `/bh graphics` (or a key binding
 in Key Bindings > Bleakhold) opens the settings window with presets (Off, Classic+, Bleakhold, Cinematic) and a
 slider for each effect; they are the `bleakFx*` CVars, saved in `Config.wtf`.
 
@@ -272,14 +273,23 @@ slider for each effect; they are the `bleakFx*` CVars, saved in `Config.wtf`.
   start (no game files). Reflections of the world, the foam and the soft shoreline need the depth buffer, so
   Multisampling 1x; with multisampling the water reflects the sky only and takes its depth from the stock liquid
   data. Liquids of other materials (magma, slime) and the procedural water option keep their own shaders.
+- Grass wind (BLEAKHOLD(grasswind), `Engine/Source/Gx/BleakGrassWind.*`), ported from WarcraftXL's
+  [wxl-grasswind](https://github.com/WarcraftXL/wxl-grasswind) by iThorgrim (commit
+  `b4a52b0e334ade8829421bdde7af42781f8930e4`, GPL-3.0-or-later): when the stock detail-doodad vertex shaders
+  load, the client writes WarcraftXL's motion block into their vs_3_0 bytecode, after the view transform. Two
+  travelling waves sway each blade by its height (its texture v), and blades bend away from the player.
+  WarcraftXL disassembles and reassembles the shader with `d3dcompiler_47`; this client writes the instruction
+  tokens itself, so it needs no compiler at run time, and it keeps the stock bytecode in a comment: a device that
+  refuses the patched shader gets the stock one back. Strength 0 with no parting draws exactly the stock grass.
+  Shaders that are not the expected stock ones (another shader model, or changed by a patch) are left alone.
 - Shaders: `Engine/Source/BleakFx/Shaders/*.hlsl` (ps_3_0 and vs_3_0) are compiled with the Windows SDK's `fxc`
   during the build and embedded in the executable, so they need no game files. Without `fxc` the client builds
   without them and BleakFx stays off.
 - CVars: `bleakFx` (on/off), `bleakFxAO`, `bleakFxAORadius`, `bleakFxSunShafts`, `bleakFxBloom`,
   `bleakFxBloomThreshold`, `bleakFxClarity`, `bleakFxContrast`, `bleakFxSaturation`, `bleakFxVibrance`,
   `bleakFxWarmth`, `bleakFxBrightness`, `bleakFxShadows`, `bleakFxVignette`, `bleakFxAA` (0 off, 1 FXAA),
-  `bleakFxSharpen`, `bleakFxWater` (0 the stock water), `bleakFxWaterReflections` and `bleakFxWaterRipples`;
-  each one's description gives its range.
+  `bleakFxSharpen`, `bleakFxWater` (0 the stock water), `bleakFxWaterReflections`, `bleakFxWaterRipples`,
+  `bleakFxGrassWind` (0 still - 2) and `bleakFxGrassParting`; each one's description gives its range.
 - Methods: ambient occlusion after Scalable Ambient Obscurance (McGuire, Mara and Luebke, 2012), bloom after
   Jimenez's downsample and upsample filters (2014), FXAA after Timothy Lottes' FXAA 3.11, sharpening after AMD
   FidelityFX CAS (MIT). The shaders are written for this client; none is copied from those sources.
@@ -323,6 +333,7 @@ this works with signature checks on or off.
 | `Interface/Bleakhold/Emoji/` | Emoji bubble art (BLP, made by `Tools/EmojiForge`) with its licences and `NOTICE.md` |
 | `Interface/AddOns/Bleakhold/` | Bleakhold UI addon (Activities, Mythic+, Rift, Collections with Animations, emote wheel, Season, Leaderboards) |
 | `Tools/UiLint/` | Lint and unit tests for the Bleakhold Lua (host Lua built from the client's own source) |
+| `Tools/GrassWind/` | Tests of the grass wind shader patch (a stand-in shader, made-up bytecode and a vs_3_0 emulator) |
 | `docs/BleakholdProtocol.md` | Message protocol between the Bleakhold server module and the UI |
 | `Server/mod-bleakhold-ui/` | AzerothCore module: server side of the Bleakhold UI protocol |
 | `Engine/Source/ModernAssets/` | Runs those conversions on the files the client opens |

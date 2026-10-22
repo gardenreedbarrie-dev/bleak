@@ -1,11 +1,13 @@
 #include "Engine/Source/BleakFx/BleakFx.h"
 #include <cmath>
 #include <cstring>
+#include <vector>
 #include "BleakFxShaders.h"
 #include "Engine/Source/BleakFx/BleakFxRipples.h"
 #include "Engine/Source/ConsoleBase/ConsoleVar.h"
 #include "Engine/Source/ConsoleBase/Types.h"
 #include "Engine/Source/Gx/BleakDepth.h"
+#include "Engine/Source/Gx/BleakGrassWind.h"
 #include "Engine/Source/Gx/CGxDevice/CGxDevice.h"
 #include "Engine/Source/Gx/CGxDevice/CGxShader.h"
 #include "Engine/Source/Gx/CGxTex.h"
@@ -91,6 +93,8 @@ namespace {
     CVar* s_cvarWater;
     CVar* s_cvarWaterRipples;
     CVar* s_cvarWaterReflections;
+    CVar* s_cvarGrassWind;
+    CVar* s_cvarGrassParting;
 
     // Created once and kept as long as the device: CGxDevice::ShaderDestroy frees a CGxShader but not its Direct3D
     // shader, and the device recreates the Direct3D shaders after a reset by itself.
@@ -638,6 +642,8 @@ void BleakFx::Init() {
     s_cvarSunShafts = CVar::Register("bleakFxSunShafts", "Light shafts from the sun (0 - 1, 0 = off; needs multisampling off)", 0x1, "0.4", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
     s_cvarWater = CVar::Register("bleakFxWater", "Water with reflections, refraction and colour by depth (1 on, 0 the stock water)", 0x1, "1", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
     s_cvarWaterRipples = CVar::Register("bleakFxWaterRipples", "Water ripple strength (0 - 0.4)", 0x1, "0.12", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
+    s_cvarGrassWind = CVar::Register("bleakFxGrassWind", "Wind in the grass (0 still - 2, 1 = a breeze)", 0x1, "1", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
+    s_cvarGrassParting = CVar::Register("bleakFxGrassParting", "Grass bends away from the player (1 on, 0 off)", 0x1, "1", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
     s_cvarWaterReflections = CVar::Register("bleakFxWaterReflections", "Water reflects the world, not only the sky (1 on, 0 off; needs multisampling off)", 0x1, "1", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
 }
 
@@ -780,6 +786,56 @@ bool BleakFx::BindWater(const WaterDraw& draw) {
     SetPsVector(kPsWater + 14, static_cast<float>(cosB), static_cast<float>(sinB), static_cast<float>(-sinB), static_cast<float>(cosB));
     SetPsVector(kPsWater + 15, draw.fogScale, draw.fogOffset, 0.0f, 0.0f);
     return true;
+}
+
+void BleakFx::PatchGrassShaders(CGxShader** shaders, uint32_t count) {
+    if (!g_theGxDevicePtr || !DeviceSupported()) {
+        return;
+    }
+
+    for (uint32_t i = 0; i < count; i++) {
+        CGxShader* shader = shaders[i];
+
+        // Only code the device has not made a shader of yet (Valid() makes it from m_code).
+        if (!shader || shader->m_loaded || !shader->m_code.Count()) {
+            continue;
+        }
+
+        std::vector<uint8_t> patched;
+
+        if (BleakGrassWindPatch(shader->m_code.m_data, shader->m_code.Count(), patched)) {
+            shader->m_code.SetCount(static_cast<uint32_t>(patched.size()));
+            memcpy(shader->m_code.m_data, patched.data(), patched.size());
+        }
+    }
+}
+
+void BleakFx::SetGrassWind(const C3Vector& camera, const C3Vector* player) {
+    if (!g_theGxDevicePtr || !DeviceSupported()) {
+        return;
+    }
+
+    bool on = Enabled();
+    C44Matrix v;
+    GxXformView(v);
+
+    // The world position the grass shaders' view space starts from: the camera, moved by what the view matrix
+    // translates (the grass batches are placed relative to the camera, CWorldScene::RenderDetailDoodads).
+    BleakGrassWindInput input;
+    input.camera[0] = camera.x - (v.d0 * v.a0 + v.d1 * v.a1 + v.d2 * v.a2);
+    input.camera[1] = camera.y - (v.d0 * v.b0 + v.d1 * v.b1 + v.d2 * v.b2);
+    input.camera[2] = camera.z - (v.d0 * v.c0 + v.d1 * v.c1 + v.d2 * v.c2);
+    input.hasPlayer = player != nullptr;
+    input.player[0] = player ? player->x : 0.0f;
+    input.player[1] = player ? player->y : 0.0f;
+    input.player[2] = player ? player->z : 0.0f;
+    input.seconds = OsGetAsyncTimeMs() / 1000.0;
+    input.strength = on ? CVarFloat(s_cvarGrassWind, 0.0f, 2.0f) : 0.0f;
+    input.parting = on && s_cvarGrassParting && s_cvarGrassParting->m_intValue;
+
+    float constants[BLEAKGRASSWIND_CONSTANT_COUNT][4];
+    BleakGrassWindConstants(input, constants);
+    GxShaderConstantsSet(GxSh_Vertex, BLEAKGRASSWIND_FIRST_CONSTANT, &constants[0][0], BLEAKGRASSWIND_CONSTANT_COUNT);
 }
 
 bool BleakFx::ReplacesStockGlow() {

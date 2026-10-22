@@ -5,6 +5,7 @@ local DEFAULTS = {
     bleakFxSaturation = "1.05", bleakFxVibrance = "0.25", bleakFxWarmth = "0.3", bleakFxBrightness = "1",
     bleakFxShadows = "0.012", bleakFxVignette = "0.18", bleakFxSharpen = "0.25", gxMultisample = "1",
     bleakFxWater = "1", bleakFxWaterReflections = "1", bleakFxWaterRipples = "0.12",
+    bleakFxGrassWind = "1", bleakFxGrassParting = "1",
 }
 
 -- Registers the client's variables with their defaults (Engine/Source/BleakFx/BleakFx.cpp).
@@ -97,11 +98,18 @@ test("graphics: defaults are the Bleakhold preset; presets and sliders set the v
     G.frame.toggles[2]:Click()
     H.eq(M.cvars.bleakFxWater, "0")
     H.eq(G.frame.toggles[2].label:GetText(), "Modern water: off")
+    G.frame.toggles[4]:Click()
+    H.eq(M.cvars.bleakFxGrassParting, "0")
+    H.eq(G.frame.toggles[4].label:GetText(), "Grass parting: off")
+    drag(M, sliderFor(G, "bleakFxGrassWind"), 1.66)
+    H.eq(M.cvars.bleakFxGrassWind, "1.7", "snapped to the step")
     H.eq(G.CurrentPreset(), "custom")
     G.frame.reset:Click()
     H.eq(G.CurrentPreset(), "bleakhold")
     H.eq(M.cvars.bleakFxAA, "1")
     H.eq(M.cvars.bleakFxWater, "1")
+    H.eq(M.cvars.bleakFxGrassWind, "1")
+    H.eq(M.cvars.bleakFxGrassParting, "1")
 end)
 
 test("graphics: off greys the sliders; multisampling note", function(M, ns)

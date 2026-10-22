@@ -5,6 +5,8 @@
 #include "Engine/Source/Tempest/C3Vector.h"
 #include "Engine/Source/Tempest/CImVector.h"
 
+class CGxShader;
+
 // BLEAKHOLD(bleakfx): post-processing of the 3D world after it is drawn and before the interface: ambient occlusion
 // and light shafts from the depth buffer, bloom, clarity (local contrast), colour grading, vignette, FXAA and
 // contrast-adaptive sharpening; and water with reflections, refraction and colour by depth. The shaders
@@ -59,6 +61,15 @@ namespace BleakFx {
     // same constants), its textures and constants. Returns false when the stock shaders should draw (BleakFx water
     // off, not supported, or no frame copy this frame).
     bool BindWater(const WaterDraw& draw);
+
+    // BLEAKHOLD(grasswind): CDetailDoodad::Initialize, after the stock grass vertex shaders are loaded: writes the
+    // wind into them (Engine/Source/Gx/BleakGrassWind.h). Shaders that are not the expected stock ones stay as they
+    // are.
+    void PatchGrassShaders(CGxShader** shaders, uint32_t count);
+
+    // CDetailDoodad::InitializeRenderState, before the grass is drawn: this frame's wind (none while BleakFx is off
+    // or bleakFxGrassWind is 0). camera: World::GetCamPos(); player: the active player's position, or nullptr.
+    void SetGrassWind(const C3Vector& camera, const C3Vector* player);
 
     // After the world is drawn, before the interface: processes the back buffer. Only a world that fills the window
     // is processed; one drawn into part of it (a resized WorldFrame) stays as drawn.

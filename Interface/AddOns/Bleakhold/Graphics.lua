@@ -1,7 +1,7 @@
 -- Bleakhold: graphics settings. The Bleakhold client draws the world through its own post-processing
--- (Engine/Source/BleakFx: ambient occlusion, light shafts, bloom, clarity, colour grading, FXAA, sharpening) and
--- draws water with reflections, refraction and colour by depth;
--- this window sets its bleakFx* console variables, with presets. The client saves them in Config.wtf. A stock
+-- (Engine/Source/BleakFx: ambient occlusion, light shafts, bloom, clarity, colour grading, FXAA, sharpening),
+-- draws water with reflections, refraction and colour by depth, and moves the grass in the wind; this window
+-- sets its bleakFx* console variables, with presets. The client saves them in Config.wtf. A stock
 -- client has none of these variables: the window then only says so.
 local ADDON, ns = ...
 local U, UI = ns.U, ns.UI
@@ -42,6 +42,8 @@ G.SLIDERS = {
       help = "Contrast-adaptive sharpening: crisper textures without halos." },
     { cvar = "bleakFxWaterRipples", label = "Water ripples", min = 0, max = 0.4, step = 0.02,
       help = "How rough the water's surface is: calm mirror to choppy." },
+    { cvar = "bleakFxGrassWind", label = "Grass wind", min = 0, max = 2, step = 0.1,
+      help = "How strongly the wind moves the grass: 0 still, 1 a breeze, 2 a strong wind." },
 }
 
 -- On/off buttons: console variable, label, help.
@@ -50,25 +52,33 @@ G.TOGGLES = {
       help = "Smooths jagged edges after the world is drawn (FXAA). Works with multisampling off." },
     { cvar = "bleakFxWater", label = "Modern water",
       help = "Water with reflections, refraction and colour by depth. Off: the stock water." },
-    { cvar = "bleakFxWaterReflections", label = "Water reflections",
+    { cvar = "bleakFxWaterReflections", label = "Reflections",
       help = "The water reflects trees, hills and buildings, not only the sky. Needs multisampling off." },
+    { cvar = "bleakFxGrassParting", label = "Grass parting",
+      help = "The grass bends away from your character as you walk through it." },
 }
 
 -- Presets set every slider plus the master switch and anti-aliasing. "bleakhold" is the client default.
 G.PRESETS = {
     { key = "off", text = "Off (stock look)", values = { bleakFx = 0 } },
     { key = "classic", text = "Classic+", values = {
-        bleakFx = 1, bleakFxAA = 1, bleakFxWater = 1, bleakFxWaterReflections = 1, bleakFxWaterRipples = 0.1, bleakFxAO = 0.4, bleakFxAORadius = 1.25, bleakFxSunShafts = 0.25, bleakFxBloom = 0.2,
-        bleakFxClarity = 0.2, bleakFxContrast = 0.08, bleakFxSaturation = 1, bleakFxVibrance = 0.1, bleakFxWarmth = 0.1,
-        bleakFxBrightness = 1, bleakFxShadows = 0, bleakFxVignette = 0.08, bleakFxSharpen = 0.2 } },
+        bleakFx = 1, bleakFxAA = 1, bleakFxWater = 1, bleakFxWaterReflections = 1, bleakFxWaterRipples = 0.1,
+        bleakFxGrassWind = 0.7, bleakFxGrassParting = 1, bleakFxAO = 0.4, bleakFxAORadius = 1.25,
+        bleakFxSunShafts = 0.25, bleakFxBloom = 0.2, bleakFxClarity = 0.2, bleakFxContrast = 0.08,
+        bleakFxSaturation = 1, bleakFxVibrance = 0.1, bleakFxWarmth = 0.1, bleakFxBrightness = 1, bleakFxShadows = 0,
+        bleakFxVignette = 0.08, bleakFxSharpen = 0.2 } },
     { key = "bleakhold", text = "Bleakhold", values = {
-        bleakFx = 1, bleakFxAA = 1, bleakFxWater = 1, bleakFxWaterReflections = 1, bleakFxWaterRipples = 0.12, bleakFxAO = 0.6, bleakFxAORadius = 1.5, bleakFxSunShafts = 0.4, bleakFxBloom = 0.35,
-        bleakFxClarity = 0.35, bleakFxContrast = 0.18, bleakFxSaturation = 1.05, bleakFxVibrance = 0.25, bleakFxWarmth = 0.3,
-        bleakFxBrightness = 1, bleakFxShadows = 0.012, bleakFxVignette = 0.18, bleakFxSharpen = 0.25 } },
+        bleakFx = 1, bleakFxAA = 1, bleakFxWater = 1, bleakFxWaterReflections = 1, bleakFxWaterRipples = 0.12,
+        bleakFxGrassWind = 1, bleakFxGrassParting = 1, bleakFxAO = 0.6, bleakFxAORadius = 1.5,
+        bleakFxSunShafts = 0.4, bleakFxBloom = 0.35, bleakFxClarity = 0.35, bleakFxContrast = 0.18,
+        bleakFxSaturation = 1.05, bleakFxVibrance = 0.25, bleakFxWarmth = 0.3, bleakFxBrightness = 1,
+        bleakFxShadows = 0.012, bleakFxVignette = 0.18, bleakFxSharpen = 0.25 } },
     { key = "cinematic", text = "Cinematic", values = {
-        bleakFx = 1, bleakFxAA = 1, bleakFxWater = 1, bleakFxWaterReflections = 1, bleakFxWaterRipples = 0.16, bleakFxAO = 0.85, bleakFxAORadius = 2, bleakFxSunShafts = 0.7, bleakFxBloom = 0.6,
-        bleakFxClarity = 0.45, bleakFxContrast = 0.3, bleakFxSaturation = 1.1, bleakFxVibrance = 0.35, bleakFxWarmth = 0.4,
-        bleakFxBrightness = 1, bleakFxShadows = 0.02, bleakFxVignette = 0.3, bleakFxSharpen = 0.35 } },
+        bleakFx = 1, bleakFxAA = 1, bleakFxWater = 1, bleakFxWaterReflections = 1, bleakFxWaterRipples = 0.16,
+        bleakFxGrassWind = 1.3, bleakFxGrassParting = 1, bleakFxAO = 0.85, bleakFxAORadius = 2,
+        bleakFxSunShafts = 0.7, bleakFxBloom = 0.6, bleakFxClarity = 0.45, bleakFxContrast = 0.3,
+        bleakFxSaturation = 1.1, bleakFxVibrance = 0.35, bleakFxWarmth = 0.4, bleakFxBrightness = 1,
+        bleakFxShadows = 0.02, bleakFxVignette = 0.3, bleakFxSharpen = 0.35 } },
 }
 
 -- Whether this client has the Bleakhold graphics (registered variables are the only ones GetCVar finds).
@@ -143,7 +153,7 @@ end
 ------------------------------------------------------------------------------------------------------
 -- Window
 ------------------------------------------------------------------------------------------------------
-local W, H = 640, 640
+local W, H = 640, 692
 local f = UI.Window("BleakholdGraphics", W, H, "Graphics", "star")
 f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 G.frame = f
@@ -162,8 +172,8 @@ f.preset:SetPoint("LEFT", presetLabel, "RIGHT", 10, 0)
 
 f.toggles = {}
 for i, t in ipairs(G.TOGGLES) do
-    local b = UI.Button(content, 190, 26, "", "dark", 12)
-    b:SetPoint("TOPLEFT", content, "TOPLEFT", 20 + (i - 1) * 200, -50)
+    local b = UI.Button(content, 145, 26, "", "dark", 12)
+    b:SetPoint("TOPLEFT", content, "TOPLEFT", 20 + (i - 1) * 150, -50)
     b:SetScript("OnClick", function()
         G.Set(t.cvar, cvarNumber(t.cvar, 1) == 1 and 0 or 1)
         G.Refresh()

@@ -5,6 +5,7 @@
 #include <new>
 #include "Engine/Source/Gx/CGxDeviceD3d9Ex/CGxDeviceD3d9Ex.h"
 #include "Engine/Source/Gx/BleakDepthD3d9.h"
+#include "Engine/Source/Gx/BleakGrassWind.h"
 #include "Engine/Source/Gx/Blit.h"
 #include "Engine/Source/Gx/CGxBuf.h"
 #include "Engine/Source/Gx/CGxPool.h"
@@ -830,6 +831,10 @@ void CGxDeviceD3d9Ex::IShaderCreateVertex(CGxShader* shader) {
     LPDIRECT3DVERTEXSHADER9 vertexShader;
 
     if (shader->m_code.Count() && this->m_d3dDevice->CreateVertexShader(reinterpret_cast<const DWORD*>(shader->m_code.m_data), &vertexShader) == D3D_OK) {
+        shader->m_apiSpecific = vertexShader;
+        shader->m_valid = 1;
+    } else if (BleakGrassWindRestore(shader->m_code) && this->m_d3dDevice->CreateVertexShader(reinterpret_cast<const DWORD*>(shader->m_code.m_data), &vertexShader) == D3D_OK) {
+        // BLEAKHOLD(grasswind): a grass shader with the wind that the device refuses draws as the stock one.
         shader->m_apiSpecific = vertexShader;
         shader->m_valid = 1;
     }

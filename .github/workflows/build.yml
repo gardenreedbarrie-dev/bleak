@@ -74,7 +74,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install tools
-        run: sudo apt-get update && sudo apt-get install -y libxml2-utils python3-pil
+        run: sudo apt-get update && sudo apt-get install -y libxml2-utils python3-pil python3-numpy
 
       - name: Lua lint and tests
         run: bash Tools/UiLint/check.sh
@@ -84,6 +84,9 @@ jobs:
           python3 -I Tools/MpqPack/tests/run_tests.py
           python3 -I Tools/RaceForge/tests/run_tests.py
           python3 -I Tools/EmojiForge/tests/run_tests.py
+
+      - name: Grass wind shader patch tests
+        run: bash Tools/GrassWind/tests/run_tests.sh
 
       - name: Server module tests
         run: bash Server/mod-bleakhold-ui/tests/run_tests.sh --fuzz-iterations 100000 --fuzz-seconds 20
