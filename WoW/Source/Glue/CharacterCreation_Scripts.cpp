@@ -104,8 +104,9 @@ static int32_t Script_IsRaceClassRestricted(lua_State* L) {
         }
 
         default: {
+            // BLEAKHOLD(races): the server sends restrictions for the ten stock races only; any other race is
+            // unrestricted instead of raising a Lua error on the character screens
             restricted = false;
-            luaL_error(L, "Script_IsRaceClassRestricted: unsupported race ID(%d)", raceID);
             break;
         }
     }
@@ -202,6 +203,7 @@ static int32_t Script_GetFactionForRace(lua_State* L) {
 // OFFSET: 0x004E0830
 static int32_t Script_GetAvailableClasses(lua_State* L) {
     int32_t count = g_chrClassesDB.m_numRecords;
+    luaL_checkstack(L, 3 * count, "GetAvailableClasses"); // BLEAKHOLD(races): three values per class
 
     for (int32_t i = 0; i < count; i++) {
         ChrClassesRec* classRec = i >= 0 && i < g_chrClassesDB.m_numRecords ? &g_chrClassesDB.m_records[i] : nullptr;
@@ -408,6 +410,8 @@ static int32_t Script_GetCreateBackgroundModel(lua_State* L) {
             raceID = 2;
         }
 
+        raceID = BleakholdProxyRace(raceID); // BLEAKHOLD(races): Bleakhold races stand in their proxy race's scene
+
         ChrRacesRec* raceRec = g_chrRacesDB.GetRecord(raceID);
 
         if (raceRec) {
@@ -424,6 +428,7 @@ static int32_t Script_GetCreateBackgroundModel(lua_State* L) {
 // OFFSET: 0x004E1880
 static int32_t Script_GetAvailableRaces(lua_State* L) {
     uint32_t count = CCharacterCreation::m_races.Count();
+    luaL_checkstack(L, static_cast<int>(3 * count), "GetAvailableRaces"); // BLEAKHOLD(races): three values per race
 
     for (uint32_t i = 0; i < count; i++) {
         lua_pushstring(L, CGUnit_C::GetDisplayRaceNameFromRecord(g_chrRacesDB.GetRecord(CCharacterCreation::m_races.m_data[i]), CCharacterCreation::m_character->m_data.m_preferences.m_sexID, nullptr));
@@ -443,6 +448,7 @@ static int32_t Script_GetAvailableRaces(lua_State* L) {
 // OFFSET: 0x004E19A0
 static int32_t Script_GetClassesForRace(lua_State* L) {
     uint32_t count = CCharacterCreation::m_classes.Count();
+    luaL_checkstack(L, static_cast<int>(3 * count), "GetClassesForRace"); // BLEAKHOLD(races): three values per class
 
     for (uint32_t i = 0; i < count; i++) {
         ChrClassesRec* classRec = i < CCharacterCreation::m_classes.Count() ? CCharacterCreation::m_classes.m_data[i] : nullptr;
