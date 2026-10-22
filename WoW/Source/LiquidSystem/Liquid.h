@@ -336,6 +336,7 @@ namespace Liquid {
     extern IDatabase<LiquidTypeRec>* s_liquidTypeDB;
     extern char s_shaderPath[256];
     extern int32_t s_shadersEnabled;
+    extern int32_t s_proceduralWater;
     extern int32_t s_useCameraRelativeCoords;
     extern int32_t s_settingsBankRefCount;
     extern int32_t s_materialBankRefCount;
@@ -351,6 +352,7 @@ namespace Liquid {
     extern PSProcWaterConstants s_psProcWaterConstants;
 
     void CacheProceduralTextures();
+    uint32_t GetRenderLiquidType(uint32_t liquidType);
     void ClearMaterials();
     void CreateProceduralTextures();
     void DestroyProceduralTextures();

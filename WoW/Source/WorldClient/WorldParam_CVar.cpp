@@ -11,6 +11,9 @@
 #include "WoW/Source/WorldClient/Map.h"
 #include "WoW/Source/WorldClient/Types.h"
 #include "WoW/Source/WorldClient/World.h"
+#include "WoW/Source/LiquidSystem/Liquid.h"
+#include "WoW/Source/WorldClient/MapHeightBlend.h"
+#include "Engine/Source/ModernAssets/ModernAssets.h"
 #include "Engine/Source/ConsoleBase/ConsoleVar.h"
 #include "Engine/Source/ConsoleBase/IConsole.h"
 #include "Engine/Source/Storm/H/storm.h"
@@ -51,6 +54,9 @@ CVar* CWorldParam::cvar_particleDensity;
 
 // STATIC: 0x00CD8598
 CVar* CWorldParam::cvar_waterLOD;
+CVar* CWorldParam::cvar_proceduralWater;
+CVar* CWorldParam::cvar_terrainHeightBlend;
+CVar* CWorldParam::cvar_terrainHeightBlendSharpness;
 
 // STATIC: 0x00CD859C
 CVar* CWorldParam::cvar_baseMip;
@@ -274,6 +280,36 @@ bool CWorldParam::WaterLodCallback(CVar* var, const char* oldValue, const char* 
 
         return false;
     }
+
+    return true;
+}
+
+// BLEAKHOLD(procwater): water already loaded keeps its look until its area is loaded again.
+bool CWorldParam::ProceduralWaterCallback(CVar* var, const char* oldValue, const char* value, void* arg) {
+    Liquid::s_proceduralWater = SStrToInt(value) != 0;
+
+    return true;
+}
+
+// BLEAKHOLD(heightblend): the terrain shaders are picked when the map loads them, so switching takes effect the
+// next time they are loaded (restart, or a change of graphics settings); the blend itself follows at once.
+bool CWorldParam::TerrainHeightBlendCallback(CVar* var, const char* oldValue, const char* value, void* arg) {
+    MapHeightBlend::s_enabled = SStrToInt(value) != 0;
+    ModernAssetsSetTerrainShaders(MapHeightBlend::s_enabled);
+
+    return true;
+}
+
+// BLEAKHOLD(heightblend)
+bool CWorldParam::TerrainHeightBlendSharpnessCallback(CVar* var, const char* oldValue, const char* value, void* arg) {
+    float sharpness = SStrToFloat(value);
+
+    if (sharpness < 0.0f || sharpness > 16.0f) {
+        ConsoleWrite("terrainHeightBlendSharpness must be between 0 and 16", DEFAULT_COLOR);
+        return false;
+    }
+
+    MapHeightBlend::s_sharpness = sharpness;
 
     return true;
 }
@@ -632,6 +668,16 @@ void CWorldParam::Initialize() {
     CWorldParam::cvar_mapObjLightLOD = CVar::Register("mapObjLightLOD", "Map object light LOD", 1, "0", CWorldParam::MapObjLightLODCallback, CATEGORY_GRAPHICS, false, nullptr, false);
     CWorldParam::cvar_particleDensity = CVar::Register("particleDensity", "Video option: Particle density", 1, "1.0", CWorldParam::ParticleDensityCallback, CATEGORY_GRAPHICS, false, nullptr, false);
     CWorldParam::cvar_waterLOD = CVar::Register("waterLOD", "Water geometry LOD", 1, "0", CWorldParam::WaterLodCallback, CATEGORY_GRAPHICS, false, nullptr, false);
+    // BLEAKHOLD(procwater)
+    CWorldParam::cvar_proceduralWater = CVar::Register("proceduralWater", "Draw water and ocean with the procedural water shader", 1, "0", CWorldParam::ProceduralWaterCallback, CATEGORY_GRAPHICS, false, nullptr, false);
+    Liquid::s_proceduralWater = CWorldParam::cvar_proceduralWater->m_intValue != 0;
+    // BLEAKHOLD(heightblend)
+    CWorldParam::cvar_terrainHeightBlend = CVar::Register("terrainHeightBlend", "Blend terrain layers by height where modern tiles provide height maps", 1, "1", CWorldParam::TerrainHeightBlendCallback, CATEGORY_GRAPHICS, false, nullptr, false);
+    CWorldParam::cvar_terrainHeightBlendSharpness = CVar::Register("terrainHeightBlendSharpness", "How hard height-blended terrain transitions are (0-16)", 1, "2.0", CWorldParam::TerrainHeightBlendSharpnessCallback, CATEGORY_GRAPHICS, false, nullptr, false);
+    MapHeightBlend::s_enabled = CWorldParam::cvar_terrainHeightBlend->m_intValue != 0;
+    ModernAssetsSetTerrainShaders(MapHeightBlend::s_enabled);
+    float sharpness = CWorldParam::cvar_terrainHeightBlendSharpness->m_floatValue;
+    MapHeightBlend::s_sharpness = sharpness >= 0.0f && sharpness <= 16.0f ? sharpness : 2.0f;
     CWorldParam::cvar_baseMip = CVar::Register("baseMip", "base mipmap level", 1, "0", CWorldParam::BaseMipCallback, CATEGORY_GRAPHICS, false, nullptr, false);
     CWorldParam::cvar_horizonFarClip = CVar::Register("horizonFarclipScale", "Far clip plane scale for horizon", 1, "4.0", CWorldParam::HorizonFarClipScaleCallback, CATEGORY_GRAPHICS, false, nullptr, false);
     CWorldParam::cvar_horizonNearClip = CVar::Register("horizonNearclipScale", "Near clip plane scale for horizon", 1, "0.7", CWorldParam::HorizonNearClipScaleCallback, CATEGORY_GRAPHICS, false, nullptr, false);

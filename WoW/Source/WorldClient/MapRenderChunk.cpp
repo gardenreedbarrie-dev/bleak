@@ -20,6 +20,7 @@
 #include "WoW/Source/WorldClient/Map.h"
 #include "WoW/Source/WorldClient/MapArea.h"
 #include "WoW/Source/WorldClient/MapChunk.h"
+#include "WoW/Source/WorldClient/MapHeightBlend.h"
 #include "WoW/Source/WorldClient/MapLight.h"
 #include "WoW/Source/WorldClient/Types.h"
 #include "WoW/Source/WorldClient/World.h"
@@ -2101,6 +2102,11 @@ void CMapRenderChunk::SetVertexShader(CMapRenderChunk* renderChunk, int32_t laye
 
     consts.m_texScale[layerCount] = alphaScale;
 
+    // BLEAKHOLD(heightblend): the tiling modern textures ask for, when every layer of the chunk is drawn at once.
+    if (layerCount == renderChunk->m_layersCount + 1) {
+        MapHeightBlend::ScaleTiling(renderChunk, consts.m_texScale);
+    }
+
     CGxShader* shader = CMapRenderChunk::GetVertexShader(pointLights, layerCount - 1, specular, vertexColor, a3, CShadowCache::GetShadowValue());
     g_theGxDevicePtr->RsSet(GxRs_VertexShader, shader);
     g_theGxDevicePtr->ShaderConstantsSet(GxSh_Vertex, 0, reinterpret_cast<const float*>(&consts), sizeof(SVertexShaderConstants) / sizeof(C4Vector));
@@ -2676,6 +2682,7 @@ void CMapRenderChunk::RenderSinglePassPixelShader() {
 
     g_theGxDevicePtr->RsSet(static_cast<EGxRenderState>(GxRs_Texture0 + i), TextureGetGxTex(this->m_terrainBlendTexture, 1, nullptr));
     GxXformSet(static_cast<EGxXform>(GxXform_Tex0 + i), alphaMatrix);
+    MapHeightBlend::BindChunk(this, 0); // BLEAKHOLD(heightblend): neutral blend constants for the extended shaders
     g_theGxDevicePtr->Draw(&this->m_batch, 1);
 
     for (; i >= 0; i--) {
@@ -2724,7 +2731,9 @@ void CMapRenderChunk::RenderSinglePassVertexPixelShader() {
     g_theGxDevicePtr->RsSet(static_cast<EGxRenderState>(GxRs_Texture0 + i), blendTex);
 
     CMapRenderChunk::SetVertexShader(this, this->m_layersCount + 1, specular);
+    MapHeightBlend::BindChunk(this, 1); // BLEAKHOLD(heightblend)
     g_theGxDevicePtr->Draw(&this->m_batch, 1);
+    MapHeightBlend::UnbindChunk(this); // BLEAKHOLD(heightblend)
 
     for (uint32_t j = 0; j < this->m_layersCount; j++) {
         if (this->m_layers[j].m_flags & 0x40) {

@@ -126,19 +126,29 @@ scratch buffer.
 The client writes what it converted, and what it could not, to `Logs/ModernAssets.log`. Set the environment
 variable `WXL_VERBOSE_ASSET_LOGS=1` to log every converted file.
 
+### Terrain and water
+
+| CVar | Default | What it does |
+|---|---|---|
+| `terrainHeightBlend` | `1` | Terrain layers of modern tiles blend by their height maps (`_h` textures) instead of fading evenly, and textures tile as wide as the tile asks (`MTXP`). The client serves WarcraftXL's extended terrain shaders for this; terrain without height data draws exactly as before. Turning the shaders on or off takes effect after a restart or a change of graphics settings. |
+| `terrainHeightBlendSharpness` | `2.0` | How sharp the height transitions are, 0 to 16. |
+| `proceduralWater` | `0` | Ocean, lake and river water draws with the procedural water material (`LiquidType.dbc` row 100, "Basic Procedural Water") instead of the animated texture frames. Stays off when that row or its shaders are missing from the game data. |
+
 ### Not supported yet
 
 - Animations stored in the `.anim` files of a `.skel`-based model (`AFSB`/`AFSA` chunks) do not play, and a
   `.skel` that names a parent skeleton is not followed.
 - Character models from the Shadowlands customization system need game data the 3.3.5a client does not
   have; the Warlords of Draenor era HD character models are the usual choice.
-- Rendering features newer clients add: four-layer WMO materials, height-blended terrain, more than four
-  terrain layers (layers 5-8 are dropped), WMO-to-outdoor visibility through open-sided spaces.
+- Rendering features newer clients add: four-layer WMO materials, more than four terrain layers (layers
+  5-8 are dropped, as WarcraftXL drops them too), WMO-to-outdoor visibility through open-sided spaces.
+- Height blending applies to terrain drawn in a single pass (the pixel shader paths); with shaders off,
+  terrain draws the stock way.
 
 ### License
 
 The conversion code is GPL-3.0-or-later (`ThirdParty/WarcraftXL`, `Engine/Source/ModernAssets`,
-`Engine/Source/Model2/M2Modern.*`). Whoever distributes a client built with it must make the corresponding
+`Engine/Source/Model2/M2Modern.*`, `WoW/Source/WorldClient/MapHeightBlend.*`). Whoever distributes a client built with it must make the corresponding
 source code available under the same license.
 
 ## Layout

@@ -2712,8 +2712,9 @@ void CWorldScene::PrepareLiquidInstances() {
                 geomFactory->SetTexCoord1ValueX(texCoord1ValueX);
 
                 group->m_liquidInstance = Liquid::CInstance::Create();
-                group->m_liquidInstance->m_material = Liquid::CMaterialBank::GetMaterial(liquidType);
-                group->m_liquidInstance->m_settings = Liquid::CSettingsBank::GetSettings(liquidType);
+                uint32_t renderType = Liquid::GetRenderLiquidType(liquidType); // BLEAKHOLD(procwater)
+                group->m_liquidInstance->m_material = Liquid::CMaterialBank::GetMaterial(renderType);
+                group->m_liquidInstance->m_settings = Liquid::CSettingsBank::GetSettings(renderType);
                 group->m_liquidInstance->m_environment = environment;
                 group->m_liquidInstance->m_geomFactory = geomFactory;
                 group->m_liquidInstance->m_transform = def->m_mat;
