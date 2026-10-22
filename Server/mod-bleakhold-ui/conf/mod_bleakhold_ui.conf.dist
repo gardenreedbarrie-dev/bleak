@@ -1,0 +1,204 @@
+#
+# mod-bleakhold-ui: server side of the Bleakhold UI (docs/BleakholdProtocol.md in the Bleakhold repository).
+# Copy this file to mod_bleakhold_ui.conf next to worldserver.conf (the build installs it into the
+# modules config folder) and change what you need. ".bleakhold reload" in game re-reads it.
+#
+
+[worldserver]
+
+###################################################################################################
+# GENERAL
+###################################################################################################
+#
+#    BleakholdUi.Enable
+#        Description: Answer the Bleakhold UI. When disabled the module ignores client messages (it
+#                     still blocks the BHs prefix from clients) and sends nothing.
+#        Default:     1 - Enabled
+#                     0 - Disabled
+
+BleakholdUi.Enable = 1
+
+#
+#    BleakholdUi.Debug
+#        Description: Log every accepted intent and every dropped message (with the reason) to the
+#                     "module" logger. Also: .bleakhold debug on|off
+#        Default:     0 - Disabled
+
+BleakholdUi.Debug = 0
+
+#
+#    BleakholdUi.RealmName
+#        Description: Realm name shown by the UI. Empty = the realm name from the realmlist table.
+#        Default:     ""
+
+BleakholdUi.RealmName = ""
+
+#
+#    BleakholdUi.SiteUrl
+#        Description: Web address shown under the leaderboards (players can copy it).
+#        Default:     ""
+
+BleakholdUi.SiteUrl = ""
+
+#
+#    BleakholdUi.UtcOffsetMinutes
+#        Description: Realm time zone in minutes from UTC (for showing the weekly reset as realm time).
+#                     Any value outside -1440..1440 means: use the server computer's time zone.
+#        Example:     60 (Central Europe in winter), -300 (US East in winter)
+#        Default:     -10000 - automatic
+
+BleakholdUi.UtcOffsetMinutes = -10000
+
+#
+#    BleakholdUi.MinProtocol
+#        Description: Oldest Bleakhold UI protocol this server still talks to. Older clients show
+#                     "out of date" and stop sending. Leave at 1.
+#        Default:     1
+
+BleakholdUi.MinProtocol = 1
+
+#
+#    BleakholdUi.DataVersion
+#        Description: Version of the definitions (names and texts from the bleakhold_* world tables).
+#                     0 = computed from the content: clients download the definitions again whenever
+#                     a row changes (after .bleakhold reload or a restart).
+#        Default:     0 - automatic
+
+BleakholdUi.DataVersion = 0
+
+#
+#    BleakholdUi.Season.Id
+#        Description: Current season id. 0 = the bleakhold_season row with state 1.
+#        Default:     0
+
+BleakholdUi.Season.Id = 0
+
+###################################################################################################
+# FEATURES (sent to the client in HELLO; the UI hides what is not live yet)
+###################################################################################################
+#
+#    BleakholdUi.Feature.RiftScoring    1 when your Eclipse Rift sends scores          Default: 0
+#    BleakholdUi.Feature.Shards         1 when your Dungeon Journey pays Shards        Default: 0
+#    BleakholdUi.Feature.Season         1 to show the season and war effort            Default: 1
+#    BleakholdUi.Feature.Leaderboards   1 to show the leaderboards                     Default: 1
+#    BleakholdUi.Feature.Collections    1 when your collection system sends COLL/SET   Default: 0
+
+BleakholdUi.Feature.RiftScoring = 0
+BleakholdUi.Feature.Shards = 0
+BleakholdUi.Feature.Season = 1
+BleakholdUi.Feature.Leaderboards = 1
+BleakholdUi.Feature.Collections = 0
+
+###################################################################################################
+# FRAMES
+###################################################################################################
+#
+#    BleakholdUi.Frame.MaxBody
+#        Description: Largest frame body sent to the client, in bytes (64..1000). Longer messages are
+#                     split into numbered parts. 1000 is the protocol's limit; 251 makes every chat
+#                     packet 255 bytes or less (more packets).
+#        Default:     1000
+
+BleakholdUi.Frame.MaxBody = 1000
+
+###################################################################################################
+# RATE LIMITS (per player; the core does not throttle addon messages)
+###################################################################################################
+#
+#    BleakholdUi.RateLimit.Burst / PerSecond
+#        Description: Every Bleakhold message from a client takes a token from a bucket of Burst tokens,
+#                     refilled at PerSecond. Messages without a token are dropped silently.
+#        Default:     10 / 5
+#
+#    BleakholdUi.RateLimit.FloodDrops / FloodWindowSec / FloodMuteSec
+#        Description: After FloodDrops dropped messages within FloodWindowSec seconds the player's
+#                     Bleakhold messages are ignored for FloodMuteSec seconds (and it is logged).
+#        Default:     200 / 60 / 60
+#
+#    BleakholdUi.RateLimit.HelloIntervalMs       HELLO at most once per this many ms        Default: 5000
+#    BleakholdUi.RateLimit.GetTopicIntervalMs    each GET topic at most once per this many ms Default: 1000
+#    BleakholdUi.RateLimit.HeavyTopicIntervalMs  GET DEF, LIDX, BOARD (large answers) at most once per this
+#                                              many ms; a new HELLO (login, /reload) resets it  Default: 5000
+#    BleakholdUi.RateLimit.LeaderboardPerSecond  LBQ per second                              Default: 2
+#    BleakholdUi.RateLimit.QueueIntervalMs       QJOIN, QLEAVE, QREPLY: one each per ms      Default: 1000
+#    BleakholdUi.RateLimit.KeyIntervalMs         KSTART, KCANCEL, KMODE: one each per ms     Default: 2000
+#    BleakholdUi.RateLimit.ClaimPerSecond        TCLAIM, TREROLL, BCLAIM, OUTFIT, WEHANDIN together per second
+#                                                                                         Default: 2
+#    BleakholdUi.RateLimit.DuplicateWindowMs     the same action again within this many ms is ignored
+#                                              (0 = off). Your handlers must still be idempotent.
+#                                                                                         Default: 1000
+
+BleakholdUi.RateLimit.Burst = 10
+BleakholdUi.RateLimit.PerSecond = 5
+BleakholdUi.RateLimit.FloodDrops = 200
+BleakholdUi.RateLimit.FloodWindowSec = 60
+BleakholdUi.RateLimit.FloodMuteSec = 60
+BleakholdUi.RateLimit.HelloIntervalMs = 5000
+BleakholdUi.RateLimit.GetTopicIntervalMs = 1000
+BleakholdUi.RateLimit.HeavyTopicIntervalMs = 5000
+BleakholdUi.RateLimit.LeaderboardPerSecond = 2
+BleakholdUi.RateLimit.QueueIntervalMs = 1000
+BleakholdUi.RateLimit.KeyIntervalMs = 2000
+BleakholdUi.RateLimit.ClaimPerSecond = 2
+BleakholdUi.RateLimit.DuplicateWindowMs = 1000
+
+###################################################################################################
+# KEYSTONE RUNS
+###################################################################################################
+#
+#    BleakholdUi.KeyRun.HeartbeatSec
+#        Description: The run tracker re-sends the run state this often while a key runs.
+#        Default:     15
+#
+#    BleakholdUi.KeyRun.ServerPullTimer
+#        Description: 1 = the server sends the DBM "Pull in" timer to the group when a key starts
+#                     (from the group leader); the clients then send none themselves.
+#        Default:     0 - the group leader's client sends it
+
+BleakholdUi.KeyRun.HeartbeatSec = 15
+BleakholdUi.KeyRun.ServerPullTimer = 0
+
+###################################################################################################
+# CHAT ANNOUNCEMENTS ([Raid Legacy], [Server First], [Season], [Queue], [Record])
+###################################################################################################
+#
+#    BleakholdUi.Announce.ColorTagsWithoutAddon
+#        Description: Players without the Bleakhold UI get the tag coloured by the server (the UI colours
+#                     it itself, so its players always get the plain tag).
+#        Default:     1
+#
+#    BleakholdUi.Announce.Color.<Tag>
+#        Description: Tag colour as RRGGBB hex for players without the UI.
+
+BleakholdUi.Announce.ColorTagsWithoutAddon = 1
+BleakholdUi.Announce.Color.RaidLegacy = "E5C07B"
+BleakholdUi.Announce.Color.ServerFirst = "FF9D3B"
+BleakholdUi.Announce.Color.Season = "6CC6D9"
+BleakholdUi.Announce.Color.Queue = "9FD8E5"
+BleakholdUi.Announce.Color.Record = "F1D9A0"
+
+###################################################################################################
+# WAR EFFORT TOKEN HAND-IN (the "Hand in" button of the Season window)
+###################################################################################################
+#
+#    BleakholdUi.WarEffort.TokenItemId
+#        Description: Item the button hands in (all of them in the bags). 0 = the button answers
+#                     "not available" unless your own code handles WEHANDIN.
+#    BleakholdUi.WarEffort.PointsPerToken
+#        Description: War effort points per token (0 = disabled).
+#    BleakholdUi.WarEffort.TokenPart
+#        Description: bleakhold_war_effort_part.part_id the points go to.
+
+BleakholdUi.WarEffort.TokenItemId = 0
+BleakholdUi.WarEffort.PointsPerToken = 0
+BleakholdUi.WarEffort.TokenPart = 1
+
+###################################################################################################
+# LEADERBOARDS
+###################################################################################################
+#
+#    BleakholdUi.Leaderboard.PageSize   rows per page, 3..50 (page 1 holds the podium) Default: 10
+#    BleakholdUi.Leaderboard.MaxRows    rows kept per board, season and dungeon     Default: 1000
+
+BleakholdUi.Leaderboard.PageSize = 10
+BleakholdUi.Leaderboard.MaxRows = 1000

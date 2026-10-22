@@ -83,4 +83,4 @@ jobs:
           python3 -I Tools/RaceForge/tests/run_tests.py
 
       - name: Server module tests
-        run: bash Server/mod-bleakhold/tests/run_tests.sh --fuzz-iterations 100000 --fuzz-seconds 20
+        run: bash Server/mod-bleakhold-ui/tests/run_tests.sh --fuzz-iterations 100000 --fuzz-seconds 20
