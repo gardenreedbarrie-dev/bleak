@@ -6,6 +6,7 @@
 #include "BleakholdMgr.h"
 #include "BleakholdCodec.h"
 #include "BleakholdData.h"
+#include "BleakholdEmoji.h"
 
 #include "Chat.h"
 #include "Config.h"
@@ -37,6 +38,7 @@ namespace Bleakhold
         char const* const TextUnavailable = "This is not available on this realm yet.";
         char const* const TextBusy = "You are doing that too often. Wait a moment and try again.";
         char const* const TextNotLeader = "Only the group leader can do that.";
+        char const* const TextEmojiOff = "Emojis are turned off on this realm.";
 
         bool IsHex6(std::string const& s)
         {
@@ -122,6 +124,9 @@ namespace Bleakhold
             bits |= FeatureLeaderboards;
         if (sConfigMgr->GetOption<bool>("BleakholdUi.Feature.Collections", false))
             bits |= FeatureCollections;
+        c.emojiEnable = sConfigMgr->GetOption<bool>("BleakholdUi.Emoji.Enable", true);
+        if (c.emojiEnable)
+            bits |= FeatureEmoji;  // the catalogue is never empty (static_assert in BleakholdEmoji.h)
         c.serverPullTimer = sConfigMgr->GetOption<bool>("BleakholdUi.KeyRun.ServerPullTimer", false);
         if (c.serverPullTimer)
             bits |= FeatureServerPullTimer;
@@ -144,6 +149,7 @@ namespace Bleakhold
         l.keyIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.KeyIntervalMs", 2000);
         l.claimPerSecond = std::max(0.1f, sConfigMgr->GetOption<float>("BleakholdUi.RateLimit.ClaimPerSecond", 2.0f));
         l.duplicateWindowMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.DuplicateWindowMs", 1000);
+        l.emojiIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.Emoji.CooldownMs", 2500);
 
         c.heartbeatMs = 1000 * std::max<uint32_t>(1, sConfigMgr->GetOption<uint32_t>("BleakholdUi.KeyRun.HeartbeatSec", 15));
         c.colorTagsWithoutAddon = sConfigMgr->GetOption<bool>("BleakholdUi.Announce.ColorTagsWithoutAddon", true);
@@ -358,6 +364,13 @@ namespace Bleakhold
                     return;
                 }
             }
+        }
+
+        // BleakholdUi.Emoji.Enable holds for a custom EMOJI handler too (section 13).
+        if (intent.type == IntentType::Emoji && !_cfg.emojiEnable)
+        {
+            Refuse(player, intent, "unavailable", TextEmojiOff);
+            return;
         }
 
         Ui::IntentHandler handler;

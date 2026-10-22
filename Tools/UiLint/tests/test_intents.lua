@@ -14,6 +14,7 @@ local SCHEMA = {
     BCLAIM = { INT }, WEHANDIN = {}, OUTFIT = { INT },
     LBQ = { "^[KREF]$", INT, INT, INT, INT },
     PING = { INT },
+    EMOJI = { "^%d%d?%d?$" },
 }
 local TOPICS = { WEEK = 0, ERA = 0, TASKS = 0, KEY = 0, BOARD = 0, QUEUE = 0, MPLUS = 0, RIFT = 0, COLL = 0, SET = 2, LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1 }
 

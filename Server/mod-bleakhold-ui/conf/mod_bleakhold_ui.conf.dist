@@ -144,6 +144,24 @@ BleakholdUi.RateLimit.ClaimPerSecond = 2
 BleakholdUi.RateLimit.DuplicateWindowMs = 1000
 
 ###################################################################################################
+# EMOJI BUBBLES (EMOJI: an emoji over the player's head for everyone nearby; needs the Bleakhold client)
+###################################################################################################
+#
+#    BleakholdUi.Emoji.Enable
+#        Description: Let players show emoji bubbles (feature bit 64). The emoji list is built into
+#                     the module (src/BleakholdEmoji.h, made by Tools/EmojiForge).
+#        Default:     1 - Enabled
+#                     0 - Disabled
+#
+#    BleakholdUi.Emoji.CooldownMs
+#        Description: Time a player must wait between two emojis, in ms (0 = no limit). The addon
+#                     waits 3.25 s itself; above 3250 some presses are answered "busy".
+#        Default:     2500
+
+BleakholdUi.Emoji.Enable = 1
+BleakholdUi.Emoji.CooldownMs = 2500
+
+###################################################################################################
 # KEYSTONE RUNS
 ###################################################################################################
 #

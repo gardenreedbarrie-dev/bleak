@@ -36,6 +36,7 @@ namespace Bleakhold
         Outfit,           // OUTFIT   setId
         LeaderboardQuery, // LBQ      board, seasonId, dungeonId, classId, page
         Ping,             // PING     nonce
+        Emoji,            // EMOJI    emojiId
         Count
     };
 
@@ -108,6 +109,9 @@ namespace Bleakhold
 
         // PING
         uint32_t nonce = 0;
+
+        // EMOJI: 0..255 (the server checks it against its catalogue)
+        uint8_t emojiId = 0;
     };
 
     // Why a message was not accepted.

@@ -32,8 +32,8 @@ jobs:
           python -m pip install pyinstaller==6.11.1
           python -m PyInstaller --onefile --name BleakholdRaceForge --add-data "Tools/RaceForge/races.json;." --paths Tools/RaceForge --paths Tools/MpqPack --hidden-import mpqpack --distpath build/raceforge/dist --workpath build/raceforge/work Tools/RaceForge/raceforge.py
 
-      # One folder the player copies over a 3.3.5a client: the executables, the glue screens, the UI addon
-      # and RaceForge. No game data.
+      # One folder the player copies over a 3.3.5a client: the executables, the glue screens, the emoji art
+      # (loose BLPs in Data\Interface\Bleakhold\Emoji, like the glue files), the UI addon and RaceForge. No game data.
       - name: Package
         shell: pwsh
         run: |
@@ -41,10 +41,12 @@ jobs:
           New-Item -ItemType Directory -Force "$p/Data/Interface/Bleakhold", "$p/Interface/AddOns", "$p/Tools" | Out-Null
           Copy-Item bin/Win/*.exe, bin/Win/*.dll $p
           Copy-Item -Recurse Interface/Bleakhold/Glue "$p/Data/Interface/Bleakhold/Glue"
+          Copy-Item -Recurse Interface/Bleakhold/Emoji "$p/Data/Interface/Bleakhold/Emoji"
           Copy-Item -Recurse Interface/AddOns/Bleakhold "$p/Interface/AddOns/Bleakhold"
           Copy-Item build/raceforge/dist/BleakholdRaceForge.exe "$p/Tools"
           Copy-Item Tools/Package/INSTALL.txt $p
           if (-not (Test-Path "$p/Bleakhold.exe")) { throw "Bleakhold.exe missing from the package" }
+          if (-not (Test-Path "$p/Data/Interface/Bleakhold/Emoji/Emoji000.blp")) { throw "emoji art missing from the package" }
 
       - name: Upload package
         uses: actions/upload-artifact@v4
@@ -72,15 +74,16 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install tools
-        run: sudo apt-get update && sudo apt-get install -y libxml2-utils
+        run: sudo apt-get update && sudo apt-get install -y libxml2-utils python3-pil
 
       - name: Lua lint and tests
         run: bash Tools/UiLint/check.sh
 
-      - name: RaceForge and MpqPack tests
+      - name: Python tool tests
         run: |
           python3 -I Tools/MpqPack/tests/run_tests.py
           python3 -I Tools/RaceForge/tests/run_tests.py
+          python3 -I Tools/EmojiForge/tests/run_tests.py
 
       - name: Server module tests
         run: bash Server/mod-bleakhold-ui/tests/run_tests.sh --fuzz-iterations 100000 --fuzz-seconds 20

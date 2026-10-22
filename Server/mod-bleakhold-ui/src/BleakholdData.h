@@ -65,6 +65,7 @@ namespace Bleakhold
         FirstsList Firsts();
         void AnswerLeaderboard(Player* player, Intent const& intent);
         void HandIn(Player* player, Intent const& intent);
+        void Emoji(Player* player, Intent const& intent);
 
         // ---- the module's own records (any thread) ----
         void RecordRun(Ui::LeaderboardEntry const& entry);

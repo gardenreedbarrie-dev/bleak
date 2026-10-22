@@ -24,6 +24,9 @@ What you get:
 - the emote wheel: hold Ctrl+G, point at an emote and let go (a short tap keeps it open for clicking);
   set it up in Collections > Animations (/bh animations). Ctrl+G is only taken when it is free; any key
   can be set in Key Bindings > Bleakhold
+- emoji bubbles: pick an emoji in Collections > Animations > Emojis (double-click or Play), or on page 4 of the
+  emote wheel; everyone nearby sees it pop up over your head (art in Data\Interface\Bleakhold\Emoji).
+  /bh emoji joy sends one, /bh emojis off hides all emoji bubbles. The realm needs the mod-bleakhold-ui module.
 - High Elf and Eredar characters also need the race file patch-R.MPQ in Data (see below; your server
   gives it to you)
 
@@ -57,4 +60,5 @@ SERVER OWNER: THE SERVER MODULE
 The Bleakhold interface shows data only when the server runs the mod-bleakhold-ui AzerothCore module
 (Server/mod-bleakhold-ui in the source repository). Its README explains the install and how to connect your
 own Mythic+, Dungeon Journey, Eclipse Rift and task systems. In game, ".bleakhold test all" (GM) fills
-every window with sample data.
+every window with sample data. Emoji bubbles are on by default (BleakholdUi.Emoji.Enable,
+BleakholdUi.Emoji.CooldownMs).

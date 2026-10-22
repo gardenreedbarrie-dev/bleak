@@ -2,7 +2,8 @@
 
 This is the message protocol between the Bleakhold server and the Bleakhold UI addon
 (`Interface/AddOns/Bleakhold`). It runs over ordinary WoW 3.3.5a addon messages, so the client needs no
-C++ change and a stock AzerothCore core can carry it with one server module.
+C++ change (except emoji bubbles, section 13, which only the Bleakhold client draws) and a stock
+AzerothCore core can carry it with one server module.
 
 Client reference implementation: `Interface/AddOns/Bleakhold/Comm.lua` (transport) and `State.lua`
 (fields of every server message). Tests: `Tools/UiLint/tests/` (`Tools/UiLint/check.sh` runs them, and
@@ -187,6 +188,7 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `OUTFIT` | `setId` | save the unlocked outfit of a legacy set |
 | `LBQ` | `board, seasonId, dungeonId, classId, page` | leaderboard page. `board`: `K` Mythic keys, `R` Eclipse Rift, `E` Raid Echoes, `F` server firsts. 0 = all for `dungeonId`/`classId`. `page` from 1 |
 | `PING` | `nonce` | answer with `PONG` |
+| `EMOJI` | `emojiId` | show emoji `emojiId` above the player's head to everyone nearby (section 13). `emojiId`: 0..255, an index into the emoji catalogue, `Tools/EmojiForge/emojis.json` |
 
 `GET` topics and what to send back:
 
@@ -218,6 +220,7 @@ C> 1 WEHANDIN e 1/1
 C> 1 OUTFIT f 1/1 201
 C> 1 LBQ g 1/1 K,1,0,0,2
 C> 1 PING h 1/1 12345
+C> 1 EMOJI i 1/1 7
 ```
 
 ## 7. Server to client
@@ -237,7 +240,7 @@ may define more with `DEF X`), item ids are item template entries.
 - `dataVer`: version of the server's definitions (section 7, `DEF`). When it differs from the client's
   cache the client sends `GET DEF,0`.
 - `featureBits`: 1 Rift scoring live, 2 Shards live, 4 the server sends the DBM pull timer itself
-  (section 9), 8 season live, 16 leaderboards live, 32 collections live.
+  (section 9), 8 season live, 16 leaderboards live, 32 collections live, 64 emoji bubbles live (section 13).
 - `dailyResetEpoch`/`weeklyResetEpoch`: the next resets (Unix time).
 - `siteUrl`: shown for copying under the leaderboards (there is no web browser in game).
 
@@ -502,6 +505,7 @@ does not throttle addon messages for you (AzerothCore's addon flood check is not
 | `QJOIN`, `QLEAVE`, `QREPLY` | 1 per second each |
 | `KSTART`, `KCANCEL`, `KMODE` | 1 per 2 s each |
 | `TCLAIM`, `TREROLL`, `BCLAIM`, `OUTFIT`, `WEHANDIN` | 2 per second together; idempotent anyway |
+| `EMOJI` | 1 per `BleakholdUi.Emoji.CooldownMs` (2.5 s); the addon waits 3.25 s itself |
 
 Also bound the work a single message can cause (for example a `GET LIDX` answer is cached per player
 rather than rebuilt on every request).
@@ -558,3 +562,42 @@ when the timer starts, then `MP` on every change -> end: `MP state 2/3`, `MPE`, 
 Fields and ops are only ever added. A change that old clients cannot read raises the protocol major:
 send `HELLO` with the new `proto` and a `minProto` above what old clients have; they stop sending and show
 "out of date". Definitions change with `dataVer`.
+
+## 13. Emoji bubbles
+
+`EMOJI emojiId` asks the server to show emoji `emojiId` above the player's head for a few seconds, to the
+player and everyone nearby. The ids index the emoji catalogue, `Tools/EmojiForge/emojis.json`; the addon
+(`EmojiData.lua`) and the module (`src/BleakholdEmoji.h`) get their copies from it, and the client ships
+the art as `Interface\Bleakhold\Emoji\EmojiNNN.blp`. Ids go on the wire and saved emote wheels hold the
+emoji keys, so the catalogue is append-only: an id or a key is never renumbered, reused or removed.
+
+The server checks, in this order:
+
+| Check | Answer |
+|---|---|
+| malformed, or `emojiId` above 255 | dropped silently (section 1) |
+| the same `emojiId` as the player's last accepted `EMOJI`, within 1 s | dropped silently |
+| the player's cooldown (`BleakholdUi.Emoji.CooldownMs`, section 8) has not run out | `ERR` `busy` |
+| emoji bubbles are off on the realm (`BleakholdUi.Emoji.Enable = 0`, no feature bit 64) | `ERR` `unavailable` |
+| `emojiId` is not in the catalogue | `ERR` `unknown_emoji` |
+| the player is not in the world | dropped silently |
+| the player is muted (addon messages skip the core's mute check) | `ERR` `muted` |
+
+The module makes the first four checks whoever handles `EMOJI`; a server that replaces the module's handler
+(`Ui::OnIntent(IntentType::Emoji, ...)`) keeps the last three itself.
+
+A refused (`busy`) or duplicate `EMOJI` counts as a drop toward the flood limit of section 8, which then
+ignores all of the player's `BHc` messages for a while. That is why the addon waits longer than the
+server between two emojis.
+
+When every check passes, the server broadcasts `SMSG_PLAY_SPELL_VISUAL` (the guid of the player, kit
+`900000 + emojiId`) to the player and everyone who can see them (AzerothCore:
+`player->SendPlaySpellVisual(900000 + emojiId)`, which already respects phases, stealth and GM
+invisibility).
+
+The Bleakhold client draws kits 900000 to 900255 as an emoji bubble over the unit the guid names, instead
+of looking them up in `SpellVisualKit.dbc`; a stock client finds no such kit and ignores the packet. Any
+unit can carry the kit, so a server script can show an emoji over a creature too
+(`creature->SendPlaySpellVisual(900000 + emojiId)`). This is the one part of the protocol that needs the
+Bleakhold client. Like chat from them, the Bleakhold client does not draw emoji bubbles from players on the
+viewer's ignore list.

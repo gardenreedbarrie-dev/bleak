@@ -1,10 +1,12 @@
 -- Bleakhold: Animations tab of the Collections window and the emote wheel.
--- The tab lists every animation the character can play (search, category filter, pages of 14), previews
--- the selected one on the player model, plays it, and edits the emote wheel: four pages of eight slots,
--- saved per character. The wheel opens with its key binding (Ctrl+G by default): hold the key, point at
--- a slot and release to play it; a short tap leaves the wheel open for clicking.
+-- The tab lists every animation the character can play and every emoji (search, category filter, pages of
+-- 14), previews the selected one on the player model, plays it, and edits the emote wheel: four pages of
+-- eight slots, saved per character. The wheel opens with its key binding (Ctrl+G by default): hold the
+-- key, point at a slot and release to play it; a short tap leaves the wheel open for clicking.
 -- Built-in animations are the client's own emotes (DoEmote); the list is data (Data.emotes), so more
--- dances can be added the same way.
+-- dances can be added the same way. Emojis (Data.emojis, EmojiData.lua) are an EMOJI intent instead: the
+-- server shows the emoji above the player's head to everyone nearby, and Bleakhold.exe draws it there
+-- (emoji bubbles, docs/BleakholdProtocol.md section 13). /bh emoji <name> sends one.
 local ADDON, ns = ...
 local U, UI, Data = ns.U, ns.UI, ns.Data
 local C = UI.C
@@ -22,25 +24,61 @@ A.TAP_SECONDS = 0.25      -- a key press shorter than this leaves the wheel open
 A.DEAD_ZONE = 40          -- cursor distance from the wheel centre below which no slot is chosen
 A.BINDING = "BLEAKHOLD_EMOTEWHEEL"
 A.DEFAULT_KEY = "CTRL-G"
+A.EMOJI_PAGE = 4          -- the default wheel's emojis are on this page (Data.defaultWheel)
 
 A.page = 1
 A.filter = "all"
 A.wheelPage = 1
 
 ------------------------------------------------------------------------------------------------------
--- Catalogue
+-- Catalogue: the emotes, then one entry per emoji (key "emoji:<key>", on the wheel and in saved wheels)
 ------------------------------------------------------------------------------------------------------
-local byKey = {}
+local entries = {}
 for _, e in ipairs(Data.emotes) do
+    entries[#entries + 1] = e
+end
+local emojis = {}
+for _, m in ipairs(Data.emojis or {}) do
+    local e = { key = "emoji:" .. m.key, name = m.name, cmd = "/bh emoji " .. m.key, cat = "emoji", emoji = m.id,
+        emojiKey = m.key, group = m.group, texture = m.texture, glyph = "sparkle",
+        text = "Everyone nearby sees it above your head." }
+    entries[#entries + 1] = e
+    emojis[#emojis + 1] = e
+end
+
+local byKey = {}
+for _, e in ipairs(entries) do
     byKey[e.key] = e
 end
 
+-- The name normal form of Tools/EmojiForge: lower case, trimmed, no leading or trailing ':', runs of
+-- whitespace turned into '_'. Keys and names are unique under it (the catalogue is checked when built).
+local function norm(s)
+    s = string.lower(strtrim(tostring(s or "")))
+    s = s:gsub("^:+", ""):gsub(":+$", "")
+    return (s:gsub("%s+", "_"))
+end
+
+local emojiByNorm = {}
+for _, e in ipairs(emojis) do
+    emojiByNorm[e.emojiKey] = e
+end
+for _, e in ipairs(emojis) do
+    local n = norm(e.name)
+    emojiByNorm[n] = emojiByNorm[n] or e
+end
+
 function A.List()
-    return Data.emotes
+    return entries
 end
 
 function A.Get(key)
     return key and byKey[key]
+end
+
+-- The emoji entry for a key or a name: "Heart Eyes", "heart_eyes" and ":heart_eyes:" all match.
+function A.EmojiByName(s)
+    return emojiByNorm[norm(s)]
 end
 
 local categoryLabel = {}
@@ -89,7 +127,9 @@ end
 -- Wheel storage (BleakholdCharDB.wheel = { [page] = { [slot] = key } })
 ------------------------------------------------------------------------------------------------------
 -- Rebuilds the saved wheel from whatever is stored: unknown keys and malformed pages are dropped, a
--- missing wheel becomes the default one.
+-- missing wheel becomes the default one. A wheel saved before emojis existed gets the default page's
+-- emojis once, in the free slots of page 4 (BleakholdCharDB.emojiWheel); no slot is ever replaced, and an
+-- emoji the player took off later stays off.
 function A.EnsureWheel()
     local saved = ns.cdb.wheel
     local wheel = {}
@@ -109,6 +149,20 @@ function A.EnsureWheel()
         end
     end
     ns.cdb.wheel = wheel
+    if not ns.cdb.emojiWheel then
+        ns.cdb.emojiWheel = true
+        local page = wheel[A.EMOJI_PAGE]
+        for _, key in ipairs(type(saved) == "table" and Data.defaultWheel[A.EMOJI_PAGE] or {}) do
+            if key:find("^emoji:") and byKey[key] and not A.OnWheel(key) then
+                for s = 1, A.WHEEL_SLOTS do
+                    if not page[s] then
+                        page[s] = key
+                        break
+                    end
+                end
+            end
+        end
+    end
     return wheel
 end
 
@@ -163,11 +217,98 @@ ns.On("DB_READY", function()
 end)
 
 ------------------------------------------------------------------------------------------------------
--- Playing
+-- Playing: an emote is DoEmote; an emoji is an EMOJI intent (the server checks it and shows the bubble
+-- to everyone nearby, the player included). The cooldown and the feature check live here, not in
+-- Comm.Send, which only sends.
 ------------------------------------------------------------------------------------------------------
+A.EMOJI_COOLDOWN = 3.25   -- s: one bubble's lifetime (WoW/Common/BleakholdEmoji.h), 0.75 s over the server's 2.5 s
+A.emojiReadyAt = 0
+A.NOTICE_SECONDS = 10     -- the same notice is printed at most once in this time
+
+local noticeAt = {}
+
+function A.EmojiNotice(text)
+    local now = GetTime()
+    if noticeAt[text] and now - noticeAt[text] < A.NOTICE_SECONDS then
+        return false
+    end
+    noticeAt[text] = now
+    ns.Print(text)
+    return true
+end
+
+-- nil when an emoji can be sent now (cooldown aside), else reason, text.
+function A.EmojiState()
+    local Comm = ns.Comm
+    if Comm.outdated then
+        return "outdated", "Emojis: your Bleakhold UI is out of date for this realm."
+    end
+    if not Comm.ready and not Comm.demo then
+        return "offline", "Emojis need the Bleakhold server module, and this realm has not answered (/bh status)."
+    end
+    if not Comm.HasFeature(Comm.FEATURE.EMOJI) then
+        return "off", "Emojis are turned off on this realm."
+    end
+    return nil
+end
+
+local demoNoted, noBubblesNoted
+
+-- Returns true when sent, or false, reason.
+function A.SendEmoji(entry)
+    if type(entry) == "string" then
+        entry = A.Get(entry)
+    end
+    if not entry or not entry.emoji then
+        return false, "not an emoji"
+    end
+    local reason, text = A.EmojiState()
+    if reason then
+        A.EmojiNotice(text)
+        return false, reason
+    end
+    local now = GetTime()
+    if now < A.emojiReadyAt then
+        if UIErrorsFrame then
+            UIErrorsFrame:AddMessage("Wait a moment before the next emoji.", 1, 0.45, 0.4)
+        end
+        return false, "cooldown"
+    end
+    local ok, err = ns.Comm.Send("EMOJI", entry.emoji)
+    if not ok then
+        A.EmojiNotice("Emojis: could not send (" .. tostring(err) .. ").")
+        return false, err
+    end
+    A.emojiReadyAt = now + A.EMOJI_COOLDOWN
+    if A.selected == entry and A.emojiPreview and A.emojiPreview:IsVisible() then
+        A.PopEmojiPreview()
+    end
+    if ns.Comm.demo then
+        if not demoNoted then
+            demoNoted = true
+            ns.Print("Demo mode: no realm is connected, so nobody sees this emoji.")
+        end
+    elseif GetCVar("emojiBubbles") == nil and not noBubblesNoted then
+        -- the CVar exists only in Bleakhold.exe (WoW/Source/Ui/EmojiBubbleFrame.cpp)
+        noBubblesNoted = true
+        ns.Print("Your game cannot draw emoji bubbles (start it with Bleakhold.exe); others still see yours.")
+    end
+    return true
+end
+
+-- The server's cooldown answered first (a press that arrived early): wait the whole cooldown again.
+ns.On("ERR", function(e)
+    if e and e.op == "EMOJI" and e.code == "busy" then
+        A.emojiReadyAt = GetTime() + A.EMOJI_COOLDOWN
+    end
+end)
+
 function A.Perform(entry)
     if type(entry) == "string" then
         entry = A.Get(entry)
+    end
+    if entry and entry.emoji then
+        return A.SendEmoji(entry)
     end
     if not entry or not entry.token or not DoEmote then
         return false
@@ -212,11 +353,15 @@ tab.filter:SetValue("all", true)
 tab.filter:SetPoint("TOPRIGHT", tab, "TOPLEFT", LEFT + GRID_W, -TOP)
 
 -- Grid of entries.
+local HOW_EMOTE = "Click: preview. Double-click: play. Drag onto the wheel, or right-click to add it."
+local HOW_EMOJI = "Click: preview. Double-click: show it above your head. Drag onto the wheel, or right-click to "
+    .. "add it."
+
 local function entryTooltip(self)
     local e = self.entry
     if e then
         UI.ShowTooltip(self, { e.name, { e.cmd .. "  -  " .. A.CategoryLabel(e.cat), C.dim },
-            "Click: preview. Double-click: play. Drag onto the wheel, or right-click to add it." })
+            e.emoji and HOW_EMOJI or HOW_EMOTE })
     end
 end
 
@@ -337,6 +482,50 @@ model:SetScript("OnUpdate", function(self)
 end)
 A.model = model
 
+-- Emoji preview: the emoji pops up over the model's head the way the bubble does in the game (the same
+-- timings as BleakholdEmojiPose in WoW/Common/BleakholdEmoji.h, in seconds).
+local EMOJI_SIZE = 112
+local emojiPreview = CreateFrame("Frame", nil, modelBox)
+emojiPreview:SetAllPoints(modelBox)
+emojiPreview:SetFrameLevel(model:GetFrameLevel() + 2)
+emojiPreview.tex = emojiPreview:CreateTexture(nil, "OVERLAY")
+emojiPreview.tex:SetPoint("CENTER", modelBox, "TOP", 0, -8 - EMOJI_SIZE / 2)   -- grows from its centre
+emojiPreview.tex:SetSize(EMOJI_SIZE, EMOJI_SIZE)
+emojiPreview:Hide()
+A.emojiPreview = emojiPreview
+
+A.EMOJI_POP, A.EMOJI_SETTLE, A.EMOJI_POP_SCALE = 0.12, 0.25, 1.25
+
+-- Size of the popping emoji (fraction of its full size) t seconds after it appears.
+function A.EmojiPop(t)
+    t = max(0, t or 0)
+    if t < A.EMOJI_POP then
+        local u = 1 - t / A.EMOJI_POP
+        return A.EMOJI_POP_SCALE * (1 - u * u)
+    elseif t < A.EMOJI_SETTLE then
+        local s = (t - A.EMOJI_POP) / (A.EMOJI_SETTLE - A.EMOJI_POP)
+        return A.EMOJI_POP_SCALE - (A.EMOJI_POP_SCALE - 1) * s * s * (3 - 2 * s)
+    end
+    return 1
+end
+
+local function popUpdate(self)
+    local t = GetTime() - self.popStart
+    local size = EMOJI_SIZE
+    if t >= A.EMOJI_SETTLE then
+        self:SetScript("OnUpdate", nil)
+    else
+        size = max(1, EMOJI_SIZE * A.EmojiPop(t))
+    end
+    self.tex:SetSize(size, size)
+end
+
+function A.PopEmojiPreview()
+    emojiPreview.popStart = GetTime()
+    emojiPreview.tex:SetSize(1, 1)
+    emojiPreview:SetScript("OnUpdate", popUpdate)
+end
+
 right.name = UI.Text(right, 18, C.goldPale, "title")
 right.name:SetPoint("TOPLEFT", right, "TOPLEFT", 0, Y_NAME)
 UI.OneLine(right.name, RIGHT_W)
@@ -432,6 +621,35 @@ right.hint = UI.Text(right, 11, C.mute, "body", "CENTER")
 right.hint:SetPoint("BOTTOM", right, "BOTTOM", 0, 0)
 right.hint:SetWidth(RIGHT_W)
 
+-- Icons: an emoji shows its own art; an emote, or an emoji whose art is missing (stock Wow.exe does not
+-- read the loose files in Data\Interface\Bleakhold\Emoji, or only the AddOns folder was installed),
+-- shows its glyph. SetTexture fails without changing the texture, and SetEmoteGlyph sets both the
+-- texture and the coords, so a reused icon never keeps the previous emoji. A path that failed once is
+-- not tried again.
+local artMissing = {}
+
+local function setArt(texture, path)
+    if artMissing[path] then
+        return false
+    end
+    if texture:SetTexture(path) then
+        return true
+    end
+    artMissing[path] = true
+    return false
+end
+
+local function setIcon(texture, entry, color)
+    if entry and entry.texture and setArt(texture, entry.texture) then
+        texture:SetTexCoord(0, 1, 0, 1)
+        texture:SetVertexColor(1, 1, 1, 1)
+        return
+    end
+    UI.SetEmoteGlyph(texture, entry and entry.glyph or "plus")
+    texture:SetVertexColor(UI.Rgb(color or (entry and C.goldLight or C.mute)))
+end
+A.SetIcon = setIcon
+
 -- Drag and drop onto the wheel editor: an icon follows the cursor; releasing over a slot fills it.
 local dragIcon = CreateFrame("Frame", "BleakholdAnimationDrag", UIParent)
 dragIcon:SetSize(36, 36)
@@ -454,8 +672,7 @@ function A.BeginDrag(entry)
         return
     end
     A.dragging = entry
-    UI.SetEmoteGlyph(dragIcon.icon, entry.glyph)
-    dragIcon.icon:SetVertexColor(UI.Rgb(C.goldLight))
+    setIcon(dragIcon.icon, entry, C.goldLight)
     dragIcon:Show()
 end
 
@@ -477,11 +694,6 @@ end
 ------------------------------------------------------------------------------------------------------
 -- Tab logic
 ------------------------------------------------------------------------------------------------------
-local function setIcon(texture, entry, color)
-    UI.SetEmoteGlyph(texture, entry and entry.glyph or "plus")
-    texture:SetVertexColor(UI.Rgb(color or (entry and C.goldLight or C.mute)))
-end
-
 function A.Pages(count)
     return max(1, floor((count + A.PAGE_SIZE - 1) / A.PAGE_SIZE))
 end
@@ -500,9 +712,24 @@ end
 -- The model is loaded after SetUnit returns, so the sequence is set again once it has had time to load.
 local previewTimer
 
+local function previewEmoji(entry)
+    local tex = emojiPreview.tex
+    if entry and entry.emoji then
+        if setArt(tex, entry.texture) then
+            emojiPreview:Show()
+            A.PopEmojiPreview()
+            return
+        end
+        tex:SetTexture(nil)    -- missing art: no stale emoji left behind
+    end
+    emojiPreview:SetScript("OnUpdate", nil)
+    emojiPreview:Hide()
+end
+
 function A.Preview(entry)
     model:SetUnit("player")
     model:SetFacing(0)
+    previewEmoji(entry)
     if not entry then
         return
     end
@@ -588,9 +815,13 @@ function A.Refresh()
     right.play:SetActive(sel ~= nil)
     right.add:SetActive(sel ~= nil and not A.OnWheel(sel.key))
     A.RefreshWheelEditor()
-    local key = A.KeyText()
-    right.hint:SetText(key and ("Hold " .. key .. " in the game to use the wheel.")
-        or "Bind a key to the emote wheel in Key Bindings, Bleakhold.")
+    local hint = sel and sel.emoji and select(2, A.EmojiState())
+    if not hint then
+        local key = A.KeyText()
+        hint = key and ("Hold " .. key .. " in the game to use the wheel.")
+            or "Bind a key to the emote wheel in Key Bindings, Bleakhold."
+    end
+    right.hint:SetText(hint)
 end
 
 -- Called by the Collections window when the tab is shown.
@@ -613,6 +844,14 @@ ns.On("WHEEL", function()
     if A.wheel and A.wheel:IsShown() then
         A.RefreshWheel(true)
     end
+end)
+
+-- The realm's answer decides whether emojis can be sent (the hint under the wheel editor).
+ns.On("HELLO", function()
+    A.Refresh()
+end)
+ns.On("OUTDATED", function()
+    A.Refresh()
 end)
 
 ------------------------------------------------------------------------------------------------------
@@ -847,10 +1086,56 @@ end)
 ns.AddCommand("emote", "play an animation: /bh emote <name>", function(args)
     local want = string.lower(strtrim and strtrim(args or "") or (args or "")):gsub("^/", "")
     for _, e in ipairs(A.List()) do
-        if e.key == want or string.lower(e.name) == want or e.cmd == "/" .. want then
+        if not e.emoji and (e.key == want or string.lower(e.name) == want or e.cmd == "/" .. want) then
             A.Perform(e)
             return
         end
     end
     ns.Print("usage: /bh emote <name>, for example /bh emote dance")
+end)
+
+A.LIST_LINE = 240         -- /bh emoji list: longest line printed
+
+ns.AddCommand("emoji", "show an emoji above your head: /bh emoji <name>", function(args)
+    local want = strtrim(args or "")
+    if string.lower(want) == "list" then
+        ns.Print(#emojis .. " emojis, by key (/bh emoji <key>):")
+        local line = ""
+        for _, e in ipairs(emojis) do
+            if line ~= "" and #line + 1 + #e.emojiKey > A.LIST_LINE then
+                ns.Print(line)
+                line = ""
+            end
+            line = line == "" and e.emojiKey or (line .. " " .. e.emojiKey)
+        end
+        if line ~= "" then
+            ns.Print(line)
+        end
+        return
+    end
+    local entry = want ~= "" and A.EmojiByName(want)
+    if entry then
+        A.SendEmoji(entry)
+        return
+    end
+    ns.Print("usage: /bh emoji <name>, for example /bh emoji joy (/bh emoji list shows them all)")
+end)
+
+-- The emojiBubbles CVar exists only in Bleakhold.exe (SetCVar of an unknown CVar is a Lua error).
+ns.AddCommand("emojis", "emoji bubbles over characters: /bh emojis on|off", function(args)
+    local value = GetCVar("emojiBubbles")
+    if value == nil then
+        ns.Print("Your game cannot draw emoji bubbles: start it with Bleakhold.exe.")
+        return
+    end
+    local want = string.lower(strtrim(args or ""))
+    if want == "on" then
+        SetCVar("emojiBubbles", "1")
+        ns.Print("Emoji bubbles are shown.")
+    elseif want == "off" then
+        SetCVar("emojiBubbles", "0")
+        ns.Print("Emoji bubbles are hidden (yours too); others still see the ones you send.")
+    else
+        ns.Print("Emoji bubbles are " .. (tonumber(value) == 0 and "off" or "on") .. ". /bh emojis on|off")
+    end
 end)

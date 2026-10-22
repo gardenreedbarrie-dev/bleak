@@ -24,7 +24,8 @@
  *          });
  *      Intents are untrusted requests: check authority and state in your handler, make it idempotent
  *      (a repeated claim must not pay twice), and answer a refusal with Refuse(). The module already
- *      dropped malformed and rate-limited messages and checked the group leader for KSTART/KCANCEL.
+ *      dropped malformed and rate-limited messages, checked the group leader for KSTART/KCANCEL and
+ *      refused EMOJI while BleakholdUi.Emoji.Enable = 0.
  *
  * Threading: every function here may be called from any thread (map update threads included). The
  * module queues the frames and sends them from the world thread. Your handlers and providers are
@@ -37,6 +38,7 @@
 #ifndef BLEAKHOLD_UI_H
 #define BLEAKHOLD_UI_H
 
+#include "BleakholdEmoji.h"
 #include "BleakholdMessages.h"
 
 #include <functional>
@@ -56,9 +58,14 @@ namespace Bleakhold::Ui
     // Your handler for one intent op. Registering replaces the module's default for that op.
     //   Defaults: TCLAIM TREROLL QJOIN QLEAVE QREPLY KMODE KSTART KCANCEL BCLAIM OUTFIT -> ERR "unavailable";
     //   WEHANDIN -> token hand-in from mod_bleakhold_ui.conf (BleakholdUi.WarEffort.*), else "unavailable";
-    //   LBQ -> the module's own leaderboard tables. HELLO, GET and PING are handled by the module.
+    //   LBQ -> the module's own leaderboard tables; EMOJI -> emoji bubble (BleakholdUi.Emoji.*).
+    //   HELLO, GET and PING are handled by the module.
     using IntentHandler = std::function<void(Player* player, Intent const& intent)>;
     void OnIntent(IntentType type, IntentHandler handler);
+
+    // The SMSG_PLAY_SPELL_VISUAL kit that shows emoji `emojiId` (< EmojiCatalogueCount, BleakholdEmoji.h)
+    // over a unit: unit->SendPlaySpellVisual(Ui::EmojiKit(id)) (EMOJI, docs/BleakholdProtocol.md section 13).
+    inline constexpr uint32_t EmojiKit(uint32_t emojiId) { return 900000 + emojiId; }
 
     // Answer a refused intent with ERR. code: a short machine code ("not_claimable"); text: a sentence
     // for the player. Never put client-supplied text in either.

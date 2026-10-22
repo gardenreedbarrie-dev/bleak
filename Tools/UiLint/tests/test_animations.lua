@@ -20,10 +20,20 @@ test("animations: catalogue is valid client data", function(M, ns)
     for _, e in ipairs(A.List()) do
         H.ok(type(e.key) == "string" and not seen[e.key], "unique key " .. tostring(e.key))
         seen[e.key] = true
-        H.ok(type(e.token) == "string" and e.token:match("^%u+$") and not tokens[e.token], "token " .. tostring(e.token))
-        tokens[e.token] = true
-        H.ok(type(e.anim) == "number" and e.anim >= 0 and e.anim < 506, e.key .. " anim id in the client's SetSequence range")
-        H.ok(e.cmd == "/" .. e.token:lower(), e.key .. " command matches its token")
+        if e.emoji then
+            H.eq(e.key, "emoji:" .. e.emojiKey, "emoji entry key")
+            H.eq(e.cmd, "/bh emoji " .. e.emojiKey, e.key .. " command")
+            H.eq(e.cat, "emoji", e.key .. " category")
+            H.eq(e.texture, string.format("Interface\\Bleakhold\\Emoji\\Emoji%03d", e.emoji), e.key .. " texture")
+            H.ok(e.token == nil, e.key .. " is not a DoEmote token")
+        else
+            H.ok(type(e.token) == "string" and e.token:match("^%u+$") and not tokens[e.token],
+                "token " .. tostring(e.token))
+            tokens[e.token] = true
+            H.ok(type(e.anim) == "number" and e.anim >= 0 and e.anim < 506,
+                e.key .. " anim id in the client's SetSequence range")
+            H.ok(e.cmd == "/" .. e.token:lower(), e.key .. " command matches its token")
+        end
         H.ok(ns.UI.EMOTE_INDEX[e.glyph], e.key .. " glyph exists: " .. tostring(e.glyph))
         H.ok(A.CategoryLabel(e.cat) ~= "Animations", e.key .. " has a known category")
     end
@@ -58,7 +68,7 @@ test("animations: tab lists, searches, filters and pages", function(M, ns)
     H.eq(#A.Filtered("", "pose"), 4)
     H.contains(tab.count:GetText(), "POSES")
     tab.filter:SetValue("wheel")
-    H.eq(#A.Filtered("", "wheel"), 28, "every built-in is on the default wheel")
+    H.eq(#A.Filtered("", "wheel"), 32, "every built-in and the four emojis are on the default wheel")
     H.eq(ns.Collections.searchBox.hint:GetText(), "Search dances and emotes")
     ns.Collections.ShowTab("legacy")
     H.ok(not tab:IsShown(), "other tabs hide it")
@@ -93,9 +103,10 @@ test("animations: wheel editor adds, fills, clears and drags", function(M, ns)
     H.ok(A.WheelEntry(1, 1).key == "dance", "default wheel in place after DB_READY")
     local editor = tab.right.editor
     H.eq(editor.pageText:GetText(), "1 / 4")
-    -- page 4 has four free slots
+    -- page 4 with its four emojis taken off has four free slots
     editor.next:Click(); editor.next:Click(); editor.next:Click()
     H.eq(A.wheelPage, 4)
+    for s = 5, 8 do A.SetWheelSlot(4, s, nil) end
     A.SetWheelSlot(1, 2, nil)
     tab.filter:SetValue("all")
     local wave = tab.entries[2]

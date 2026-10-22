@@ -351,13 +351,19 @@ return function(opts)
     function IMPL.IsPlaying(self) return self.__playing and 1 or nil end
     function IMPL.SetLooping(self, l) self.__looping = l end
 
+    -- Like Script_SetTexture: a file that cannot be loaded (M.missingTextures) returns nil and keeps the
+    -- old texture; nil clears it.
+    M.missingTextures = {}
     function IMPL.SetTexture(self, a, g, b, al)
         if type(a) == "string" then
             M.textures[a] = true
+            if M.missingTextures[a] then
+                return nil
+            end
             self.__texture = a
-        elseif type(a) == "number" then
+        elseif type(a) == "number" or a == nil then
             self.__texture = nil
-        elseif a ~= nil then
+        else
             error("SetTexture: string or numbers expected")
         end
         return 1
@@ -541,7 +547,13 @@ return function(opts)
     env.GetScreenWidth = function() return 1024 end
     env.GetScreenHeight = function() return 768 end
     env.PlaySound = function(s) M.sounds[#M.sounds + 1] = s end
-    env.GetCVar = function() return nil end
+    -- CVars the client registered (only those GetCVar/SetCVar find, ConsoleVar.cpp LookupRegistered)
+    M.cvars = {}
+    env.GetCVar = function(name) return M.cvars[name] end
+    env.SetCVar = function(name, value)
+        assert(M.cvars[name] ~= nil, "Couldn't find CVar named '" .. tostring(name) .. "'")
+        M.cvars[name] = tostring(value)
+    end
     env.IsAddOnLoaded = function(n) return M.addons[n] and 1 or nil end
     env.GetItemInfo = function(id)
         if type(id) == "string" then id = tonumber(id:match("item:(%d+)")) end

@@ -8,6 +8,7 @@
 
 #include "BleakholdData.h"
 #include "BleakholdCodec.h"
+#include "BleakholdEmoji.h"
 #include "BleakholdMgr.h"
 
 #include "DatabaseEnv.h"
@@ -1082,6 +1083,30 @@ namespace Bleakhold
             std::to_string(count) + (count == 1 ? " token" : " tokens") + " added to the War Effort", "season");
     }
 
+    static_assert(EmojiCatalogueCount <= Proto::MaxEmojis, "emoji catalogue (Tools/EmojiForge)");
+    static_assert(Ui::EmojiKit(0) == Proto::EmojiKitBase, "Ui::EmojiKit (BleakholdUi.h) and the protocol agree");
+
+    void Data::Emoji(Player* player, Intent const& intent)
+    {
+        // world thread (the chat hook); the cooldown (BleakholdUi.Emoji.CooldownMs) is the Endpoint's and
+        // BleakholdUi.Emoji.Enable is Mgr::Dispatch's, so both also hold for a custom handler
+        if (intent.emojiId >= EmojiCatalogueCount)
+        {
+            Ui::Refuse(player, intent, "unknown_emoji", "That emoji does not exist on this realm.");
+            return;
+        }
+        if (!player->IsInWorld())
+            return;
+        // addon messages skip the core's mute check (ChatHandler.cpp), and an emoji is seen by others
+        if (!player->CanSpeak())
+        {
+            Ui::Refuse(player, intent, "muted", "You cannot use emojis while muted.");
+            return;
+        }
+        // SMSG_PLAY_SPELL_VISUAL to the player and every player who can see them (section 13)
+        player->SendPlaySpellVisual(Ui::EmojiKit(intent.emojiId));
+    }
+
     // =============================================================================================
     // Default providers and handlers
     // =============================================================================================
@@ -1121,5 +1146,6 @@ namespace Bleakhold
 
         m.SetDefaultHandler(IntentType::LeaderboardQuery, [](Player* p, Intent const& in) { Data::Instance().AnswerLeaderboard(p, in); });
         m.SetDefaultHandler(IntentType::WarEffortHandIn, [](Player* p, Intent const& in) { Data::Instance().HandIn(p, in); });
+        m.SetDefaultHandler(IntentType::Emoji, [](Player* p, Intent const& in) { Data::Instance().Emoji(p, in); });
     }
 }

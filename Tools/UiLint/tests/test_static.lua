@@ -34,22 +34,41 @@ test("every texture the addon sets exists, and fonts are stock client fonts", fu
     M.env.SlashCmdList.BLEAKHOLD("demo")
     M.Advance(1)
     FX.openEverything(M, ns)
+    -- emoji icons: a page of the Emojis filter, the wheel editor's emoji page and the emoji preview
+    local A = ns.Animations
+    A.tab.filter:SetValue("emoji")
+    A.Select(A.Filtered("", "emoji")[1])
+    A.SetWheelPage(4)
     M.Advance(40)
-    local n = 0
+    local n, emojis = 0, 0
     for path in pairs(M.textures) do
         local sub = path:match("^Interface\\AddOns\\Bleakhold\\(.+)$")
+        local emoji = path:match("^Interface\\Bleakhold\\Emoji\\Emoji%d%d%d$")
         if sub then
             local file = addonDir .. "/" .. sub:gsub("\\", "/")
             H.ok(fileExistsCI(file .. ".tga") or fileExistsCI(file .. ".blp") or fileExistsCI(file), "texture file for " .. path)
             n = n + 1
+        elseif emoji then
+            -- emoji bubbles art, shipped as loose files in Data\Interface\Bleakhold\Emoji (Tools/EmojiForge)
+            H.ok(fileExistsCI(repo .. "/" .. path:gsub("\\", "/") .. ".blp"), "emoji art for " .. path)
+            emojis = emojis + 1
         else
             H.ok(path:match("^Interface\\Icons\\"), "only stock icons outside the addon: " .. path)
         end
     end
     H.ok(n >= 6, "addon textures used: " .. n)
+    H.ok(emojis >= 14, "emoji textures used: " .. emojis)
     local stock = { ["Fonts\\FRIZQT__.TTF"] = true, ["Fonts\\MORPHEUS.TTF"] = true, ["Fonts\\ARIALN.TTF"] = true }
     for path in pairs(M.fonts) do
         H.ok(stock[path], "stock font: " .. path)
+    end
+end)
+
+test("every emoji of the catalogue has its art in the repo", function(M, ns)
+    H.ok(#ns.Data.emojis >= 1, "emoji catalogue loaded")
+    for _, m in ipairs(ns.Data.emojis) do
+        H.ok(m.texture:match("^Interface\\Bleakhold\\Emoji\\Emoji%d%d%d$"), "emoji texture path " .. m.texture)
+        H.ok(fileExistsCI(repo .. "/" .. m.texture:gsub("\\", "/") .. ".blp"), "emoji art for " .. m.key)
     end
 end)
 

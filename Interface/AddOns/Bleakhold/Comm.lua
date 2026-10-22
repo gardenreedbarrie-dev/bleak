@@ -251,6 +251,7 @@ Comm.INTENTS = {
     OUTFIT = { int(1, INT32) },                                       -- legacy set id (from SET)
     LBQ = { enum("K", "R", "E", "F"), int(0, INT32), int(0, INT32), int(0, INT32), int(1, 999) },
     PING = { int(0, INT32) },
+    EMOJI = { int(0, 255) },                                          -- emoji id (the server checks its catalogue)
 }
 
 local function checkField(spec, v)
@@ -780,7 +781,8 @@ Comm.Handle("PONG", function(r)
 end)
 
 -- Feature bits from HELLO (the server can hide boards that are not ready).
-Comm.FEATURE = { RIFT_SCORE = 1, SHARDS = 2, DBM_BY_SERVER = 4, SEASON = 8, LEADERBOARDS = 16, COLLECTIONS = 32 }
+Comm.FEATURE = { RIFT_SCORE = 1, SHARDS = 2, DBM_BY_SERVER = 4, SEASON = 8, LEADERBOARDS = 16, COLLECTIONS = 32,
+    EMOJI = 64 }
 
 function Comm.HasFeature(bitValue)
     local f = Comm.server and Comm.server.features or 0

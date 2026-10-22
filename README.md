@@ -92,9 +92,10 @@ logger off in `WowClient` with `-DWOWCLIENT_CRASH_LOG=OFF`.
 ## Download
 
 The CI build (`Build Bleakhold Client`, artifact `bleakhold-client-x64`) is one folder to copy over a 3.3.5a
-client: `Bleakhold.exe`, the glue screens in `Data\Interface\Bleakhold\Glue`, the UI addon in
-`Interface\AddOns\Bleakhold`, `Tools\BleakholdRaceForge.exe` and `INSTALL.txt` (from `Tools/Package`), which
-explains the steps for players and for the server owner. It holds no game data.
+client: `Bleakhold.exe`, the glue screens in `Data\Interface\Bleakhold\Glue`, the emoji art in
+`Data\Interface\Bleakhold\Emoji`, the UI addon in `Interface\AddOns\Bleakhold`, `Tools\BleakholdRaceForge.exe` and
+`INSTALL.txt` (from `Tools/Package`), which explains the steps for players and for the server owner. It holds no
+game data.
 
 ## Modern (HD) assets
 
@@ -213,6 +214,36 @@ Tests (Linux; clang or g++, python3): `Server/mod-bleakhold-ui/tests/run_tests.s
 example in the protocol document, runs its messages through the addon's own Lua parser and every message the addon
 sends through the module, and fuzzes the parser under AddressSanitizer.
 
+## Emoji bubbles
+
+A player picks an emoji in Collections > Animations > Emojis, on page 4 of the emote wheel or with
+`/bh emoji <name>` (`/bh emoji list` shows them all), and everyone nearby sees it pop up over that character's head
+for 3.25 s. The addon sends `EMOJI <id>` (`docs/BleakholdProtocol.md`, section 13); the server module checks it
+(feature on, known id, cooldown, not muted) and calls `player->SendPlaySpellVisual(900000 + id)`, which AzerothCore
+sends as `SMSG_PLAY_SPELL_VISUAL` to every player in range. The Bleakhold client (BLEAKHOLD(emoji),
+`WoW/Source/Ui/EmojiBubbleFrame.cpp`) catches kits 900000 to 900255 before it looks in SpellVisualKit and draws the
+emoji over that unit like a chat bubble, above its name and any chat bubble. Stock clients find no such kit and
+ignore the packet.
+
+- Install: copy `Interface/Bleakhold/Emoji` from this repository to `<client>\Data\Interface\Bleakhold\Emoji\`
+  (the CI package has it there), or pack it into a `Data\patch-?.MPQ` under the same path. Without it no bubble is
+  drawn, and the addon shows a plain icon in place of each picture.
+- Client settings: the CVars `emojiBubbles` (default `1`; `/bh emojis on|off` shows or hides every emoji bubble,
+  yours too) and `emojiBubbleScale` (`0.5` to `2`, default `1.0`; `/console emojiBubbleScale 1.5`), saved in
+  `Config.wtf`.
+- Server settings (`mod_bleakhold_ui.conf.dist`): `BleakholdUi.Emoji.Enable` (default `1`; HELLO feature bit 64)
+  and `BleakholdUi.Emoji.CooldownMs` (default `2500`; the addon itself waits 3.25 s between two emojis).
+- Catalogue: `Tools/EmojiForge/emojis.json` lists the emojis: 73 Noto Emoji 3D images and 10 text emotes (GG, EZ,
+  LOL, RIP, OMG, WOW, NICE, BRB, AFK, GLHF). `python3 -I Tools/EmojiForge/emojiforge.py generate` writes the
+  addon's `EmojiData.lua`, the module's `src/BleakholdEmoji.h` and the art's `NOTICE.md` from it, `art` draws the
+  BLPs (needs Pillow and a noto-emoji checkout) and `check` validates all of it. Ids go on the wire and into saved
+  wheels, so the catalogue is append-only; a new emoji needs a rebuilt server module and a new client package
+  (`Tools/EmojiForge/README.md`).
+- Licences: the emoji images come from Google's Noto Emoji (Copyright 2013 Google LLC; the project's LICENSE is the
+  SIL Open Font License 1.1 and its README puts image resources under the Apache License 2.0, so both texts are in
+  `Interface/Bleakhold/Emoji`); the text emotes are drawn with the Bangers font (SIL Open Font License 1.1).
+  `Interface/Bleakhold/Emoji/NOTICE.md` names the source of every file.
+
 ## Login screen and character creation
 
 The client loads `Interface\Bleakhold\Glue\BleakholdGlue.toc` right after the stock
@@ -247,7 +278,9 @@ this works with signature checks on or off.
 | `Tools/MpqPack/` | Python tool that packs files into an MPQ patch archive the client loads (`Data\patch-<letter>.MPQ`) |
 | `Tools/RaceForge/` | Python tool that adds the Bleakhold races (High Elf, Eredar) to your own DBCs and writes the AzerothCore SQL |
 | `Tools/BlpConvert/` | Python tool that converts pictures to BLP textures; draws the login art |
+| `Tools/EmojiForge/` | Python tool that holds the emoji catalogue and makes the emoji art, the addon's list and the server module's list |
 | `Interface/Bleakhold/Glue/` | Bleakhold login screen and character creation (glue Lua, art, fonts) |
+| `Interface/Bleakhold/Emoji/` | Emoji bubble art (BLP, made by `Tools/EmojiForge`) with its licences and `NOTICE.md` |
 | `Interface/AddOns/Bleakhold/` | Bleakhold UI addon (Activities, Mythic+, Rift, Collections with Animations, emote wheel, Season, Leaderboards) |
 | `Tools/UiLint/` | Lint and unit tests for the Bleakhold Lua (host Lua built from the client's own source) |
 | `docs/BleakholdProtocol.md` | Message protocol between the Bleakhold server module and the UI |

@@ -106,6 +106,7 @@ To change names, texts, the week schedule or seasons later: edit the `bleakhold_
 | Eclipse Rift | | `RiftStatus`, `RiftEnded`, `QJOIN` with kind `R` |
 | Daily and weekly tasks, Mythic Coins, Shards | | `SendTasks`, `TaskProgress`, `SendWeek`, `TCLAIM`/`TREROLL` handlers |
 | Collections counts | | `SendCollections` |
+| Emoji bubbles (Animations tab, emote wheel, `/bh emoji`) | everything: the module checks `EMOJI` and shows the emoji over the player's head to everyone nearby; config `BleakholdUi.Emoji.*` | nothing (players need the Bleakhold client to see the bubbles) |
 
 Buttons whose system is not connected yet answer the player with "This is not available on this realm
 yet." Set `BleakholdUi.Feature.*` in the config when a system goes live (the UI hides what is not).
@@ -321,6 +322,15 @@ Ui::OnRequest(Topic::Week, [](Player* p, TopicRequest const&) { MySeason::SendWe
 Ui::OnDefinitionsLoaded([](Definitions& d) { /* add dungeons, affixes... from your own tables */ });
 Ui::SetResetTimesSource([] { return std::make_pair(MyTasks::NextDaily(), MyTasks::NextWeekly()); });
 bool hasUi = Ui::HasAddon(player);
+// Emoji bubbles work out of the box (BleakholdUi.Emoji.*). The module applies the cooldown and
+// BleakholdUi.Emoji.Enable before any handler. Your own handler replaces the rest of the module's
+// (Data::Emoji in src/BleakholdData.cpp), so keep its checks: the id is in the catalogue (BleakholdEmoji.h,
+// included by BleakholdUi.h), the player is in the world and not muted (the core's Player.h).
+Ui::OnIntent(IntentType::Emoji, [](Player* p, Intent const& in) {
+    if (in.emojiId >= EmojiCatalogueCount || !p->IsInWorld() || !p->CanSpeak() || MyArena::InMatch(p))
+        return Ui::Refuse(p, in, "unavailable", "You cannot use emojis here.");
+    p->SendPlaySpellVisual(Ui::EmojiKit(in.emojiId));
+});
 ```
 
 ### 3.8 Function reference
@@ -348,7 +358,8 @@ bool hasUi = Ui::HasAddon(player);
 Intents (`Ui::OnIntent(IntentType::..., handler)`): `TaskClaim` (`in.taskUid`), `TaskReroll` (`in.taskUid`),
 `QueueJoin` (`in.queueKind, activityId, tier, roles, groupSize`), `QueueLeave`, `QueueReply`
 (`in.proposalId, in.accept`), `KeyMode` (`in.mode`), `KeyStart`, `KeyCancel`, `BountyClaim` (`in.bountyId`),
-`WarEffortHandIn`, `Outfit` (`in.setId`), `LeaderboardQuery` (`in.board, seasonId, dungeonId, classId, page`).
+`WarEffortHandIn`, `Outfit` (`in.setId`), `LeaderboardQuery` (`in.board, seasonId, dungeonId, classId, page`),
+`Emoji` (`in.emojiId`).
 
 ---
 

@@ -11,8 +11,10 @@
 #include "BleakholdEndpoint.h"
 #include "BleakholdIntent.h"
 #include "BleakholdMessages.h"
+#include "../../src/BleakholdEmoji.h"
 
 #include <map>
+#include <set>
 
 using namespace Bleakhold;
 using namespace Bleakhold::Proto;
@@ -242,6 +244,30 @@ TEST("every C> example of the document is accepted and re-encodes byte for byte"
     CHECK(in.proto == 1 && in.addonVersion == "1.0.0" && in.dataVersion == 0 && in.locale == "enUS");
     CHECK(Parse("1 LBQ g 1/1 K,1,0,0,2", &in) == DropReason::None);
     CHECK(in.board == Board::Keys && in.seasonId == 1 && in.page == 2 && in.seq == 16);
+    CHECK(Parse("1 EMOJI i 1/1 7", &in) == DropReason::None);
+    CHECK(in.type == IntentType::Emoji && in.emojiId == 7 && in.seq == 18);
+    CHECK(Parse("1 EMOJI i 1/1 255", &in) == DropReason::None && in.emojiId == 255);
+}
+
+TEST("emoji catalogue fits the protocol")
+{
+    // src/BleakholdEmoji.h is generated from Tools/EmojiForge/emojis.json (its tests compare the rest)
+    CHECK(EmojiCatalogueCount >= 1 && EmojiCatalogueCount <= MaxEmojis);
+    std::set<std::string> keys;
+    for (uint32_t i = 0; i < EmojiCatalogueCount; ++i)
+    {
+        std::string const k = EmojiCatalogueKeys[i];
+        bool ok = !k.empty() && k[0] >= 'a' && k[0] <= 'z';
+        for (char c : k)
+            ok = ok && ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_');
+        CHECK_MSG(ok, "emoji key [" + k + "]");
+        CHECK_MSG(keys.insert(k).second, "emoji key " + k + " is unique");
+    }
+    CHECK_EQ(EmojiCatalogueKeys[0], "joy");
+    // the last id fits the wire field
+    Intent in;
+    CHECK(Parse("1 EMOJI i 1/1 " + std::to_string(EmojiCatalogueCount - 1), &in) == DropReason::None &&
+        uint32_t(in.emojiId) == EmojiCatalogueCount - 1);
 }
 
 TEST("malformed client messages are dropped with the right reason")
@@ -309,6 +335,11 @@ TEST("malformed client messages are dropped with the right reason")
         { "BHc\t1 LBQ 1 1/1 X,1,0,0,1", DropReason::BadField },
         { "BHc\t1 LBQ 1 1/1 K,1,0,0,0", DropReason::OutOfRange },
         { "BHc\t1 LBQ 1 1/1 K,1,0,0,1000", DropReason::OutOfRange },
+        { "BHc\t1 EMOJI 1 1/1 256", DropReason::OutOfRange },
+        { "BHc\t1 EMOJI 1 1/1 -1", DropReason::OutOfRange },
+        { "BHc\t1 EMOJI 1 1/1", DropReason::FieldCount },
+        { "BHc\t1 EMOJI 1 1/1 1,2", DropReason::FieldCount },
+        { "BHc\t1 EMOJI 1 1/1 x", DropReason::BadField },
         { "BHc\t1 HELLO 1 1/1 1,1.0 beta,0,enUS", DropReason::BadField },
         { "BHc\t1 HELLO 1 1/1 1,,0,enUS", DropReason::BadField },
         { "BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUSenUSx", DropReason::BadField },
@@ -454,6 +485,11 @@ TEST("endpoint: per-op limits of section 8")
     CHECK(Feed(ep, "1 BCLAIM m 1/1 2", 20100).verdict == Verdict::Accepted);
     CHECK(Feed(ep, "1 OUTFIT n 1/1 3", 20200).verdict == Verdict::Refused);
     CHECK(Feed(ep, "1 WEHANDIN o 1/1", 20700).verdict == Verdict::Accepted);
+    // EMOJI: 1 per 2.5 s (at 24500 the bucket holds exactly one token again)
+    CHECK(Feed(ep, "1 EMOJI p 1/1 1", 22000).verdict == Verdict::Accepted);
+    ReceiveResult e = Feed(ep, "1 EMOJI q 1/1 2", 23000, &in);
+    CHECK(e.verdict == Verdict::Refused && in.type == IntentType::Emoji && in.emojiId == 2);
+    CHECK(Feed(ep, "1 EMOJI r 1/1 2", 24600).verdict == Verdict::Accepted);
 }
 
 TEST("endpoint: the same action twice within the window is ignored")
@@ -467,6 +503,10 @@ TEST("endpoint: the same action twice within the window is ignored")
     CHECK(Feed(ep, "1 KMODE 6 1/1 2", 4000).verdict == Verdict::Accepted);
     CHECK(Feed(ep, "1 KMODE 7 1/1 0", 6500).verdict == Verdict::Accepted);
     CHECK(Feed(ep, "1 KMODE 8 1/1 2", 9000).verdict == Verdict::Accepted);      // not the same as the last one
+    // EMOJI: the same id is dropped before the cooldown answers "busy" (section 13)
+    CHECK(Feed(ep, "1 EMOJI 9 1/1 7", 10000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 EMOJI a 1/1 7", 10500).reason == DropReason::Duplicate);
+    CHECK(Feed(ep, "1 EMOJI b 1/1 8", 10600).verdict == Verdict::Refused);
 }
 
 TEST("endpoint: SEQ per message, revisions per topic, snapshots reset by HELLO")

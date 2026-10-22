@@ -69,6 +69,7 @@
 #include "WoW/Source/Ui/ChatBubbleFrame.h"
 #include "WoW/Source/Ui/CommentatorFrame.h"
 #include "WoW/Source/Ui/DressUpModelFrame.h"
+#include "WoW/Source/Ui/EmojiBubbleFrame.h"
 #include "WoW/Source/Ui/GameUI.h"
 #include "WoW/Source/Ui/MailInfo.h"
 #include "WoW/Source/Ui/MinimapFrame.h"
@@ -1788,6 +1789,8 @@ void CGWorldFrame::OnWorldRender() {
     g_theGxDevicePtr->RsPop();
     SmartScreenRectClearGrid(1);
     CGChatBubbleFrame::OnWorldRender(this);
+    // BLEAKHOLD(emoji): after the chat bubbles, whose rects the emoji bubbles stack above.
+    CGEmojiBubbleFrame::OnWorldRender(this);
     GxXformSetViewport(minX, maxX, minY, maxY, minZ, maxZ);
     FFX::Finish();
     CVehiclePassenger_C::PostRenderUpdateAll();
@@ -1838,6 +1841,8 @@ int32_t CGWorldFrame::ObjectEnumProc(void* param, uint32_t flags, uint64_t guid,
 void CGWorldFrame::OnLayerUpdate(float elapsedSec) {
     this->CSimpleFrame::OnLayerUpdate(elapsedSec);
     CGChatBubbleFrame::OnWorldLayerUpdate();
+    // BLEAKHOLD(emoji): age the emoji bubbles and find their head points.
+    CGEmojiBubbleFrame::OnWorldLayerUpdate();
 
     CSimpleTop* top = this->m_simpleTop;
     HITTESTRESULT hit;

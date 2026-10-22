@@ -37,6 +37,7 @@ namespace Bleakhold
             { "OUTFIT", IntentType::Outfit },
             { "LBQ", IntentType::LeaderboardQuery },
             { "PING", IntentType::Ping },
+            { "EMOJI", IntentType::Emoji },
         }};
 
         struct TopicInfo
@@ -149,6 +150,7 @@ namespace Bleakhold
                 case IntentType::Outfit: return 1;
                 case IntentType::LeaderboardQuery: return 5;
                 case IntentType::Ping: return 1;
+                case IntentType::Emoji: return 1;
                 default: return -1;
             }
         }
@@ -265,6 +267,9 @@ namespace Bleakhold
                 }
                 case IntentType::Ping:
                     BH_TRY(Int(f[0], 0, Int32Max, out.nonce));
+                    break;
+                case IntentType::Emoji:
+                    BH_TRY(Small(f[0], 0, Proto::MaxEmojis - 1, out.emojiId));
                     break;
                 default:
                     break;
@@ -442,6 +447,8 @@ namespace Bleakhold
                     n(in.classId) + "," + n(in.page);
             case IntentType::Ping:
                 return n(in.nonce);
+            case IntentType::Emoji:
+                return n(in.emojiId);
             default:
                 return std::string();
         }

@@ -36,6 +36,9 @@ namespace Bleakhold::Proto
     // SEQ is 1 to 6 base-36 digits and wraps at 36^6.
     inline constexpr uint32_t SeqModulo = 2176782336u;
     inline constexpr int64_t Int32Max = 2147483647;
+    // EMOJI (section 13): emoji N is shown with SMSG_PLAY_SPELL_VISUAL kit EmojiKitBase + N, N < MaxEmojis.
+    inline constexpr uint32_t EmojiKitBase = 900000;
+    inline constexpr uint32_t MaxEmojis = 256;
 
     // Lower-case base 36, no leading zeros ("0" for 0). n is taken modulo 36^6.
     std::string Base36(uint32_t n);

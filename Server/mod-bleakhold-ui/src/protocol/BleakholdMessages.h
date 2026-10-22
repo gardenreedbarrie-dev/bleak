@@ -54,6 +54,7 @@ namespace Bleakhold
         FeatureSeason = 8,
         FeatureLeaderboards = 16,
         FeatureCollections = 32,
+        FeatureEmoji = 64,            // emoji bubbles (EMOJI, section 13)
     };
 
     // One reward line of MPE / RIFTE.

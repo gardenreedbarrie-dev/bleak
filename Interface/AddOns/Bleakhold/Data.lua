@@ -161,6 +161,7 @@ Data.animationCategories = {
     { key = "emote", label = "Emotes" },
     { key = "talk", label = "Talk" },
     { key = "pose", label = "Poses" },
+    { key = "emoji", label = "Emojis" },      -- Data.emojis (EmojiData.lua), listed after the emotes
 }
 Data.emotes = {
     { key = "dance", name = "Dance", token = "DANCE", cmd = "/dance", anim = 69, cat = "dance", glyph = "dance", text = "Your race's own dance." },
@@ -193,12 +194,13 @@ Data.emotes = {
     { key = "stand", name = "Stand", token = "STAND", cmd = "/stand", anim = 0, cat = "pose", glyph = "stand" },
 }
 
--- The emote wheel a character starts with: four pages of eight slots (keys of Data.emotes).
+-- The emote wheel a character starts with: four pages of eight slots (keys of Data.emotes, and
+-- "emoji:<key>" for Data.emojis). A wheel saved before emojis existed gets page 4's emojis once.
 Data.defaultWheel = {
     { "dance", "wave", "cheer", "laugh", "bow", "flex", "kiss", "roar" },
     { "salute", "applaud", "point", "rude", "chicken", "cry", "shy", "beg" },
     { "talk", "talkex", "talkq", "shout", "nod", "no", "train", "eat" },
-    { "sit", "kneel", "sleep", "stand" },
+    { "sit", "kneel", "sleep", "stand", "emoji:joy", "emoji:fire", "emoji:skull", "emoji:heart" },
 }
 
 -- Legacy set chat/tooltip tags.
