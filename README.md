@@ -149,6 +149,25 @@ The conversion code is GPL-3.0-or-later (`ThirdParty/WarcraftXL`, `Engine/Source
 `Engine/Source/Model2/M2Modern.*`, `WoW/Source/WorldClient/MapTerrainTiling.*`). Whoever distributes a client built with it must make the corresponding
 source code available under the same license.
 
+## Bleakhold races
+
+The client accepts race ids up to 31 (`WoW/Common/BleakholdRaces.h`). High Elf (22, Alliance, built from Blood
+Elf) and Eredar (23, Horde, built from Draenei) need game data that is made from your own 3.3.5a DBCs; no game
+data is in this repository:
+
+```powershell
+py -3 -I Tools\RaceForge\raceforge.py build --dbc C:\azerothcore\data\dbc --out C:\bleakhold\raceforge-out --mpq
+```
+
+- Client: copy `raceforge-out\client\patch-R.MPQ` into the client's `Data` folder. The client reads DBC files
+  only from MPQ archives; `Tools/MpqPack` builds them.
+- Server: copy the files of `raceforge-out\server\dbc` into the server's `data\dbc`, and run
+  `raceforge-out\server\sql\bleakhold_races.sql` on the world database.
+- Character creation shows the new races with the Bleakhold glue files installed (see below).
+- Until their own art exists, both races use the models, scenes, voices and portraits of their template race.
+
+See `Tools/RaceForge/README.md` for the race settings (`races.json`) and what the server still needs.
+
 ## Login screen and character creation
 
 The client loads `Interface\Bleakhold\Glue\BleakholdGlue.toc` right after the stock
@@ -177,6 +196,10 @@ works with signature checks on or off.
 | `WoW/Common/` | Code shared by the game modules |
 | `ThirdParty/` | Libraries linked from their upstream sources |
 | `ThirdParty/WarcraftXL/` | WarcraftXL's modern-asset conversions (GPL-3.0-or-later) |
+| `Tools/MpqPack/` | Python tool that packs files into an MPQ patch archive the client loads (`Data\\patch-<letter>.MPQ`) |
+| `Tools/RaceForge/` | Python tool that adds the Bleakhold races (High Elf, Eredar) to your own DBCs and writes the AzerothCore SQL |
+| `Tools/BlpConvert/` | Python tool that converts pictures to BLP textures; draws the login art |
+| `Interface/Bleakhold/Glue/` | Bleakhold login screen and character creation (glue Lua, art, fonts) |
 | `Engine/Source/ModernAssets/` | Runs those conversions on the files the client opens |
 | `Tools/WowClient/` | The `WowClient` executable target |
 | `Tools/XvidDecoder/` | x64 movie decoder that replaces the original 32-bit `DivxDecoder.dll` |

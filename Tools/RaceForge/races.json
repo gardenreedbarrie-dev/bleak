@@ -1,0 +1,50 @@
+{
+    "_readme": "Bleakhold races for RaceForge. Every race clones its template race (models, sounds, racials, class list) and joins the faction of faction_race (language, reputations, faction template, start zone). See README.md for every field.",
+    "races": [
+        {
+            "id": 22,
+            "name": "High Elf",
+            "names": {},
+            "name_female": null,
+            "name_male": null,
+            "client_file_string": "HighElf",
+            "template_race": 10,
+            "faction": "alliance",
+            "faction_race": 1,
+            "faction_template": null,
+            "classes": null,
+            "male_display_id": null,
+            "female_display_id": null,
+            "required_expansion": null,
+            "cinematic_sequence_id": 0,
+            "start": {"map": 0, "zone": 12, "x": -8949.95, "y": -132.493, "z": 83.5312, "o": 0.0, "comment": "Northshire Valley, Elwynn Forest (the Human start)"},
+            "death_knight_start": {"map": 609, "zone": 4298, "x": 2355.84, "y": -5664.77, "z": 426.028, "o": 3.65997, "comment": "Ebon Hold (the Blood Elf Death Knight start)"},
+            "stats": null
+        },
+        {
+            "id": 23,
+            "name": "Eredar",
+            "names": {},
+            "name_female": null,
+            "name_male": null,
+            "client_file_string": "Eredar",
+            "template_race": 11,
+            "faction": "horde",
+            "faction_race": 2,
+            "faction_template": null,
+            "classes": null,
+            "male_display_id": null,
+            "female_display_id": null,
+            "required_expansion": null,
+            "cinematic_sequence_id": 0,
+            "start": {"map": 1, "zone": 14, "x": -618.518, "y": -4251.67, "z": 38.718, "o": 0.0, "comment": "Valley of Trials, Durotar (the Orc start)"},
+            "death_knight_start": {"map": 609, "zone": 4298, "x": 2358.17, "y": -5663.21, "z": 426.027, "o": 3.65997, "comment": "Ebon Hold (the Draenei Death Knight start)"},
+            "stats": null
+        }
+    ],
+    "policy": {
+        "faction_wide_masks": true,
+        "reputation_from": "faction_race",
+        "content_masks_from": "faction_race"
+    }
+}
