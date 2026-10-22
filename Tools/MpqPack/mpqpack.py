@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """MpqPack: build MPQ archives that the 3.3.5a client (and this decompilation) loads as patch archives.
 
-    python3 -I mpqpack.py pack <source folder> <out.mpq>
+    python3 -I mpqpack.py pack <source folder> <out.mpq> [--stream]
     python3 -I mpqpack.py list <archive.mpq>
     python3 -I mpqpack.py extract <archive.mpq> <out folder>
     python3 -I mpqpack.py verify <archive.mpq> [<source folder>]
@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import mmap
 import os
 import re
 import struct
@@ -257,14 +258,14 @@ def _next_power_of_two(value: int) -> int:
     return size
 
 
-def _pack_payload(data: bytes, sector_size: int, compress: bool, single_unit: bool) -> tuple[bytes, int]:
+def _pack_payload(data: bytes, sector_size: int, compress: bool, single_unit: bool, level: int = 9) -> tuple[bytes, int]:
     """The bytes stored for one file and its block flags."""
     if not data or not compress:
         # Uncompressed files go through the plain range path, which requires compressed size == file size.
         return data, FILE_EXISTS
 
     if single_unit:
-        packed = bytes([COMPRESSION_ZLIB]) + zlib.compress(data, 9)
+        packed = bytes([COMPRESSION_ZLIB]) + zlib.compress(data, level)
 
         # IOMpqReadUnit treats a single unit whose stored size equals the file size as uncompressed.
         if len(packed) < len(data):
@@ -276,7 +277,7 @@ def _pack_payload(data: bytes, sector_size: int, compress: bool, single_unit: bo
 
     for start in range(0, len(data), sector_size):
         raw = data[start:start + sector_size]
-        packed = bytes([COMPRESSION_ZLIB]) + zlib.compress(raw, 9)
+        packed = bytes([COMPRESSION_ZLIB]) + zlib.compress(raw, level)
 
         # A sector stored at its full size is read raw (CountCompressed/CountUncompressed), so only keep the
         # compressed form when it is strictly smaller.
@@ -328,24 +329,7 @@ def build_archive(files: list[tuple[str, bytes]], *, compress: bool = True, sect
         raise MpqError("sector shift must be between 0 and 15")
 
     sector_size = 512 << sector_shift
-    seen = {}
-    entries = []
-
-    for name, data in files:
-        name = normalize_archive_name(name)
-
-        if name in SPECIAL_FILES:
-            raise MpqError(f"{name} is written by MpqPack itself")
-
-        key = name_key(name)
-
-        if key in seen:
-            raise MpqError(f"{name} and {seen[key]} are the same file to the client (case and slashes are ignored)")
-
-        seen[key] = name
-        entries.append((name, bytes(data)))
-
-    entries.sort(key=lambda item: name_key(item[0]))
+    entries = [(name, bytes(data)) for name, data in _checked_entries(files)]
 
     if any(len(data) >= 0x100000000 for _, data in entries):
         raise MpqError("a file of 4 GB or more does not fit an MPQ v1 block entry")
@@ -358,14 +342,6 @@ def build_archive(files: list[tuple[str, bytes]], *, compress: bool = True, sect
     attributes = _attributes_payload(packed)
     packed[-1] = PackedFile(ATTRIBUTES, attributes, *_pack_payload(attributes, sector_size, compress, single_unit))
 
-    count = len(packed)
-
-    if hash_table_size is None:
-        # At most half full, so the linear probe in SearchHashTable stays short.
-        hash_table_size = _next_power_of_two(max(16, count * 2))
-    elif hash_table_size < count or hash_table_size & (hash_table_size - 1):
-        raise MpqError("the hash table size must be a power of two and at least the number of files")
-
     # Layout: header, file data, hash table, block table (the block table must end the archive).
     offset = HEADER_SIZE_V0
 
@@ -373,7 +349,32 @@ def build_archive(files: list[tuple[str, bytes]], *, compress: bool = True, sect
         entry.offset = offset
         offset += len(entry.payload)
 
-    hash_table_pos = offset
+    blocks = [(e.name, e.offset, len(e.payload), len(e.data), e.flags) for e in packed]
+    header, tables, archive_size = _tables(blocks, offset, sector_shift, hash_table_size)
+
+    out = bytearray(header)
+
+    for entry in packed:
+        out += entry.payload
+
+    out += tables
+
+    assert len(out) == archive_size
+    return bytes(out)
+
+
+def _tables(blocks: list[tuple[str, int, int, int, int]], data_end: int, sector_shift: int, hash_table_size: int | None) -> tuple[bytes, bytes, int]:
+    """The header and the encrypted hash and block tables for blocks (name, offset, stored size, file size, flags)
+    whose data ends at data_end. Returns (header, tables, archive size)."""
+    count = len(blocks)
+
+    if hash_table_size is None:
+        # At most half full, so the linear probe in SearchHashTable stays short.
+        hash_table_size = _next_power_of_two(max(16, count * 2))
+    elif hash_table_size < count or hash_table_size & (hash_table_size - 1):
+        raise MpqError("the hash table size must be a power of two and at least the number of files")
+
+    hash_table_pos = data_end
     block_table_pos = hash_table_pos + 16 * hash_table_size
     archive_size = block_table_pos + 16 * count
 
@@ -383,31 +384,162 @@ def build_archive(files: list[tuple[str, bytes]], *, compress: bool = True, sect
     hash_table = [(HASH_ENTRY_EMPTY, HASH_ENTRY_EMPTY, 0xFFFF, 0xFF, 0xFF, HASH_ENTRY_EMPTY)] * hash_table_size
     mask = hash_table_size - 1
 
-    for block_index, entry in enumerate(packed):
-        index = hash_string(entry.name, HASH_TABLE_INDEX) & mask
+    for block_index, (name, _, _, _, _) in enumerate(blocks):
+        index = hash_string(name, HASH_TABLE_INDEX) & mask
 
         while hash_table[index][5] != HASH_ENTRY_EMPTY:
             index = (index + 1) & mask
 
         # Locale 0 (neutral) and platform 0: SearchHashTable matches them for every client locale.
-        hash_table[index] = (hash_string(entry.name, HASH_NAME_A), hash_string(entry.name, HASH_NAME_B), 0, 0, 0, block_index)
+        hash_table[index] = (hash_string(name, HASH_NAME_A), hash_string(name, HASH_NAME_B), 0, 0, 0, block_index)
 
     hash_bytes = b"".join(struct.pack("<IIHBBI", *row) for row in hash_table)
-    block_bytes = b"".join(struct.pack("<IIII", e.offset, len(e.payload), len(e.data), e.flags) for e in packed)
+    block_bytes = b"".join(struct.pack("<IIII", offset, stored, size, flags) for _, offset, stored, size, flags in blocks)
 
     header = struct.pack("<IIIHHIIII", MPQ_MAGIC, HEADER_SIZE_V0, archive_size, 0, sector_shift,
                          hash_table_pos, block_table_pos, hash_table_size, count)
 
-    out = bytearray(header)
+    return header, encrypt_block(hash_bytes, HASH_TABLE_KEY) + encrypt_block(block_bytes, BLOCK_TABLE_KEY), archive_size
 
-    for entry in packed:
-        out += entry.payload
 
-    out += encrypt_block(hash_bytes, HASH_TABLE_KEY)
-    out += encrypt_block(block_bytes, BLOCK_TABLE_KEY)
+def _checked_entries(items: list[tuple[str, object]]) -> list[tuple[str, object]]:
+    """Normalized names, no special files and no two names the client would treat as one; sorted like build_archive."""
+    seen = {}
+    entries = []
 
-    assert len(out) == archive_size
-    return bytes(out)
+    for name, value in items:
+        name = normalize_archive_name(name)
+
+        if name in SPECIAL_FILES:
+            raise MpqError(f"{name} is written by MpqPack itself")
+
+        key = name_key(name)
+
+        if key in seen:
+            raise MpqError(f"{name} and {seen[key]} are the same file to the client (case and slashes are ignored)")
+
+        seen[key] = name
+        entries.append((name, value))
+
+    entries.sort(key=lambda item: name_key(item[0]))
+    return entries
+
+
+def write_archive_streaming(path: str, items: list[tuple[str, str]], *, compress: bool = True, sector_shift: int = DEFAULT_SECTOR_SHIFT,
+                            level: int = 6, progress=None) -> PackStats:
+    """Build the same layout as build_archive from files on disk, holding one file in memory at a time, so archives of
+    several gigabytes need no more memory than their largest file. items: (archive name, source file path).
+    progress(done, total) is called after each file. Written through a temporary file."""
+    if not 0 <= sector_shift <= 15:
+        raise MpqError("sector shift must be between 0 and 15")
+
+    sector_size = 512 << sector_shift
+    entries = _checked_entries(items)
+    tmp = path + ".tmp"
+    blocks = []
+    crcs = []
+    md5s = []
+
+    try:
+        with open(tmp, "wb") as out:
+            out.write(bytes(HEADER_SIZE_V0))
+            offset = HEADER_SIZE_V0
+
+            def add(name: str, data: bytes, attributes: bool = False):
+                nonlocal offset
+
+                if len(data) >= 0x100000000:
+                    raise MpqError(f"{name}: a file of 4 GB or more does not fit an MPQ v1 block entry")
+
+                payload, flags = _pack_payload(data, sector_size, compress, False, level)
+
+                if offset + len(payload) >= 0x100000000:
+                    raise MpqError("the archive would be 4 GB or larger, which MPQ v1 cannot address; pack fewer files")
+
+                out.write(payload)
+                blocks.append((name, offset, len(payload), len(data), flags))
+                crcs.append(0 if attributes else zlib.crc32(data) & 0xFFFFFFFF)
+                md5s.append(bytes(16) if attributes else hashlib.md5(data).digest())
+                offset += len(payload)
+
+            for done, (name, source) in enumerate(entries, 1):
+                with open(source, "rb") as f:
+                    add(name, f.read())
+
+                if progress:
+                    progress(done, len(entries))
+
+            add(LISTFILE, make_listfile([name for name, _ in entries]))
+            # The (attributes) block itself gets zeros, as in build_archive.
+            crcs.append(0)
+            md5s.append(bytes(16))
+            attributes = struct.pack("<II", ATTRIBUTES_VERSION, ATTRIBUTE_CRC32 | ATTRIBUTE_MD5) + struct.pack(f"<{len(crcs)}I", *crcs) + b"".join(md5s)
+            crcs.pop()
+            md5s.pop()
+            add(ATTRIBUTES, attributes, attributes=True)
+
+            header, tables, archive_size = _tables(blocks, offset, sector_shift, None)
+            out.write(tables)
+            out.seek(0)
+            out.write(header)
+
+        os.replace(tmp, path)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        raise
+
+    compressed = sum(1 for b in blocks if b[4] & FILE_COMPRESS)
+    return PackStats(path, len(entries), archive_size, _next_power_of_two(max(16, len(blocks) * 2)), compressed, len(blocks) - compressed)
+
+
+def list_folder(src_dir: str) -> list[tuple[str, str, int]]:
+    """Every regular file under src_dir as (archive name, path, size), sorted by archive name, without reading it."""
+    src_dir = os.path.abspath(src_dir)
+
+    if not os.path.isdir(src_dir):
+        raise MpqError(f"{src_dir} is not a folder")
+
+    files = []
+
+    for root, dirs, names in os.walk(src_dir):
+        dirs.sort()
+
+        for filename in sorted(names):
+            path = os.path.join(root, filename)
+
+            if os.path.islink(path) or not os.path.isfile(path):
+                continue
+
+            files.append((normalize_archive_name(os.path.relpath(path, src_dir).replace(os.sep, "\\")), path, os.path.getsize(path)))
+
+    files.sort(key=lambda item: name_key(item[0]))
+    return files
+
+
+def plan_split(files: list[tuple[str, str, int]], max_bytes: int) -> list[list[tuple[str, str, int]]]:
+    """Split files (archive name, path, size) into groups of at most max_bytes of file data each, in order. Packed
+    data is never larger than the file (a file that does not shrink is stored), so each archive stays under
+    max_bytes plus its tables. A single file larger than max_bytes gets a group of its own."""
+    if max_bytes <= 0:
+        raise MpqError("the archive size limit must be positive")
+
+    groups = []
+    current = []
+    total = 0
+
+    for item in files:
+        if current and total + item[2] > max_bytes:
+            groups.append(current)
+            current, total = [], 0
+
+        current.append(item)
+        total += item[2]
+
+    if current:
+        groups.append(current)
+
+    return groups
 
 
 def write_archive(path: str, files: list[tuple[str, bytes]], **options) -> PackStats:
@@ -487,19 +619,50 @@ class MpqArchive:
     """
 
     def __init__(self, source: str | bytes):
+        self._file = None
+
         if isinstance(source, (bytes, bytearray)):
             self.data = bytes(source)
             self.path = "<memory>"
         else:
-            with open(source, "rb") as f:
-                self.data = f.read()
+            # Mapped, not read: archives of several gigabytes are only paged in where they are read.
             self.path = source
+            self._file = open(source, "rb")
 
-        self.header = self._find_header()
+            try:
+                if os.fstat(self._file.fileno()).st_size:
+                    self.data = mmap.mmap(self._file.fileno(), 0, access=mmap.ACCESS_READ)
+                else:
+                    self.data = b""
+            except BaseException:
+                self._file.close()
+                raise
+
+        try:
+            self.header = self._find_header()
+        except BaseException:
+            self.close()
+            raise
+
         self.archive_end = self._archive_end()
         self.sector_size = 512 << self.header.sector_shift
         self.hashes = self._read_hash_table()
         self.blocks = self._read_block_table()
+
+    def close(self):
+        if isinstance(self.data, mmap.mmap):
+            self.data.close()
+            self.data = b""
+
+        if self._file:
+            self._file.close()
+            self._file = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
 
     # s_OpenArchive: look for the header at offset 0, then every 512 bytes, following an 'MPQ\x1B' user data header.
     def _find_header(self) -> Header:
@@ -988,6 +1151,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--no-compress", action="store_true", help="store every file uncompressed")
     p.add_argument("--single-unit", action="store_true", help="compress each file as one unit instead of 4 KB sectors")
     p.add_argument("--sector-shift", type=int, default=DEFAULT_SECTOR_SHIFT, help="sector size is 512 << shift (default 3)")
+    p.add_argument("--stream", action="store_true", help="read one file at a time (for folders of gigabytes; zlib level 6)")
 
     p = sub.add_parser("list", help="list the files of an archive")
     p.add_argument("archive")
@@ -1006,8 +1170,22 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         if args.command == "pack":
-            stats = pack_folder(args.source, args.archive, compress=not args.no_compress, single_unit=args.single_unit, sector_shift=args.sector_shift)
-            report = MpqArchive(args.archive).verify()
+            if args.stream:
+                if args.single_unit:
+                    raise MpqError("--stream compresses in sectors; leave out --single-unit")
+
+                out_abs, src_abs = os.path.abspath(args.archive), os.path.abspath(args.source)
+
+                if os.path.commonpath([out_abs, src_abs]) == src_abs:
+                    raise MpqError("the output archive must not be inside the source folder")
+
+                items = [(name, path) for name, path, _ in list_folder(args.source)]
+                stats = write_archive_streaming(args.archive, items, compress=not args.no_compress, sector_shift=args.sector_shift)
+            else:
+                stats = pack_folder(args.source, args.archive, compress=not args.no_compress, single_unit=args.single_unit, sector_shift=args.sector_shift)
+
+            with MpqArchive(args.archive) as archive:
+                report = archive.verify()
 
             if report.problems:
                 for problem in report.problems:

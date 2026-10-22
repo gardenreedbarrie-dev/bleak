@@ -82,6 +82,38 @@ To pack extra client files into the same archive (for example corpse skeletons u
 `World\Generic\PassiveDoodads\DeathSkeletons\HighElfMaleDeathSkeleton.m2`, copied from your client), put them in a
 folder with their archive paths as subfolders and add `--mpq-extra <folder>`.
 
+## Character customization packages (more faces, hair, skins, tattoos, HD models)
+
+A customization package such as Ascension Character Customization (HD models of the stock races and 500+ extra
+faces, hair styles, skins and markings) is a folder with `DBFilesClient\*.dbc` next to art folders
+(`Character\`, `Textures\`). Give it to RaceForge and it is merged into your DBCs first, so High Elf and Eredar,
+cloned from the merged Blood Elf and Draenei, get every option and the HD models too:
+
+```bat
+py -3 -I Tools\RaceForge\raceforge.py build --dbc C:\azerothcore\data\dbc --out C:\bleakhold\raceforge-out --mpq --customization C:\Downloads\Ascension_Character_Customization
+```
+
+In the easy mode, drop the DBC folder and then the package folder onto the program (or answer its second
+question). The package is your own download; nothing of it is in this repository.
+
+- Tables keyed by race (CharSections, CharHairGeosets, CharacterFacialHairStyles, BarberShopStyle,
+  EmotesTextSound): for every race the package has rows for, its rows replace yours; your other races keep theirs.
+  Rows for races your ChrRaces lacks, or for the races RaceForge adds, are left out.
+- Tables keyed by id (HelmetGeosetVisData, CreatureDisplayInfoExtra): the package's row replaces yours with the same
+  id; your other rows are kept.
+- CharSections is sorted again (the client groups consecutive rows). Ids that clash with a row you keep get new ones.
+- Helmet masks: the new races copy the template race's bit exactly, so a package mask like "every race but a few"
+  cannot hide geosets the template race shows.
+- The art (every file under the package's folders except `DBFilesClient`) is packed into `client\patch-S.MPQ`,
+  `patch-T.MPQ`, ... with at most 1500 MB of files each (`--art-max-mb`, `--art-letters`), streamed one file at a
+  time. `--no-art` merges the tables only.
+- `customization\base-dbc` in the output holds your DBCs with the package merged in: the starting point the checks
+  compare against (`raceforge.py validate` finds it by itself). The report lists every merge step, and checks that
+  the package's rows arrived exactly and your other rows did not change.
+
+The server gets the merged tables in `server\dbc` as usual; players need `patch-R.MPQ` and the art archives in
+their `Data` folder.
+
 ## Output
 
 | Path | Contents |
@@ -92,6 +124,8 @@ folder with their archive paths as subfolders and add `--mpq-extra <folder>`.
 | `server\sql\bleakhold_races.sql` | Required world-database rows |
 | `server\sql\bleakhold_races_content_masks.sql` | Optional quest, item, area spell, condition and mail race masks |
 | `server\sql\bleakhold_races_remove.sql` | Undoes both SQL files |
+| `client\patch-S.MPQ`, `patch-T.MPQ`, ... | The customization package's art (`--customization`) |
+| `customization\base-dbc\*.dbc` | Your DBCs with the package merged in, before the races were added |
 | `report.txt` | Every change, warning and check |
 
 ## What changes

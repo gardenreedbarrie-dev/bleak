@@ -262,6 +262,7 @@ USED_TABLES = (
     "ChrClasses",
     "ChrRaces",
     "CreatureDisplayInfo",
+    "CreatureDisplayInfoExtra",
     "CreatureModelData",
     "DanceMoves",
     "EmotesTextSound",

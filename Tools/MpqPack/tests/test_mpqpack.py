@@ -231,6 +231,84 @@ class VerifyTests(unittest.TestCase):
         self.assertTrue(any("hash table is not directly in front" in p for p in problems), problems)
 
 
+def write_tree(root, files):
+    for name, content in files:
+        path = os.path.join(root, *name.split("\\"))
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        with open(path, "wb") as f:
+            f.write(content)
+
+
+class StreamingTests(unittest.TestCase):
+    def test_same_bytes_as_the_memory_writer(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "src")
+            write_tree(src, SAMPLE_FILES)
+            items = [(name, path) for name, path, _ in mpqpack.list_folder(src)]
+            self.assertEqual([n for n, _ in items], [n for n, _ in sorted(SAMPLE_FILES, key=lambda f: mpqpack.name_key(f[0]))])
+
+            for compress in (True, False):
+                out = os.path.join(tmp, f"stream-{compress}.MPQ")
+                stats = mpqpack.write_archive_streaming(out, items, compress=compress, level=9)
+
+                with open(out, "rb") as f:
+                    streamed = f.read()
+
+                self.assertEqual(streamed, mpqpack.build_archive(SAMPLE_FILES, compress=compress))
+                self.assertEqual(stats.archive_size, len(streamed))
+                self.assertEqual(stats.file_count, len(SAMPLE_FILES))
+                self.assertFalse(os.path.exists(out + ".tmp"))
+
+    def test_default_level_round_trips_through_the_mapped_reader(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "src")
+            write_tree(src, SAMPLE_FILES)
+            out = os.path.join(tmp, "a.MPQ")
+            seen = []
+            mpqpack.write_archive_streaming(out, [(n, p) for n, p, _ in mpqpack.list_folder(src)], progress=lambda d, t: seen.append((d, t)))
+            self.assertEqual(seen[-1], (len(SAMPLE_FILES), len(SAMPLE_FILES)))
+
+            with mpqpack.MpqArchive(out) as archive:
+                report = archive.verify()
+                self.assertEqual(report.problems, [])
+
+                for name, content in SAMPLE_FILES:
+                    self.assertEqual(archive.read(name), content)
+
+            self.assertEqual(archive.data, b"", "closed")
+
+    def test_errors_leave_no_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            out = os.path.join(tmp, "a.MPQ")
+
+            with self.assertRaises(OSError):
+                mpqpack.write_archive_streaming(out, [("A\\missing.blp", os.path.join(tmp, "missing.blp"))])
+
+            self.assertFalse(os.path.exists(out) or os.path.exists(out + ".tmp"))
+
+            with self.assertRaises(mpqpack.MpqError):
+                mpqpack.write_archive_streaming(out, [("a\\x.blp", out), ("A/X.BLP", out)])
+
+    def test_plan_split(self):
+        files = [(f"f{i}", f"p{i}", size) for i, size in enumerate([5, 5, 5, 20, 1, 9, 1])]
+        groups = mpqpack.plan_split(files, 10)
+        self.assertEqual([[f[2] for f in g] for g in groups], [[5, 5], [5], [20], [1, 9], [1]])
+        self.assertEqual(sum(len(g) for g in groups), len(files))
+        self.assertEqual(mpqpack.plan_split([], 10), [])
+
+        with self.assertRaises(mpqpack.MpqError):
+            mpqpack.plan_split(files, 0)
+
+    def test_empty_archive_file_is_rejected_cleanly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "empty.MPQ")
+            open(path, "wb").close()
+
+            with self.assertRaises(mpqpack.MpqError):
+                mpqpack.MpqArchive(path)
+
+
 class CommandLineTests(unittest.TestCase):
     def run_tool(self, *args):
         return subprocess.run([sys.executable, "-I", os.path.join(TOOL_DIR, "mpqpack.py"), *args], capture_output=True, text=True)
@@ -269,6 +347,18 @@ class CommandLineTests(unittest.TestCase):
             # The output must not land inside the folder being packed.
             result = self.run_tool("pack", src, os.path.join(src, "x.MPQ"))
             self.assertNotEqual(result.returncode, 0)
+
+    def test_pack_stream(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "src")
+            write_tree(src, SAMPLE_FILES)
+            out = os.path.join(tmp, "s.MPQ")
+            result = self.run_tool("pack", src, out, "--stream")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result = self.run_tool("verify", out, src)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertNotEqual(self.run_tool("pack", src, out, "--stream", "--single-unit").returncode, 0)
+            self.assertNotEqual(self.run_tool("pack", src, os.path.join(src, "x.MPQ"), "--stream").returncode, 0)
 
     def test_selftest_command(self):
         result = self.run_tool("selftest")

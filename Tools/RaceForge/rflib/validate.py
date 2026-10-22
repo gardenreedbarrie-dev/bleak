@@ -206,7 +206,7 @@ def validate(out_dir: str, stock_dir: str, config: Config, mpq_path: str | None 
 
 
 def stock_rows_unchanged(name: str, stock: DbcTable, result: DbcTable, config: Config) -> list[str]:
-    """Every stock row must still be there, identical except that mask columns may gain new-race bits."""
+    """Every stock row must still be there, identical except for the new races' bits in mask columns."""
     problems = []
     allowed = {}  # column index -> bits that may be added
     new_bits = sum(r.bit for r in config.races)
@@ -260,7 +260,8 @@ def stock_rows_unchanged(name: str, stock: DbcTable, result: DbcTable, config: C
 
             bits = allowed.get(i)
 
-            if bits is None or (b & ~bits) != a:
+            # Only the new races' bits may differ (added, or cleared where the template race has none).
+            if bits is None or (b & ~bits) != (a & ~bits):
                 problems.append(f"row {to_signed(row[0])} column {result.schema.columns[i].name}: {a} -> {b}")
 
     if len(result.rows) < len(stock.rows):

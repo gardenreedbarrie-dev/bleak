@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """RaceForge: add the Bleakhold races (High Elf, Eredar) to your own 3.3.5a DBCs, for the client and AzerothCore.
 
-    python3 -I raceforge.py build --dbc <your DBFilesClient folder> --out <output folder> [--mpq]
+    python3 -I raceforge.py build --dbc <your DBFilesClient folder> --out <output folder> [--mpq] [--customization <package>]
     python3 -I raceforge.py validate --dbc <same folder> --out <output folder>
     python3 -I raceforge.py schemas --check
-    python3 -I raceforge.py [<DBC folder>]       (double-click or drop a folder: builds next to it)
+    python3 -I raceforge.py [<DBC folder> [<customization package>]]   (double-click or drop folders: builds next to it)
 
 RaceForge ships no game data: it reads the DBC files of your own client and writes patched copies of the tables it
 changes, the AzerothCore SQL and a report. See README.md.
@@ -25,13 +25,18 @@ for path in (HERE, os.path.join(os.path.dirname(HERE), "MpqPack")):
         sys.path.insert(0, path)
 
 from rflib import config as configmod  # noqa: E402
-from rflib import recparse, schema_access, sqlgen, validate  # noqa: E402
-from rflib.dbc import DbcError  # noqa: E402
-from rflib.forge import Forge, ForgeError  # noqa: E402
+from rflib import customize, recparse, schema_access, sqlgen, validate  # noqa: E402
+from rflib.dbc import DbcError, DbcTable  # noqa: E402
+from rflib.forge import OPTIONAL_TABLES, REQUIRED_TABLES, Forge, ForgeError, find_dbc  # noqa: E402
 
 DEFAULT_CONFIG = os.path.join(HERE, "races.json")
 DEFAULT_MPQ = "patch-R.MPQ"
-OUTPUT_ENTRIES = ("client", "server", "report.txt")
+OUTPUT_ENTRIES = ("client", "server", "customization", "report.txt")
+# Art archives of a customization package: patch-<letter>.MPQ, each at most this much file data. MPQ v1 addresses
+# 4 GB; staying well below keeps every offset clear of the sign bit.
+DEFAULT_ART_LETTERS = "STUVWXYZ"
+DEFAULT_ART_MAX_MB = 1500
+BASE_DBC = os.path.join("customization", "base-dbc")
 
 
 def prepare_out_dir(out_dir: str, force: bool):
@@ -90,9 +95,125 @@ def build_mpq(out_dir: str, name: str, extra: str | None = None) -> str:
     return path
 
 
-def format_report(forge: Forge, config: configmod.Config, written: dict, sql_files: list[str], mpq_path: str | None, result: validate.Validation, out_dir: str) -> str:
+def merge_customization(dbc_dir: str, package_dir: str, config: configmod.Config) -> customize.MergeResult:
+    """The user's tables merged with the package's (in memory)."""
+    base = {}
+
+    for name in ("ChrRaces",) + customize.TABLES:
+        path = find_dbc(dbc_dir, name)
+
+        if path:
+            base[name] = DbcTable.read(path, schema_access.get(name))
+
+    if "ChrRaces" not in base:
+        raise ForgeError(f"{dbc_dir}: missing ChrRaces.dbc (point --dbc at the DBFilesClient folder of your 3.3.5a client)")
+
+    return customize.merge(base, package_dir, {r.id for r in config.races})
+
+
+def write_base_dbc(out_dir: str, dbc_dir: str, merged_bytes: dict[str, bytes]) -> str:
+    """The user's DBCs with the package merged in (merged_bytes, taken before the races were added), as RaceForge's
+    starting point: the validation compares the output with this folder. Only the tables RaceForge uses are written."""
+    folder = os.path.join(out_dir, BASE_DBC)
+    os.makedirs(folder, exist_ok=True)
+
+    for name in REQUIRED_TABLES + OPTIONAL_TABLES + customize.TABLES:
+        base = os.path.basename(schema_access.get(name).filename.replace("\\", "/"))
+
+        if name in merged_bytes:
+            with open(os.path.join(folder, base), "wb") as f:
+                f.write(merged_bytes[name])
+            continue
+
+        path = find_dbc(dbc_dir, name)
+
+        if path and not os.path.exists(os.path.join(folder, base)):
+            shutil.copyfile(path, os.path.join(folder, base))
+
+    return folder
+
+
+def art_archive_names(dbc_mpq: str | None, letters: str) -> list[str]:
+    letters = letters.upper()
+
+    # The client loads Data\\patch-<one character>.MPQ; letters sort after the stock patch-2 and patch-3.
+    if any(not "A" <= c <= "Z" for c in letters) or len(set(letters)) != len(letters):
+        raise ForgeError(f"--art-letters {letters!r}: give distinct letters A-Z, for example {DEFAULT_ART_LETTERS}")
+
+    names = [f"patch-{letter}.MPQ" for letter in letters]
+
+    if dbc_mpq and dbc_mpq.lower() in (n.lower() for n in names):
+        names = [n for n in names if n.lower() != dbc_mpq.lower()]
+
+    return names
+
+
+def build_art_archives(out_dir: str, package_dir: str, dbc_mpq: str | None, letters: str, max_mb: int) -> list[tuple[str, list[str]]]:
+    """Pack the package's art into client/patch-<letter>.MPQ archives. Returns (path, archive names) per archive."""
+    import mpqpack
+
+    files = customize.art_files(package_dir)
+
+    if not files:
+        return []
+
+    groups = mpqpack.plan_split(files, max_mb * 1024 * 1024)
+    names = art_archive_names(dbc_mpq, letters)
+
+    if len(groups) > len(names):
+        raise ForgeError(f"the art needs {len(groups)} archives but --art-letters gives only {len(names)} names; add letters or raise --art-max-mb")
+
+    archives = []
+    total = sum(len(g) for g in groups)
+    done_before = 0
+
+    for group, name in zip(groups, names):
+        path = os.path.join(out_dir, "client", name)
+        print(f"Packing {len(group)} art files into {name} ...", flush=True)
+
+        def progress(done, count, before=done_before):
+            if done % 2000 == 0 or done == count:
+                print(f"  {before + done} / {total} files", flush=True)
+
+        try:
+            mpqpack.write_archive_streaming(path, [(n, p) for n, p, _ in group], progress=progress)
+        except mpqpack.MpqError as e:
+            raise ForgeError(f"packing {path}: {e}") from None
+
+        archives.append((path, [n for n, _, _ in group]))
+        done_before += len(group)
+
+    return archives
+
+
+def check_art_archives(v: validate.Validation, archives: list[tuple[str, list[str]]]):
+    import mpqpack
+
+    for path, expected in archives:
+        try:
+            with mpqpack.MpqArchive(path) as archive:
+                report = archive.verify()
+                listed = {mpqpack.name_key(n) for n in archive.names()}
+        except (mpqpack.MpqError, OSError) as e:
+            v.add("FAIL", f"{os.path.basename(path)}: art archive opens", str(e))
+            continue
+
+        missing = [n for n in expected if mpqpack.name_key(n) not in listed]
+        problems = report.problems + ([f"{len(missing)} files missing, e.g. {missing[0]}"] if missing else [])
+
+        if len(listed) != len(expected) and not missing:
+            problems.append(f"{len(listed)} files listed, {len(expected)} packed")
+
+        v.expect(not problems, f"{os.path.basename(path)}: {len(expected)} art files, passes the client's archive checks", "; ".join(problems[:5]))
+
+
+def format_report(forge: Forge, config: configmod.Config, written: dict, sql_files: list[str], mpq_path: str | None, result: validate.Validation, out_dir: str,
+                  merged: customize.MergeResult | None = None, package_dir: str | None = None, art: list | None = None) -> str:
     lines = ["RaceForge report", "================", ""]
     lines.append(f"Input DBCs: {os.path.abspath(forge.input_dir)}")
+
+    if package_dir:
+        lines.append(f"Customization package: {os.path.abspath(package_dir)}")
     lines.append(f"Config:     {os.path.abspath(config.path) if config.path else '(built in)'}")
     lines.append(f"Faction masks of the stock playable races: Alliance 0x{forge.faction_masks.alliance:X}, Horde 0x{forge.faction_masks.horde:X} (from {forge.faction_masks.source})")
     lines.append("")
@@ -104,6 +225,18 @@ def format_report(forge: Forge, config: configmod.Config, written: dict, sql_fil
         s = forge.summaries[race.id]
         lines.append(f"{race.id} {race.name}: ClientFileString {race.client_file_string}, template race {race.template_race}, {race.faction} (like race {race.faction_race}), "
                      f"FactionTemplate {s.faction_template}, displays {s.male_display}/{s.female_display}, classes {s.classes}")
+
+    if merged:
+        lines.append("")
+        lines.append("Customization merged first")
+        lines.append("--------------------------")
+
+        for name in sorted(merged.notes):
+            for note in merged.notes[name]:
+                lines.append(f"{name}: {note}")
+
+        for warning in merged.warnings:
+            lines.append(f"- {warning}")
 
     lines.append("")
     lines.append("Changes")
@@ -140,6 +273,9 @@ def format_report(forge: Forge, config: configmod.Config, written: dict, sql_fil
     if mpq_path:
         lines.append(f"Client archive: {mpq_path}")
 
+    for path, files in art or []:
+        lines.append(f"Client art archive: {path} ({len(files)} files)")
+
     lines.append(f"Server DBCs: {os.path.join(out_dir, 'server', 'dbc')} (identical copies)")
 
     for path in sql_files:
@@ -149,6 +285,9 @@ def format_report(forge: Forge, config: configmod.Config, written: dict, sql_fil
     lines.append("Next steps")
     lines.append("----------")
     lines.append(f"1. Client: put {mpq_path or 'the DBFilesClient folder packed with MpqPack'} into the client's Data folder as Data\\{os.path.basename(mpq_path) if mpq_path else DEFAULT_MPQ}.")
+
+    if art:
+        lines.append(f"   Put the art archives ({', '.join(os.path.basename(p) for p, _ in art)}) into the Data folder as well.")
     lines.append("   The client reads DBCs only from archives, and a Data\\patch-<letter>.MPQ later in the alphabet wins over earlier ones.")
     lines.append("2. Server: copy server/dbc/*.dbc over AzerothCore's data/dbc, run server/sql/bleakhold_races.sql on the world")
     lines.append("   database (optionally bleakhold_races_content_masks.sql), restart worldserver.")
@@ -158,13 +297,46 @@ def format_report(forge: Forge, config: configmod.Config, written: dict, sql_fil
 
 def cmd_build(args) -> int:
     config = configmod.load(args.config)
-    forge = Forge(args.dbc, config)
+    package_dir = getattr(args, "customization", None)
+    merged = None
+
+    if package_dir:
+        try:
+            merged = merge_customization(args.dbc, package_dir, config)
+        except customize.CustomizeError as e:
+            raise ForgeError(str(e)) from None
+
+    # The forge changes the merged tables in place; the starting point is kept for the base folder.
+    merged_bytes = {name: table.to_bytes() for name, table in merged.tables.items()} if merged else {}
+    forge = Forge(args.dbc, config, merged.tables if merged else None)
     forge.load()
     forge.run()
 
     out_dir = os.path.abspath(args.out)
+
+    if package_dir and os.path.commonpath([out_dir, os.path.abspath(package_dir)]) == os.path.abspath(package_dir):
+        raise ForgeError("the output folder must not be inside the customization package")
+
     prepare_out_dir(out_dir, args.force)
+    stock_dir = args.dbc
+
+    if merged:
+        stock_dir = write_base_dbc(out_dir, args.dbc, merged_bytes)
+        forge.warnings.extend(merged.warnings)
+
     written = forge.write(out_dir)
+
+    # Merged tables RaceForge itself does not change (CreatureDisplayInfoExtra) still differ from the user's.
+    for name, table in (merged.tables.items() if merged else ()):
+        if name in forge.tables:
+            continue
+
+        base = os.path.basename(table.schema.filename.replace("\\", "/"))
+
+        for kind, folder in (("client", os.path.join(out_dir, "client", "DBFilesClient")), ("server", os.path.join(out_dir, "server", "dbc"))):
+            os.makedirs(folder, exist_ok=True)
+            table.write(os.path.join(folder, base))
+            written[kind].append(os.path.join(folder, base))
 
     sql_dir = os.path.join(out_dir, "server", "sql")
     os.makedirs(sql_dir, exist_ok=True)
@@ -193,8 +365,20 @@ def cmd_build(args) -> int:
         args.mpq = DEFAULT_MPQ
 
     mpq_path = build_mpq(out_dir, args.mpq, args.mpq_extra) if args.mpq else None
-    result = validate.validate(out_dir, args.dbc, config, mpq_path)
-    report = format_report(forge, config, written, sql_files, mpq_path, result, out_dir)
+    art = []
+
+    if package_dir and args.mpq and not getattr(args, "no_art", False):
+        art = build_art_archives(out_dir, package_dir, args.mpq, args.art_letters, args.art_max_mb)
+
+    result = validate.validate(out_dir, stock_dir, config, mpq_path)
+
+    if package_dir:
+        for status, name, detail in customize.check(stock_dir, args.dbc, package_dir, {r.id for r in config.races}):
+            result.add(status, name, detail)
+
+        check_art_archives(result, art)
+
+    report = format_report(forge, config, written, sql_files, mpq_path, result, out_dir, merged, package_dir, art)
 
     with open(os.path.join(out_dir, "report.txt"), "w", encoding="utf-8") as f:
         f.write(report)
@@ -205,7 +389,16 @@ def cmd_build(args) -> int:
 
 def cmd_validate(args) -> int:
     config = configmod.load(args.config)
-    result = validate.validate(os.path.abspath(args.out), args.dbc, config, args.mpq)
+    out_dir = os.path.abspath(args.out)
+    stock_dir = args.dbc
+    base_dir = os.path.join(out_dir, BASE_DBC)
+
+    # A build with a customization package started from the merged tables it kept in the output.
+    if os.path.isdir(base_dir):
+        print(f"note: comparing with the merged starting point {base_dir}")
+        stock_dir = base_dir
+
+    result = validate.validate(out_dir, stock_dir, config, args.mpq)
 
     for check in result.checks:
         print(f"[{check.status}] {check.name}" + (f" -- {check.detail}" if check.detail and check.status != "PASS" else ""))
@@ -256,8 +449,13 @@ def easy_mode(argv: list[str]) -> int:
     the output goes next to it, in a folder RaceForge owns, so running it again replaces its own output."""
     print("Bleakhold RaceForge: adds High Elf and Eredar to your own DBC files.\n")
 
+    package = None
+
     if argv and os.path.isdir(argv[0]):
         dbc = argv[0]
+
+        if len(argv) > 1 and os.path.isdir(argv[1]):
+            package = argv[1]
     else:
         try:
             dbc = input("Drag your DBC folder (the client's DBFilesClient, or the server's data\\dbc) into this window and press Enter:\n> ")
@@ -270,8 +468,22 @@ def easy_mode(argv: list[str]) -> int:
         print(f"error: '{dbc}' is not a folder", file=sys.stderr)
         return 1
 
+    if package is None and not argv:
+        try:
+            package = input("\nOptional: drag a character customization package (for example Ascension Character Customization) into this\n"
+                            "window and press Enter, or just press Enter to skip:\n> ")
+        except EOFError:
+            package = ""
+
+        package = package.strip().strip('"') or None
+
+        if package and not os.path.isdir(package):
+            print(f"error: '{package}' is not a folder", file=sys.stderr)
+            return 1
+
     out = os.path.join(os.path.dirname(os.path.abspath(dbc)), EASY_OUT)
-    args = argparse.Namespace(dbc=dbc, out=out, config=DEFAULT_CONFIG, mpq=DEFAULT_MPQ, mpq_extra=None, force=True)
+    args = argparse.Namespace(dbc=dbc, out=out, config=DEFAULT_CONFIG, mpq=DEFAULT_MPQ, mpq_extra=None, force=True,
+                              customization=package, no_art=False, art_letters=DEFAULT_ART_LETTERS, art_max_mb=DEFAULT_ART_MAX_MB)
 
     try:
         result = cmd_build(args)
@@ -282,6 +494,9 @@ def easy_mode(argv: list[str]) -> int:
     if result == 0:
         print(f"Done. Everything is in {out}:")
         print(f"  client\\{DEFAULT_MPQ}            -> copy into the game's Data folder")
+
+        if package:
+            print("  client\\patch-S.MPQ (and T, U, ...) -> the customization art: copy into the game's Data folder too")
         print("  server\\dbc\\*.dbc              -> copy into the server's data\\dbc folder")
         print("  server\\sql\\bleakhold_races.sql -> run on the world database")
     else:
@@ -313,6 +528,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--mpq", nargs="?", const=DEFAULT_MPQ, help=f"also pack the client DBCs into an archive (default name {DEFAULT_MPQ})")
     p.add_argument("--mpq-extra", help="folder of extra client files to pack into the archive too (its subfolders are the archive paths)")
     p.add_argument("--force", action="store_true", help="replace earlier RaceForge output in --out")
+    p.add_argument("--customization", help="character customization package to merge first (a folder with DBFilesClient\\ and art folders)")
+    p.add_argument("--no-art", action="store_true", help="with --customization: merge the tables only, do not pack the package's art")
+    p.add_argument("--art-letters", default=DEFAULT_ART_LETTERS, help=f"letters of the art archives patch-<letter>.MPQ (default {DEFAULT_ART_LETTERS})")
+    p.add_argument("--art-max-mb", type=int, default=DEFAULT_ART_MAX_MB, help=f"file data per art archive in MB (default {DEFAULT_ART_MAX_MB})")
 
     p = sub.add_parser("validate", help="check an output folder again")
     p.add_argument("--dbc", required=True)

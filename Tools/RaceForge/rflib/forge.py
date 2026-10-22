@@ -115,9 +115,12 @@ def find_dbc(input_dir: str, name: str) -> str | None:
 
 
 class Forge:
-    def __init__(self, input_dir: str, config: Config):
+    def __init__(self, input_dir: str, config: Config, overrides: dict[str, DbcTable] | None = None):
+        """overrides: tables to use instead of the files in input_dir (a merged customization package); they are
+        always written, as they differ from the user's files."""
         self.input_dir = input_dir
         self.config = config
+        self.overrides = overrides or {}
         self.tables: dict[str, DbcTable] = {}
         self.missing: list[str] = []
         self.warnings: list[str] = []
@@ -129,6 +132,10 @@ class Forge:
 
     def load(self):
         for name in REQUIRED_TABLES + OPTIONAL_TABLES:
+            if name in self.overrides:
+                self.tables[name] = self.overrides[name]
+                continue
+
             path = find_dbc(self.input_dir, name)
 
             if path is None:
@@ -392,23 +399,27 @@ class Forge:
         self.change("Faction").values_changed += changed
         self.change("Faction").notes.append(f"race {race.id}: reputation masks copied from race {source} ({changed} masks)")
 
-        # Helmets hide the template race's geosets for the new race too; this table uses 1 << race.
+        # Helmets hide exactly the template race's geosets for the new race; this table uses 1 << race. The bit is
+        # copied both ways: masks like "every race but a few" can have the new race's bit set already.
         helmets = self.tables.get("HelmetGeosetVisData")
 
         if helmets is not None:
             columns = helmets.schema.field_columns("hideGeoset")
             new_bit = 1 << race.id
             template_bit = 1 << race.template_race
-            changed = 0
+            added = cleared = 0
 
             for row in helmets.rows:
                 for column in columns:
                     if row[column] & template_bit and not row[column] & new_bit:
                         row[column] |= new_bit
-                        changed += 1
+                        added += 1
+                    elif not row[column] & template_bit and row[column] & new_bit:
+                        row[column] &= ~new_bit
+                        cleared += 1
 
-            self.change("HelmetGeosetVisData").values_changed += changed
-            self.change("HelmetGeosetVisData").notes.append(f"race {race.id}: bit 1<<{race.id} added where 1<<{race.template_race} is set ({changed} masks)")
+            self.change("HelmetGeosetVisData").values_changed += added + cleared
+            self.change("HelmetGeosetVisData").notes.append(f"race {race.id}: bit 1<<{race.id} copied from 1<<{race.template_race} ({added} set, {cleared} cleared)")
 
     # --- output ---
 

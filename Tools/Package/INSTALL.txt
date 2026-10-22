@@ -45,6 +45,12 @@ High Elf and Eredar must exist in the same game data on the server and in every 
 Use the dbc folder your server really runs with, so your own changes are kept. Run RaceForge again
 whenever you change those files.
 
+More faces, hair, skins, tattoos and HD models: after the dbc folder, drag a character customization
+package folder (for example Ascension Character Customization, your own download) into the window when
+RaceForge asks for it. High Elf and Eredar get every option too. The output then also has
+client\patch-S.MPQ, patch-T.MPQ, ... with the package's models and textures: give those to every player
+as well (they go into the Data folder next to patch-R.MPQ). Packing the art takes a few minutes.
+
 
 SERVER OWNER: THE SERVER MODULE
 -------------------------------

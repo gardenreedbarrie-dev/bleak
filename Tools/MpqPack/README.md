@@ -18,6 +18,9 @@ On Windows the Python launcher is `py -3`; elsewhere use `python3`.
 :: C:\bleakhold\mpq-src\DBFilesClient\ChrRaces.dbc becomes DBFilesClient\ChrRaces.dbc.
 py -3 -I Tools\MpqPack\mpqpack.py pack C:\bleakhold\mpq-src C:\WoW335\Data\patch-R.MPQ
 
+:: Folders of gigabytes (art): --stream reads one file at a time instead of building the archive in memory.
+py -3 -I Tools\MpqPack\mpqpack.py pack C:\bleakhold\art-src C:\WoW335\Data\patch-S.MPQ --stream
+
 :: Check an archive against the rules of the client's reader, and that it holds exactly the folder's files.
 py -3 -I Tools\MpqPack\mpqpack.py verify C:\WoW335\Data\patch-R.MPQ C:\bleakhold\mpq-src
 
