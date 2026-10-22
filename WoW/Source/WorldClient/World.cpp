@@ -1924,8 +1924,11 @@ void CWorldScene::RenderLiquidPass() {
     CWorldScene::ApplyFogState();
 
     if ((CWorld::enables & Enable_Water) && CWorldScene::s_liquidRenderer) {
-        // BLEAKHOLD(bleakfx): the frame and its depth as the water sees them, before it is drawn.
-        BleakFx::BeginLiquids();
+        // BLEAKHOLD(bleakfx): the frame and its depth as the water sees them, before it is drawn (only when a
+        // transparent liquid is queued).
+        if (CWorldScene::s_liquidRenderer->m_instances[1].Count()) {
+            BleakFx::BeginLiquids();
+        }
         CWorldScene::s_liquidRenderer->Flush(CWorldScene::s_activeWorldView, 1);
     }
 
