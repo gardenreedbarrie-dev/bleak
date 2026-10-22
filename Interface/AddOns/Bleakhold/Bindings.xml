@@ -1,0 +1,14 @@
+<Bindings>
+	<Binding name="BLEAKHOLD_ACTIVITIES" header="BLEAKHOLD">
+		BleakholdToggle("activities")
+	</Binding>
+	<Binding name="BLEAKHOLD_COLLECTIONS">
+		BleakholdToggle("collections")
+	</Binding>
+	<Binding name="BLEAKHOLD_SEASON">
+		BleakholdToggle("season")
+	</Binding>
+	<Binding name="BLEAKHOLD_LEADERBOARDS">
+		BleakholdToggle("leaderboards")
+	</Binding>
+</Bindings>

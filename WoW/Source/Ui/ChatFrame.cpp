@@ -1619,7 +1619,11 @@ int32_t CGChat::ChatMessageReceived(CDataStore* msg, bool isGM) {
                 flags = "AFK";
             }
 
-            if (type == CHAT_MSG_WHISPER || type == CHAT_MSG_BATTLENET) {
+            // BLEAKHOLD(fix): addon messages (language 0xFFFFFFFF) are not conversation. The Bleakhold UI whispers
+            // itself for every server message, which made the player their own reply target.
+            if (language == 0xFFFFFFFF) {
+                // not recorded
+            } else if (type == CHAT_MSG_WHISPER || type == CHAT_MSG_BATTLENET) {
                 CGChat::RecordWhisperSource(senderGuid);
             } else if (type == CHAT_MSG_WHISPER_INFORM) {
                 CGChat::RecordWhisperDest(senderGuid);

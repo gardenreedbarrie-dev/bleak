@@ -1,0 +1,185 @@
+-- Security principle: the client only ever sends intents. Every client message must be one of the
+-- documented intent ops with integer / enum / short-token fields; no results, scores, rewards, loot or
+-- state, and no free text.
+local FX = host_loadfile(repo .. "/Tools/UiLint/tests/fixtures.lua")()
+
+-- Independent schema (docs/BleakholdProtocol.md, "Client to server").
+local INT = "^%d+$"
+local SCHEMA = {
+    HELLO = { INT, "^[%w_%.%-]+$", INT, "^%a%a%a%a$" },
+    TCLAIM = { INT }, TREROLL = { INT },
+    QJOIN = { "^[DR]$", INT, "^%d$", "^[1-7]$", "^[1-5]$" },
+    QLEAVE = {}, QREPLY = { INT, "^[01]$" },
+    KMODE = { "^[012]$" }, KSTART = {}, KCANCEL = {},
+    BCLAIM = { INT }, WEHANDIN = {}, OUTFIT = { INT },
+    LBQ = { "^[KREF]$", INT, INT, INT, INT },
+    PING = { INT },
+}
+local TOPICS = { WEEK = 0, ERA = 0, TASKS = 0, KEY = 0, BOARD = 0, QUEUE = 0, MPLUS = 0, RIFT = 0, COLL = 0, SET = 2, LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1 }
+
+local function checkBody(body)
+    H.ok(#body <= 251, "body over 251 bytes: " .. #body)
+    local ver, op, seq, part, total, rest = body:match("^(%d+) (%u+) (%w+) (%d+)/(%d+)(.*)$")
+    H.ok(ver == "1", "bad frame: " .. body)
+    H.ok(part == "1" and total == "1", "client messages are never chunked: " .. body)
+    local payload = rest:sub(2)
+    H.ok(not payload:find("[^%w_%.%-,;]"), "only integers, enums and tokens: " .. body)
+    if op == "GET" then
+        local n = 0
+        for rec in (payload .. ";"):gmatch("([^;]*);") do
+            n = n + 1
+            local fields = {}
+            for f in (rec .. ","):gmatch("([^,]*),") do fields[#fields + 1] = f end
+            H.ok(TOPICS[fields[1]], "GET of an unknown topic: " .. body)
+            H.ok(#fields - 1 <= TOPICS[fields[1]], "too many GET args: " .. body)
+            for i = 2, #fields do H.ok(fields[i]:match(INT), "GET arg not an integer: " .. body) end
+        end
+        H.ok(n >= 1 and n <= 8, "GET record count: " .. body)
+        return op
+    end
+    local schema = SCHEMA[op]
+    H.ok(schema, "not an intent op: " .. op)
+    local fields = {}
+    if payload ~= "" then
+        for f in (payload .. ","):gmatch("([^,]*),") do fields[#fields + 1] = f end
+    end
+    H.eq(#fields, #schema, "field count of " .. op)
+    for i, pat in ipairs(schema) do
+        H.ok(fields[i]:match(pat), op .. " field " .. i .. " = " .. tostring(fields[i]))
+    end
+    return op
+end
+
+local function clickAll(M, root)
+    local clicked = 0
+    for _, b in ipairs(M.Clickables(root)) do
+        if b:IsVisible() and b:IsEnabled() and b.__scripts.OnClick then
+            b:Click()
+            clicked = clicked + 1
+            -- accept any confirmation it opened
+            local d = M.env.BleakholdDialog
+            if d and d:IsShown() and d.ok:IsShown() then
+                d.ok:Click()
+            end
+            M.Advance(0.2)
+        end
+    end
+    return clicked
+end
+
+test("Comm.Send refuses anything that is not an intent", function(M, ns)
+    local C = ns.Comm
+    H.hello(M)
+    for _, op in ipairs({ "SCORE", "RESULT", "LOOT", "REWARD", "MPE", "TASK", "TASKS", "KEY", "SETSTATE", "HELLOS", "" }) do
+        H.eq(C.Send(op, 1), false, "refused " .. op)
+    end
+    H.eq(C.Send("TCLAIM", "12; GIVE 999"), false, "free text in an int field")
+    H.eq(C.Send("TCLAIM", 1.5), false, "non-integer")
+    H.eq(C.Send("TCLAIM", -1), false, "out of range")
+    H.eq(C.Send("TCLAIM"), false, "missing field")
+    H.eq(C.Send("TCLAIM", 1, 2), false, "extra field")
+    H.eq(C.Send("QJOIN", "X", 1, 0, 4, 5), false, "bad enum")
+    H.eq(C.Send("QJOIN", "D", 1, 0, 4, 9), false, "group size over 5")
+    H.eq(C.Send("HELLO", 1, "1.0 beta", 0, "enUS"), false, "token with a space")
+    H.eq(C.Send("GET", { "WEEK", "x" }), false, "GET arg not an integer")
+    H.eq(C.Send("GET", { "SECRETS" }), false, "unknown topic")
+    H.ok(C.stats.refused >= 14)
+end)
+
+test("SendAddonMessage is only called by Comm (BHc) and Countdown (DBM pull timer)", function(M, ns)
+    for _, file in ipairs(M.loaded) do
+        local text = host_readfile(addonDir .. "/" .. file):gsub("%-%-[^\n]*", "")
+        local n = 0
+        for _ in text:gmatch("SendAddonMessage%(") do n = n + 1 end
+        if file == "Comm.lua" then
+            H.eq(n, 1, "Comm.lua sends in one place")
+            H.contains(text, 'SendAddonMessage(Comm.PREFIX_OUT, body, "WHISPER", ns.PlayerName())')
+        elseif file == "Countdown.lua" then
+            for line in text:gmatch("[^\n]*SendAddonMessage%([^\n]*") do
+                H.contains(line, "CD.DBM_PREFIX", "Countdown only sends the DBM prefix")
+            end
+        else
+            H.eq(n, 0, file .. " must not call SendAddonMessage")
+        end
+    end
+end)
+
+test("clicking every button of every window sends only valid intents (live mode)", function(M, ns)
+    FX.connect(M, H)
+    FX.all(M, H)
+    local start = #M.sent
+    local roots = {}
+    for _, k in ipairs({ "tasks", "dungeons", "keys", "rift" }) do
+        ns.UI.Open(k)
+        M.Advance(0.3)
+        clickAll(M, ns.Activities.pages[k])
+    end
+    -- select a dungeon so the queue button is live, then join, then accept a proposal
+    ns.Dungeons.selected = 389
+    ns.UI.Open("dungeons")
+    clickAll(M, ns.Dungeons.queue)
+    H.send(M, "QUEUE", FX.examples(M).QUEUE)
+    clickAll(M, ns.Dungeons.queue)
+    for _, k in ipairs({ "collections", "season", "leaderboards" }) do
+        ns.UI.Open(k)
+        M.Advance(0.3)
+        clickAll(M, ns.UI.windows[({ collections = "BleakholdCollectionsFrame", season = "BleakholdSeasonFrame", leaderboards = "BleakholdLeaderboardsFrame" })[k]].content)
+    end
+    M.Advance(10)
+    local ops, n = {}, 0
+    for i = start + 1, #M.sent do
+        local s = M.sent[i]
+        if s.prefix == "BHc" then
+            local op = checkBody(s.msg)
+            ops[op] = true
+            n = n + 1
+            H.eq(s.channel, "WHISPER")
+            H.eq(s.target, M.playerName)
+        else
+            H.eq(s.prefix, "DBMv4-PT", "unexpected addon prefix " .. s.prefix)
+        end
+    end
+    H.ok(n >= 10, "a good number of intents were exercised: " .. n)
+    for _, want in ipairs({ "TCLAIM", "TREROLL", "QJOIN", "QREPLY", "KMODE", "KSTART", "BCLAIM", "WEHANDIN", "LBQ", "GET" }) do
+        H.ok(ops[want], want .. " was sent by some button")
+    end
+end)
+
+test("demo mode routes intents locally and sends nothing to the server", function(M, ns)
+    M.env.SlashCmdList.BLEAKHOLD("demo")
+    M.Advance(1)
+    local start = #M.sent
+    local logStart = #ns.Comm.log
+    for _, k in ipairs({ "tasks", "dungeons", "keys", "rift" }) do
+        ns.UI.Open(k)
+        M.Advance(0.3)
+        clickAll(M, ns.Activities.pages[k])
+    end
+    ns.UI.Open("season")
+    clickAll(M, ns.UI.windows.BleakholdSeasonFrame.content)
+    M.Advance(40)
+    H.eq(#M.sent, start, "no SendAddonMessage in demo mode")
+    local out = 0
+    for i = logStart + 1, #ns.Comm.log do
+        local e = ns.Comm.log[i]
+        if e.dir == ">" then
+            checkBody(e.body)
+            out = out + 1
+        end
+    end
+    H.ok(out > 5, "intents went to the demo responder: " .. out)
+end)
+
+test("intent fields are ids the server gave us, never values we computed", function(M, ns)
+    FX.connect(M, H)
+    FX.all(M, H)
+    ns.UI.Open("tasks")
+    M.Advance(0.3)
+    local card = ns.Activities.tasksPage.cards[3]
+    H.ok(card.claim:IsShown(), "claim shown for the claimable task")
+    card.claim:Click()
+    local it = H.lastIntent(M, "TCLAIM")
+    H.eq(it.payload, "103", "TCLAIM carries only the server's task uid")
+    H.eq(ns.S.tasks.byUid[103].state, 1, "claiming does not change local state; the server answers")
+    H.eq(ns.S.week.coins, 2140, "coins unchanged until the server says so")
+end)

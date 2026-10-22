@@ -40,6 +40,7 @@ Status: [ ] todo  [x] done  [-] not needed
 | [x] **CUSTOM fix** | addon chat prefix and message copied with no bound into 3000-byte stack buffers; emote sound lookups kept pointers into an array that could move | ChatFrame.cpp (addon message receive), SoundInterface2Emotes.cpp `InitEmoteSounds` |
 | [x] **CUSTOM loginui** | Bleakhold glue TOC loaded after GlueXML.toc (optional; no Blizzard files replaced): Bleakhold login screen, restyled dialog with a connecting progress bar, 12-race character creation | CGlueMgr.cpp — `CGlueMgr::Resume`; Interface/Bleakhold/Glue; Tools/BlpConvert |
 | [x] **CUSTOM racedata** | High Elf and Eredar rows for ChrRaces and every table keyed by race, race-mask bits (faction-wide masks follow the race's faction), AzerothCore world SQL; built offline from the user's own DBCs and packed into `Data\patch-R.MPQ` | Tools/RaceForge, Tools/MpqPack |
+| [x] **CUSTOM ui** | Bleakhold UI addon (Lua only) and its server protocol; addon messages no longer go into the whisper reply history | Interface/AddOns/Bleakhold, docs/BleakholdProtocol.md, Tools/UiLint (lint + tests), ChatFrame.cpp (whisper source recording) |
 | [x] **CUSTOM branding** | "Bleakhold" window title, popup captions and error log title; CI builds the player exe as `Bleakhold.exe` | Client.cpp, ConsoleDetect.cpp, ConsoleDevice.cpp, WoW/Source/CMakeLists.txt (`WOW_OUTPUT_OVERRIDE`) |
 | [x] **CUSTOM names** | client name check always OK (returns 87) | ClientServices.cpp — `CharacterValidateName` |
 | [-] **CUSTOM Lexara.dll loader** (file missing, loader was a no-op) | loads `Lexara.dll` at startup | WinMain.cpp `start`, StormRtl.cpp `StormRtlInitialize` — needs x64 Lexara.dll or port into source |
@@ -93,6 +94,7 @@ Status: [ ] todo  [x] done  [-] not needed
 - mouse (CenterMouse rewrite + OsWindowProc cursor tracking)
 - glyphfix, iconsnap (font cache hooks)
 - CUSTOM lght (needs the custom shader MPQ it was built for)
+- server module implementing docs/BleakholdProtocol.md (AzerothCore OnPlayerCanUseChat hook)
 - server code for the new races: taxi nodes, race/faction change, costume auras, racial riding trainers (an AzerothCore module)
 - HD High Elf and Eredar models (palettized skins, geoset remap, 512 composite)
 

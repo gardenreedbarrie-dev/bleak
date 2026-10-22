@@ -1,0 +1,32 @@
+# Globals the Bleakhold addon may read that come from FrameXML (Lua/XML shipped in the game data, not
+# in this repository) or from optional addons. lint.py accepts reads of these names in addition to the
+# client's C functions (extracted from the source by extract_api.py), the Lua base library, the
+# client's compat aliases and the addon's own Bleakhold* globals. mock/wowmock.lua provides each one.
+#
+# FrameXML frames and tables (3.3.5a)
+UIParent
+Minimap
+MinimapCluster
+MinimapBackdrop
+GameTooltip
+ItemRefTooltip
+ShoppingTooltip1
+ShoppingTooltip2
+UIErrorsFrame
+WatchFrame
+DEFAULT_CHAT_FRAME
+NUM_CHAT_WINDOWS
+UISpecialFrames
+SlashCmdList
+RAID_CLASS_COLORS
+ITEM_QUALITY_COLORS
+# FrameXML functions (3.3.5a)
+ChatFrame_AddMessageEventFilter
+ChatEdit_InsertLink
+DressUpItemLink
+GetMinimapShape
+# Optional addons (always checked for nil before use)
+DragonUI
+DragonUI_QuestTrackerFrame
+DragonUIObjectiveTracker
+DBM

@@ -168,6 +168,25 @@ py -3 -I Tools\RaceForge\raceforge.py build --dbc C:\azerothcore\data\dbc --out 
 
 See `Tools/RaceForge/README.md` for the race settings (`races.json`) and what the server still needs.
 
+## Bleakhold UI
+
+The in-game Bleakhold interface is a built-in addon in `Interface/AddOns/Bleakhold`:
+- Activities: daily and weekly tasks, the Dungeon Journey board and queue, keystones, Eclipse Rift.
+- Collections, Season and Leaderboards windows.
+- Minimap buttons, the Mythic+ tracker and keystone countdown (with a DBM pull bar), task toasts, item tooltip
+  lines and coloured server announcements.
+
+Copy the folder to `Interface\AddOns\Bleakhold` next to the executable. `/bh` (or `/bleakhold`) opens it,
+`/bh help` lists the commands, and `/bh demo` shows every window with sample data without a server.
+
+It talks to the server only through addon messages and sends intents only; the server decides everything. The
+message format for the server module is in `docs/BleakholdProtocol.md`. Until the server answers its `HELLO`,
+the addon sends nothing else.
+
+Checks (Linux; needs g++, python3, xmllint): `Tools/UiLint/check.sh` builds a host Lua from the client's own Lua
+5.1 source, lints the addon against the 3.3.5a API extracted from this source tree, and runs the unit tests.
+The art is generated with `python3 -I Tools/UiLint/make_art.py`.
+
 ## Login screen and character creation
 
 The client loads `Interface\Bleakhold\Glue\BleakholdGlue.toc` right after the stock
@@ -200,6 +219,9 @@ works with signature checks on or off.
 | `Tools/RaceForge/` | Python tool that adds the Bleakhold races (High Elf, Eredar) to your own DBCs and writes the AzerothCore SQL |
 | `Tools/BlpConvert/` | Python tool that converts pictures to BLP textures; draws the login art |
 | `Interface/Bleakhold/Glue/` | Bleakhold login screen and character creation (glue Lua, art, fonts) |
+| `Interface/AddOns/Bleakhold/` | Bleakhold UI addon (Activities, Mythic+, Rift, Collections, Season, Leaderboards) |
+| `Tools/UiLint/` | Lint and unit tests for the Bleakhold Lua (host Lua built from the client's own source) |
+| `docs/BleakholdProtocol.md` | Message protocol between the Bleakhold server module and the UI |
 | `Engine/Source/ModernAssets/` | Runs those conversions on the files the client opens |
 | `Tools/WowClient/` | The `WowClient` executable target |
 | `Tools/XvidDecoder/` | x64 movie decoder that replaces the original 32-bit `DivxDecoder.dll` |
