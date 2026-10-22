@@ -12,7 +12,6 @@ The client runs these conversions on the files it opens (see `Engine/Source/Mode
 |---|---|---|
 | `shared/`, `host/` | [WarcraftXL/wxl-modern-assets](https://github.com/WarcraftXL/wxl-modern-assets) | `eb7c7c66461bda2941c549943e6a8884a006f436` (2026-07-17) |
 | `include/structure/m2/M2Format.hpp` | [WarcraftXL/wxl-core](https://github.com/WarcraftXL/wxl-core) (`v1.1`, `src/engine/assets/shared/models/m2/`) | `4f8f455b73d2b8eb556294dea0904bd0a98edab0` (2026-10-21) |
-| `shaders/` | [WarcraftXL/wxl-modern-adt](https://github.com/WarcraftXL/wxl-modern-adt) (`_resources/shaders/`) | `5f2726cc9e7fb78ec0b3511d946fd28f849b6a03` (2026-09-19) |
 | `adt/` | [WarcraftXL/wxl-cold-converter](https://github.com/WarcraftXL/wxl-cold-converter) (`converter/src/models/adt/`) | `87f12cde27611f1ceb9fa19ca7a25b7decb10c7a` (2026-07-17) |
 
 The M3 (Heroes of the Storm) and DDS pipelines of wxl-modern-assets are not included.
@@ -32,6 +31,7 @@ The live-engine half of wxl-modern-assets (`src/common/BoneBudget.cpp`, `src/mod
 onto the client's own model structures in `Engine/Source/Model2/M2Modern.cpp`, and the index-start widening
 of wxl-core (`src/client/CM2Shared/WideIndices.cpp`) is done in the client's own index fills and draws.
 
-The height blend of wxl-modern-adt (`src/render/HeightBlend.cpp`) is ported onto the client's own terrain
-draw in `WoW/Source/WorldClient/MapHeightBlend.cpp`; its shaders (`shaders/`, unchanged) are compiled into
-the client by `Engine/Source/ModernAssets/CMakeLists.txt` and served in place of the stock terrain shaders.
+The per-texture terrain tiling of wxl-modern-adt (`src/render/HeightBlend.cpp`, the tiling half) is ported
+onto the client's own terrain draw in `WoW/Source/WorldClient/MapTerrainTiling.cpp`, reading each tile's own
+ATSC table. Its height blend is not: the terrain shaders shipped with wxl-modern-adt read a different register
+layout from the one its height-blend code uploads.

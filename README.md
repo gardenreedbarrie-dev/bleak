@@ -102,8 +102,8 @@ loaded exactly as before. The conversions come from [WarcraftXL](https://github.
 | `.anim` | The `AFM2` wrapper of external animation files |
 | `.skin` | The material contract a modern skin leaves out is rebuilt when the model loads, and sections drawing with more bones than the GPU holds per draw are split (this applies to every model) |
 | `.wmo` | Root and group files: modern-only chunks, shaders, material ids, FileDataID textures and doodads |
-| `.adt`, `.wdt`, `.wdl` | Split terrain tiles (`_tex0`, `_obj0`) merged into one 3.3.5a tile, with FileDataID textures and placements; the map's WDT and WDL reshaped to match |
-| `.blp` | Uncompressed (BGRA) textures re-encoded to DXT5, retail character component textures converted for the 3.3.5a compositor, world textures and textures of modern assets larger than 2048 reduced to 2048 |
+| `.adt`, `.wdt`, `.wdl` | Split terrain tiles (`_tex0`, `_obj0`) merged into one 3.3.5a tile, with FileDataID textures and placements; each texture keeps the tiling the tile gives it (`MTXP`); the map's WDT and WDL reshaped to match |
+| `.blp` | Uncompressed (BGRA) textures re-encoded to DXT5, retail character component textures converted for the 3.3.5a compositor, world textures and textures of modern assets larger than 2048 reduced to 2048 (on x64; on Win32 the caps are 1024 for modern assets and 512, or 256 with `environmentDetail` below 0.75, for world textures) |
 
 Skins with more than 65535 indices (retail character models) are drawn correctly, and textures larger than
 1024 load: before, a texture file over 4 MB never finished loading and a chain over 1024 overran the mip
@@ -126,13 +126,11 @@ scratch buffer.
 The client writes what it converted, and what it could not, to `Logs/ModernAssets.log`. Set the environment
 variable `WXL_VERBOSE_ASSET_LOGS=1` to log every converted file.
 
-### Terrain and water
+### Water
 
 | CVar | Default | What it does |
 |---|---|---|
-| `terrainHeightBlend` | `1` | Terrain layers of modern tiles blend by their height maps (`_h` textures) instead of fading evenly, and textures tile as wide as the tile asks (`MTXP`). The client serves WarcraftXL's extended terrain shaders for this; terrain without height data draws exactly as before. Turning the shaders on or off takes effect after a restart or a change of graphics settings. |
-| `terrainHeightBlendSharpness` | `2.0` | How sharp the height transitions are, 0 to 16. |
-| `proceduralWater` | `0` | Ocean, lake and river water draws with the procedural water material (`LiquidType.dbc` row 100, "Basic Procedural Water") instead of the animated texture frames. Stays off when that row or its shaders are missing from the game data. |
+| `proceduralWater` | `0` | Ocean, lake and river water, on terrain and in map objects, draws with the procedural water material (`LiquidType.dbc` row 100, "Basic Procedural Water") instead of the animated texture frames. Stays off when that row or its shaders are missing from the game data. Water already loaded keeps its look until its area loads again. |
 
 ### Not supported yet
 
@@ -140,15 +138,15 @@ variable `WXL_VERBOSE_ASSET_LOGS=1` to log every converted file.
   `.skel` that names a parent skeleton is not followed.
 - Character models from the Shadowlands customization system need game data the 3.3.5a client does not
   have; the Warlords of Draenor era HD character models are the usual choice.
-- Rendering features newer clients add: four-layer WMO materials, more than four terrain layers (layers
-  5-8 are dropped, as WarcraftXL drops them too), WMO-to-outdoor visibility through open-sided spaces.
-- Height blending applies to terrain drawn in a single pass (the pixel shader paths); with shaders off,
-  terrain draws the stock way.
+- Rendering features newer clients add: four-layer WMO materials, height-blended terrain layers, more than
+  four terrain layers (layers 5-8 are dropped, as WarcraftXL drops them too), WMO-to-outdoor visibility
+  through open-sided spaces. WarcraftXL's height-blend terrain shaders read a different register layout
+  from the one its own height-blend code uploads, so they are not used.
 
 ### License
 
 The conversion code is GPL-3.0-or-later (`ThirdParty/WarcraftXL`, `Engine/Source/ModernAssets`,
-`Engine/Source/Model2/M2Modern.*`, `WoW/Source/WorldClient/MapHeightBlend.*`). Whoever distributes a client built with it must make the corresponding
+`Engine/Source/Model2/M2Modern.*`, `WoW/Source/WorldClient/MapTerrainTiling.*`). Whoever distributes a client built with it must make the corresponding
 source code available under the same license.
 
 ## Layout

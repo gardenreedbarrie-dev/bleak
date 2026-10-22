@@ -33,7 +33,8 @@ void Liquid::ClearMaterials() {
 }
 
 // BLEAKHOLD(procwater): the liquid type whose material and settings draw `liquidType`. With the proceduralWater
-// CVar on, ordinary water and ocean (1, 2, 5, 6, 9, 10) draw with the procedural water the client ships for
+// CVar on, ordinary water and ocean (terrain 1, 2, 5, 6, 9, 10; map object water 13 and ocean 14, the types
+// CMapObjGroup::GetLiquidType maps those to) draw with the procedural water the client ships for
 // testing (liquid type 100: depth-tinted, refracting), the same rows modders copy type 100 over in
 // LiquidType.dbc. Only the look changes: the liquid keeps its own type for sound, particles and swimming.
 // The swap is skipped unless type 100 is that procedural material and its shaders load, so the setting can
@@ -52,6 +53,8 @@ uint32_t Liquid::GetRenderLiquidType(uint32_t liquidType) {
         case 6:
         case 9:
         case 10:
+        case 13:
+        case 14:
             break;
         default:
             return liquidType;

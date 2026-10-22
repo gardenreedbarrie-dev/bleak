@@ -1698,6 +1698,11 @@ int32_t LoadTgaMips(char* fileName, char* extension, int32_t flags, MipBits** im
     uint32_t imageHeight = image.Height();
     uint32_t mipCount = TextureCalcMipCount(imageWidth, imageHeight);
 
+    // BLEAKHOLD(hdtextures): sized from the image itself, so a cube map strip (six faces wide) fits as well
+    if (images == &s_mipBits && !EnsureMipBits(imageWidth, imageHeight)) {
+        return 0;
+    }
+
     if (*images) {
         MippedImgSet(PIXEL_ARGB8888, imageWidth, imageHeight, *images);
     } else {
@@ -1761,13 +1766,13 @@ void UpdateTgaTexture(EGxTexCommand command, uint32_t width, uint32_t height, ui
     switch (command) {
         case GxTex_Lock:
             if (!s_pumping) {
-                EnsureMipBits(width, height); // BLEAKHOLD(hdtextures)
                 char* extension = texture->m_filename + SStrLen(texture->m_filename);
                 int32_t result = LoadTgaMips(texture->m_filename, extension, texture->m_flags & 2, &s_mipBits, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
                 *extension = '\0';
 
                 if (!result) {
-                    GetDefaultTexture(width, height);
+                    // BLEAKHOLD(hdtextures): a cube map latches six faces side by side from the scratch
+                    GetDefaultTexture(texture->m_gxTexTarget == GxTex_CubeMap ? 6 * width : width, height);
                     GetGlobalStatusObj().Add(STATUS_ERROR, "Texture %s not loaded -- replaced with default.\n", texture->m_filename);
                 }
             }
@@ -2179,7 +2184,12 @@ CTexture::~CTexture() {
             void* buffer = this->m_asyncObject->m_buffer;
 
             if (AsyncFile::Cancel(this->m_asyncObject, AsyncTextureDestroyedCallback)) {
-                s_asyncLoadBufferUsed -= this->m_asyncObject->m_size;
+                // BLEAKHOLD(hdtextures): only a read that started took its size from the budget. Giving back
+                // the size of one still queued wraps the counter, and the budget then never allows a read again.
+                if (buffer) {
+                    s_asyncLoadBufferUsed -= this->m_asyncObject->m_size;
+                }
+
                 SMemFree(buffer, __FILE__, __LINE__, 0);
             }
         }

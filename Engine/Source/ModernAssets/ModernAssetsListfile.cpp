@@ -5,6 +5,7 @@
 #include "core/Logger.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <cstdio>
 
 namespace {
@@ -107,6 +108,12 @@ void ModernAssetsListfile::Load() {
 }
 
 bool ModernAssetsListfile::Parse(const char* data, size_t size) {
+    // A listfile re-saved by a Windows editor can start with a UTF-8 byte order mark.
+    if (size >= 3 && memcmp(data, "\xEF\xBB\xBF", 3) == 0) {
+        data += 3;
+        size -= 3;
+    }
+
     const char* end = data + size;
 
     for (const char* line = data; line < end; ) {

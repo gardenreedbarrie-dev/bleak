@@ -17,27 +17,13 @@ static const uint32_t MODERN_ASSETS_STAGED_VERSION_BIT = 0x40000000;
 // and turned into an SFILE_MEMORY file holding the converted bytes; any other file is left as it is.
 void ModernAssetsFilterOpenedFile(const char* name, SFileImpl* file);
 
-// BLEAKHOLD(heightblend): what modern terrain tiles say about one of their textures. Tiles carry it per texture
-// (MTXP and MHID in the _tex0 file); the merge keeps it in trailing ATHB/ATSC tables that the client's own tile
-// loader never reads, and the client collects it here when the tile is opened.
-struct ModernAssetsTerrainTexture {
-    float m_heightScale;        // height map contribution (0 = none)
-    float m_heightOffset;       // added to the height before scaling (1 = none)
-    uint32_t m_tilingExponent;  // the texture tiles 1 << m_tilingExponent times wider
-    char m_heightTexture[260];  // the _h height map, empty when the texture has none
-};
+// Whether `name` is a texture path a modern terrain tile resolved from a FileDataID.
+bool ModernAssetsIsModernTexture(const char* name);
 
-// Changes every time a tile describes a terrain texture not seen before (0: none yet).
-uint32_t ModernAssetsTerrainTextureGeneration();
-
-// What modern tiles say about `texture` (a terrain texture path, with or without its .blp extension).
-bool ModernAssetsGetTerrainTexture(const char* texture, ModernAssetsTerrainTexture* out);
-
-// Serves WarcraftXL's extended terrain pixel shaders (Shaders\Pixel\ps_3_0\Terrain1-3) in place of the stock
-// ones from now on. With every height-blend constant at zero they draw exactly like the stock shaders.
-void ModernAssetsSetTerrainShaders(int32_t enabled);
-
-// Whether the extended terrain shaders were served since the last call to ModernAssetsSetTerrainShaders.
-int32_t ModernAssetsTerrainShadersServed();
+// BLEAKHOLD(terraintiling): the per-texture tiling a merged modern tile carries in a trailing ATSC table, after
+// the chunks the client reads. Calls `fn` for each texture the table names in the tile bytes `tile`: the name
+// as the tile's MTEX has it (lowercased, backslashes) and its exponent (the texture tiles 1 << exponent times
+// wider). A tile without the table calls nothing.
+void ModernAssetsForEachTileTiling(const void* tile, uint32_t size, void (*fn)(void* user, const char* texture, uint32_t exponent), void* user);
 
 #endif

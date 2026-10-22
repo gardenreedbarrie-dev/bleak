@@ -18,7 +18,6 @@
 
 #include "Engine/Source/ModernAssets/ModernAssets.h"
 #include "Engine/Source/ModernAssets/ModernAssetsListfile.h"
-#include "Engine/Source/ModernAssets/ModernAssetsShaders.h"
 #include "Engine/Source/BlizzardCore/SFile2-Core.h"
 #include "Engine/Source/BlizzardCore/Source/System/Memory/MemoryStorm.h"
 
@@ -28,7 +27,6 @@
 #include "structure/m2/M2Format.hpp"
 
 #include "ThirdParty/WarcraftXL/adt/AdtMerge.hpp"
-#include "ThirdParty/WarcraftXL/adt/AdtTexHeight.hpp"
 #include "ThirdParty/WarcraftXL/adt/AdtTexScale.hpp"
 #include "ThirdParty/WarcraftXL/adt/WdlFixup.hpp"
 #include "ThirdParty/WarcraftXL/adt/WdtFixup.hpp"
@@ -37,7 +35,6 @@
 #include "ThirdParty/WarcraftXL/shared/models/m2/Textures.hpp"
 
 #include <algorithm>
-#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <mutex>
@@ -45,7 +42,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
 namespace wxl::modern::assets::textures::blp {
@@ -317,137 +313,15 @@ bool ResolveAdtFdid(void* user, uint32_t fileDataId, std::string& outPath) {
 }
 
 wxl::modern::adt::Options AdtOptions() {
-    // The 3.3.5a terrain has neither hi-res holes nor more than four layers, so the merge folds or drops them.
-    // The per-texture UV scale and height-blend tables are kept: the terrain height blend reads them
-    // (see the terrain texture table below).
+    // The 3.3.5a terrain has neither hi-res holes, more than four layers nor height blending, so the merge
+    // folds or drops them. BLEAKHOLD(terraintiling): the per-texture UV scale table is kept; the terrain
+    // draw reads it from the tile (WoW/Source/WorldClient/MapTerrainTiling.cpp).
     wxl::modern::adt::Options options;
     options.highResHoles = false;
     options.packExtraTextureLayers = false;
     options.uvScaleTable = true;
-    options.heightBlendTable = true;
+    options.heightBlendTable = false;
     return options;
-}
-
-// BLEAKHOLD(heightblend): terrain textures described by modern tiles, keyed by NormalizeTerrainTexture. A
-// texture's height map and tiling belong to the texture, not to the tile that names it.
-std::mutex& TerrainTextureMutex() {
-    static std::mutex mutex;
-    return mutex;
-}
-
-std::unordered_map<std::string, ModernAssetsTerrainTexture>& TerrainTextures() {
-    static std::unordered_map<std::string, ModernAssetsTerrainTexture> textures;
-    return textures;
-}
-
-std::atomic<uint32_t> s_terrainTextureGeneration { 0 };
-
-std::string NormalizeTerrainTexture(std::string_view name) {
-    std::string normalized = text::LowerSlashed(name);
-
-    if (text::EndsWithCI(normalized, ".blp")) {
-        normalized.resize(normalized.size() - 4);
-    }
-
-    return normalized;
-}
-
-ModernAssetsTerrainTexture& TerrainTextureEntry(const std::string& name, bool& added) {
-    auto& textures = TerrainTextures();
-    auto it = textures.find(name);
-
-    if (it == textures.end()) {
-        ModernAssetsTerrainTexture entry = {};
-        entry.m_heightOffset = 1.0f;
-        it = textures.emplace(name, entry).first;
-        added = true;
-    }
-
-    return it->second;
-}
-
-// Reads the ATHB and ATSC tables the merge appended to a tile.
-void CollectTerrainTextures(const std::vector<uint8_t>& tile) {
-    std::vector<wxl::modern::adt::TexHeightEntry> heights;
-    std::vector<wxl::modern::adt::TexScaleEntry> scales;
-
-    for (size_t offset = 0; offset + 8 <= tile.size(); ) {
-        uint32_t magic = ReadU32(&tile[offset]);
-        uint32_t size = ReadU32(&tile[offset + 4]);
-
-        if (offset + 8 + size_t(size) > tile.size()) {
-            break;
-        }
-
-        const uint8_t* payload = &tile[offset + 8];
-
-        if (magic == wxl::modern::adt::kATHB) {
-            wxl::modern::adt::ParseTexHeights(payload, size, heights);
-        } else if (magic == wxl::modern::adt::kATSC) {
-            wxl::modern::adt::ParseTexScales(payload, size, scales);
-        }
-
-        offset += 8 + size;
-    }
-
-    if (heights.empty() && scales.empty()) {
-        return;
-    }
-
-    bool changed = false;
-    std::lock_guard<std::mutex> lock(TerrainTextureMutex());
-
-    for (const auto& height : heights) {
-        bool added = false;
-        ModernAssetsTerrainTexture& entry = TerrainTextureEntry(NormalizeTerrainTexture(height.name), added);
-        std::string heightTexture = height.heightName.size() < sizeof(entry.m_heightTexture) ? height.heightName : std::string();
-
-        if (added || entry.m_heightScale != height.heightScale || entry.m_heightOffset != height.heightOffset || heightTexture != entry.m_heightTexture) {
-            entry.m_heightScale = height.heightScale;
-            entry.m_heightOffset = height.heightOffset;
-            snprintf(entry.m_heightTexture, sizeof(entry.m_heightTexture), "%s", heightTexture.c_str());
-            changed = true;
-        }
-    }
-
-    for (const auto& scale : scales) {
-        bool added = false;
-        ModernAssetsTerrainTexture& entry = TerrainTextureEntry(NormalizeTerrainTexture(scale.name), added);
-
-        if (added || entry.m_tilingExponent != scale.exponent) {
-            entry.m_tilingExponent = scale.exponent;
-            changed = true;
-        }
-    }
-
-    if (changed) {
-        s_terrainTextureGeneration.fetch_add(1, std::memory_order_release);
-    }
-}
-
-// BLEAKHOLD(heightblend): set by the terrainHeightBlend CVar before the map loads its shaders.
-std::atomic<int32_t> s_terrainShaders { 0 };
-std::atomic<int32_t> s_terrainShadersServed { 0 };
-
-// The embedded shader that replaces `name`, or null.
-const ModernAssetsEmbeddedShader* TerrainShaderFor(std::string_view name) {
-    static const std::string_view s_prefix = "shaders\\pixel\\ps_3_0\\";
-
-    if (!s_terrainShaders.load(std::memory_order_relaxed) || !text::StartsWithCI(name, s_prefix) || !text::EndsWithCI(name, ".bls")) {
-        return nullptr;
-    }
-
-    std::string_view shader = name.substr(s_prefix.size(), name.size() - s_prefix.size() - 4);
-
-    for (uint32_t i = 0; i < g_modernAssetsTerrainShaderCount; i++) {
-        std::string_view embedded = g_modernAssetsTerrainShaders[i].m_name;
-
-        if (shader.size() == embedded.size() && text::StartsWithCI(shader, embedded)) {
-            return &g_modernAssetsTerrainShaders[i];
-        }
-    }
-
-    return nullptr;
 }
 
 bool TransformAdt(std::string_view name, std::span<const uint8_t> raw, std::vector<uint8_t>& out) {
@@ -471,14 +345,7 @@ bool TransformAdt(std::string_view name, std::span<const uint8_t> raw, std::vect
     });
 
     wxl::modern::adt::ResolveCtx resolve { &ResolveAdtFdid, nullptr };
-
-    if (!wxl::modern::adt::MergeSplitAdt(raw, tex0, obj0, out, name, resolve)) {
-        return false;
-    }
-
-    CollectTerrainTextures(out);
-
-    return true;
+    return wxl::modern::adt::MergeSplitAdt(raw, tex0, obj0, out, name, resolve);
 }
 
 bool TransformWdt(std::string_view name, std::span<const uint8_t> raw, std::vector<uint8_t>& out) {
@@ -573,15 +440,6 @@ void ModernAssetsFilterOpenedFile(const char* name, SFileImpl* file) {
     }
 
     std::string_view fileName(name);
-
-    if (const ModernAssetsEmbeddedShader* shader = TerrainShaderFor(fileName)) {
-        if (ServeFromMemory(file, std::vector<uint8_t>(shader->m_data, shader->m_data + shader->m_size))) {
-            s_terrainShadersServed.store(1, std::memory_order_relaxed);
-        }
-
-        return;
-    }
-
     ASSET_KIND kind = KindForName(fileName);
 
     if (kind == ASSET_NONE) {
@@ -634,35 +492,35 @@ void ModernAssetsFilterOpenedFile(const char* name, SFileImpl* file) {
     WLOG_DEBUG("modern-assets: %s converted (%u -> %zu bytes)", name, fileSize, converted.size());
 }
 
-uint32_t ModernAssetsTerrainTextureGeneration() {
-    return s_terrainTextureGeneration.load(std::memory_order_acquire);
+bool ModernAssetsIsModernTexture(const char* name) {
+    return name && wxl::host::IsModernTexture(name);
 }
 
-bool ModernAssetsGetTerrainTexture(const char* texture, ModernAssetsTerrainTexture* out) {
-    if (!texture || !out || !ModernAssetsTerrainTextureGeneration()) {
-        return false;
+void ModernAssetsForEachTileTiling(const void* tile, uint32_t size, void (*fn)(void* user, const char* texture, uint32_t exponent), void* user) {
+    if (!tile || !fn) {
+        return;
     }
 
-    std::string name = NormalizeTerrainTexture(texture);
-    std::lock_guard<std::mutex> lock(TerrainTextureMutex());
-    auto it = TerrainTextures().find(name);
+    const uint8_t* bytes = static_cast<const uint8_t*>(tile);
+    std::vector<wxl::modern::adt::TexScaleEntry> scales;
 
-    if (it == TerrainTextures().end()) {
-        return false;
+    // The merge appends the table after the chunks the client reads, so walk the top-level chunks to it.
+    for (size_t offset = 0; offset + 8 <= size; ) {
+        uint32_t magic = ReadU32(bytes + offset);
+        uint32_t chunkSize = ReadU32(bytes + offset + 4);
+
+        if (chunkSize > size - offset - 8) {
+            break;
+        }
+
+        if (magic == wxl::modern::adt::kATSC && wxl::modern::adt::ParseTexScales(bytes + offset + 8, chunkSize, scales)) {
+            for (const auto& scale : scales) {
+                fn(user, scale.name.c_str(), scale.exponent);
+            }
+        }
+
+        offset += 8 + size_t(chunkSize);
     }
-
-    *out = it->second;
-
-    return true;
-}
-
-void ModernAssetsSetTerrainShaders(int32_t enabled) {
-    s_terrainShaders.store(enabled != 0, std::memory_order_relaxed);
-    s_terrainShadersServed.store(0, std::memory_order_relaxed);
-}
-
-int32_t ModernAssetsTerrainShadersServed() {
-    return s_terrainShadersServed.load(std::memory_order_relaxed);
 }
 
 namespace wxl::host {

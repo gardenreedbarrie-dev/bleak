@@ -20,8 +20,6 @@ class CWorldParam {
     static CVar* cvar_particleDensity;
     static CVar* cvar_waterLOD;
     static CVar* cvar_proceduralWater; // BLEAKHOLD(procwater)
-    static CVar* cvar_terrainHeightBlend; // BLEAKHOLD(heightblend)
-    static CVar* cvar_terrainHeightBlendSharpness; // BLEAKHOLD(heightblend)
     static CVar* cvar_baseMip;
     static CVar* cvar_horizonFarClip;
     static CVar* cvar_horizonNearClip;
@@ -79,8 +77,6 @@ class CWorldParam {
     static bool TextureFilteringCallback(CVar* var, const char* oldValue, const char* value, void* arg);
     static bool WaterLodCallback(CVar* var, const char* oldValue, const char* value, void* arg);
     static bool ProceduralWaterCallback(CVar* var, const char* oldValue, const char* value, void* arg); // BLEAKHOLD(procwater)
-    static bool TerrainHeightBlendCallback(CVar* var, const char* oldValue, const char* value, void* arg); // BLEAKHOLD(heightblend)
-    static bool TerrainHeightBlendSharpnessCallback(CVar* var, const char* oldValue, const char* value, void* arg); // BLEAKHOLD(heightblend)
     static bool WorldPoolUsageCallback(CVar* var, const char* oldValue, const char* value, void* arg);
 };
 

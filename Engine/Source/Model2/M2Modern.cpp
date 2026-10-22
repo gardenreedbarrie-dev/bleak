@@ -39,8 +39,9 @@ namespace {
 // The vertex shader keeps the bone palette from constant register 31 on, three registers per bone.
 const uint32_t s_bonePaletteRegister = 31;
 
-// WarcraftXL's ceiling: (256 - 31) / 3. Devices with fewer vertex shader constants get fewer.
-const uint32_t s_maxBonesPerDraw = 75;
+// The client's own palette size at 256 constants: the shadow matrices live at c224..c235, so the palette has
+// to end below them (WarcraftXL's 75 assumes its own shaders). Devices with fewer constants get fewer.
+const uint32_t s_maxBonesPerDraw = 64;
 
 // A skin with more sections or batches than this is treated as malformed.
 const uint32_t s_maxBatches = 0x4000;
@@ -114,7 +115,9 @@ uint32_t MaxBonesPerDraw() {
         return s_maxBonesPerDraw;
     }
 
-    return std::min(s_maxBonesPerDraw, (constants - s_bonePaletteRegister) / 3);
+    // The same reservation as CM2Shared::Initialize.
+    uint32_t bones = (constants > 0xC0 ? constants - 64 : constants - 32) / 3;
+    return std::min(s_maxBonesPerDraw, bones);
 }
 
 // Whether any drawn section of the live skin uses more bones than one draw holds (the condition
@@ -978,7 +981,14 @@ void M2ModernFinalizeSkin(CM2Shared* shared, uint32_t skinSize) {
     uint32_t maxBones = MaxBonesPerDraw();
     bool converted = (shared->m_modernFlags & M2MODERN_CONVERTED) != 0;
 
-    // A 3.3.5a model whose sections all fit a draw is left exactly as it was loaded.
+    // InitializeSkinProfile sizes co-instance batches from this, and the batched doodad and shadow draws write
+    // instances * bones matrices from c31 without another check. Stock picks a profile that already fits;
+    // a modern skin carries whatever the retail file says (often 256).
+    if (skin->m_boneCountMax > maxBones) {
+        skin->m_boneCountMax = maxBones;
+    }
+
+    // Otherwise a 3.3.5a model whose sections all fit a draw is left as it was loaded.
     if (!converted && !NeedsSplit(name, maxBones, skin)) {
         return;
     }
