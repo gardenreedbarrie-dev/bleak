@@ -106,8 +106,7 @@ static void SetVideoIdx(Hardware& hardware) {
 // VERIFY: b9267b57 manual
 // OFFSET: 0x0076B5A0
 static void ShowFatalMessageBox(int32_t stringID, const char* message) {
-    Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(1);
-    const char* caption = titleRec ? titleRec->m_message : "World of Warcraft";
+    const char* caption = "Bleakhold"; // BLEAKHOLD(branding)
     Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(stringID);
 
     OsGuiMessageBox(OsGuiGetWindow(2), 0, rec ? rec->m_message : message, caption);
@@ -143,8 +142,7 @@ void ConsoleDetectSaveHardware(const Hardware& hardware, bool& changed) {
     if (hardware.m_cpuIdx == cpuIdx && hardware.m_memIdx == memIdx && (genericVideo || hardware.m_videoID == videoID) && hardware.m_soundIdx == soundIdx) {
         changed = false;
     } else {
-        Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(1);
-        const char* caption = titleRec ? titleRec->m_message : "World of Warcraft";
+        const char* caption = "Bleakhold"; // BLEAKHOLD(branding)
         Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(5);
         const char* message = rec ? rec->m_message : "Hardware changed.  Reload default settings?";
 

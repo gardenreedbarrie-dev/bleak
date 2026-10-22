@@ -81,6 +81,7 @@ logger off in `WowClient` with `-DWOWCLIENT_CRASH_LOG=OFF`.
 | `WOWDECOMP_DISABLE_SIGNATURE_CHECKS` | `OFF` | Skip the MPQ file and `.toc.sig` signature checks, so modified game data and interface files load |
 | `WOWCLIENT_CRASH_LOG` | `ON` | Build `WowClient` with the crash logger |
 | `WOWCLIENT_OUTPUT_OVERRIDE` | empty | Name the `WowClient` executable something other than `WowClient64` / `WowClient32` |
+| `WOW_OUTPUT_OVERRIDE` | empty | Name the `Wow` executable something other than `Wow64` / `Wow32` |
 
 ## Running
 
