@@ -196,6 +196,23 @@ Checks (Linux; needs g++, python3, xmllint): `Tools/UiLint/check.sh` builds a ho
 5.1 source, lints the addon against the 3.3.5a API extracted from this source tree, and runs the unit tests.
 The art is generated with `python3 -I Tools/UiLint/make_art.py`.
 
+## Bleakhold server module
+
+`Server/mod-bleakhold/` is the server half of the Bleakhold UI: an AzerothCore module (GPL-2.0-or-later, like
+AzerothCore) that implements `docs/BleakholdProtocol.md`. Copy the folder to `azerothcore-wotlk/modules/`,
+re-run CMake and build; the worldserver applies its SQL itself and installs `mod_bleakhold.conf.dist` next to your
+other module configs. `.bleakhold test all` in game fills every window with sample data.
+
+Out of the box it handles the protocol (strict parsing, rate limits, handshake, revisions, chunking) and the parts
+that need no custom system: definitions, week schedule, season and war effort, legacy sets, leaderboards, server
+firsts and the chat tags. Keystones, the Dungeon Journey board and queue, the Eclipse Rift and tasks come from your
+own systems through `Server/mod-bleakhold/src/BleakholdUi.h` (one function per server message, one handler per
+button); `Server/mod-bleakhold/README.md` shows how to connect each one.
+
+Tests (Linux; clang or g++, python3): `Server/mod-bleakhold/tests/run_tests.sh` checks the module against every
+example in the protocol document, runs its messages through the addon's own Lua parser and every message the addon
+sends through the module, and fuzzes the parser under AddressSanitizer.
+
 ## Login screen and character creation
 
 The client loads `Interface\Bleakhold\Glue\BleakholdGlue.toc` right after the stock
@@ -231,6 +248,7 @@ works with signature checks on or off.
 | `Interface/AddOns/Bleakhold/` | Bleakhold UI addon (Activities, Mythic+, Rift, Collections, Season, Leaderboards) |
 | `Tools/UiLint/` | Lint and unit tests for the Bleakhold Lua (host Lua built from the client's own source) |
 | `docs/BleakholdProtocol.md` | Message protocol between the Bleakhold server module and the UI |
+| `Server/mod-bleakhold/` | AzerothCore module: server side of the Bleakhold UI protocol |
 | `Engine/Source/ModernAssets/` | Runs those conversions on the files the client opens |
 | `Tools/WowClient/` | The `WowClient` executable target |
 | `Tools/XvidDecoder/` | x64 movie decoder that replaces the original 32-bit `DivxDecoder.dll` |

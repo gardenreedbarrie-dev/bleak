@@ -42,5 +42,7 @@ whenever you change those files.
 
 SERVER OWNER: THE SERVER MODULE
 -------------------------------
-The Bleakhold interface shows data only when the server answers it. The messages the server module
-sends and accepts are described in docs/BleakholdProtocol.md in the source repository.
+The Bleakhold interface shows data only when the server runs the mod-bleakhold AzerothCore module
+(Server/mod-bleakhold in the source repository). Its README explains the install and how to connect your
+own Mythic+, Dungeon Journey, Eclipse Rift and task systems. In game, ".bleakhold test all" (GM) fills
+every window with sample data.

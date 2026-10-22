@@ -69,7 +69,7 @@ body = VER SP OP SP SEQ SP PART "/" TOTAL [SP PAYLOAD]
 | Field | Format |
 |---|---|
 | `VER` | protocol major version, decimal: `1` |
-| `OP` | 2 to 6 uppercase ASCII letters |
+| `OP` | 2 to 8 uppercase ASCII letters (`TREROLL`, `KCANCEL` and `WEHANDIN` are 7 and 8) |
 | `SEQ` | 1 to 6 base-36 digits (`0-9a-z`), a counter per direction, incremented once per message (not per part) and wrapping at 36^6 |
 | `PART`/`TOTAL` | decimal 1..99, `PART <= TOTAL` |
 | `SP` | exactly one space |
@@ -131,8 +131,9 @@ the client treats those as missing. Booleans are `0`/`1`. An **empty field means
 uses a default. Fields are positional and only ever appended in later versions: the client ignores extra
 fields, extra records and unknown ops, so the server may add fields at the end at any time.
 
-Records the client splits are capped (500 records, 40 fields, 64 list items) and every value is clamped
-to a sane range, so garbage cannot break the UI. The server should still send clean data.
+Records the client splits are capped (500 records per message, 40 fields, 64 list items) and every value is
+clamped to a sane range, so garbage cannot break the UI. A message whose first record is a header (`LIDX`, a
+`DEF` kind) therefore carries at most 499 entries after it. The server should still send clean data.
 
 ## 5. Revisions (snapshots and deltas)
 
@@ -334,7 +335,7 @@ S> 1 TASK a 1/1 2,102,20,1
 `season`, `leaderboards`, or empty.
 
 ```
-S> 1 TOAST b 1/1 R,New record,Halls of Lightning +8 in 24:13,leaderboards
+S> 1 TOAST b 1/1 R,New record,Halls of Lightning +8 in 24%3A13,leaderboards
 ```
 
 ### KEY (revisioned)
