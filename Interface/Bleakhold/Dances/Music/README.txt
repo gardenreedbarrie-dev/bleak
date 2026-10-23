@@ -38,3 +38,29 @@ id   key (file name)        dance                       BPM loop (s)
 19   hip_roll               Hip Roll                     96     5.00
 20   hula_hoop              Hula Hoop                   132     3.63
 21   slow_sway              Slow Sway                    90     5.33
+22   toprock                Toprock                     112     4.30
+23   arm_wave               Arm Wave                    100     4.80
+24   lock_it_up             Lock It Up                  108     4.43
+25   krump_stomp            Krump Stomp                  96     5.00
+26   neon_shuffle           Neon Shuffle                128     3.73
+27   two_step               Two Step                     92     5.23
+28   heel_toe               Heel Toe                    124     3.87
+29   moon_glide             Moon Glide                  104     4.60
+30   dab_drop               Dab Drop                    100     4.80
+31   pop_circuit            Pop Circuit                 104     4.60
+32   tut_box                Tut Box                     104     4.60
+33   freeze_frame           Freeze Frame                128     7.50
+34   arm_roll               Arm Roll                    100     4.80
+35   charleston             Charleston                  150     3.20
+36   salsa_step             Salsa Step                  150     6.40
+37   hustle_roll            Hustle Roll                 120     4.00
+38   cossack_kicks          Cossack Kicks               132     3.63
+39   tavern_jig             Tavern Jig                  140     3.43
+40   lindy_kick             Lindy Kick                  150     3.20
+41   tango_strut            Tango Strut                 116     4.13
+42   mashed_potato          Mashed Potato               132     3.63
+43   hand_jive              Hand Jive                   150     6.40
+44   swim_stroke            Swim Stroke                 124     5.80
+45   line_dance             Line Dance                  128     7.50
+46   can_can                Can-Can                     150     3.20
+47   light_bulb             Light Bulb                  128     3.73

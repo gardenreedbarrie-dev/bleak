@@ -14,7 +14,7 @@
 namespace Bleakhold
 {
     // DANCE ids 0 .. DanceCatalogueCount - 1 exist; the client has a clip for each of them.
-    inline constexpr uint32_t DanceCatalogueCount = 22;
+    inline constexpr uint32_t DanceCatalogueCount = 48;
     static_assert(DanceCatalogueCount >= 1 && DanceCatalogueCount <= 1024,
         "the dance catalogue (Tools/DanceForge/dances.json) must hold 1..1024 entries (Proto::MaxDances)");
 
@@ -22,14 +22,20 @@ namespace Bleakhold
     inline constexpr uint32_t DanceLoopMs[DanceCatalogueCount] = {
         2033, 2233, 4300, 3166, 2400, 4600, 2300, 2400,
         4366, 4433, 4000, 4133, 3800, 3733, 4800, 4000,
-        4133, 4900, 3800, 5000, 3633, 5333
+        4133, 4900, 3800, 5000, 3633, 5333, 4300, 4800,
+        4433, 5000, 3733, 5233, 3866, 4600, 4800, 4600,
+        4600, 7500, 4800, 3200, 6400, 4000, 3633, 3433,
+        3200, 4133, 3633, 6400, 5800, 7500, 3200, 3733
     };
 
     // Key of each id (for logs), the same as the addon's Data.dances.
     inline constexpr char const* DanceCatalogueKeys[DanceCatalogueCount] = {
         "string_swing", "running_man", "disco_fever", "twist_it", "raise_the_roof", "mech_bot", "cabbage_patch", "sprinkler",
         "lawnmower", "shopping_cart", "party_starter", "prep_swing", "sidekick_pump", "hands_up", "snap_groove", "clap_along",
-        "step_touch", "shoulder_bounce", "club_bounce", "hip_roll", "hula_hoop", "slow_sway"
+        "step_touch", "shoulder_bounce", "club_bounce", "hip_roll", "hula_hoop", "slow_sway", "toprock", "arm_wave",
+        "lock_it_up", "krump_stomp", "neon_shuffle", "two_step", "heel_toe", "moon_glide", "dab_drop", "pop_circuit",
+        "tut_box", "freeze_frame", "arm_roll", "charleston", "salsa_step", "hustle_roll", "cossack_kicks", "tavern_jig",
+        "lindy_kick", "tango_strut", "mashed_potato", "hand_jive", "swim_stroke", "line_dance", "can_can", "light_bulb"
     };
 }
 

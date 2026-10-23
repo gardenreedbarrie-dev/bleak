@@ -38,6 +38,11 @@ FROZEN_KEYS = [
     "cabbage_patch", "sprinkler", "lawnmower", "shopping_cart",
     "party_starter", "prep_swing", "sidekick_pump", "hands_up", "snap_groove", "clap_along",
     "step_touch", "shoulder_bounce", "club_bounce", "hip_roll", "hula_hoop", "slow_sway",
+    "toprock", "arm_wave", "lock_it_up", "krump_stomp", "neon_shuffle", "two_step",
+    "heel_toe", "moon_glide", "dab_drop", "pop_circuit", "tut_box", "freeze_frame",
+    "arm_roll", "charleston", "salsa_step", "hustle_roll", "cossack_kicks", "tavern_jig",
+    "lindy_kick", "tango_strut", "mashed_potato", "hand_jive", "swim_stroke", "line_dance",
+    "can_can", "light_bulb",
 ]
 
 KIND = {RT.MAP: 1, RT.SPINE: 2, RT.NECK: 3, RT.RIGID: 4, RT.PELVIS: 5, RT.ROOT: 6, RT.STILL: 7}
