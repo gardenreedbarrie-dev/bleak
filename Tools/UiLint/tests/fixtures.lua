@@ -105,4 +105,17 @@ function FX.openEverything(M, ns)
     M.Advance(1.5)
 end
 
+-- The Animations tab's button for the entry `key`, after turning to its page (the dances come first and
+-- fill more than one page).
+function FX.showEntry(ns, key)
+    local A = ns.Animations
+    for i, e in ipairs(A.Filtered(ns.Collections.search or "", A.filter)) do
+        if e.key == key then
+            A.page = math.floor((i - 1) / A.PAGE_SIZE) + 1
+            A.Refresh()
+            return A.tab.entries[(i - 1) % A.PAGE_SIZE + 1]
+        end
+    end
+end
+
 return FX

@@ -26,3 +26,15 @@ id   key (file name)        dance                       BPM loop (s)
 7    sprinkler              Sprinkler                   100     2.40
 8    lawnmower              Lawnmower                   110     4.37
 9    shopping_cart          Shopping Cart               108     4.43
+10   party_starter          Party Starter               120     4.00
+11   prep_swing             Prep Swing                  116     4.13
+12   sidekick_pump          Sidekick Pump               126     3.80
+13   hands_up               Hands Up                    128     3.73
+14   snap_groove            Snap Groove                 100     4.80
+15   clap_along             Clap Along                  120     4.00
+16   step_touch             Step Touch                  116     4.13
+17   shoulder_bounce        Shoulder Bounce              98     4.90
+18   club_bounce            Club Bounce                 126     3.80
+19   hip_roll               Hip Roll                     96     5.00
+20   hula_hoop              Hula Hoop                   132     3.63
+21   slow_sway              Slow Sway                    90     5.33

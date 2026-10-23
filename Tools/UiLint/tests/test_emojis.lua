@@ -195,7 +195,7 @@ test("emojis: no realm answer or the feature off: a notice, a hint and no EMOJI"
     H.eq(printed(M, "Emojis are turned off on this realm."), 1)
     H.eq(sentEmojis(M), "")
     tab.filter:SetValue("all")
-    tab.entries[#A.Dances() + 1]:Click("LeftButton")
+    FX.showEntry(ns, "dance"):Click("LeftButton")
     H.ok(tab.right.hint:GetText():find("wheel"), "emotes keep the key hint")
 end)
 

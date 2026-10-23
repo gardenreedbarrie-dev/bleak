@@ -36,6 +36,8 @@ import synth  # noqa: E402
 FROZEN_KEYS = [
     "string_swing", "running_man", "disco_fever", "twist_it", "raise_the_roof", "mech_bot",
     "cabbage_patch", "sprinkler", "lawnmower", "shopping_cart",
+    "party_starter", "prep_swing", "sidekick_pump", "hands_up", "snap_groove", "clap_along",
+    "step_touch", "shoulder_bounce", "club_bounce", "hip_roll", "hula_hoop", "slow_sway",
 ]
 
 KIND = {RT.MAP: 1, RT.SPINE: 2, RT.NECK: 3, RT.RIGID: 4, RT.PELVIS: 5, RT.ROOT: 6, RT.STILL: 7}

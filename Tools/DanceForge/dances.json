@@ -21,6 +21,18 @@
     { "id": 6, "key": "cabbage_patch", "name": "Cabbage Patch", "command": "cabbagepatch", "category": "street", "source": "party:cabbage_patch" },
     { "id": 7, "key": "sprinkler", "name": "Sprinkler", "command": "sprinkler", "category": "fun", "source": "party:sprinkler" },
     { "id": 8, "key": "lawnmower", "name": "Lawnmower", "command": "lawnmower", "category": "fun", "source": "party:lawnmower" },
-    { "id": 9, "key": "shopping_cart", "name": "Shopping Cart", "command": "shoppingcart", "category": "fun", "source": "party:shopping_cart" }
+    { "id": 9, "key": "shopping_cart", "name": "Shopping Cart", "command": "shoppingcart", "category": "fun", "source": "party:shopping_cart" },
+    { "id": 10, "key": "party_starter", "name": "Party Starter", "command": "partystarter", "category": "party", "source": "club:party_starter" },
+    { "id": 11, "key": "prep_swing", "name": "Prep Swing", "command": "prepswing", "category": "party", "source": "club:prep_swing" },
+    { "id": 12, "key": "sidekick_pump", "name": "Sidekick Pump", "command": "sidekickpump", "category": "party", "source": "club:sidekick_pump" },
+    { "id": 13, "key": "hands_up", "name": "Hands Up", "command": "handsup", "category": "party", "source": "club:hands_up" },
+    { "id": 14, "key": "snap_groove", "name": "Snap Groove", "command": "snapgroove", "category": "party", "source": "club:snap_groove" },
+    { "id": 15, "key": "clap_along", "name": "Clap Along", "command": "clapalong", "category": "party", "source": "club:clap_along" },
+    { "id": 16, "key": "step_touch", "name": "Step Touch", "command": "steptouch", "category": "party", "source": "club:step_touch" },
+    { "id": 17, "key": "shoulder_bounce", "name": "Shoulder Bounce", "command": "shoulderbounce", "category": "party", "source": "club:shoulder_bounce" },
+    { "id": 18, "key": "club_bounce", "name": "Club Bounce", "command": "clubbounce", "category": "party", "source": "club:club_bounce" },
+    { "id": 19, "key": "hip_roll", "name": "Hip Roll", "command": "hiproll", "category": "party", "source": "club:hip_roll" },
+    { "id": 20, "key": "hula_hoop", "name": "Hula Hoop", "command": "hulahoop", "category": "party", "source": "club:hula_hoop" },
+    { "id": 21, "key": "slow_sway", "name": "Slow Sway", "command": "slowsway", "category": "party", "source": "club:slow_sway" }
   ]
 }
