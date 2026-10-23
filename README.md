@@ -266,6 +266,10 @@ effect; they are the `bleakFx*` CVars, saved in `Config.wtf`.
   diffuse colours), so it is weaker at night and in dim zones; there are none indoors (where no sky is drawn) or
   when the sun stands low, and they fade out on surfaces seen edge-on and beyond 80 yards. Like all screen-space
   effects, they only know what is on the screen.
+- A fresh install starts at high settings on any machine (BLEAKHOLD(defaults)): view distance 1277, ground
+  clutter density 128 at 140 yards, terrain shadows, specular, full particle density and unit draw distance. The
+  stock defaults come from a hardware table that knows no graphics card newer than the client. The Video options
+  still lower them, and their sliders reach further than stock (BLEAKHOLD(sliders)).
 - Only a world that fills the window is processed; one that an addon draws into part of the window (a resized
   WorldFrame) stays as the stock client draws it.
 - The bloom stands in for the stock full screen glow; the underwater and drunk blur stay. Zones whose light

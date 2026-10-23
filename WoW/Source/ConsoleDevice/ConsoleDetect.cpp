@@ -82,6 +82,23 @@ void ConsoleDetectSetDefaults(DefaultSettings& defaults, const Hardware& hardwar
     defaults.unk_0019 = true;
     defaults.m_numChannels = 0;
     defaults.m_fivePointOne = false;
+
+    // BLEAKHOLD(defaults): the hardware table (VideoHardware.dbc) knows no graphics card newer than the client, so
+    // a fresh install starts at its best settings on any machine instead; the Video options still lower them. The
+    // screen format stays the detected one.
+    defaults.m_farClip = 1277.0f;
+    defaults.m_terrainShadowLOD = 0;
+    defaults.m_detailDoodadDensity = 128;
+    defaults.m_animatingDoodads = true;
+    defaults.m_trilinear = true;
+    defaults.m_specular = true;
+    defaults.m_specularity = true;
+    defaults.m_waterLOD = 1;
+    defaults.m_particleDensity = 1.0f;
+    defaults.m_unitDrawDist = 300.0f;
+    defaults.m_smallCull = 0.04f;
+    defaults.m_distCull = 500.0f;
+    defaults.m_baseMipLevel = 0;
 }
 
 // VERIFY: 2f86cffe auto
