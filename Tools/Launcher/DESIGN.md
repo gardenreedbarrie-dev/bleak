@@ -51,12 +51,13 @@ UTF-8 JSON. Unknown fields are ignored (newer publishers may add some).
   "launcher": { "version": "1.0.0", "size": 8123456, "sha256": "…" },
   "files": [
     { "p": "Data/common.MPQ", "s": 2911342017, "h": "…" },
-    { "p": "Data/patch-A.MPQ", "s": 2708937193, "h": "…", "u": "https://pub-….r2.dev/patch-A.mpq" },
+    { "p": "Data/patch-A.MPQ", "s": 2708937193, "h": "…", "u": "https://pub-….r2.dev/patch-A.mpq", "pack": "hd" },
     { "p": "WTF/Config.wtf", "s": 812, "h": "…", "once": true }
   ],
   "news": [ { "title": "…", "date": "2026-10-23", "body": "…", "url": "https://…" } ],
   "links": { "website": "https://…", "discord": "https://…", "register": "https://…" },
-  "server": { "name": "Bleakhold", "host": "185.217.124.41", "auth_port": 3724, "world_port": 8085 }
+  "server": { "name": "Bleakhold", "host": "185.217.124.41", "auth_port": 3724, "world_port": 8085 },
+  "packs": [ { "id": "hd", "name": "HD graphics", "about": "Reforged's HD models and textures", "default": true } ]
 }
 ```
 
@@ -70,6 +71,11 @@ UTF-8 JSON. Unknown fields are ignored (newer publishers may add some).
   `Data/x`). A manifest without files is rejected too.
 - `s`: size in bytes; `h`: SHA-256, 64 lower-case hex characters.
 - `once`: install when missing, never overwrite or delete (settings files the player may change).
+- `packs`: optional parts of the game a player may leave out (at most 16): `id` (1-32 of `a-z`, `0-9`, `-`,
+  unique), `name` (1-60 characters), `about` (at most 300), `default` (on for a player who has not chosen; false
+  when absent). No control characters anywhere.
+- `pack`: the pack a file belongs to; it must be one of `packs`. Such a file is installed only while its pack is on.
+  A `once` file and the `exe` cannot belong to a pack.
 - `u`: optional mirror of the file, an absolute `http://` or `https://` URL of printable ASCII without spaces, at
   most 2048 characters (anything else rejects the manifest). It is fetched like an object and checked against `h`.
 - `cache_epoch`: when it differs from the one stored locally, the launcher empties `Cache/` before the next start.
@@ -96,8 +102,9 @@ so, and `install` is refused.
 
 - Settings: `%APPDATA%\Bleakhold Launcher\settings.json` — `install_dir`, `parallel` (1-8, default 4),
   `limit_mbps` (megabytes per second, 1 MB = 10^6 bytes; the window sends a whole number 0-1000; 0 = no limit),
-  `close_on_play` (default true), `shortcuts` (bool), and `self_update_sha` (the launcher a self-update installed;
-  see rule 2; not changed by the window).
+  `close_on_play` (default true), `shortcuts` (bool), `packs` (the player's choices, pack id → bool; a pack not
+  listed follows its `default`), and `self_update_sha` (the launcher a self-update installed; see rule 2; not changed
+  by the window).
 - Install state: `<install>\.bleakhold\state.json` — for every file the launcher installed: `p`, `s`, `h`, and the
   file's size and modification time (`size`, `mtime` in ns) when it was verified, `once` for `once` files; plus
   `cache_epoch`, the last manifest `build`, `exe` and `realmlist` (for Play while offline), and `job` while a
@@ -119,7 +126,8 @@ so, and `install` is refused.
    launcher while that launcher's SHA-256 is the remembered one (a mislabelled publish) does not update again and
    logs it; the mark is cleared once the running launcher is current. Installing copies the running launcher to
    `<install>\Bleakhold Launcher.exe` (the shortcuts point to it); a current launcher keeps that copy current.
-3. Plan: a file needs downloading when it is missing, or its size differs, or (size equal, but size, mtime or hash in
+3. Plan, over the files the player installs (every file outside a pack, and those of the packs that are on): a
+   file needs downloading when it is missing, or its size differs, or (size equal, but size, mtime or hash in
    the state differ, or the state has no entry) its SHA-256 differs; a file found right by hash is adopted into the
    state, a wrong one dropped from it. "Repair" hashes every file. `once` files are only checked for presence.
 4. Before downloading, the free space must hold what is left to download plus 64 MB (`disk_full`). Download
@@ -131,7 +139,8 @@ so, and `install` is refused.
    Repair refuse to start while `Bleakhold.exe` runs. A file with a mirror (`u`) is fetched from the mirror first;
    when that try fails in any way (unreachable, an HTTP error, a cut connection, other bytes), the realm's object
    takes over for the normal tries, continuing a kept `.part`, and the mirror's failure is not counted as a try.
-5. Delete files the state lists that the manifest no longer lists (never `once` files, never files the launcher did
+5. Delete files the state lists that the manifest no longer lists, or whose pack the player turned off (never
+   `once` files, never files the launcher did
    not install: a player's own addons and screenshots are safe). Paths compare case-insensitively: a case-only
    rename never deletes the file just downloaded. Folders left empty are removed.
 6. Save state after every file (at most every 0.5 s, and after every file of 8 MB or more; always when a download
@@ -198,7 +207,7 @@ as for the `error` event): `install` (folder not usable or not writable, no key,
 | `pause` / `resume` / `cancel` | — | — (cancel goes back to `needs_install` or `needs_update`) |
 | `repair` | — | — |
 | `play` | — | — |
-| `save_settings` | `{ settings }` | — (takes `parallel`, `limit_mbps`, `close_on_play`, `shortcuts`; the limit applies at once) |
+| `save_settings` | `{ settings }` | — (takes `parallel`, `limit_mbps`, `close_on_play`, `shortcuts`, `packs`; the limit applies at once; a changed pack choice changes the files to install at once — before installing, `total_bytes`, `pending_bytes` and `folder_info` follow; an installed game is checked again: `needs_update` to download a pack, or the pack's files are removed) |
 | `open_folder` | — | — |
 | `open_url` | `{ url }` | — (only `http(s)://`) |
 | `clear_cache` | — | — |
@@ -212,15 +221,18 @@ as for the `error` event): `install` (folder not usable or not writable, no key,
   "message": "",
   "installed": true,
   "install_dir": "C:\\Games\\Bleakhold",
-  "settings": { "parallel": 4, "limit_mbps": 0, "close_on_play": true, "shortcuts": true },
+  "settings": { "parallel": 4, "limit_mbps": 0, "close_on_play": true, "shortcuts": true, "packs": { "hd": true } },
   "build": "2026-10-23 16:00 c74f1eb",
   "total_bytes": 17123456789,
   "pending_bytes": 0,
   "news": [], "links": {},
-  "server": { "name": "Bleakhold", "online": true, "auth": true, "world": true, "ping_ms": 41 }
+  "server": { "name": "Bleakhold", "online": true, "auth": true, "world": true, "ping_ms": 41 },
+  "packs": [ { "id": "hd", "name": "HD graphics", "about": "…", "bytes": 21260000000, "on": true } ]
 }
 ```
 
+`total_bytes` counts the files the player installs (packs that are off left out); `packs` lists the manifest's
+packs with their size and whether they are on (a box in the install dialog, a switch in the settings).
 `install_dir` is the suggested folder until the game is installed (see "Install folder"); `server` is `null` until
 the first probe, `ping_ms` `null` when the realm does not answer; `online` means both ports answer.
 

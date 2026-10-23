@@ -3,6 +3,7 @@
 //! time; pause and cancel reach it through the shared [`Control`]. A second thread probes the realm every
 //! 30 s. The window side (Tauri) only forwards commands and turns [`Sink`] calls into events.
 
+use std::collections::BTreeMap;
 use std::ffi::OsString;
 use std::fs;
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -143,6 +144,8 @@ pub struct StateView {
     pub links: Map<String, Value>,
     /// `null` until the first probe.
     pub server: Option<ServerView>,
+    /// The manifest's optional packs, with the player's choice.
+    pub packs: Vec<PackView>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -151,6 +154,7 @@ pub struct SettingsView {
     pub limit_mbps: u32,
     pub close_on_play: bool,
     pub shortcuts: bool,
+    pub packs: BTreeMap<String, bool>,
 }
 
 impl From<&Settings> for SettingsView {
@@ -160,8 +164,20 @@ impl From<&Settings> for SettingsView {
             limit_mbps: s.limit_mbps,
             close_on_play: s.close_on_play,
             shortcuts: s.shortcuts,
+            packs: s.packs.clone(),
         }
     }
+}
+
+/// `State.packs`: one optional pack.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct PackView {
+    pub id: String,
+    pub name: String,
+    pub about: String,
+    pub bytes: u64,
+    /// Installed (or to be installed) for this player.
+    pub on: bool,
 }
 
 /// `State.server` and the `server` event.
@@ -222,7 +238,10 @@ struct Status {
     phase: Phase,
     message: String,
     settings: Settings,
+    /// The manifest as this player installs it: without the files of packs that are off.
     manifest: Option<Arc<Manifest>>,
+    /// The whole verified manifest, every pack included.
+    full_manifest: Option<Arc<Manifest>>,
     /// The manifest was fetched in this session (not the cached copy shown while offline).
     manifest_live: bool,
     installed: bool,
@@ -257,6 +276,18 @@ pub struct Engine {
     worker: Mutex<Option<JoinHandle<()>>>,
 }
 
+/// The ids of the packs that are on, in manifest order.
+fn packs_on(st: &Status) -> Vec<String> {
+    let Some(full) = &st.full_manifest else { return Vec::new() };
+    full.packs.iter().filter(|p| Manifest::pack_on(p, &st.settings.packs)).map(|p| p.id.clone()).collect()
+}
+
+/// Keeps the whole manifest and the one for the player's pack choices.
+fn set_manifest(st: &mut Status, full: Arc<Manifest>) {
+    st.manifest = Some(if full.packs.is_empty() { full.clone() } else { Arc::new(full.for_packs(&st.settings.packs)) });
+    st.full_manifest = Some(full);
+}
+
 const DEFAULT_EXE: &str = "Bleakhold.exe";
 const SAVE_EVERY: Duration = Duration::from_millis(500);
 const BIG_FILE: u64 = 8 << 20;
@@ -288,6 +319,7 @@ impl Engine {
                 message: String::new(),
                 settings,
                 manifest: None,
+                full_manifest: None,
                 manifest_live: false,
                 installed: false,
                 local_build: String::new(),
@@ -399,17 +431,33 @@ impl Engine {
     }
 
     /// `save_settings`: takes the keys the window may change, applies the speed limit at once (the
-    /// number of parallel downloads applies to the next download) and returns the result.
+    /// number of parallel downloads applies to the next download) and returns the result. A changed pack
+    /// choice changes the files to install at once; an installed game is checked again, so the pack's files
+    /// are downloaded (Update) or removed.
     pub fn save_settings(&self, v: &Value) -> Result<Settings> {
-        let s = {
+        let (s, packs_changed, installing) = {
             let mut st = self.inner.st();
+            let before = packs_on(&st);
             st.settings.merge_json(v);
             st.settings = st.settings.clone().normalized();
-            st.settings.clone()
+            let changed = packs_on(&st) != before;
+            if changed {
+                if let Some(full) = st.full_manifest.clone() {
+                    set_manifest(&mut st, full);
+                }
+                st.plan = None;
+                if st.phase == Phase::NeedsInstall {
+                    st.pending_bytes = st.manifest.as_ref().map_or(0, |m| m.total_bytes());
+                }
+            }
+            (st.settings.clone(), changed, st.phase == Phase::NeedsInstall)
         };
         self.inner.ctl.set_limit_bps(s.limit_bps());
         s.save(&self.inner.cfg.config_dir)
             .map_err(|e| Error::io(format!("saving {}", Settings::path(&self.inner.cfg.config_dir).display()), &e))?;
+        if packs_changed && !installing {
+            self.check();
+        }
         Ok(s)
     }
 
@@ -505,6 +553,22 @@ impl Inner {
             news: m.map(|m| m.news.clone()).unwrap_or_default(),
             links: m.map(|m| m.links.clone()).unwrap_or_default(),
             server: st.server.clone(),
+            packs: st
+                .full_manifest
+                .as_deref()
+                .map(|full| {
+                    full.packs
+                        .iter()
+                        .map(|p| PackView {
+                            id: p.id.clone(),
+                            name: p.name.clone(),
+                            about: p.about.clone(),
+                            bytes: full.pack_bytes(&p.id),
+                            on: Manifest::pack_on(p, &st.settings.packs),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 
@@ -667,19 +731,19 @@ impl Inner {
     /// Fetches and stores the manifest (and keeps a copy for offline starts).
     fn load_live_manifest(&self) -> Result<Arc<Manifest>> {
         let (m, bytes, sig) = self.fetch_manifest()?;
-        let m = Arc::new(m);
         let dir = self.cfg.config_dir.join(MANIFEST_CACHE);
         if let Err(e) = write_atomic(&dir.join("manifest.json"), &bytes)
             .and_then(|_| write_atomic(&dir.join("manifest.json.sig"), &sig))
         {
             log::warn!("could not keep a copy of the manifest: {e}");
         }
-        {
+        let m = {
             let mut st = self.st();
-            st.manifest = Some(m.clone());
+            set_manifest(&mut st, Arc::new(m));
             st.manifest_live = true;
             st.plan = None;
-        }
+            st.manifest.clone().expect("just set")
+        };
         self.probe_now.store(true, Ordering::SeqCst);
         Ok(m)
     }
@@ -754,8 +818,8 @@ impl Inner {
         let cached = if self.st().manifest.is_none() { self.cached_manifest().map(Arc::new) } else { None };
         {
             let mut st = self.st();
-            if cached.is_some() {
-                st.manifest = cached;
+            if let Some(full) = cached {
+                set_manifest(&mut st, full);
             }
             st.manifest_live = false;
             st.plan = None;

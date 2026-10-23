@@ -1,6 +1,8 @@
 //! The manifest (DESIGN.md "Manifest (format 1)"): parsing and strict validation. A manifest that fails
 //! any rule is rejected whole; nothing in it is used.
 
+use std::collections::{BTreeMap, HashSet};
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -25,7 +27,25 @@ pub struct FileEntry {
     /// A mirror: another address serving the same bytes, tried before the realm's `objects/` copy.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub u: Option<String>,
+    /// The optional pack the file belongs to; installed only while that pack is on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pack: Option<String>,
 }
+
+/// An optional part of the game the player may leave out, like the HD graphics.
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Pack {
+    pub id: String,
+    pub name: String,
+    #[serde(default)]
+    pub about: String,
+    /// On for a player who has not chosen.
+    #[serde(default)]
+    pub default: bool,
+}
+
+/// The most packs a manifest may declare.
+pub const MAX_PACKS: usize = 16;
 
 /// The newest launcher.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
@@ -83,6 +103,8 @@ pub struct Manifest {
     pub links: Map<String, Value>,
     #[serde(default)]
     pub server: Option<ServerInfo>,
+    #[serde(default)]
+    pub packs: Vec<Pack>,
 }
 
 impl Manifest {
@@ -146,7 +168,62 @@ impl Manifest {
         if self.build.chars().any(char::is_control) || self.build.len() > 200 {
             return Err("build: control characters or too long".into());
         }
+        self.validate_packs()
+    }
+
+    fn validate_packs(&self) -> std::result::Result<(), String> {
+        if self.packs.len() > MAX_PACKS {
+            return Err(format!("more than {MAX_PACKS} packs"));
+        }
+        let mut ids = HashSet::new();
+        for p in &self.packs {
+            if !is_pack_id(&p.id) {
+                return Err(format!("pack id {:?}: 1-32 characters of a-z, 0-9 and -", p.id));
+            }
+            if !ids.insert(p.id.as_str()) {
+                return Err(format!("pack {:?} is listed twice", p.id));
+            }
+            if p.name.trim().is_empty() || p.name.chars().count() > 60 || p.name.chars().any(char::is_control) {
+                return Err(format!("pack {:?}: the name is empty, longer than 60 or has control characters", p.id));
+            }
+            if p.about.chars().count() > 300 || p.about.chars().any(char::is_control) {
+                return Err(format!("pack {:?}: the text is longer than 300 or has control characters", p.id));
+            }
+        }
+        for f in &self.files {
+            let Some(pack) = &f.pack else { continue };
+            if !ids.contains(pack.as_str()) {
+                return Err(format!("{:?}: unknown pack {pack:?}", f.p));
+            }
+            if f.once {
+                return Err(format!("{:?}: a 'once' file cannot belong to a pack", f.p));
+            }
+            if f.p == self.exe {
+                return Err("the game executable cannot belong to a pack".into());
+            }
+        }
         Ok(())
+    }
+
+    /// Whether `pack` is on for these choices; a pack the player has not chosen follows its `default`.
+    pub fn pack_on(pack: &Pack, choices: &BTreeMap<String, bool>) -> bool {
+        choices.get(&pack.id).copied().unwrap_or(pack.default)
+    }
+
+    /// What a player with these pack choices installs: every file outside a pack, and the files of the packs
+    /// that are on. Files of a pack that is off are then no longer listed, so the launcher removes the ones it
+    /// installed, as it does with any file a manifest drops.
+    pub fn for_packs(&self, choices: &BTreeMap<String, bool>) -> Manifest {
+        let on: HashSet<&str> =
+            self.packs.iter().filter(|p| Self::pack_on(p, choices)).map(|p| p.id.as_str()).collect();
+        let mut m = self.clone();
+        m.files.retain(|f| f.pack.as_deref().is_none_or(|p| on.contains(p)));
+        m
+    }
+
+    /// The size of a pack's files.
+    pub fn pack_bytes(&self, id: &str) -> u64 {
+        self.files.iter().filter(|f| f.pack.as_deref() == Some(id)).map(|f| f.s).sum()
     }
 
     /// Sum of every file's size.
@@ -167,6 +244,11 @@ impl Manifest {
 /// `<objects><h0h1>/<h>`.
 pub fn object_path(objects: &str, h: &str) -> String {
     format!("{objects}{}/{h}", &h[..2])
+}
+
+/// A pack id: 1-32 characters of `a-z`, `0-9` and `-`.
+pub fn is_pack_id(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 32 && id.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
 }
 
 /// 64 lower-case hex characters.
@@ -256,6 +338,55 @@ mod tests {
         assert_eq!(m.server.as_ref().unwrap().world_port, 8085);
         assert_eq!(m.launcher.as_ref().unwrap().version, "1.2.0");
         assert!(m.files.iter().all(|f| f.u.is_none()));
+    }
+
+    #[test]
+    fn packs() {
+        let mut v = base();
+        v["packs"] = json!([{ "id": "hd", "name": "HD graphics", "about": "Reforged", "default": true },
+                            { "id": "extra-music", "name": "Music" }]);
+        v["files"].as_array_mut().unwrap().push(json!({ "p": "Data/patch-A.MPQ", "s": 5, "h": H, "pack": "hd" }));
+        v["files"].as_array_mut().unwrap().push(json!({ "p": "Sound/x.mp3", "s": 7, "h": H, "pack": "extra-music" }));
+        let m = parse(&v).unwrap();
+        assert_eq!(m.packs.len(), 2);
+        assert!(m.packs[0].default && !m.packs[1].default, "default is false when absent");
+        assert_eq!(m.pack_bytes("hd"), 5);
+        let mut choices = BTreeMap::new();
+        let names = |m: &Manifest| m.files.iter().map(|f| f.p.clone()).collect::<Vec<_>>();
+        assert_eq!(names(&m.for_packs(&choices)), ["Bleakhold.exe", "WTF/Config.wtf", "Data/patch-A.MPQ"]);
+        choices.insert("hd".to_string(), false);
+        choices.insert("extra-music".to_string(), true);
+        assert_eq!(names(&m.for_packs(&choices)), ["Bleakhold.exe", "WTF/Config.wtf", "Sound/x.mp3"]);
+        choices.insert("gone".to_string(), true);
+        assert_eq!(m.for_packs(&choices).files.len(), 3, "a choice for a pack the manifest lacks changes nothing");
+
+        let with_pack = |change: &dyn Fn(&mut Value)| {
+            let mut v = base();
+            v["packs"] = json!([{ "id": "hd", "name": "HD graphics", "default": true }]);
+            change(&mut v);
+            v
+        };
+        for (change, why) in [
+            (&(|v: &mut Value| v["files"][0]["pack"] = json!("nope")) as &dyn Fn(&mut Value), "unknown pack"),
+            (&|v: &mut Value| v["files"][1]["pack"] = json!("hd"), "'once' file"),
+            (&|v: &mut Value| v["files"][0]["pack"] = json!("hd"), "game executable"),
+            (&|v: &mut Value| v["packs"][0]["id"] = json!("HD"), "pack id"),
+            (&|v: &mut Value| v["packs"][0]["id"] = json!(""), "pack id"),
+            (&|v: &mut Value| v["packs"].as_array_mut().unwrap().push(json!({ "id": "hd", "name": "x" })), "twice"),
+            (&|v: &mut Value| v["packs"][0]["name"] = json!(" "), "name"),
+            (&|v: &mut Value| v["packs"][0]["name"] = json!("x".repeat(61)), "name"),
+            (&|v: &mut Value| v["packs"][0]["about"] = json!("a\nb"), "text"),
+            (
+                &|v: &mut Value| {
+                    v["packs"] =
+                        json!((0..17).map(|i| json!({ "id": format!("p{i}"), "name": "x" })).collect::<Vec<_>>())
+                },
+                "more than",
+            ),
+        ] {
+            let e = parse(&with_pack(change)).expect_err(why);
+            assert!(e.message.contains(why), "{} (expected {why})", e.message);
+        }
     }
 
     #[test]

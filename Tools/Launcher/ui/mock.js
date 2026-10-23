@@ -62,24 +62,28 @@
     ];
 
     const FULL = Math.round(FILES.reduce((sum, f) => sum + f[1], 0));
+    const HD = Math.round(19.8 * GB);
 
     const listeners = {};
     const emit = (event, payload) => (listeners[event] || []).slice().forEach((cb) => cb({ event, payload }));
 
     const state = {
-        launcher_version: "1.1.0",
+        launcher_version: "1.2.0",
         phase: "loading",
         message: "",
         installed: true,
         install_dir: "C:\\Games\\Bleakhold",
-        settings: { parallel: 4, limit_mbps: 0, close_on_play: true },
+        settings: { parallel: 4, limit_mbps: 0, close_on_play: true, packs: {} },
         build: "2026-10-23 16:00 c74f1eb",
         total_bytes: FULL,
         pending_bytes: 0,
         news: NEWS,
         links: { register: "https://bleakhold.com/register", website: "https://bleakhold.com", discord: "https://discord.gg/bleakhold" },
         server: { name: "Bleakhold", online: true, auth: true, world: true, ping_ms: 41 },
+        packs: [{ id: "hd", name: "HD graphics", about: "Reforged's HD models and textures, with Bleakhold's Patch-Y",
+            bytes: HD, on: true }],
     };
+    state.total_bytes = FULL + HD;
 
     const preview = { scenario, open: null };
     window.__BLEAKHOLD_MOCK__ = preview;
@@ -180,7 +184,7 @@
         if (/^e:/i.test(p)) {
             return { path: p, free_bytes: 9.8 * GB, needed_bytes: FULL, has_game: false, writable: true };
         }
-        return { path: p, free_bytes: 214.6 * GB, needed_bytes: FULL, has_game: false, writable: true };
+        return { path: p, free_bytes: 214.6 * GB, needed_bytes: state.total_bytes, has_game: false, writable: true };
     }
 
     // --------------------------------------------------------------------------------- commands
@@ -258,7 +262,16 @@
         },
         save_settings({ settings }) {
             log("save_settings", settings);
-            Object.assign(state.settings, settings);
+            Object.assign(state.settings, settings, { packs: Object.assign({}, state.settings.packs, settings.packs) });
+            state.packs.forEach((p) => {
+                if (settings.packs && typeof settings.packs[p.id] === "boolean") {
+                    p.on = settings.packs[p.id];
+                }
+            });
+            state.total_bytes = FULL + state.packs.reduce((a, p) => a + (p.on ? p.bytes : 0), 0);
+            if (state.phase === "needs_install") {
+                state.pending_bytes = state.total_bytes;
+            }
         },
         open_folder() {
             log("open_folder", state.install_dir);

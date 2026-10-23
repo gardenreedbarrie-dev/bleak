@@ -2502,6 +2502,63 @@ p {
     color: var(--text);
 }
 
+.packs {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 18px;
+}
+
+.check.pack {
+    display: flex;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid rgba(110, 90, 58, 0.45);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.25);
+    transition: border-color var(--quick), background var(--quick);
+}
+
+.check.pack:hover {
+    border-color: var(--gold-light);
+    background: rgba(0, 0, 0, 0.35);
+}
+
+.check.pack:has(input:disabled) {
+    opacity: 0.55;
+    cursor: default;
+}
+
+.pack-text {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
+}
+
+.pack-name {
+    font: 500 13px/1.3 var(--f-ui);
+    color: var(--text);
+}
+
+.pack-about {
+    font: 400 12px/1.35 var(--f-ui);
+    color: var(--mute);
+}
+
+.pack-size {
+    font: 500 12px/1 var(--f-ui);
+    color: var(--gold-light);
+    white-space: nowrap;
+}
+
+.set-packs {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
 .dialog-foot {
     display: flex;
     justify-content: flex-end;

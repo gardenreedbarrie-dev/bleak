@@ -1,11 +1,13 @@
 //! `settings.json` in the launcher's config folder (DESIGN.md "Local state").
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::manifest::is_pack_id;
 use crate::util::write_atomic;
 
 pub const SETTINGS_FILE: &str = "settings.json";
@@ -13,6 +15,8 @@ pub const MAX_PARALLEL: u32 = 8;
 pub const MAX_LIMIT_MBPS: u32 = 10_000;
 /// `limit_mbps` counts megabytes (10^6 bytes) per second, as the window shows it ("MB/s").
 pub const BYTES_PER_MB: u64 = 1_000_000;
+/// The most pack choices kept.
+pub const MAX_PACK_CHOICES: usize = 32;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
@@ -25,6 +29,8 @@ pub struct Settings {
     pub close_on_play: bool,
     /// The player asked for shortcuts when installing.
     pub shortcuts: bool,
+    /// The player's choices of optional packs (id → on); a pack not listed follows the manifest's default.
+    pub packs: BTreeMap<String, bool>,
     /// SHA-256 of the launcher the last self-update installed (loop guard; not changed by the window).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub self_update_sha: Option<String>,
@@ -38,6 +44,7 @@ impl Default for Settings {
             limit_mbps: 0,
             close_on_play: true,
             shortcuts: false,
+            packs: BTreeMap::new(),
             self_update_sha: None,
         }
     }
@@ -78,9 +85,9 @@ impl Settings {
         self
     }
 
-    /// Takes the keys the window may change (`parallel`, `limit_mbps`, `close_on_play`, `shortcuts`) from
-    /// a `save_settings` payload; others, and values of the wrong type, are ignored. `limit_mbps` may be
-    /// `null` (no limit) or a fraction (rounded up).
+    /// Takes the keys the window may change (`parallel`, `limit_mbps`, `close_on_play`, `shortcuts`, `packs`)
+    /// from a `save_settings` payload; others, and values of the wrong type, are ignored. `limit_mbps` may be
+    /// `null` (no limit) or a fraction (rounded up); `packs` sets the choices it names and keeps the others.
     pub fn merge_json(&mut self, v: &Value) {
         if let Some(n) = v.get("parallel").and_then(Value::as_f64) {
             self.parallel = n.round().clamp(1.0, MAX_PARALLEL as f64) as u32;
@@ -101,6 +108,14 @@ impl Settings {
         }
         if let Some(b) = v.get("shortcuts").and_then(Value::as_bool) {
             self.shortcuts = b;
+        }
+        if let Some(packs) = v.get("packs").and_then(Value::as_object) {
+            for (id, on) in packs {
+                let room = self.packs.len() < MAX_PACK_CHOICES || self.packs.contains_key(id);
+                if let (Some(on), true, true) = (on.as_bool(), is_pack_id(id), room) {
+                    self.packs.insert(id.clone(), on);
+                }
+            }
         }
     }
 
@@ -146,5 +161,24 @@ mod tests {
         assert_eq!((s.parallel, s.limit_mbps), (1, 12));
         s.merge_json(&json!({ "limit_mbps": "" }));
         assert_eq!(s.limit_mbps, 0);
+    }
+
+    #[test]
+    fn pack_choices() {
+        let mut s = Settings::default();
+        s.merge_json(&json!({ "packs": { "hd": false, "Bad Id": true, "music": "yes" } }));
+        assert_eq!(s.packs, BTreeMap::from([("hd".to_string(), false)]));
+        s.merge_json(&json!({ "packs": { "music": true } }));
+        assert_eq!(s.packs.len(), 2, "other choices are kept");
+        s.merge_json(&json!({ "packs": { "hd": true } }));
+        assert!(s.packs["hd"]);
+        let many: serde_json::Map<String, Value> = (0..40).map(|i| (format!("p{i}"), json!(true))).collect();
+        s.merge_json(&json!({ "packs": many }));
+        assert_eq!(s.packs.len(), MAX_PACK_CHOICES);
+        let dir = std::env::temp_dir().join(format!("bh-settings-packs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        s.save(&dir).unwrap();
+        assert_eq!(Settings::load(&dir).packs, s.packs);
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

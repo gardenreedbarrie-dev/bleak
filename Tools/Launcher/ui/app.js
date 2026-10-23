@@ -980,6 +980,7 @@
         renderRealm();
         renderNews();
         renderLinks();
+        renderPacks();
         if (!dom.drawer.hidden) {
             renderSettings(false);
         }
@@ -1082,6 +1083,100 @@
             lastFocus.focus({ preventScroll: true });
         }
         lastFocus = null;
+    }
+
+    // ------------------------------------------------------------------------------ optional packs
+
+    // Packs (like the HD graphics) the player may leave out: a box in the install dialog and a switch in the
+    // settings. The lists are rebuilt only when the packs themselves change, so a click never loses focus.
+    let packsKey = "";
+
+    function packList() {
+        return Array.isArray(model.state.packs) ? model.state.packs : [];
+    }
+
+    function packsLocked() {
+        return ["downloading", "verifying", "paused", "launching", "playing", "self_updating"]
+            .includes(model.state.phase);
+    }
+
+    function renderPacks() {
+        const packs = packList();
+        const key = JSON.stringify(packs.map((p) => [p.id, p.name, p.about, p.bytes]));
+        if (key !== packsKey) {
+            packsKey = key;
+            dom.installPacks.textContent = "";
+            dom.setPacks.textContent = "";
+            packs.forEach((p) => {
+                const row = el("label", "check pack");
+                const box = el("input");
+                box.type = "checkbox";
+                box.dataset.pack = p.id;
+                row.appendChild(box);
+                const mark = el("span", "check-box");
+                mark.setAttribute("aria-hidden", "true");
+                row.appendChild(mark);
+                const text = el("span", "pack-text");
+                text.appendChild(el("span", "pack-name", p.name));
+                if (p.about) {
+                    text.appendChild(el("span", "pack-about", p.about));
+                }
+                row.appendChild(text);
+                row.appendChild(el("span", "pack-size", "+" + fmtBytes(p.bytes)));
+                dom.installPacks.appendChild(row);
+
+                const srow = el("label", "switch-row");
+                const label = el("span", "set-label", p.name);
+                label.appendChild(el("span", "set-hint", (p.about ? p.about + " · " : "") + fmtBytes(p.bytes)));
+                srow.appendChild(label);
+                const sw = el("input", "switch");
+                sw.type = "checkbox";
+                sw.setAttribute("role", "switch");
+                sw.dataset.pack = p.id;
+                srow.appendChild(sw);
+                dom.setPacks.appendChild(srow);
+            });
+            dom.installPacks.hidden = !packs.length;
+            dom.setPacksGroup.hidden = !packs.length;
+        }
+        const on = {};
+        packs.forEach((p) => {
+            on[p.id] = !!p.on;
+        });
+        const locked = packsLocked();
+        dom.installPacks.querySelectorAll("input").forEach((i) => {
+            i.checked = !!on[i.dataset.pack];
+            i.disabled = install.busy;
+        });
+        dom.setPacks.querySelectorAll("input").forEach((i) => {
+            i.checked = !!on[i.dataset.pack];
+            i.disabled = locked;
+            i.closest(".switch-row").title = locked ? "Finish or cancel the download first." : "";
+        });
+    }
+
+    async function setPack(id, on) {
+        const pack = packList().find((p) => p.id === id);
+        if (pack) {
+            pack.on = on;
+        }
+        const packs = {};
+        packs[id] = on;
+        model.state.settings.packs = Object.assign({}, model.state.settings.packs, packs);
+        if ((await call("save_settings", { settings: { packs } })) !== FAILED && !dom.drawer.hidden) {
+            flashSaved();
+        }
+        await syncState();
+        if (!dom.modal.hidden && install.path) {
+            fetchFolderInfo(install.path);
+        }
+    }
+
+    function onPackChange(e) {
+        const t = e.target;
+        if (t && t.dataset && t.dataset.pack) {
+            setPack(t.dataset.pack, t.checked);
+        }
     }
 
     // ------------------------------------------------------------------------------ install dialog
@@ -1201,6 +1296,9 @@
         dom.installGo.classList.toggle("is-busy", install.busy);
         dom.installBrowse.disabled = install.busy;
         dom.installCancel.disabled = install.busy;
+        dom.installPacks.querySelectorAll("input").forEach((i) => {
+            i.disabled = install.busy;
+        });
     }
 
     async function browseFolder() {
@@ -1547,6 +1645,7 @@
             setBuild: "set-build", modal: "install-modal", installPath: "install-path", installBrowse: "install-browse",
             space: "space", spaceNeeded: "space-needed", spaceFree: "space-free", spaceUsed: "space-used",
             installNotes: "install-notes", optDesktop: "opt-desktop", optStart: "opt-start",
+            installPacks: "install-packs", setPacks: "set-packs", setPacksGroup: "set-packs-group",
             installCancel: "install-cancel", installGo: "install-go", selfupdate: "selfupdate",
             selfupdateMsg: "selfupdate-msg", selfupdateFill: "selfupdate-fill", selfupdatePct: "selfupdate-pct",
             tooltip: "tooltip",
@@ -1596,6 +1695,8 @@
             readSettingsInputs();
             saveSettings();
         });
+        dom.setPacks.addEventListener("change", onPackChange);
+        dom.installPacks.addEventListener("change", onPackChange);
 
         // install dialog
         dom.installBrowse.addEventListener("click", browseFolder);

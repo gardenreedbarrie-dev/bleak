@@ -111,6 +111,9 @@ impl TestServer {
             if let Some(m) = &f.mirror {
                 e["u"] = json!(format!("{}{m}", self.base));
             }
+            if let Some(pack) = &f.pack {
+                e["pack"] = json!(pack);
+            }
             files.push(e);
         }
         let mut m = json!({
@@ -132,6 +135,9 @@ impl TestServer {
         if let Some(port) = spec.server_port {
             m["server"] = json!({ "name": "Test Realm", "host": "127.0.0.1", "auth_port": port, "world_port": port });
         }
+        if !spec.packs.is_empty() {
+            m["packs"] = json!(spec.packs);
+        }
         let bytes = serde_json::to_vec(&m).unwrap();
         self.put("manifest.json.sig", sign(&bytes).as_bytes());
         self.put("manifest.json", &bytes);
@@ -147,6 +153,7 @@ pub struct SpecFile {
     pub once: bool,
     /// The mirror's path on the test server (`u` = base + this).
     pub mirror: Option<String>,
+    pub pack: Option<String>,
 }
 
 pub struct Spec {
@@ -157,6 +164,8 @@ pub struct Spec {
     /// (version, bytes)
     pub launcher: Option<(String, Vec<u8>)>,
     pub server_port: Option<u16>,
+    /// The manifest's `packs`.
+    pub packs: Vec<Value>,
 }
 
 impl Spec {
@@ -168,22 +177,47 @@ impl Spec {
             files: Vec::new(),
             launcher: None,
             server_port: None,
+            packs: Vec::new(),
         }
     }
 
     pub fn file(mut self, p: &str, content: &[u8]) -> Spec {
-        self.files.push(SpecFile { p: p.into(), content: content.to_vec(), once: false, mirror: None });
+        self.files.push(SpecFile { p: p.into(), content: content.to_vec(), once: false, mirror: None, pack: None });
         self
     }
 
     pub fn once(mut self, p: &str, content: &[u8]) -> Spec {
-        self.files.push(SpecFile { p: p.into(), content: content.to_vec(), once: true, mirror: None });
+        self.files.push(SpecFile { p: p.into(), content: content.to_vec(), once: true, mirror: None, pack: None });
+        self
+    }
+
+    /// Declares an optional pack.
+    pub fn pack(mut self, id: &str, name: &str, default: bool) -> Spec {
+        self.packs.push(json!({ "id": id, "name": name, "about": format!("About {name}"), "default": default }));
+        self
+    }
+
+    /// A file of the pack `pack`.
+    pub fn in_pack(mut self, p: &str, content: &[u8], pack: &str) -> Spec {
+        self.files.push(SpecFile {
+            p: p.into(),
+            content: content.to_vec(),
+            once: false,
+            mirror: None,
+            pack: Some(pack.into()),
+        });
         self
     }
 
     /// A file with a mirror at `mirror` on the test server (the realm's object is published as well).
     pub fn mirrored(mut self, p: &str, content: &[u8], mirror: &str) -> Spec {
-        self.files.push(SpecFile { p: p.into(), content: content.to_vec(), once: false, mirror: Some(mirror.into()) });
+        self.files.push(SpecFile {
+            p: p.into(),
+            content: content.to_vec(),
+            once: false,
+            mirror: Some(mirror.into()),
+            pack: None,
+        });
         self
     }
 }

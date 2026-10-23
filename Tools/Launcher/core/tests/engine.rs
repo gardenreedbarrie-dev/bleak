@@ -517,6 +517,60 @@ fn mirrored_files_come_from_their_mirror() {
 }
 
 #[test]
+fn an_optional_pack_can_be_left_out_added_and_removed() {
+    let srv = TestServer::start();
+    let s = setup("en-packs");
+    let hd_a = bytes(9, 150_000);
+    let hd_y = bytes(10, 60_000);
+    let spec = v1().pack("hd", "HD graphics", true).in_pack("Data/patch-A.MPQ", &hd_a, "hd").in_pack(
+        "Data/Patch-Y.MPQ",
+        &hd_y,
+        "hd",
+    );
+    srv.publish(&spec);
+    let (e, rec) = start(config(&srv.base, &public_key_b64(), &s.config));
+    let i = rec.wait_phase(Phase::NeedsInstall, 0);
+    let st = e.state();
+    assert_eq!(st.packs.len(), 1);
+    let hd = &st.packs[0];
+    assert_eq!((hd.id.as_str(), hd.name.as_str(), hd.bytes, hd.on), ("hd", "HD graphics", 210_000, true));
+    let base_bytes = st.total_bytes - 210_000;
+    assert_eq!(st.pending_bytes, st.total_bytes, "on by default");
+
+    // Left out in the install dialog: the sizes follow at once, without a check.
+    e.save_settings(&json!({ "packs": { "hd": false } })).unwrap();
+    let st = e.state();
+    assert!(!st.packs[0].on && !st.settings.packs["hd"]);
+    assert_eq!((st.total_bytes, st.pending_bytes), (base_bytes, base_bytes));
+    assert_eq!(e.folder_info(s.install.to_str().unwrap()).unwrap().needed_bytes, base_bytes);
+    e.install(s.install.to_str().unwrap(), false, false).unwrap();
+    let j = rec.wait_phase(Phase::Ready, i);
+    assert!(!s.install.join("Data/patch-A.MPQ").exists() && !s.install.join("Data/Patch-Y.MPQ").exists());
+    assert_eq!(InstallState::load(&s.install).files.len(), 6);
+
+    // Turned on in Settings: checked again, then Update downloads the pack.
+    e.save_settings(&json!({ "packs": { "hd": true } })).unwrap();
+    let k = rec.wait_phase(Phase::NeedsUpdate, j);
+    assert_eq!(e.state().pending_bytes, 210_000);
+    e.update();
+    let k = rec.wait_phase(Phase::Ready, k);
+    assert_eq!(read(&s.install.join("Data/patch-A.MPQ")), hd_a);
+    assert_eq!(read(&s.install.join("Data/Patch-Y.MPQ")), hd_y);
+
+    // Turned off again: its files go, everything else and the player's own files stay.
+    fs::write(s.install.join("Data/patch-Mine.MPQ"), b"my own patch").unwrap();
+    e.save_settings(&json!({ "packs": { "hd": false } })).unwrap();
+    let n = rec.wait_phase(Phase::Loading, k);
+    rec.wait_phase(Phase::Ready, n);
+    assert!(!s.install.join("Data/patch-A.MPQ").exists() && !s.install.join("Data/Patch-Y.MPQ").exists());
+    assert!(s.install.join("Data/common.MPQ").exists() && s.install.join("Data/patch-Mine.MPQ").exists());
+    assert_eq!(InstallState::load(&s.install).files.len(), 6);
+    let settings: serde_json::Value = serde_json::from_slice(&read(&s.config.join("settings.json"))).unwrap();
+    assert_eq!(settings["packs"], json!({ "hd": false }));
+    fs::remove_dir_all(&s.root).unwrap();
+}
+
+#[test]
 fn existing_client_is_adopted() {
     let srv = TestServer::start();
     let s = setup("en-adopt");
