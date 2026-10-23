@@ -70,6 +70,7 @@
 #include "WoW/Source/Ui/ChatBubbleFrame.h"
 #include "WoW/Source/Ui/CommentatorFrame.h"
 #include "WoW/Source/Ui/DressUpModelFrame.h"
+#include "WoW/Source/Ui/BleakholdDance.h"
 #include "WoW/Source/Ui/EmojiBubbleFrame.h"
 #include "WoW/Source/Ui/GameUI.h"
 #include "WoW/Source/Ui/MailInfo.h"
@@ -1871,6 +1872,8 @@ void CGWorldFrame::OnLayerUpdate(float elapsedSec) {
     CGChatBubbleFrame::OnWorldLayerUpdate();
     // BLEAKHOLD(emoji): age the emoji bubbles and find their head points.
     CGEmojiBubbleFrame::OnWorldLayerUpdate();
+    // BLEAKHOLD(dance)
+    CGBleakholdDance::OnWorldLayerUpdate();
 
     CSimpleTop* top = this->m_simpleTop;
     HITTESTRESULT hit;

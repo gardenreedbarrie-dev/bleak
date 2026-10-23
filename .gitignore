@@ -410,3 +410,6 @@ FodyWeavers.xsd
 
 # Local Visual Studio CMake settings (absolute paths to re/tools)
 CMakeSettings.json
+
+# The dance pack is built from Tools/DanceForge (danceforge.py pack); the CI package carries it.
+Interface/Bleakhold/Dances/Dances.bdc

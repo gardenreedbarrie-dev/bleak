@@ -10,6 +10,7 @@
 Core.lua
 Data.lua
 EmojiData.lua
+DanceData.lua
 Comm.lua
 State.lua
 Widgets.lua

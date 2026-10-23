@@ -15,6 +15,7 @@
 #include "Engine/Source/Gx/CGxTexFlags.h"
 #include "Engine/Source/Gx/Gx.h"
 #include "Engine/Source/Model2/M2Cache.h"
+#include "Engine/Source/Model2/M2Dance.h"
 #include "Engine/Source/Model2/M2Model.h"
 #include "Engine/Source/Model2/M2Modern.h"
 #include "Engine/Source/Os/TimeManager.h"
@@ -1533,6 +1534,7 @@ CM2Shared::CM2Shared(CM2Cache* cache) {
     this->m_lastUsedTime = 0;
     this->m_fileName[0] = '\0';
     this->m_modernFlags = 0;
+    this->m_bleakDanceRig = nullptr;
 }
 
 // INLINED
@@ -1856,6 +1858,10 @@ void CM2Shared::CancelAllDeferredSequences() {
 // OFFSET: 0x0083D5B0
 CM2Shared::~CM2Shared() {
     this->CancelAllDeferredSequences();
+
+    // BLEAKHOLD(dance)
+    M2DanceReleaseRig(this->m_bleakDanceRig);
+    this->m_bleakDanceRig = nullptr;
 
     int32_t pending = 0;
 

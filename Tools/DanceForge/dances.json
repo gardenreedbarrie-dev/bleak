@@ -1,0 +1,22 @@
+{
+  "format": 1,
+  "kitBase": 910000,
+  "maxDances": 1024,
+  "fps": 30,
+  "pack": "Interface\\Bleakhold\\Dances\\Dances.bdc",
+  "musicFolder": "Interface\\Bleakhold\\Dances\\Music\\",
+  "categories": [
+    { "key": "party", "label": "Party" },
+    { "key": "street", "label": "Street" },
+    { "key": "classic", "label": "Classic" },
+    { "key": "fun", "label": "Fun" }
+  ],
+  "dances": [
+    { "id": 0, "key": "string_swing", "name": "String Swing", "command": "stringswing", "category": "party", "source": "party:string_swing" },
+    { "id": 1, "key": "running_man", "name": "Running Man", "command": "runningman", "category": "street", "source": "party:running_man" },
+    { "id": 2, "key": "disco_fever", "name": "Disco Fever", "command": "discofever", "category": "classic", "source": "party:disco_point" },
+    { "id": 3, "key": "twist_it", "name": "Twist It", "command": "twistit", "category": "classic", "source": "party:twist" },
+    { "id": 4, "key": "raise_the_roof", "name": "Raise the Roof", "command": "raisetheroof", "category": "party", "source": "party:raise_the_roof" },
+    { "id": 5, "key": "mech_bot", "name": "Mech Bot", "command": "mechbot", "category": "street", "source": "party:robot" }
+  ]
+}

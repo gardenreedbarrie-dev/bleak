@@ -21,6 +21,7 @@
 #include "Engine/Source/Gx/CGxPool.h"
 #include "Engine/Source/Gx/Gx.h"
 #include "Engine/Source/Model2/M2Cache.h"
+#include "Engine/Source/Model2/M2Dance.h"
 #include "Engine/Source/Model2/M2ModelLight.h"
 #include "Engine/Source/Model2/M2Modern.h"
 #include "Engine/Source/Model2/M2Scene.h"
@@ -3729,6 +3730,7 @@ M2BatchRange::M2BatchRange() {
 // VERIFY: 2ddf06e6 manual
 // OFFSET: 0x0082BE60
 CM2Model::CM2Model() {
+    this->m_bleakDance = nullptr;
     this->m_scaleSq = 0.0f;
     this->m_refCount = 1;
     this->m_fFlags = (this->m_fFlags & 0xFF800000) | 0x340;
@@ -5116,6 +5118,10 @@ void CM2Model::AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C
         this->m_lastAnimTime = time;
     }
 
+    // BLEAKHOLD(dance): a Bleakhold dance replaces the mapped bones' local transforms below (M2Dance.h).
+    M2DanceFrame dance;
+    bool dancing = this->m_bleakDance && M2DanceBeginFrame(this, dance);
+
     for (uint32_t i = 0; i < data->m_bones.m_count; i++) {
         M2ModelBone* bone = &this->m_bones[i];
         M2CompBone* boneData = &data->m_bones[i];
@@ -5418,8 +5424,17 @@ void CM2Model::AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C
             local.d1 = offset.y + local.d1;
             local.d2 = offset.z + local.d2;
             local.Translate(C3Vector(-boneData->m_pivot.x, -boneData->m_pivot.y, -boneData->m_pivot.z));
+
+            if (dancing) {
+                M2DanceBone(dance, i, boneData, bone, boneFlags, local);
+            }
+
             boneMatrix = local * *parentMatrix;
         } else {
+            if (dancing) {
+                M2DanceStillBone(dance, i, parentIndex);
+            }
+
             boneMatrix = *parentMatrix;
         }
 
@@ -6573,6 +6588,11 @@ void CM2Model::ProcessCallbacksRecursive() {
 // VERIFY: d96ccadd manual
 // OFFSET: 0x00832640
 CM2Model::~CM2Model() {
+    // BLEAKHOLD(dance)
+    if (this->m_bleakDance) {
+        M2DanceRelease(this);
+    }
+
     CM2Model* model30 = this->m_model30;
 
     if (model30 && model30->m_refCount-- == 1) {
