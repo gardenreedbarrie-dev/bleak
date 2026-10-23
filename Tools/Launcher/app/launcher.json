@@ -1,0 +1,5 @@
+{
+  "base_url": "http://185.217.124.41:8090/",
+  "public_key": "REPLACE_WITH_VPS_PUBLIC_KEY",
+  "realmlist": "185.217.124.41"
+}

@@ -10,7 +10,7 @@ PLAYERS
 1. Copy everything in this folder into your WoW 3.3.5a folder (the one with Wow.exe and the Data folder).
    Say yes if Windows asks to merge folders.
 2. Set your realm in Data\enUS\realmlist.wtf (or your language folder), for example:
-       set realmlist logon.bleakhold.com
+       set realmlist 185.217.124.41
 3. Start Bleakhold.exe.
 
 What you get:
