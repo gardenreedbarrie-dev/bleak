@@ -9,10 +9,11 @@ target_include_directories(XvidDecoder
         ${CMAKE_SOURCE_DIR}/ThirdParty/xvidcore/include
 )
 
-# libxvidcore.lib is built against the release C runtime DLL (MSVCRT); Debug executables use MSVCRTD instead.
+# libxvidcore.lib is built against the release C runtime DLL (MSVCRT); the executables link the runtime statically
+# (CMAKE_MSVC_RUNTIME_LIBRARY), so its default library is dropped and its runtime calls bind to the static one.
 target_link_libraries(XvidDecoder
     PRIVATE
         ${CMAKE_SOURCE_DIR}/ThirdParty/xvidcore/lib/x64/libxvidcore.lib
     INTERFACE
-        $<$<CONFIG:Debug>:-NODEFAULTLIB:MSVCRT>
+        -NODEFAULTLIB:MSVCRT
 )

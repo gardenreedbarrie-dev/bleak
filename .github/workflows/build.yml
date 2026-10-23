@@ -27,6 +27,34 @@ jobs:
       - name: Build
         run: cmake --build build/x64 --config Release --target WowClient Wow --parallel
 
+      # The repo rule is: no DLLs shipped, and no Visual C++ Redistributable needed. Every import of the game must be
+      # a Windows API set or a DLL that ships with Windows (System32); the C/C++ runtime is linked in (/MT).
+      - name: Check client DLLs
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vc = "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+          $vs = & $vswhere -latest -products * -requires $vc -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe |
+            Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
+          if (-not $dumpbin) { throw "dumpbin not found" }
+          foreach ($exe in "bin/Win/Bleakhold.exe", "bin/Win/WowClient64.exe") {
+            if (-not (Test-Path $exe)) { throw "$exe was not built" }
+            $deps = & $dumpbin.FullName /nologo /dependents $exe | ForEach-Object { $_.Trim() } |
+              Where-Object { $_ -match '\.dll$' }
+            Write-Host "$exe imports: $($deps -join ', ')"
+            if (-not $deps) { throw "dumpbin listed no imports for $exe" }
+            $bad = @()
+            foreach ($d in $deps) {
+              $n = $d.ToLowerInvariant()
+              if ($n -match '^(vcruntime|msvcp|vccorlib|concrt|ucrtbase|api-ms-win-crt-)') { $bad += $d; continue }
+              if ($n -match '^(api|ext)-ms-win-') { continue }
+              if (-not (Test-Path (Join-Path $env:SystemRoot "System32\$d"))) { $bad += $d }
+            }
+            if ($bad) { throw "$exe needs DLLs that are not part of Windows: $($bad -join ', ')" }
+          }
+          if (Get-ChildItem bin/Win -Filter *.dll) { throw "DLLs next to the client" }
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:

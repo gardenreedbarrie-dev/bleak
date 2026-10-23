@@ -1,5 +1,13 @@
 cmake_minimum_required(VERSION 3.10)
 
+# BLEAKHOLD(nodll): the C and C++ runtime are linked into the executables (/MT), as in the original Wow.exe, so a
+# player needs no Visual C++ Redistributable and the client ships no DLL. start() runs only Win32 calls before
+# WinMainCRTStartup initializes the runtime (WoW/Source/Win64/WinMain.cpp).
+if (POLICY CMP0091)
+    cmake_policy(SET CMP0091 NEW)
+endif ()
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 if (${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
     message(FATAL_ERROR
         "In-source builds not allowed.
