@@ -124,7 +124,9 @@ const BleakDance::Pack* M2DancePack() {
         void* data = nullptr;
         uint32_t size = 0;
 
-        if (!SFile::LoadFile(kPackFile, &data, &size, 0, nullptr) || !data) {
+        // Flag 1 finds loose files too, as the AddOns and glue loaders use it: the pack ships loose in the package's
+        // Data folder, and without the flag the client looks only inside MPQ archives.
+        if (!SFile::ReadFile(nullptr, kPackFile, &data, &size, 0, 1, nullptr) || !data) {
             s_packStatus = "Interface\\Bleakhold\\Dances\\Dances.bdc is missing";
         } else {
             BleakDance::Pack* pack = new (std::nothrow) BleakDance::Pack();

@@ -90,7 +90,8 @@ namespace {
                 char path[96];
                 SStrPrintf(path, sizeof(path), "%s%s%s", kMusicFolder, clip->key.c_str(), ext);
 
-                if (SFile::FileExists(path)) {
+                // loose files too (players drop the music into Data), not only inside MPQ archives
+                if (SFile::FileExistsEx(path, 1)) {
                     SStrCopy(m.path, path, sizeof(m.path));
                     break;
                 }
