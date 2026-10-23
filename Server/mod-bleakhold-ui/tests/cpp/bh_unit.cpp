@@ -252,8 +252,8 @@ TEST("every C> example of the document is accepted and re-encodes byte for byte"
     CHECK(Parse("1 DANCE j 1/1 5", &in) == DropReason::None);
     CHECK(in.type == IntentType::Dance && in.danceId == 5 && in.seq == 19);
     CHECK(Parse("1 DANCE j 1/1 1023", &in) == DropReason::None && in.danceId == 1023);
-    CHECK(Parse("1 CASEOPEN l 1/1 990001", &in) == DropReason::None);
-    CHECK(in.type == IntentType::CaseOpen && in.caseItemId == 990001 && in.seq == 21);
+    CHECK(Parse("1 CASEOPEN l 1/1 990001,7", &in) == DropReason::None);
+    CHECK(in.type == IntentType::CaseOpen && in.caseItemId == 990001 && in.caseNonce == 7 && in.seq == 21);
     CHECK(Parse("1 GET k 1/1 CASES;CASE,990001", &in) == DropReason::None);
     CHECK(in.topics.size() == 2 && in.topics[0].topic == Topic::Cases && in.topics[1].topic == Topic::Case &&
         in.topics[1].arg1 == 990001);
@@ -407,11 +407,14 @@ TEST("malformed client messages are dropped with the right reason")
         { "BHc\t1 DANCE 1 1/1", DropReason::FieldCount },
         { "BHc\t1 DANCE 1 1/1 1,2", DropReason::FieldCount },
         { "BHc\t1 DANCE 1 1/1 a", DropReason::BadField },
-        { "BHc\t1 CASEOPEN 1 1/1 0", DropReason::OutOfRange },
-        { "BHc\t1 CASEOPEN 1 1/1 2147483648", DropReason::OutOfRange },
+        { "BHc\t1 CASEOPEN 1 1/1 0,1", DropReason::OutOfRange },
+        { "BHc\t1 CASEOPEN 1 1/1 2147483648,1", DropReason::OutOfRange },
+        { "BHc\t1 CASEOPEN 1 1/1 1,2147483648", DropReason::OutOfRange },
+        { "BHc\t1 CASEOPEN 1 1/1 1,-1", DropReason::OutOfRange },
         { "BHc\t1 CASEOPEN 1 1/1", DropReason::FieldCount },
-        { "BHc\t1 CASEOPEN 1 1/1 1,2", DropReason::FieldCount },
-        { "BHc\t1 CASEOPEN 1 1/1 x", DropReason::BadField },
+        { "BHc\t1 CASEOPEN 1 1/1 1", DropReason::FieldCount },
+        { "BHc\t1 CASEOPEN 1 1/1 1,2,3", DropReason::FieldCount },
+        { "BHc\t1 CASEOPEN 1 1/1 x,1", DropReason::BadField },
         { "BHc\t1 GET 1 1/1 CASE", DropReason::BadTopic },
         { "BHc\t1 GET 1 1/1 CASE,0", DropReason::OutOfRange },
         { "BHc\t1 GET 1 1/1 CASES,1", DropReason::BadTopic },
@@ -571,10 +574,10 @@ TEST("endpoint: per-op limits of section 8")
     CHECK(dn.verdict == Verdict::Refused && in.type == IntentType::Dance && in.danceId == 2);
     CHECK(Feed(ep, "1 DANCE u 1/1 2", 31100).verdict == Verdict::Accepted);
     // CASEOPEN: 1 per second
-    CHECK(Feed(ep, "1 CASEOPEN v 1/1 990001", 40000).verdict == Verdict::Accepted);
-    ReceiveResult cs = Feed(ep, "1 CASEOPEN w 1/1 990002", 40500, &in);
+    CHECK(Feed(ep, "1 CASEOPEN v 1/1 990001,1", 40000).verdict == Verdict::Accepted);
+    ReceiveResult cs = Feed(ep, "1 CASEOPEN w 1/1 990002,2", 40500, &in);
     CHECK(cs.verdict == Verdict::Refused && in.type == IntentType::CaseOpen && in.caseItemId == 990002);
-    CHECK(Feed(ep, "1 CASEOPEN x 1/1 990002", 41100).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CASEOPEN x 1/1 990002,3", 41100).verdict == Verdict::Accepted);
 }
 
 TEST("endpoint: the same action twice within the window is ignored")
@@ -595,9 +598,10 @@ TEST("endpoint: the same action twice within the window is ignored")
     // DANCE: the same dance again at once is dropped too
     CHECK(Feed(ep, "1 DANCE c 1/1 3", 20000).verdict == Verdict::Accepted);
     CHECK(Feed(ep, "1 DANCE d 1/1 3", 20400).reason == DropReason::Duplicate);
-    // CASEOPEN: the same case again at once is dropped too (section 15)
-    CHECK(Feed(ep, "1 CASEOPEN e 1/1 990001", 30000).verdict == Verdict::Accepted);
-    CHECK(Feed(ep, "1 CASEOPEN f 1/1 990001", 30400).reason == DropReason::Duplicate);
+    // CASEOPEN: the same request again at once is dropped too; a new one (another nonce) is not (section 15)
+    CHECK(Feed(ep, "1 CASEOPEN e 1/1 990001,5", 30000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CASEOPEN f 1/1 990001,5", 30400).reason == DropReason::Duplicate);
+    CHECK(Feed(ep, "1 CASEOPEN g 1/1 990001,6", 31500).verdict == Verdict::Accepted);
 }
 
 TEST("endpoint: SEQ per message, revisions per topic, snapshots reset by HELLO")
@@ -809,7 +813,7 @@ static std::map<std::string, std::string> BuiltExamples()
         c.rewards = { { 32837, 1, 1200, 4 }, { 32838, 1, 400, 5 } };
         m["CASE 5"] = EncodeCase(c);
         Unbox u;
-        u.caseItemId = 990001; u.rewardIndex = 2; u.itemId = 32838; u.count = 1;
+        u.caseItemId = 990001; u.rewardIndex = 2; u.itemId = 32838; u.count = 1; u.nonce = 7;
         m["UNBOX 6"] = EncodeUnbox(u);
     }
     return m;

@@ -68,9 +68,9 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
     H.eq(C.Send("DANCE", 1023), true, "the client sends DANCE 1023")
     M.Advance(1.3)
     -- CASEOPEN as the addon spaces it (1.25 s, after each answer), against the 1 s cooldown
-    H.eq(C.Send("CASEOPEN", 990001), true, "the client sends CASEOPEN")
+    H.eq(C.Send("CASEOPEN", 990001, 0), true, "the client sends CASEOPEN")
     M.Advance(1.3)
-    H.eq(C.Send("CASEOPEN", 2147483647), true, "the client sends CASEOPEN with the largest id")
+    H.eq(C.Send("CASEOPEN", 2147483647, 2147483647), true, "the client sends CASEOPEN with the largest id and nonce")
     M.Advance(1.3)
     -- GET of every topic; the client batches one frame's requests (8 records at most per GET)
     for _, topic in ipairs({ "WEEK", "ERA", "TASKS", "KEY", "BOARD", "QUEUE", "COLL", "LIDX", "SEASON", "FIRSTS", "MPLUS", "RIFT" }) do

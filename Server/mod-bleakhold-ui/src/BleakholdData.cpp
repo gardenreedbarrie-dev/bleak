@@ -346,15 +346,34 @@ namespace Bleakhold
                     LOG_ERROR("module", "[Bleakhold] bleakhold_case: item {} does not exist; case skipped", c.itemId);
                     continue;
                 }
+                // a bag or anything worn could be taken from an equipment slot (and a bag with what is in it)
+                auto wearable = [](ItemTemplate const* t) {
+                    return t->InventoryType != INVTYPE_NON_EQUIP || t->Class == ITEM_CLASS_CONTAINER || t->Class == ITEM_CLASS_QUIVER;
+                };
+                if (wearable(proto))
+                {
+                    LOG_ERROR("module", "[Bleakhold] bleakhold_case: item {} can be equipped or is a bag; case skipped", c.itemId);
+                    continue;
+                }
                 if (c.title.empty())
                     c.title = proto->Name1;
-                if (c.keyItemId && !sObjectMgr->GetItemTemplate(c.keyItemId))
+                if (c.keyItemId)
                 {
-                    LOG_ERROR("module", "[Bleakhold] bleakhold_case {}: key item {} does not exist; case skipped", c.itemId, c.keyItemId);
+                    ItemTemplate const* key = sObjectMgr->GetItemTemplate(c.keyItemId);
+                    if (!key || wearable(key) || c.keyItemId == c.itemId)
+                    {
+                        LOG_ERROR("module", "[Bleakhold] bleakhold_case {}: key item {} does not exist, can be equipped, is a bag or is "
+                            "the case itself; case skipped", c.itemId, c.keyItemId);
+                        continue;
+                    }
+                }
+                if (cases.size() >= MaxCases)
+                {
+                    LOG_ERROR("module", "[Bleakhold] bleakhold_case: more than {} cases; case {} skipped", MaxCases, c.itemId);
                     continue;
                 }
                 cases.push_back(std::move(c));
-            } while (r->NextRow() && cases.size() < MaxCases);
+            } while (r->NextRow());
         if (QueryResult r = WorldDatabase.Query("SELECT `case_item_id`, `item_id`, `count`, `weight`, `tier` FROM `bleakhold_case_reward` "
                 "ORDER BY `case_item_id`, `sort`, `item_id`"))
             do
@@ -362,8 +381,13 @@ namespace Bleakhold
                 Field* f = r->Fetch();
                 uint32 const caseId = f[0].Get<uint32>(), itemId = f[1].Get<uint32>(), weight = f[3].Get<uint32>();
                 auto it = std::find_if(cases.begin(), cases.end(), [&](CaseRow const& c) { return c.itemId == caseId; });
-                if (it == cases.end() || weight == 0 || it->items.size() >= MaxCaseRewards)
+                if (it == cases.end() || weight == 0)
                     continue;
+                if (it->items.size() >= MaxCaseRewards)
+                {
+                    LOG_ERROR("module", "[Bleakhold] bleakhold_case {}: more than {} rewards; item {} skipped", caseId, MaxCaseRewards, itemId);
+                    continue;
+                }
                 ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
                 if (!proto)
                 {
@@ -372,14 +396,27 @@ namespace Bleakhold
                 }
                 int32 const tier = f[4].Get<int8>();
                 it->items.push_back(itemId);
-                it->counts.push_back(std::clamp<uint32>(f[2].Get<uint16>(), 1, std::max<uint32>(1, proto->GetMaxStackSize())));
+                // at most a stack, and at most what a player may carry
+                uint32 maxCount = std::max<uint32>(1, proto->GetMaxStackSize());
+                if (proto->MaxCount > 0)
+                    maxCount = std::min<uint32>(maxCount, uint32(proto->MaxCount));
+                it->counts.push_back(std::clamp<uint32>(f[2].Get<uint16>(), 1, maxCount));
                 it->weights.push_back(weight);
                 it->tiers.push_back(uint8_t(tier < 0 ? std::min<uint32>(proto->Quality, 6) : std::min<int32>(tier, 6)));
             } while (r->NextRow());
         cases.erase(std::remove_if(cases.begin(), cases.end(), [](CaseRow const& c) {
             if (c.items.empty())
+            {
                 LOG_ERROR("module", "[Bleakhold] bleakhold_case {} has no reward; case skipped", c.itemId);
-            return c.items.empty();
+                return true;
+            }
+            // the roll draws a 32-bit number
+            if (Cases::TotalWeight(c.weights) > 0xFFFFFFFFull)
+            {
+                LOG_ERROR("module", "[Bleakhold] bleakhold_case {}: the weights add up to more than 4294967295; case skipped", c.itemId);
+                return true;
+            }
+            return false;
         }), cases.end());
         _cases = std::move(cases);
     }
@@ -1322,21 +1359,28 @@ namespace Bleakhold
             Ui::Refuse(player, intent, "no_key", "You need the case's key to open it.");
             return;
         }
-        uint64_t const total = Cases::TotalWeight(c.weights);
-        std::size_t const index = Cases::Pick(c.weights, urand(0, uint32(std::min<uint64_t>(total, 0xFFFFFFFFull) - 1)));
+        // Every reward must fit before the roll: a refusal that depended on the roll would let a player open again
+        // and again until the reward they want comes up (a unique reward they own, a stack that fits, ...).
+        for (std::size_t i = 0; i < c.items.size(); ++i)
+        {
+            ItemPosCountVec test;
+            InventoryResult const room = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, test, c.items[i], c.counts[i]);
+            if (room == EQUIP_ERR_OK)
+                continue;
+            bool const unique = room == EQUIP_ERR_CANT_CARRY_MORE_OF_THIS || room == EQUIP_ERR_ITEM_MAX_LIMIT_CATEGORY_COUNT_EXCEEDED;
+            Ui::Refuse(player, intent, "bags_full", unique
+                ? "This case can give a reward you cannot carry more of. Your case was not used."
+                : "Make room in your bags for any reward first. Your case was not used.");
+            return;
+        }
+        uint64_t const total = Cases::TotalWeight(c.weights);   // at most 2^32 - 1 (the loader)
+        std::size_t const index = Cases::Pick(c.weights, urand(0, uint32(total - 1)));
         if (index >= c.items.size())
             return;
         uint32_t const itemId = c.items[index], count = c.counts[index];
         ItemPosCountVec dest;
-        InventoryResult const room = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, itemId, count);
-        if (room != EQUIP_ERR_OK)
-        {
-            // the case stays: the player opens it again with room (or once a unique reward is gone)
-            Ui::Refuse(player, intent, "bags_full", room == EQUIP_ERR_CANT_CARRY_MORE_OF_THIS
-                ? "You cannot carry more of the reward the case rolled. Your case was not used."
-                : "Make room in your bags first. Your case was not used.");
-            return;
-        }
+        if (player->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, itemId, count) != EQUIP_ERR_OK)
+            return;   // checked just above
         // the case and its key go first, so a failure below can never hand out a reward for nothing
         player->DestroyItemCount(c.itemId, 1, true);
         if (c.keyItemId)
@@ -1344,7 +1388,9 @@ namespace Bleakhold
         Item* item = player->StoreNewItem(dest, itemId, true, Item::GenerateItemRandomPropertyId(itemId));
         if (!item)
         {
-            LOG_ERROR("module", "[Bleakhold] case {}: could not give item {} to {}", c.itemId, itemId, player->GetName());
+            LOG_ERROR("module", "[Bleakhold] case {}: could not give item {} x{} to {} ({}); the case and key are gone", c.itemId,
+                itemId, count, player->GetName(), player->GetGUID().ToString());
+            Ui::Refuse(player, intent, "failed", "The case opened but the reward could not be given. Tell a game master: it is logged.");
             return;
         }
         player->SendNewItem(item, count, true, false);
@@ -1355,6 +1401,7 @@ namespace Bleakhold
         won.rewardIndex = uint32_t(index + 1);
         won.itemId = itemId;
         won.count = count;
+        won.nonce = intent.caseNonce;
         Ui::SendUnbox(player, won);
 
         if (c.announceTier && c.tiers[index] >= c.announceTier)
@@ -1364,7 +1411,9 @@ namespace Bleakhold
             {
                 char color[9];
                 std::snprintf(color, sizeof(color), "%08x", ItemQualityColors[std::min<uint32>(proto->Quality, MAX_ITEM_QUALITY - 1)]);
-                std::string const link = "|c" + std::string(color) + "|Hitem:" + std::to_string(itemId) + ":0:0:0:0:0:0:0:0|h[" + proto->Name1 + "]|h|r";
+                std::string const link = "|c" + std::string(color) + "|Hitem:" + std::to_string(itemId) + ":0:0:0:0:0:" +
+                    std::to_string(item->GetItemRandomPropertyId()) + ":" + std::to_string(item->GetItemSuffixFactor()) + ":0|h[" +
+                    proto->Name1 + "]|h|r";
                 Ui::Announce(Ui::AnnounceTag::Case, player->GetName() + " found " + link + " in " + c.title + "!");
             }
         }
@@ -1406,8 +1455,13 @@ namespace Bleakhold
         m.SetDefaultProvider(Topic::Firsts, [](Player* p, TopicRequest const&) { Ui::SendFirsts(p, Data::Instance().Firsts()); });
         m.SetDefaultProvider(Topic::Mplus, [](Player* p, TopicRequest const&) { Mgr::Instance().SendRunTo(p); });
         m.SetDefaultProvider(Topic::Def, [](Player* p, TopicRequest const&) { Mgr::Instance().SendDefinitions(p); });
-        m.SetDefaultProvider(Topic::Cases, [](Player* p, TopicRequest const&) { Ui::SendCases(p, Data::Instance().CaseIds()); });
+        // with BleakholdUi.Case.Enable = 0 the list is empty, so the addon shows no case (section 15)
+        m.SetDefaultProvider(Topic::Cases, [](Player* p, TopicRequest const&) {
+            Ui::SendCases(p, Mgr::Instance().CasesEnabled() ? Data::Instance().CaseIds() : CaseList());
+        });
         m.SetDefaultProvider(Topic::Case, [](Player* p, TopicRequest const& req) {
+            if (!Mgr::Instance().CasesEnabled())
+                return;
             if (Opt<CaseInfo> c = Data::Instance().CaseFor(req.arg1))
                 Ui::SendCase(p, *c);
         });

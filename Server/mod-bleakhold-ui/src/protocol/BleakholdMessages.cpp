@@ -255,7 +255,7 @@ namespace Bleakhold
     std::string EncodeUnbox(Unbox const& m)
     {
         PayloadWriter w;
-        w.Int(m.caseItemId).Int(m.rewardIndex).Int(m.itemId).Int(std::max<uint32_t>(1, m.count));
+        w.Int(m.caseItemId).Int(m.rewardIndex).Int(m.itemId).Int(std::max<uint32_t>(1, m.count)).Int(m.nonce);
         return w.Take();
     }
 

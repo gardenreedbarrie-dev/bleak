@@ -190,7 +190,7 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `PING` | `nonce` | answer with `PONG` |
 | `EMOJI` | `emojiId` | show emoji `emojiId` above the player's head to everyone nearby (section 13). `emojiId`: 0..255, an index into the emoji catalogue, `Tools/EmojiForge/emojis.json` |
 | `DANCE` | `danceId` | dance Bleakhold dance `danceId` until the player moves (section 14). `danceId`: 0..1023, an index into the dance catalogue, `Tools/DanceForge/dances.json` |
-| `CASEOPEN` | `caseItemId` | open one case `caseItemId` from the player's bags (section 15) |
+| `CASEOPEN` | `caseItemId, nonce` | open one case `caseItemId` from the player's bags (section 15); `nonce` (0..2147483647) comes back in `UNBOX` |
 
 `GET` topics and what to send back:
 
@@ -227,7 +227,7 @@ C> 1 PING h 1/1 12345
 C> 1 EMOJI i 1/1 7
 C> 1 DANCE j 1/1 5
 C> 1 GET k 1/1 CASES;CASE,990001
-C> 1 CASEOPEN l 1/1 990001
+C> 1 CASEOPEN l 1/1 990001,7
 ```
 
 ## 7. Server to client
@@ -660,7 +660,7 @@ and `creature->SendPlaySpellVisual(910000 + danceId)`, again every loop).
 
 A case is an item that holds one of several rewards. Right-clicking one in the bags opens the case window
 (the addon knows the case items from `CASES`), which shows every reward the case can give and its chance;
-Unlock sends `CASEOPEN caseItemId`. The server decides everything: it checks the case and its key, rolls the
+Unlock sends `CASEOPEN caseItemId,nonce`. The server decides everything: it checks the case and its key, rolls the
 reward by weight, takes the case (and the key), gives the reward and answers `UNBOX`. The window's spinning
 reel only shows where the roll already landed. A case item needs no spell or loot of its own; a stock client
 just cannot open it.
@@ -679,31 +679,36 @@ order (at most 60).
 - `tier`: the colour of the reward's card, 0 (poor) to 6 (artifact) like item quality; usually the item's quality,
   but a server may mark a jackpot higher.
 
-`UNBOX` (answer to `CASEOPEN`): `caseItemId, rewardIndex, itemId, count`. `rewardIndex` is the reward's
-position in `CASE`, from 1. The reward is already in the player's bags when it arrives.
+`UNBOX` (answer to `CASEOPEN`): `caseItemId, rewardIndex, itemId, count, nonce`. `rewardIndex` is the reward's
+position in `CASE`, from 1; `nonce` is the request's. The reward is already in the player's bags when it arrives.
+A client that shows a different list (the server reloaded its cases) knows the reward by `itemId`.
+
+`CASES` is empty while `BleakholdUi.Case.Enable = 0`, and the server answers no `GET CASE` then.
 
 The server checks `CASEOPEN`, in this order:
 
 | Check | Answer |
 |---|---|
 | malformed | dropped silently (section 1) |
-| the same `caseItemId` as the player's last accepted `CASEOPEN`, within 1 s | dropped silently |
+| the same `caseItemId,nonce` as the player's last accepted `CASEOPEN`, within 1 s | dropped silently |
 | the player's cooldown (`BleakholdUi.Case.CooldownMs`, section 8) has not run out | `ERR` `busy` |
 | cases are off on the realm (`BleakholdUi.Case.Enable = 0`, or no case: no feature bit 256) | `ERR` `unavailable` |
 | `caseItemId` is not a case | `ERR` `unknown_case` |
 | the player is not in the world | dropped silently |
 | the player has no such case in the bags | `ERR` `no_case` |
 | the case needs a key the player does not have | `ERR` `no_key` |
-| the bags have no room for the reward (or it is unique and the player has it); the case stays | `ERR` `bags_full` |
+| any reward the case can give would not fit in the bags (no room, or a unique reward the player has); the case stays | `ERR` `bags_full` |
 
-When every check passes, the server takes one case and the key from the bags, adds the reward (with the usual
-"You receive item" message) and sends `UNBOX`. A reward whose tier is at least the case's announce tier is
+Every reward must fit before the roll: a refusal that depended on the roll would let a player open the case
+again and again until the reward they want comes up. When every check passes, the server rolls the reward, takes
+one case and the key from the bags, adds the reward (with the usual "You receive item" message) and sends `UNBOX`
+(or, should the core refuse the item after all, `ERR` `failed`, logged for a game master). A reward whose tier is at least the case's announce tier is
 told to the realm with a `[Case]` line (section 10).
 
 ```
 C> 1 GET k 1/1 CASES;CASE,990001
 S> 1 CASES 4 1/1 990001;990002
 S> 1 CASE 5 1/1 990001,Glaive Case,Unlock it to receive one of the items below.;32837,1,1200,4;32838,1,400,5
-C> 1 CASEOPEN l 1/1 990001
-S> 1 UNBOX 6 1/1 990001,2,32838,1
+C> 1 CASEOPEN l 1/1 990001,7
+S> 1 UNBOX 6 1/1 990001,2,32838,1,7
 ```

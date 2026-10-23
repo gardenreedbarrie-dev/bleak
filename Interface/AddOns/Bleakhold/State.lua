@@ -752,6 +752,8 @@ S.cases = {}        -- [caseItemId] = true
 S.caseDefs = {}     -- [caseItemId] = { id, title, text, keyItem, keyCount, rewards = { { itemId, count, chance, tier } } }
 
 Comm.Handle("CASES", function(r)
+    -- a new list (the server reloaded its cases): the cached contents may be stale too
+    S.caseDefs = {}
     local list = {}
     for i = 1, math.min(#r, 200) do
         local id = U.Int(r[i][1], nil, 1, INT32)
@@ -775,7 +777,7 @@ Comm.Handle("CASE", function(r)
         local g = r[i]
         local item = U.Int(g[1], nil, 1, INT32)
         if item then
-            c.rewards[#c.rewards + 1] = { itemId = item, count = U.Int(g[2], 1, 1, 10000), chance = U.Int(g[3], 0, 0, 10000),
+            c.rewards[#c.rewards + 1] = { itemId = item, count = U.Int(g[2], 1, 1, 65535), chance = U.Int(g[3], 0, 0, 10000),
                 tier = U.Int(g[4], 1, 0, 7) }
         end
     end
@@ -787,7 +789,7 @@ end)
 Comm.Handle("UNBOX", function(r)
     local f = r[1]
     local e = { caseItemId = U.Int(f[1], nil, 1, INT32), index = U.Int(f[2], nil, 1, 60), itemId = U.Int(f[3], nil, 1, INT32),
-        count = U.Int(f[4], 1, 1, 10000) }
+        count = U.Int(f[4], 1, 1, 65535), nonce = U.Int(f[5], nil, 0, INT32) }
     if e.caseItemId and e.index and e.itemId then
         ns.Fire("UNBOX", e)
     end

@@ -4,7 +4,10 @@
 --
 -- A case is any item listed here: the Bleakhold addon opens the case window when a player right-clicks it
 -- in the bags, and Unlock asks the server to open one. The item needs no spell or loot of its own (give it
--- none, so a stock client cannot use it); class 15 (Miscellaneous) and a chest or box icon look right.
+-- none, so a stock client cannot use it); class 15 (Miscellaneous) and a chest or box icon look right. Give it a
+-- SellPrice of 0, so a right-click at a vendor cannot sell it by mistake. A case or key that can be equipped or is a
+-- bag is refused at load. Every reward must fit in the player's bags before a case opens, so a unique reward
+-- the player already has keeps the case closed.
 
 CREATE TABLE IF NOT EXISTS `bleakhold_case` (
   `item_id` INT UNSIGNED NOT NULL COMMENT 'the case item (item_template.entry)',

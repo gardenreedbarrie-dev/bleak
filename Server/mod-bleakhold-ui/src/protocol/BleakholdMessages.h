@@ -398,7 +398,7 @@ namespace Bleakhold
         uint32_t keyCount = 0;
         std::vector<CaseReward> rewards;     // display order
     };
-    struct Unbox { uint32_t caseItemId = 0, rewardIndex = 0, itemId = 0, count = 1; };   // rewardIndex from 1
+    struct Unbox { uint32_t caseItemId = 0, rewardIndex = 0, itemId = 0, count = 1, nonce = 0; };   // rewardIndex from 1
 
     // ---------------------------------------------------------------------------------------------
     // Encoders: payload of each op (without frame header). `rev` is the revision of the topic.

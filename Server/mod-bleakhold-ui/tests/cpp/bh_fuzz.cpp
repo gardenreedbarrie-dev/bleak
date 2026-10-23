@@ -143,7 +143,7 @@ namespace
         if (op == "DANCE")
             return n(1) && RefInt(f[0], 0, 1023);
         if (op == "CASEOPEN")
-            return n(1) && RefInt(f[0], 1, I32);
+            return n(2) && RefInt(f[0], 1, I32) && RefInt(f[1], 0, I32);
         return false;
     }
 
@@ -295,7 +295,7 @@ namespace
             "1 TCLAIM 4 1/1 103", "1 TREROLL 5 1/1 101", "1 QJOIN 6 1/1 D,389,2,4,3", "1 QJOIN 7 1/1 R,0,0,4,1", "1 QREPLY 8 1/1 77,1",
             "1 QLEAVE 9 1/1", "1 KMODE a 1/1 2", "1 KSTART b 1/1", "1 KCANCEL c 1/1", "1 BCLAIM d 1/1 55", "1 WEHANDIN e 1/1",
             "1 OUTFIT f 1/1 201", "1 LBQ g 1/1 K,1,0,0,2", "1 PING h 1/1 12345", "1 EMOJI i 1/1 7", "1 DANCE j 1/1 5",
-            "1 GET k 1/1 CASES;CASE,990001", "1 CASEOPEN l 1/1 990001", "1 WEEK 2s 1/1 3,4",
+            "1 GET k 1/1 CASES;CASE,990001", "1 CASEOPEN l 1/1 990001,7", "1 WEEK 2s 1/1 3,4",
             "2 HELLO 1 1/1 2,2.0,7,deDE",
         };
     }

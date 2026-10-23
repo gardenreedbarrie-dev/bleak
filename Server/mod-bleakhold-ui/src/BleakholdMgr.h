@@ -152,6 +152,8 @@ namespace Bleakhold
         bool HasAddon(Player* player);
         void QueueSystem(Player* player, std::string text);
         void Announce(Ui::AnnounceTag tag, std::string_view text, uint64_t onlyGuid = 0);
+        // BleakholdUi.Case.Enable (the case list is empty to clients while it is off).
+        bool CasesEnabled() const { return _cfg.caseEnable; }
         // Pushes the full DEF set to one player (answer to GET DEF,0) or to every ready player.
         void SendDefinitions(Player* player);
         void BroadcastDefinitions();

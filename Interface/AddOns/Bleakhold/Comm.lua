@@ -253,7 +253,7 @@ Comm.INTENTS = {
     PING = { int(0, INT32) },
     EMOJI = { int(0, 255) },                                          -- emoji id (the server checks its catalogue)
     DANCE = { int(0, 1023) },                                         -- dance id (the server checks its catalogue)
-    CASEOPEN = { int(1, INT32) },                                     -- case item id (from CASES)
+    CASEOPEN = { int(1, INT32), int(0, INT32) },                      -- case item id (from CASES), nonce (back in UNBOX)
 }
 
 local function checkField(spec, v)
@@ -476,6 +476,7 @@ function Comm.Send(op, ...)
     end
     recent[key] = now
     queue[#queue + 1] = body
+    Comm.lastSeq = Comm.Base36(outSeq)   -- what an ERR for this intent will name
     Comm.Flush()
     return true
 end

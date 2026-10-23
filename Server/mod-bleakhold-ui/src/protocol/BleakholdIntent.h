@@ -38,7 +38,7 @@ namespace Bleakhold
         Ping,             // PING     nonce
         Emoji,            // EMOJI    emojiId
         Dance,            // DANCE    danceId
-        CaseOpen,         // CASEOPEN caseItemId
+        CaseOpen,         // CASEOPEN caseItemId, nonce
         Count
     };
 
@@ -118,8 +118,9 @@ namespace Bleakhold
         // DANCE: 0..1023 (the server checks it against its catalogue)
         uint32_t danceId = 0;
 
-        // CASEOPEN: an item id (the server checks it is a case)
+        // CASEOPEN: an item id (the server checks it is a case) and the client's number, echoed in UNBOX
         uint32_t caseItemId = 0;
+        uint32_t caseNonce = 0;
     };
 
     // Why a message was not accepted.

@@ -1,8 +1,10 @@
 -- Bleakhold: the case window (docs/BleakholdProtocol.md section 15).
--- Right-clicking a case item in the bags (an item in the server's CASES list) opens it: the case's rewards
+-- Right-clicking a case item in the bags (an item in the server's CASES list; not while a vendor, the bank, the
+-- mailbox, the auction house, a trade or a guild bank takes the click) opens it: the case's rewards
 -- with their chances, a reel of reward cards under a gold marker, and Unlock. Unlock sends CASEOPEN; the reel
 -- starts spinning at once and, when the server's UNBOX names the reward (already in the bags by then), slows
--- down to stop on it. The reel is only the show: the server rolled before it answered. A click on the reel
+-- down to stop on it. Only the answer to the latest request counts: UNBOX carries the request's nonce, ERR its
+-- sequence number. The reel is only the show: the server rolled before it answered. A click on the reel
 -- skips to the end. /bh case opens the first case in the bags.
 local ADDON, ns = ...
 local U, UI, Comm = ns.U, ns.UI, ns.Comm
@@ -27,6 +29,7 @@ CA.GRID_COLS = 6
 CA.TIER = { [0] = "9D9D9D", "FFFFFF", "1EFF00", "0070DD", "A335EE", "FF8000", "E6CC80", "E6CC80" }
 
 CA.phase = "idle"            -- idle, wait (spinning, no answer yet), stop (slowing onto the reward), won
+CA.nonce = floor((GetTime() * 1000) % 1000000)   -- CASEOPEN's request number, echoed in UNBOX
 CA.offset = 0
 CA.reel = {}
 
@@ -355,11 +358,13 @@ function CA.Unlock()
     if CA.nextAt and now < CA.nextAt then
         return false
     end
-    if not Comm.Send("CASEOPEN", c.id) then
+    CA.nonce = CA.nonce % 2147483647 + 1
+    if not Comm.Send("CASEOPEN", c.id, CA.nonce) then
         CA.status = "|cffE5604FNot connected to the realm.|r"
         CA.Refresh()
         return false
     end
+    CA.reqNonce, CA.reqSeq = CA.nonce, Comm.lastSeq
     CA.nextAt = now + CA.GAP
     -- spin on from where the reel is, with fresh cards ahead of the marker
     local here = CA.MarkerIndex()
@@ -379,13 +384,20 @@ end
 
 -- UNBOX: plan the stop on the reward.
 local function onUnbox(e)
-    if CA.phase ~= "wait" or e.caseItemId ~= CA.caseId then
+    -- only the answer to the request this spin waits for (a late answer to an earlier one is not it)
+    if CA.phase ~= "wait" or e.caseItemId ~= CA.caseId or (e.nonce and e.nonce ~= CA.reqNonce) then
         return
     end
     local c = CA.Def()
-    if not c or not c.rewards[e.index] then
-        CA.phase = "idle"
-        CA.status = "You received an item."
+    local r = c and c.rewards[e.index]
+    if not r or r.itemId ~= e.itemId then
+        -- the list shown is not the server's any more (it reloaded): no reel, the item by its id, a fresh list
+        CA.phase = "won"
+        CA.won = nil
+        local name = GetItemInfo(e.itemId) or ("item " .. e.itemId)
+        CA.status = "You received " .. U.Safe(name) .. (e.count > 1 and (" x" .. e.count) or "") .. "!"
+        S.caseDefs[CA.caseId] = nil
+        Comm.Get("CASE", CA.caseId)
         CA.Refresh()
         return
     end
@@ -458,7 +470,7 @@ end)
 ns.On("UNBOX", onUnbox)
 
 ns.On("ERR", function(e)
-    if e and e.op == "CASEOPEN" and CA.phase == "wait" then
+    if e and e.op == "CASEOPEN" and CA.phase == "wait" and (not e.seq or not CA.reqSeq or e.seq == CA.reqSeq) then
         CA.phase = "idle"
         CA.status = "|cffE5604F" .. U.Safe(e.text or "The case could not be opened.") .. "|r"
         CA.Refresh()
@@ -466,7 +478,14 @@ ns.On("ERR", function(e)
 end)
 
 ns.On("STATE", function(topic)
-    if win:IsShown() and (topic == "CASE" or topic == "CASES") then
+    if not win:IsShown() then
+        return
+    end
+    -- a new case list drops the cached contents: ask again for the case on show
+    if topic == "CASES" and CA.caseId and not S.caseDefs[CA.caseId] then
+        Comm.Get("CASE", CA.caseId)
+    end
+    if topic == "CASE" or topic == "CASES" then
         CA.Refresh()
     end
 end)
@@ -489,10 +508,26 @@ end
 
 resetReel()
 
+-- While these are open a right-click in the bags sells, stores, mails, auctions or trades the item.
+CA.CLICK_TAKERS = { "MerchantFrame", "BankFrame", "MailFrame", "AuctionFrame", "TradeFrame", "GuildBankFrame" }
+
+local function clickTaken()
+    if SpellIsTargeting and SpellIsTargeting() then
+        return true
+    end
+    for _, name in ipairs(CA.CLICK_TAKERS) do
+        local f = _G[name]
+        if f and f.IsShown and f:IsShown() then
+            return true
+        end
+    end
+    return false
+end
+
 -- Right-click in the bags (any bag addon calls UseContainerItem).
 function CA.OnUseContainerItem(bag, slot)
     local id = GetContainerItemID and GetContainerItemID(bag, slot)
-    if id and S.cases[id] then
+    if id and S.cases[id] and not clickTaken() then
         CA.Open(id)
     end
 end

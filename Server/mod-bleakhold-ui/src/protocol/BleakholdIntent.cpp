@@ -156,7 +156,7 @@ namespace Bleakhold
                 case IntentType::Ping: return 1;
                 case IntentType::Emoji: return 1;
                 case IntentType::Dance: return 1;
-                case IntentType::CaseOpen: return 1;
+                case IntentType::CaseOpen: return 2;
                 default: return -1;
             }
         }
@@ -284,6 +284,7 @@ namespace Bleakhold
                     break;
                 case IntentType::CaseOpen:
                     BH_TRY(Int(f[0], 1, Int32Max, out.caseItemId));
+                    BH_TRY(Int(f[1], 0, Int32Max, out.caseNonce));
                     break;
                 default:
                     break;
@@ -466,7 +467,7 @@ namespace Bleakhold
             case IntentType::Dance:
                 return n(in.danceId);
             case IntentType::CaseOpen:
-                return n(in.caseItemId);
+                return n(in.caseItemId) + "," + n(in.caseNonce);
             default:
                 return std::string();
         }
