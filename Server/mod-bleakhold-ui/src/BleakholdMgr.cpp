@@ -39,6 +39,7 @@ namespace Bleakhold
         char const* const TextBusy = "You are doing that too often. Wait a moment and try again.";
         char const* const TextNotLeader = "Only the group leader can do that.";
         char const* const TextEmojiOff = "Emojis are turned off on this realm.";
+        char const* const TextDanceOff = "Dances are turned off on this realm.";
 
         bool IsHex6(std::string const& s)
         {
@@ -127,6 +128,9 @@ namespace Bleakhold
         c.emojiEnable = sConfigMgr->GetOption<bool>("BleakholdUi.Emoji.Enable", true);
         if (c.emojiEnable)
             bits |= FeatureEmoji;  // the catalogue is never empty (static_assert in BleakholdEmoji.h)
+        c.danceEnable = sConfigMgr->GetOption<bool>("BleakholdUi.Dance.Enable", true);
+        if (c.danceEnable)
+            bits |= FeatureDance;  // the catalogue is never empty (static_assert in BleakholdDance.h)
         c.serverPullTimer = sConfigMgr->GetOption<bool>("BleakholdUi.KeyRun.ServerPullTimer", false);
         if (c.serverPullTimer)
             bits |= FeatureServerPullTimer;
@@ -150,6 +154,7 @@ namespace Bleakhold
         l.claimPerSecond = std::max(0.1f, sConfigMgr->GetOption<float>("BleakholdUi.RateLimit.ClaimPerSecond", 2.0f));
         l.duplicateWindowMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.DuplicateWindowMs", 1000);
         l.emojiIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.Emoji.CooldownMs", 2500);
+        l.danceIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.Dance.CooldownMs", 1000);
 
         c.heartbeatMs = 1000 * std::max<uint32_t>(1, sConfigMgr->GetOption<uint32_t>("BleakholdUi.KeyRun.HeartbeatSec", 15));
         c.colorTagsWithoutAddon = sConfigMgr->GetOption<bool>("BleakholdUi.Announce.ColorTagsWithoutAddon", true);
@@ -370,6 +375,13 @@ namespace Bleakhold
         if (intent.type == IntentType::Emoji && !_cfg.emojiEnable)
         {
             Refuse(player, intent, "unavailable", TextEmojiOff);
+            return;
+        }
+
+        // BleakholdUi.Dance.Enable holds for a custom DANCE handler too (section 14).
+        if (intent.type == IntentType::Dance && !_cfg.danceEnable)
+        {
+            Refuse(player, intent, "unavailable", TextDanceOff);
             return;
         }
 

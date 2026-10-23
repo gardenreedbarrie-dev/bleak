@@ -8,12 +8,14 @@
 
 #include "BleakholdData.h"
 #include "BleakholdCodec.h"
+#include "BleakholdDance.h"
 #include "BleakholdEmoji.h"
 #include "BleakholdMgr.h"
 
 #include "DatabaseEnv.h"
 #include "GameTime.h"
 #include "Log.h"
+#include "ObjectAccessor.h"
 #include "Player.h"
 #include "World.h"
 
@@ -555,6 +557,7 @@ namespace Bleakhold
 
     void Data::Update(uint64_t nowMs)
     {
+        UpdateDancers(nowMs);
         if (nowMs - _lastRolloverCheckMs < 60000)
             return;
         _lastRolloverCheckMs = nowMs;
@@ -1107,6 +1110,82 @@ namespace Bleakhold
         player->SendPlaySpellVisual(Ui::EmojiKit(intent.emojiId));
     }
 
+    static_assert(DanceCatalogueCount <= Proto::MaxDances, "dance catalogue (Tools/DanceForge)");
+    static_assert(Ui::DanceKit(0) == Proto::DanceKitBase, "Ui::DanceKit (BleakholdUi.h) and the protocol agree");
+
+    void Data::Dance(Player* player, Intent const& intent)
+    {
+        // world thread (the chat hook); the cooldown (BleakholdUi.Dance.CooldownMs) is the Endpoint's and
+        // BleakholdUi.Dance.Enable is Mgr::Dispatch's, so both also hold for a custom handler
+        if (intent.danceId >= DanceCatalogueCount)
+        {
+            Ui::Refuse(player, intent, "unknown_dance", "That dance does not exist on this realm.");
+            return;
+        }
+        if (!player->IsInWorld())
+            return;
+        if (!player->IsAlive())
+        {
+            Ui::Refuse(player, intent, "dead", "You cannot dance while dead.");
+            return;
+        }
+        if (player->IsInCombat())
+        {
+            Ui::Refuse(player, intent, "in_combat", "You cannot dance in combat.");
+            return;
+        }
+        if (player->IsMounted() || player->GetVehicle() || player->IsInFlight())
+        {
+            Ui::Refuse(player, intent, "mounted", "You cannot dance while mounted.");
+            return;
+        }
+        if (player->isMoving() || player->IsFlying() || player->IsFalling() || player->IsInWater())
+        {
+            Ui::Refuse(player, intent, "moving", "Stand still on the ground to dance.");
+            return;
+        }
+        if (player->IsNonMeleeSpellCast(false))
+        {
+            Ui::Refuse(player, intent, "casting", "You cannot dance while casting.");
+            return;
+        }
+        if (!player->IsStandState())
+            player->SetStandState(UNIT_STAND_STATE_STAND);
+        // the stock dance for every client; the server clears it when the player moves, turns or dies
+        // (MovementHandler.cpp, Unit::setDeathState), which also ends the Bleakhold dance
+        player->SetEmoteState(EMOTE_STATE_DANCE);
+        // SMSG_PLAY_SPELL_VISUAL to the player and every player who can see them: the Bleakhold clients play the
+        // dance for as long as the emote state lasts (section 14)
+        player->SendPlaySpellVisual(Ui::DanceKit(intent.danceId));
+        Dancer& d = _dancers[player->GetGUID().GetRawValue()];
+        d.danceId = intent.danceId;
+        d.nextLoopMs = Mgr::NowMs() + DanceLoopMs[intent.danceId];
+    }
+
+    void Data::UpdateDancers(uint64_t nowMs)
+    {
+        // the kit again at the start of every loop, so a client that sees the dancer later joins in step
+        for (auto it = _dancers.begin(); it != _dancers.end();)
+        {
+            Player* p = ObjectAccessor::FindPlayer(ObjectGuid(it->first));
+            if (!p || !p->IsInWorld() || p->GetUInt32Value(UNIT_NPC_EMOTESTATE) != EMOTE_STATE_DANCE)
+            {
+                it = _dancers.erase(it);
+                continue;
+            }
+            Dancer& d = it->second;
+            if (nowMs >= d.nextLoopMs)
+            {
+                p->SendPlaySpellVisual(Ui::DanceKit(d.danceId));
+                uint32_t const loop = std::max<uint32_t>(DanceLoopMs[d.danceId], 500);
+                d.nextLoopMs += loop;
+                if (d.nextLoopMs <= nowMs)
+                    d.nextLoopMs = nowMs + loop;   // the world stalled: start counting loops again from now
+            }
+            ++it;
+        }
+    }
+
     // =============================================================================================
     // Default providers and handlers
     // =============================================================================================
@@ -1147,5 +1226,6 @@ namespace Bleakhold
         m.SetDefaultHandler(IntentType::LeaderboardQuery, [](Player* p, Intent const& in) { Data::Instance().AnswerLeaderboard(p, in); });
         m.SetDefaultHandler(IntentType::WarEffortHandIn, [](Player* p, Intent const& in) { Data::Instance().HandIn(p, in); });
         m.SetDefaultHandler(IntentType::Emoji, [](Player* p, Intent const& in) { Data::Instance().Emoji(p, in); });
+        m.SetDefaultHandler(IntentType::Dance, [](Player* p, Intent const& in) { Data::Instance().Dance(p, in); });
     }
 }

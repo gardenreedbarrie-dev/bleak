@@ -58,7 +58,8 @@ namespace Bleakhold::Ui
     // Your handler for one intent op. Registering replaces the module's default for that op.
     //   Defaults: TCLAIM TREROLL QJOIN QLEAVE QREPLY KMODE KSTART KCANCEL BCLAIM OUTFIT -> ERR "unavailable";
     //   WEHANDIN -> token hand-in from mod_bleakhold_ui.conf (BleakholdUi.WarEffort.*), else "unavailable";
-    //   LBQ -> the module's own leaderboard tables; EMOJI -> emoji bubble (BleakholdUi.Emoji.*).
+    //   LBQ -> the module's own leaderboard tables; EMOJI -> emoji bubble (BleakholdUi.Emoji.*);
+    //   DANCE -> Bleakhold dance (BleakholdUi.Dance.*).
     //   HELLO, GET and PING are handled by the module.
     using IntentHandler = std::function<void(Player* player, Intent const& intent)>;
     void OnIntent(IntentType type, IntentHandler handler);
@@ -66,6 +67,10 @@ namespace Bleakhold::Ui
     // The SMSG_PLAY_SPELL_VISUAL kit that shows emoji `emojiId` (< EmojiCatalogueCount, BleakholdEmoji.h)
     // over a unit: unit->SendPlaySpellVisual(Ui::EmojiKit(id)) (EMOJI, docs/BleakholdProtocol.md section 13).
     inline constexpr uint32_t EmojiKit(uint32_t emojiId) { return 900000 + emojiId; }
+
+    // The SMSG_PLAY_SPELL_VISUAL kit that plays dance `danceId` (< DanceCatalogueCount, BleakholdDance.h) on a unit
+    // whose emote state is EMOTE_STATE_DANCE (DANCE, docs/BleakholdProtocol.md section 14).
+    inline constexpr uint32_t DanceKit(uint32_t danceId) { return 910000 + danceId; }
 
     // Answer a refused intent with ERR. code: a short machine code ("not_claimable"); text: a sentence
     // for the player. Never put client-supplied text in either.

@@ -189,6 +189,7 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `LBQ` | `board, seasonId, dungeonId, classId, page` | leaderboard page. `board`: `K` Mythic keys, `R` Eclipse Rift, `E` Raid Echoes, `F` server firsts. 0 = all for `dungeonId`/`classId`. `page` from 1 |
 | `PING` | `nonce` | answer with `PONG` |
 | `EMOJI` | `emojiId` | show emoji `emojiId` above the player's head to everyone nearby (section 13). `emojiId`: 0..255, an index into the emoji catalogue, `Tools/EmojiForge/emojis.json` |
+| `DANCE` | `danceId` | dance Bleakhold dance `danceId` until the player moves (section 14). `danceId`: 0..1023, an index into the dance catalogue, `Tools/DanceForge/dances.json` |
 
 `GET` topics and what to send back:
 
@@ -221,6 +222,7 @@ C> 1 OUTFIT f 1/1 201
 C> 1 LBQ g 1/1 K,1,0,0,2
 C> 1 PING h 1/1 12345
 C> 1 EMOJI i 1/1 7
+C> 1 DANCE j 1/1 5
 ```
 
 ## 7. Server to client
@@ -240,7 +242,8 @@ may define more with `DEF X`), item ids are item template entries.
 - `dataVer`: version of the server's definitions (section 7, `DEF`). When it differs from the client's
   cache the client sends `GET DEF,0`.
 - `featureBits`: 1 Rift scoring live, 2 Shards live, 4 the server sends the DBM pull timer itself
-  (section 9), 8 season live, 16 leaderboards live, 32 collections live, 64 emoji bubbles live (section 13).
+  (section 9), 8 season live, 16 leaderboards live, 32 collections live, 64 emoji bubbles live (section 13),
+  128 dances live (section 14).
 - `dailyResetEpoch`/`weeklyResetEpoch`: the next resets (Unix time).
 - `siteUrl`: shown for copying under the leaderboards (there is no web browser in game).
 
@@ -506,6 +509,7 @@ does not throttle addon messages for you (AzerothCore's addon flood check is not
 | `KSTART`, `KCANCEL`, `KMODE` | 1 per 2 s each |
 | `TCLAIM`, `TREROLL`, `BCLAIM`, `OUTFIT`, `WEHANDIN` | 2 per second together; idempotent anyway |
 | `EMOJI` | 1 per `BleakholdUi.Emoji.CooldownMs` (2.5 s); the addon waits 3.25 s itself |
+| `DANCE` | 1 per `BleakholdUi.Dance.CooldownMs` (1 s); the addon waits 1.25 s itself |
 
 Also bound the work a single message can cause (for example a `GET LIDX` answer is cached per player
 rather than rebuilt on every request).
@@ -601,3 +605,46 @@ unit can carry the kit, so a server script can show an emoji over a creature too
 (`creature->SendPlaySpellVisual(900000 + emojiId)`). This is the one part of the protocol that needs the
 Bleakhold client. Like chat from them, the Bleakhold client does not draw emoji bubbles from players on the
 viewer's ignore list.
+
+## 14. Dances
+
+`DANCE danceId` asks the server to start Bleakhold dance `danceId` on the player. The ids index the dance
+catalogue, `Tools/DanceForge/dances.json`; the addon (`DanceData.lua`) and the module (`src/BleakholdDance.h`) get
+their copies from it, and the client ships the clips in `Interface\Bleakhold\Dances\Dances.bdc`. Ids go on the
+wire, saved emote wheels hold `dance:<key>` and music files are named after the key, so the catalogue is
+append-only: an id or a key is never renumbered, reused or removed.
+
+The server checks, in this order:
+
+| Check | Answer |
+|---|---|
+| malformed, or `danceId` above 1023 | dropped silently (section 1) |
+| the same `danceId` as the player's last accepted `DANCE`, within 1 s | dropped silently |
+| the player's cooldown (`BleakholdUi.Dance.CooldownMs`, section 8) has not run out | `ERR` `busy` |
+| dances are off on the realm (`BleakholdUi.Dance.Enable = 0`, no feature bit 128) | `ERR` `unavailable` |
+| `danceId` is not in the catalogue | `ERR` `unknown_dance` |
+| the player is not in the world | dropped silently |
+| the player is dead | `ERR` `dead` |
+| the player is in combat | `ERR` `in_combat` |
+| the player is mounted, on a vehicle or on a flight path | `ERR` `mounted` |
+| the player moves, flies, falls or swims | `ERR` `moving` |
+| the player casts a spell | `ERR` `casting` |
+
+The module makes the first four checks whoever handles `DANCE`; a server that replaces the module's handler
+(`Ui::OnIntent(IntentType::Dance, ...)`) keeps the others itself.
+
+When every check passes, the server stands the player up, sets their emote state to `EMOTE_STATE_DANCE` (10) and
+broadcasts `SMSG_PLAY_SPELL_VISUAL` (the guid of the player, kit `910000 + danceId`) to the player and everyone
+who can see them (AzerothCore: `player->SetEmoteState(EMOTE_STATE_DANCE)` and
+`player->SendPlaySpellVisual(910000 + danceId)`). While the emote state lasts, the server sends the kit again at
+the start of every loop of the dance (`DanceLoopMs` in `src/BleakholdDance.h`), so a client that sees the dancer
+later starts the dance in step. The core clears the emote state when the player moves, turns or dies, which ends
+the dance; the server then stops sending the kit.
+
+A stock client sees the stock dance (the emote state) and ignores the unknown kit. The Bleakhold client plays clip
+`danceId` on the unit the guid names for as long as its emote state is `EMOTE_STATE_DANCE` (from a kit that came
+first it waits 2.5 s for the state), keeps a dance that is already in step when the loop kit comes, and plays the
+dance's music at the unit when `Interface\Bleakhold\Dances\Music\<key>.mp3` (or `.ogg`, `.wav`) exists.
+Like chat from them, the Bleakhold client does not show dances of players on the viewer's ignore list. Any unit
+can carry the kit, so a server script can make a creature dance too (`creature->SetEmoteState(EMOTE_STATE_DANCE)`
+and `creature->SendPlaySpellVisual(910000 + danceId)`, again every loop).

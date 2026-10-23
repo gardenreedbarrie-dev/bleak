@@ -194,10 +194,12 @@ Data.emotes = {
     { key = "stand", name = "Stand", token = "STAND", cmd = "/stand", anim = 0, cat = "pose", glyph = "stand" },
 }
 
--- The emote wheel a character starts with: four pages of eight slots (keys of Data.emotes, and
--- "emoji:<key>" for Data.emojis). A wheel saved before emojis existed gets page 4's emojis once.
+-- The emote wheel a character starts with: four pages of eight slots (keys of Data.emotes, "dance:<key>" for
+-- Data.dances and "emoji:<key>" for Data.emojis). A wheel saved before emojis existed gets page 4's emojis
+-- once; one saved before dances existed gets the dances of page 1 once, in its free slots.
 Data.defaultWheel = {
-    { "dance", "wave", "cheer", "laugh", "bow", "flex", "kiss", "roar" },
+    { "dance:string_swing", "dance:running_man", "dance:disco_fever", "dance:mech_bot",
+      "dance", "wave", "cheer", "laugh" },
     { "salute", "applaud", "point", "rude", "chicken", "cry", "shy", "beg" },
     { "talk", "talkex", "talkq", "shout", "nod", "no", "train", "eat" },
     { "sit", "kneel", "sleep", "stand", "emoji:joy", "emoji:fire", "emoji:skull", "emoji:heart" },

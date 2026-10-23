@@ -56,6 +56,7 @@ namespace Bleakhold::Proto
         for (TokenBucket& b : _key)
             b.Configure(1, perInterval(l.keyIntervalMs));
         _emoji.Configure(1, perInterval(l.emojiIntervalMs));
+        _dance.Configure(1, perInterval(l.danceIntervalMs));
     }
 
     void Endpoint::CountDrop(uint64_t nowMs, ReceiveResult& r)
@@ -87,6 +88,7 @@ namespace Bleakhold::Proto
             case IntentType::KeyStart: return _key[1].Take(nowMs);
             case IntentType::KeyCancel: return _key[2].Take(nowMs);
             case IntentType::Emoji: return _emoji.Take(nowMs);
+            case IntentType::Dance: return _dance.Take(nowMs);
             case IntentType::TaskClaim:
             case IntentType::TaskReroll:
             case IntentType::BountyClaim:

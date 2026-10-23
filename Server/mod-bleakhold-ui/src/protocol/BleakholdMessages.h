@@ -55,6 +55,7 @@ namespace Bleakhold
         FeatureLeaderboards = 16,
         FeatureCollections = 32,
         FeatureEmoji = 64,            // emoji bubbles (EMOJI, section 13)
+        FeatureDance = 128,           // Bleakhold dances (DANCE, section 14)
     };
 
     // One reward line of MPE / RIFTE.

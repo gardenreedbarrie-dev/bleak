@@ -29,6 +29,11 @@ What you get:
 - emoji bubbles: pick an emoji in Collections > Animations > Emojis (double-click or Play), or on page 4 of the
   emote wheel; everyone nearby sees it pop up over your head (art in Data\Interface\Bleakhold\Emoji).
   /bh emoji joy sends one, /bh emojis off hides all emoji bubbles. The realm needs the mod-bleakhold-ui module.
+- Bleakhold dances: pick one in Collections > Animations (Dances), put it on the emote wheel, or type its
+  command (/stringswing, /runningman, ... /bh dance list shows them all); everyone nearby sees it until you
+  move. Each dance can have music: put <key>.mp3 into Data\Interface\Bleakhold\Dances\Music (the README
+  there lists the keys). The realm needs the mod-bleakhold-ui module; others need Bleakhold.exe to see the
+  dance (stock clients see the stock dance). /console bleakDanceMusic 0 turns the music off.
 - Bleakhold graphics: ambient occlusion, contact shadows, light shafts, bloom, colour grading, anti-aliasing
   and sharpening on the 3D world, water with reflections, refraction and colour by depth, and grass that moves
   in the wind and bends away from you. /bh graphics opens the settings with presets (Off, Classic+, Bleakhold,

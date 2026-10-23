@@ -41,7 +41,7 @@ namespace Bleakhold
 
         // Installs the module's default providers and intent handlers.
         void RegisterDefaults();
-        // Once per world tick (world thread): week rollover of the default ERA.
+        // Once per world tick (world thread): the dancers' loop kits and the week rollover of the default ERA.
         void Update(uint64_t nowMs);
 
         // ---- definitions ----
@@ -66,6 +66,8 @@ namespace Bleakhold
         void AnswerLeaderboard(Player* player, Intent const& intent);
         void HandIn(Player* player, Intent const& intent);
         void Emoji(Player* player, Intent const& intent);
+        // DANCE: starts the dance (emote state and kit) and keeps sending the kit at every loop (section 14).
+        void Dance(Player* player, Intent const& intent);
 
         // ---- the module's own records (any thread) ----
         void RecordRun(Ui::LeaderboardEntry const& entry);
@@ -81,6 +83,11 @@ namespace Bleakhold
 
     private:
         Data() = default;
+
+        // Players dancing a Bleakhold dance (world thread only): the dance and when its next loop starts.
+        struct Dancer { uint32_t danceId = 0; uint64_t nextLoopMs = 0; };
+        std::unordered_map<uint64_t, Dancer> _dancers;
+        void UpdateDancers(uint64_t nowMs);
 
         struct WeekRow { uint32_t startsAt = 0; uint32_t eraId = 0; std::vector<uint32_t> affixIds; Opt<uint32_t> bonusId; };
         struct SeasonRow { uint32_t id = 0; std::string name, text, weTitle, weText; uint8_t state = 2; };

@@ -88,7 +88,7 @@ test("emojis: catalogue, groups, default wheel and the Emojis filter", function(
     end
     H.ok(inFilter, "Emojis category in the filter")
     H.eq(#A.Filtered("", "emoji"), #Data.emojis)
-    H.eq(#A.List(), #Data.emotes + #Data.emojis, "the tab lists emotes and emojis")
+    H.eq(#A.List(), #Data.dances + #Data.emotes + #Data.emojis, "the tab lists dances, emotes and emojis")
     for _, name in ipairs({ "Heart Eyes", "heart_eyes", ":heart_eyes:", "  HEART   EYES ", "Heart_Eyes" }) do
         local e = A.EmojiByName(name)
         H.ok(e and e.emoji == 3, "EmojiByName(" .. name .. ")")
@@ -195,7 +195,7 @@ test("emojis: no realm answer or the feature off: a notice, a hint and no EMOJI"
     H.eq(printed(M, "Emojis are turned off on this realm."), 1)
     H.eq(sentEmojis(M), "")
     tab.filter:SetValue("all")
-    tab.entries[1]:Click("LeftButton")
+    tab.entries[#A.Dances() + 1]:Click("LeftButton")
     H.ok(tab.right.hint:GetText():find("wheel"), "emotes keep the key hint")
 end)
 
@@ -348,7 +348,7 @@ test("emojis: the preview pops like the bubble and hides for emotes", function(M
     near(A.EmojiPop(0.25), 1, "0.25 s")
     near(A.EmojiPop(3), 1, "3 s")
     local _, tab = openTab(M, ns, "emoji")
-    H.eq(A.selected.key, "dance", "the tab opens on the first entry")
+    H.eq(A.selected.key, "dance:string_swing", "the tab opens on the first entry")
     H.ok(not A.emojiPreview:IsShown(), "hidden for an emote")
     tab.entries[1]:Click("LeftButton")
     local tex = A.emojiPreview.tex

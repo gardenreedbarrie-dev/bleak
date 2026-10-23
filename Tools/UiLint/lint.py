@@ -44,6 +44,21 @@ TEX_RE = re.compile(r"[\"'](Interface\\\\AddOns\\\\Bleakhold\\\\[^\"']+)[\"']")
 ART_RE = re.compile(r"(?:UI\.)?ART\s*\.\.\s*[\"']([A-Za-z0-9_]+)[\"']")
 
 
+# Lua functions Bleakhold.exe adds to the 3.3.5a API, read from the client's own registration table so the lint
+# and the client cannot drift apart (the addon checks that each exists before calling it).
+CLIENT_API_SOURCES = (("WoW/Source/Ui/BleakholdDance.cpp", re.compile(r'\{\s*"(BleakholdDance_\w+)",\s*&Script_')),)
+
+
+def client_api(root):
+    names = set()
+    for rel_path, pattern in CLIENT_API_SOURCES:
+        path = os.path.join(root, rel_path)
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as fh:
+                names |= set(pattern.findall(fh.read()))
+    return names
+
+
 class Report:
     def __init__(self):
         self.errors = []
@@ -170,6 +185,7 @@ def lint_addon(addon, api, wowlua, framexml, rep):
     # --- globals (addon files only, tests excluded)
     addon_lua = [f for f in lua_files if not in_tests(f)]
     known = set(api["globals"]) | set(api["compat"]) | set(api["luabase"]) | framexml
+    known |= client_api(os.path.normpath(os.path.join(HERE, "..", "..")))
     sets, gets = {}, []
     if addon_lua:
         r = subprocess.run([wowlua, "-g"] + addon_lua, capture_output=True, text=True)

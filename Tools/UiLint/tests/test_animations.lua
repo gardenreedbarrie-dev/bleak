@@ -20,7 +20,14 @@ test("animations: catalogue is valid client data", function(M, ns)
     for _, e in ipairs(A.List()) do
         H.ok(type(e.key) == "string" and not seen[e.key], "unique key " .. tostring(e.key))
         seen[e.key] = true
-        if e.emoji then
+        if e.dance then
+            H.eq(e.key, "dance:" .. e.danceKey, "dance entry key")
+            H.ok(e.cmd:match("^/%l[%l%d]+$"), e.key .. " command")
+            H.eq(e.cat, "dance", e.key .. " category")
+            H.ok(e.token == nil, e.key .. " is not a DoEmote token")
+            H.ok(type(e.bpm) == "number" and e.bpm > 0 and type(e.seconds) == "number" and e.seconds >= 1,
+                e.key .. " tempo and length")
+        elseif e.emoji then
             H.eq(e.key, "emoji:" .. e.emojiKey, "emoji entry key")
             H.eq(e.cmd, "/bh emoji " .. e.emojiKey, e.key .. " command")
             H.eq(e.cat, "emoji", e.key .. " category")
@@ -47,9 +54,12 @@ test("animations: tab lists, searches, filters and pages", function(M, ns)
     local A, tab = openTab(M, ns)
     local total = #A.List()
     H.ok(tab:IsShown(), "tab shown")
+    local nd = #A.Dances()
     H.contains(tab.count:GetText(), total .. "|r of " .. total)
-    H.eq(tab.entries[1].name:GetText(), "Dance")
-    H.eq(tab.entries[1].cmd:GetText(), "/dance")
+    H.eq(tab.entries[1].name:GetText(), "String Swing", "the Bleakhold dances come first")
+    H.eq(tab.entries[1].cmd:GetText(), "/stringswing")
+    H.eq(tab.entries[nd + 1].name:GetText(), "Dance")
+    H.eq(tab.entries[nd + 1].cmd:GetText(), "/dance")
     H.eq(tab.pageText:GetText(), "Page 1 / " .. A.Pages(total))
     H.ok(not tab.prev.enabled and tab.next.enabled, "pager buttons")
     tab.next:Click()
@@ -68,7 +78,9 @@ test("animations: tab lists, searches, filters and pages", function(M, ns)
     H.eq(#A.Filtered("", "pose"), 4)
     H.contains(tab.count:GetText(), "POSES")
     tab.filter:SetValue("wheel")
-    H.eq(#A.Filtered("", "wheel"), 32, "every built-in and the four emojis are on the default wheel")
+    H.eq(#A.Filtered("", "wheel"), 32, "four dances, built-ins and four emojis fill the default wheel")
+    tab.filter:SetValue("dance")
+    H.contains(tab.count:GetText(), "DANCES  |cffECE7DD" .. (nd + 1) .. "|r of " .. (nd + 1))
     H.eq(ns.Collections.searchBox.hint:GetText(), "Search dances and emotes")
     ns.Collections.ShowTab("legacy")
     H.ok(not tab:IsShown(), "other tabs hide it")
@@ -78,8 +90,8 @@ end)
 test("animations: click previews, double-click and Play perform", function(M, ns)
     local A, tab = openTab(M, ns)
     H.eq(A.model.__unit, "player")
-    H.eq(A.model.__sequence, 69, "first entry previewed")
-    local wave = tab.entries[2]
+    H.eq(A.model.__sequence, 69, "first entry previewed (a dance: the race's own dance without Bleakhold.exe)")
+    local wave = tab.entries[#A.Dances() + 2]
     wave:Click("LeftButton")
     H.eq(A.selected.key, "wave")
     H.eq(A.model.__sequence, 67)
@@ -100,16 +112,16 @@ end)
 
 test("animations: wheel editor adds, fills, clears and drags", function(M, ns)
     local A, tab = openTab(M, ns)
-    H.ok(A.WheelEntry(1, 1).key == "dance", "default wheel in place after DB_READY")
+    H.ok(A.WheelEntry(1, 1).key == "dance:string_swing", "default wheel in place after DB_READY")
     local editor = tab.right.editor
     H.eq(editor.pageText:GetText(), "1 / 4")
     -- page 4 with its four emojis taken off has four free slots
     editor.next:Click(); editor.next:Click(); editor.next:Click()
     H.eq(A.wheelPage, 4)
     for s = 5, 8 do A.SetWheelSlot(4, s, nil) end
-    A.SetWheelSlot(1, 2, nil)
+    A.SetWheelSlot(1, 6, nil)
     tab.filter:SetValue("all")
-    local wave = tab.entries[2]
+    local wave = tab.entries[#A.Dances() + 2]
     H.ok(not wave.mark:IsShown(), "wave no longer on the wheel")
     wave:Click("RightButton")
     H.eq(A.WheelEntry(4, 5).key, "wave", "right-click fills the first free slot from the shown page")
@@ -138,6 +150,7 @@ end)
 
 test("animations: saved wheel is repaired", function(M, ns)
     local A = ns.Animations
+    ns.cdb.danceWheel = true    -- already seeded with the dances: only the repair is tested here
     ns.cdb.wheel = { { "dance", 7, "nope", { } }, "garbage", nil, { [8] = "sleep", [9] = "bow" } }
     A.EnsureWheel()
     H.eq(A.WheelEntry(1, 1).key, "dance")
@@ -147,15 +160,15 @@ test("animations: saved wheel is repaired", function(M, ns)
     H.ok(ns.cdb.wheel[4][9] == nil, "slot 9 dropped")
     ns.cdb.wheel = "x"
     A.EnsureWheel()
-    H.eq(A.WheelEntry(1, 1).key, "dance", "not a table: default wheel")
+    H.eq(A.WheelEntry(1, 1).key, "dance:string_swing", "not a table: default wheel")
 end)
 
 test("emote wheel: hold, point and release plays the slot", function(M, ns)
     local A = ns.Animations
     M.env.BleakholdEmoteWheel("down")
     H.ok(A.wheel:IsShown(), "opens on key down")
-    H.eq(A.wheel.slots[1].name:GetText(), "Dance")
-    pointAt(M, A, 3)
+    H.eq(A.wheel.slots[1].name:GetText(), "String Swing")
+    pointAt(M, A, 7)
     M.Advance(0.5)
     H.eq(A.wheel.title:GetText(), "Cheer", "hovered slot named in the centre")
     M.env.BleakholdEmoteWheel("up")

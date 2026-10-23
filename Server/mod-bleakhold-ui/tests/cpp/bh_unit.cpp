@@ -11,6 +11,7 @@
 #include "BleakholdEndpoint.h"
 #include "BleakholdIntent.h"
 #include "BleakholdMessages.h"
+#include "../../src/BleakholdDance.h"
 #include "../../src/BleakholdEmoji.h"
 
 #include <map>
@@ -247,6 +248,30 @@ TEST("every C> example of the document is accepted and re-encodes byte for byte"
     CHECK(Parse("1 EMOJI i 1/1 7", &in) == DropReason::None);
     CHECK(in.type == IntentType::Emoji && in.emojiId == 7 && in.seq == 18);
     CHECK(Parse("1 EMOJI i 1/1 255", &in) == DropReason::None && in.emojiId == 255);
+    CHECK(Parse("1 DANCE j 1/1 5", &in) == DropReason::None);
+    CHECK(in.type == IntentType::Dance && in.danceId == 5 && in.seq == 19);
+    CHECK(Parse("1 DANCE j 1/1 1023", &in) == DropReason::None && in.danceId == 1023);
+}
+
+TEST("dance catalogue fits the protocol")
+{
+    // src/BleakholdDance.h is generated from Tools/DanceForge/dances.json (its tests compare the rest)
+    CHECK(DanceCatalogueCount >= 1 && DanceCatalogueCount <= MaxDances);
+    std::set<std::string> keys;
+    for (uint32_t i = 0; i < DanceCatalogueCount; ++i)
+    {
+        std::string const k = DanceCatalogueKeys[i];
+        bool ok = !k.empty() && k[0] >= 'a' && k[0] <= 'z' && k.size() <= 32;
+        for (char c : k)
+            ok = ok && ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_');
+        CHECK_MSG(ok, "dance key [" + k + "]");
+        CHECK_MSG(keys.insert(k).second, "dance key " + k + " is unique");
+        CHECK_MSG(DanceLoopMs[i] >= 1000 && DanceLoopMs[i] <= 60000, "dance loop of " + k);
+    }
+    CHECK_EQ(DanceCatalogueKeys[0], "string_swing");
+    Intent in;
+    CHECK(Parse("1 DANCE i 1/1 " + std::to_string(DanceCatalogueCount - 1), &in) == DropReason::None &&
+        in.danceId == DanceCatalogueCount - 1);
 }
 
 TEST("emoji catalogue fits the protocol")
@@ -340,6 +365,11 @@ TEST("malformed client messages are dropped with the right reason")
         { "BHc\t1 EMOJI 1 1/1", DropReason::FieldCount },
         { "BHc\t1 EMOJI 1 1/1 1,2", DropReason::FieldCount },
         { "BHc\t1 EMOJI 1 1/1 x", DropReason::BadField },
+        { "BHc\t1 DANCE 1 1/1 1024", DropReason::OutOfRange },
+        { "BHc\t1 DANCE 1 1/1 -1", DropReason::OutOfRange },
+        { "BHc\t1 DANCE 1 1/1", DropReason::FieldCount },
+        { "BHc\t1 DANCE 1 1/1 1,2", DropReason::FieldCount },
+        { "BHc\t1 DANCE 1 1/1 a", DropReason::BadField },
         { "BHc\t1 HELLO 1 1/1 1,1.0 beta,0,enUS", DropReason::BadField },
         { "BHc\t1 HELLO 1 1/1 1,,0,enUS", DropReason::BadField },
         { "BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUSenUSx", DropReason::BadField },
@@ -490,6 +520,11 @@ TEST("endpoint: per-op limits of section 8")
     ReceiveResult e = Feed(ep, "1 EMOJI q 1/1 2", 23000, &in);
     CHECK(e.verdict == Verdict::Refused && in.type == IntentType::Emoji && in.emojiId == 2);
     CHECK(Feed(ep, "1 EMOJI r 1/1 2", 24600).verdict == Verdict::Accepted);
+    // DANCE: 1 per second
+    CHECK(Feed(ep, "1 DANCE s 1/1 1", 30000).verdict == Verdict::Accepted);
+    ReceiveResult dn = Feed(ep, "1 DANCE t 1/1 2", 30500, &in);
+    CHECK(dn.verdict == Verdict::Refused && in.type == IntentType::Dance && in.danceId == 2);
+    CHECK(Feed(ep, "1 DANCE u 1/1 2", 31100).verdict == Verdict::Accepted);
 }
 
 TEST("endpoint: the same action twice within the window is ignored")
@@ -507,6 +542,9 @@ TEST("endpoint: the same action twice within the window is ignored")
     CHECK(Feed(ep, "1 EMOJI 9 1/1 7", 10000).verdict == Verdict::Accepted);
     CHECK(Feed(ep, "1 EMOJI a 1/1 7", 10500).reason == DropReason::Duplicate);
     CHECK(Feed(ep, "1 EMOJI b 1/1 8", 10600).verdict == Verdict::Refused);
+    // DANCE: the same dance again at once is dropped too
+    CHECK(Feed(ep, "1 DANCE c 1/1 3", 20000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 DANCE d 1/1 3", 20400).reason == DropReason::Duplicate);
 }
 
 TEST("endpoint: SEQ per message, revisions per topic, snapshots reset by HELLO")

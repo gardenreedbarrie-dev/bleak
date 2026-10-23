@@ -37,6 +37,7 @@ namespace Bleakhold
         LeaderboardQuery, // LBQ      board, seasonId, dungeonId, classId, page
         Ping,             // PING     nonce
         Emoji,            // EMOJI    emojiId
+        Dance,            // DANCE    danceId
         Count
     };
 
@@ -112,6 +113,9 @@ namespace Bleakhold
 
         // EMOJI: 0..255 (the server checks it against its catalogue)
         uint8_t emojiId = 0;
+
+        // DANCE: 0..1023 (the server checks it against its catalogue)
+        uint32_t danceId = 0;
     };
 
     // Why a message was not accepted.

@@ -39,6 +39,9 @@ namespace Bleakhold::Proto
     // EMOJI (section 13): emoji N is shown with SMSG_PLAY_SPELL_VISUAL kit EmojiKitBase + N, N < MaxEmojis.
     inline constexpr uint32_t EmojiKitBase = 900000;
     inline constexpr uint32_t MaxEmojis = 256;
+    // DANCE (section 14): dance N plays with SMSG_PLAY_SPELL_VISUAL kit DanceKitBase + N, N < MaxDances.
+    inline constexpr uint32_t DanceKitBase = 910000;
+    inline constexpr uint32_t MaxDances = 1024;
 
     // Lower-case base 36, no leading zeros ("0" for 0). n is taken modulo 36^6.
     std::string Base36(uint32_t n);

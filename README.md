@@ -246,6 +246,43 @@ ignore the packet.
   `Interface/Bleakhold/Emoji`); the text emotes are drawn with the Bangers font (SIL Open Font License 1.1).
   `Interface/Bleakhold/Emoji/NOTICE.md` names the source of every file.
 
+## Dances
+
+Bleakhold dances are full-body dances any character can do: pick one in Collections > Animations (the Dances
+filter; the Dance button or a double-click), put it on the emote wheel, or type its command (`/stringswing`,
+`/runningman`, ... or `/bh dance <name>`; `/bh dance list` shows them all). Everyone nearby sees it until the
+dancer moves, with the dance's music if the file is installed. The addon sends `DANCE <id>`
+(`docs/BleakholdProtocol.md`, section 14); the server module checks it, sets the player's emote state to the stock
+dance and broadcasts `SMSG_PLAY_SPELL_VISUAL` kit 910000 + id, again at every loop for players who arrive later.
+Stock clients see the stock dance.
+
+The Bleakhold client (BLEAKHOLD(dance)) plays the dance without a single new animation in the game's models: a
+dance is a clip of a canonical 22-joint skeleton, and `Engine/Source/Model2/BleakDance.cpp` maps that skeleton onto
+each character model when it first dances (from the model's key bones, the finger bones under the hands and the
+bind pose; legs are found by their geometry, and helper and twin bones are handled), then replaces the mapped
+bones' transforms in the model's bone loop. So every race, both genders and HD replacement models dance the same
+dance; fingers, face, hair, cloth and tails keep the animation that plays underneath. Creatures, druid forms and
+vehicles keep their own dance. The clips come in `Data\Interface\Bleakhold\Dances\Dances.bdc` (built by
+`Tools/DanceForge`, in the CI package).
+
+- Music: every dance can have its own music. Put `<key>.mp3` (or `.ogg`, `.wav`) into
+  `Data\Interface\Bleakhold\Dances\Music\`, or pack it into a patch MPQ under that path for your players;
+  `Interface/Bleakhold/Dances/Music/README.txt` lists every dance's key, tempo and loop length. The music plays at
+  the dancer (positional, Sound Effects channel), loops with the dance and stops with it. Only use music you have
+  the rights to.
+- Client settings: `bleakDances` (default `1`; `0` shows nobody's Bleakhold dances), `bleakDanceMusic` (default
+  `1`) and `bleakDanceMusicVolume` (`0` to `1`, default `0.8`). `/bh dance debug` says whether the dance pack
+  loaded and whether your character's model can dance.
+- Server settings (`mod_bleakhold_ui.conf.dist`): `BleakholdUi.Dance.Enable` (default `1`; HELLO feature bit 128)
+  and `BleakholdUi.Dance.CooldownMs` (default `1000`). A player cannot dance dead, in combat, mounted, moving,
+  swimming or casting. Without a realm that knows dances (or in `/bh demo`), Bleakhold.exe dances on your screen
+  only.
+- Choreography: `Tools/DanceForge` (`Tools/DanceForge/README.md`). The dances are original choreography in the
+  style of well-known party and street dances; their names and moves are Bleakhold's own. `dances.json` is the
+  append-only catalogue; `python3 -I Tools/DanceForge/danceforge.py generate` writes the addon's `DanceData.lua`,
+  the module's `src/BleakholdDance.h` and the music README, `pack` builds the clips and `check` validates it all.
+  A new dance needs a rebuilt server module and a new client package.
+
 ## Graphics (BleakFx)
 
 The Bleakhold client post-processes the 3D world after it is drawn and before the interface (BLEAKHOLD(bleakfx),
@@ -349,8 +386,10 @@ this works with signature checks on or off.
 | `Tools/RaceForge/` | Python tool that adds the Bleakhold races (High Elf, Eredar) to your own DBCs and writes the AzerothCore SQL |
 | `Tools/BlpConvert/` | Python tool that converts pictures to BLP textures; draws the login art |
 | `Tools/EmojiForge/` | Python tool that holds the emoji catalogue and makes the emoji art, the addon's list and the server module's list |
+| `Tools/DanceForge/` | Python tool for the dances: choreography, the catalogue, the clip pack, the addon's and server module's lists, and the tests of the client's dance retargeting |
 | `Interface/Bleakhold/Glue/` | Bleakhold login screen and character creation (glue Lua, art, fonts) |
 | `Interface/Bleakhold/Emoji/` | Emoji bubble art (BLP, made by `Tools/EmojiForge`) with its licences and `NOTICE.md` |
+| `Interface/Bleakhold/Dances/` | Where the dance pack (`Dances.bdc`, built by `Tools/DanceForge`) and the dances' music go |
 | `Interface/AddOns/Bleakhold/` | Bleakhold UI addon (Activities, Mythic+, Rift, Collections with Animations, emote wheel, Season, Leaderboards) |
 | `Tools/UiLint/` | Lint and unit tests for the Bleakhold Lua (host Lua built from the client's own source) |
 | `Tools/GrassWind/` | Tests of the grass wind shader patch (a stand-in shader, made-up bytecode and a vs_3_0 emulator) |

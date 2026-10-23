@@ -107,6 +107,7 @@ To change names, texts, the week schedule or seasons later: edit the `bleakhold_
 | Daily and weekly tasks, Mythic Coins, Shards | | `SendTasks`, `TaskProgress`, `SendWeek`, `TCLAIM`/`TREROLL` handlers |
 | Collections counts | | `SendCollections` |
 | Emoji bubbles (Animations tab, emote wheel, `/bh emoji`) | everything: the module checks `EMOJI` and shows the emoji over the player's head to everyone nearby; config `BleakholdUi.Emoji.*` | nothing (players need the Bleakhold client to see the bubbles) |
+| Dances (Animations tab, emote wheel, `/bh dance`, each dance's own command) | everything: the module checks `DANCE`, starts the stock dance (emote state) and tells everyone nearby which Bleakhold dance it is, again at every loop; config `BleakholdUi.Dance.*` | nothing (players need the Bleakhold client to see the dances; stock clients see the stock dance) |
 
 Buttons whose system is not connected yet answer the player with "This is not available on this realm
 yet." Set `BleakholdUi.Feature.*` in the config when a system goes live (the UI hides what is not).
@@ -331,6 +332,9 @@ Ui::OnIntent(IntentType::Emoji, [](Player* p, Intent const& in) {
         return Ui::Refuse(p, in, "unavailable", "You cannot use emojis here.");
     p->SendPlaySpellVisual(Ui::EmojiKit(in.emojiId));
 });
+// Dances work out of the box too (BleakholdUi.Dance.*); a handler of your own keeps the checks of Data::Dance
+// (catalogue, alive, not in combat, mounted, moving or casting), sets EMOTE_STATE_DANCE and sends
+// Ui::DanceKit(in.danceId). The module's loop kits (section 14) only follow its own handler's dancers.
 ```
 
 ### 3.8 Function reference
@@ -359,7 +363,7 @@ Intents (`Ui::OnIntent(IntentType::..., handler)`): `TaskClaim` (`in.taskUid`), 
 `QueueJoin` (`in.queueKind, activityId, tier, roles, groupSize`), `QueueLeave`, `QueueReply`
 (`in.proposalId, in.accept`), `KeyMode` (`in.mode`), `KeyStart`, `KeyCancel`, `BountyClaim` (`in.bountyId`),
 `WarEffortHandIn`, `Outfit` (`in.setId`), `LeaderboardQuery` (`in.board, seasonId, dungeonId, classId, page`),
-`Emoji` (`in.emojiId`).
+`Emoji` (`in.emojiId`), `Dance` (`in.danceId`).
 
 ---
 

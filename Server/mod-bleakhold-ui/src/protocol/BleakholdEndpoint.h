@@ -56,6 +56,7 @@ namespace Bleakhold::Proto
         uint32_t keyIntervalMs = 2000;       // KSTART, KCANCEL, KMODE: 1 per 2 s each
         double claimPerSecond = 2;           // TCLAIM, TREROLL, BCLAIM, OUTFIT, WEHANDIN: 2 per second together
         uint32_t emojiIntervalMs = 2500;     // EMOJI: 1 per BleakholdUi.Emoji.CooldownMs
+        uint32_t danceIntervalMs = 1000;     // DANCE: 1 per BleakholdUi.Dance.CooldownMs
         uint32_t duplicateWindowMs = 1000;   // the same action intent again within this window is ignored (0 = off)
     };
 
@@ -131,6 +132,7 @@ namespace Bleakhold::Proto
         std::array<TokenBucket, 3> _queue;   // QJOIN, QLEAVE, QREPLY
         std::array<TokenBucket, 3> _key;     // KMODE, KSTART, KCANCEL
         TokenBucket _emoji;
+        TokenBucket _dance;
         std::unordered_map<std::string, uint64_t> _lastGet;
         struct LastIntent { std::string key; uint64_t atMs = 0; bool set = false; };
         std::array<LastIntent, static_cast<std::size_t>(IntentType::Count)> _last{};

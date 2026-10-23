@@ -53,6 +53,7 @@ namespace Bleakhold
         uint32_t leaderboardPageSize = 10;
         uint32_t leaderboardMaxRows = 1000;
         bool emojiEnable = true;              // EMOJI (the catalogue is BleakholdEmoji.h)
+        bool danceEnable = true;              // DANCE (the catalogue is BleakholdDance.h)
     };
 
     struct OutItem

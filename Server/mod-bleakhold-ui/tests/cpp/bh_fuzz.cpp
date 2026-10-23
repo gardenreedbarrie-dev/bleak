@@ -138,6 +138,8 @@ namespace
             return n(1) && RefInt(f[0], 0, I32);
         if (op == "EMOJI")
             return n(1) && RefInt(f[0], 0, 255);
+        if (op == "DANCE")
+            return n(1) && RefInt(f[0], 0, 1023);
         return false;
     }
 
@@ -288,7 +290,8 @@ namespace
             "1 HELLO 1 1/1 1,1.0.0,0,enUS", "1 GET 2 1/1 WEEK;ERA;TASKS;KEY;QUEUE;MPLUS;LIDX", "1 GET 3 1/1 SET,1,2", "1 GET 4 1/1 DEF,0",
             "1 TCLAIM 4 1/1 103", "1 TREROLL 5 1/1 101", "1 QJOIN 6 1/1 D,389,2,4,3", "1 QJOIN 7 1/1 R,0,0,4,1", "1 QREPLY 8 1/1 77,1",
             "1 QLEAVE 9 1/1", "1 KMODE a 1/1 2", "1 KSTART b 1/1", "1 KCANCEL c 1/1", "1 BCLAIM d 1/1 55", "1 WEHANDIN e 1/1",
-            "1 OUTFIT f 1/1 201", "1 LBQ g 1/1 K,1,0,0,2", "1 PING h 1/1 12345", "1 EMOJI i 1/1 7", "1 WEEK 2s 1/1 3,4",
+            "1 OUTFIT f 1/1 201", "1 LBQ g 1/1 K,1,0,0,2", "1 PING h 1/1 12345", "1 EMOJI i 1/1 7", "1 DANCE j 1/1 5",
+            "1 WEEK 2s 1/1 3,4",
             "2 HELLO 1 1/1 2,2.0,7,deDE",
         };
     }

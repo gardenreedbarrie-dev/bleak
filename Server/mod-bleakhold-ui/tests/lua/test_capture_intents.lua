@@ -62,6 +62,11 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
     M.Advance(3.3)
     H.eq(C.Send("EMOJI", 255), true, "the client sends EMOJI 255")
     M.Advance(3.3)
+    -- DANCE as the addon spaces it (1.25 s), against the 1 s cooldown
+    H.eq(C.Send("DANCE", 0), true, "the client sends DANCE 0")
+    M.Advance(1.3)
+    H.eq(C.Send("DANCE", 1023), true, "the client sends DANCE 1023")
+    M.Advance(1.3)
     -- GET of every topic; the client batches one frame's requests (8 records at most per GET)
     for _, topic in ipairs({ "WEEK", "ERA", "TASKS", "KEY", "BOARD", "QUEUE", "COLL", "LIDX", "SEASON", "FIRSTS", "MPLUS", "RIFT" }) do
         C.Refresh(topic)

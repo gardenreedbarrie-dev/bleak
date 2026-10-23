@@ -1,12 +1,16 @@
 -- Bleakhold: Animations tab of the Collections window and the emote wheel.
--- The tab lists every animation the character can play and every emoji (search, category filter, pages of
--- 14), previews the selected one on the player model, plays it, and edits the emote wheel: four pages of
--- eight slots, saved per character. The wheel opens with its key binding (Ctrl+G by default): hold the
--- key, point at a slot and release to play it; a short tap leaves the wheel open for clicking.
--- Built-in animations are the client's own emotes (DoEmote); the list is data (Data.emotes), so more
--- dances can be added the same way. Emojis (Data.emojis, EmojiData.lua) are an EMOJI intent instead: the
--- server shows the emoji above the player's head to everyone nearby, and Bleakhold.exe draws it there
--- (emoji bubbles, docs/BleakholdProtocol.md section 13). /bh emoji <name> sends one.
+-- The tab lists the Bleakhold dances, every animation the character can play and every emoji (search,
+-- category filter, pages of 14), previews the selected one on the player model, plays it, and edits the
+-- emote wheel: four pages of eight slots, saved per character. The wheel opens with its key binding (Ctrl+G
+-- by default): hold the key, point at a slot and release to play it; a short tap leaves the wheel open for
+-- clicking.
+-- Dances (Data.dances, DanceData.lua from Tools/DanceForge) are a DANCE intent: the server sets the
+-- player's emote state to the stock dance and tells everyone nearby which Bleakhold dance it is, and
+-- Bleakhold.exe plays that dance on the character, with its music if the file is there (section 14). Each
+-- dance has its own slash command (/stringswing) and /bh dance <name>. The client's own emotes are DoEmote
+-- (Data.emotes). Emojis (Data.emojis, EmojiData.lua) are an EMOJI intent: the server shows the emoji
+-- above the player's head to everyone nearby, and Bleakhold.exe draws it there (emoji bubbles,
+-- docs/BleakholdProtocol.md section 13). /bh emoji <name> sends one.
 local ADDON, ns = ...
 local U, UI, Data = ns.U, ns.UI, ns.Data
 local C = UI.C
@@ -34,6 +38,14 @@ A.wheelPage = 1
 -- Catalogue: the emotes, then one entry per emoji (key "emoji:<key>", on the wheel and in saved wheels)
 ------------------------------------------------------------------------------------------------------
 local entries = {}
+local dances = {}
+for _, d in ipairs(Data.dances or {}) do
+    local e = { key = "dance:" .. d.key, name = d.name, cmd = d.cmd, cat = "dance", dance = d.id, danceKey = d.key,
+        style = d.cat, bpm = d.bpm, seconds = d.seconds, glyph = "dance",
+        text = "A Bleakhold dance: everyone nearby sees it." }
+    entries[#entries + 1] = e
+    dances[#dances + 1] = e
+end
 for _, e in ipairs(Data.emotes) do
     entries[#entries + 1] = e
 end
@@ -70,6 +82,22 @@ end
 
 function A.List()
     return entries
+end
+
+function A.Dances()
+    return dances
+end
+
+local danceByNorm = {}
+for _, e in ipairs(dances) do
+    danceByNorm[e.danceKey] = e
+    danceByNorm[norm(e.name)] = danceByNorm[norm(e.name)] or e
+    danceByNorm[e.cmd:sub(2)] = danceByNorm[e.cmd:sub(2)] or e
+end
+
+-- The dance entry for a key, a name or a command: "string_swing", "String Swing" and "stringswing" all match.
+function A.DanceByName(s)
+    return danceByNorm[norm(s)]
 end
 
 function A.Get(key)
@@ -158,6 +186,23 @@ function A.EnsureWheel()
                     if not page[s] then
                         page[s] = key
                         break
+                    end
+                end
+            end
+        end
+    end
+    -- A wheel saved before dances existed gets page 1's dances once, in its first free slots (page 1 first).
+    if not ns.cdb.danceWheel then
+        ns.cdb.danceWheel = true
+        for _, key in ipairs(type(saved) == "table" and Data.defaultWheel[1] or {}) do
+            if key:find("^dance:") and byKey[key] and not A.OnWheel(key) then
+                local placed = false
+                for p = 1, A.WHEEL_PAGES do
+                    for s = 1, A.WHEEL_SLOTS do
+                        if not placed and not wheel[p][s] then
+                            wheel[p][s] = key
+                            placed = true
+                        end
                     end
                 end
             end
@@ -300,8 +345,97 @@ end
 ns.On("ERR", function(e)
     if e and e.op == "EMOJI" and e.code == "busy" then
         A.emojiReadyAt = GetTime() + A.EMOJI_COOLDOWN
+    elseif e and e.op == "DANCE" and e.code == "busy" then
+        A.danceReadyAt = GetTime() + A.DANCE_COOLDOWN
     end
 end)
+
+------------------------------------------------------------------------------------------------------
+-- Dances: a DANCE intent (the server checks it, starts the stock dance for everyone and tells the
+-- Bleakhold clients which dance it is). Without a realm that knows dances, Bleakhold.exe dances here only.
+------------------------------------------------------------------------------------------------------
+A.DANCE_COOLDOWN = 1.25   -- s: the server's 1 s (BleakholdUi.Dance.CooldownMs) with a margin
+A.danceReadyAt = 0
+
+-- True when this game is Bleakhold.exe with the dance pack (BleakholdDance_* are its functions).
+function A.CanShowDances()
+    return BleakholdDance_Info ~= nil and BleakholdDance_Status ~= nil and BleakholdDance_Status() == ""
+end
+
+-- nil when a dance can be sent to the realm now (cooldown aside), else reason, text.
+function A.DanceState()
+    local Comm = ns.Comm
+    if Comm.outdated then
+        return "outdated", "Dances: your Bleakhold UI is out of date for this realm."
+    end
+    if not Comm.ready and not Comm.demo then
+        return "offline", "Dances need the Bleakhold server module, and this realm has not answered (/bh status)."
+    end
+    if not Comm.ready and Comm.demo then
+        return "demo", "Demo mode: no realm is connected, so only you see this dance."
+    end
+    if not Comm.HasFeature(Comm.FEATURE.DANCE) then
+        return "off", "Dances are turned off on this realm."
+    end
+    return nil
+end
+
+-- 1 when the dance's music file is installed (Bleakhold.exe only), else nil.
+function A.DanceHasMusic(entry)
+    if not entry or not entry.dance or not BleakholdDance_Info then
+        return nil
+    end
+    local key, seconds, bpm, music = BleakholdDance_Info(entry.dance)
+    return key and music and 1 or nil
+end
+
+local noDanceClientNoted
+
+-- Dances here only (Bleakhold.exe), when the realm cannot be asked. Returns true when it plays.
+local function danceHere(entry)
+    if BleakholdDance_PlayLocal and BleakholdDance_PlayLocal(entry.dance) then
+        return true
+    end
+    if DoEmote then
+        DoEmote("DANCE")
+    end
+    return false
+end
+
+-- Returns true when sent (or played here only), or false, reason.
+function A.SendDance(entry)
+    if type(entry) == "string" then
+        entry = A.Get(entry) or A.DanceByName(entry)
+    end
+    if not entry or not entry.dance then
+        return false, "not a dance"
+    end
+    local now = GetTime()
+    if now < A.danceReadyAt then
+        return false, "cooldown"
+    end
+    local reason, text = A.DanceState()
+    if reason then
+        A.EmojiNotice(text)
+        A.danceReadyAt = now + A.DANCE_COOLDOWN
+        if reason == "outdated" then
+            return false, reason
+        end
+        danceHere(entry)
+        return true, reason
+    end
+    local ok, err = ns.Comm.Send("DANCE", entry.dance)
+    if not ok then
+        A.EmojiNotice("Dances: could not send (" .. tostring(err) .. ").")
+        return false, err
+    end
+    A.danceReadyAt = now + A.DANCE_COOLDOWN
+    if not A.CanShowDances() and not noDanceClientNoted then
+        noDanceClientNoted = true
+        ns.Print("Your game cannot show Bleakhold dances (start it with Bleakhold.exe); others see yours.")
+    end
+    return true
+end
 
 function A.Perform(entry)
     if type(entry) == "string" then
@@ -309,6 +443,9 @@ function A.Perform(entry)
     end
     if entry and entry.emoji then
         return A.SendEmoji(entry)
+    end
+    if entry and entry.dance then
+        return A.SendDance(entry)
     end
     if not entry or not entry.token or not DoEmote then
         return false
@@ -726,19 +863,36 @@ local function previewEmoji(entry)
     emojiPreview:Hide()
 end
 
+-- A Bleakhold dance on the preview model (Bleakhold.exe's model:SetBleakholdDance); true when it plays.
+local function previewDance(entry)
+    if not model.SetBleakholdDance then
+        return false
+    end
+    return model:SetBleakholdDance(entry and entry.dance or nil) and true or false
+end
+
 function A.Preview(entry)
     model:SetUnit("player")
     model:SetFacing(0)
     previewEmoji(entry)
+    ns.Cancel(previewTimer)
     if not entry then
+        previewDance(nil)
         return
     end
-    local anim = U.Clamp(entry.anim or 0, 0, 505)
-    model:SetSequence(anim)
-    ns.Cancel(previewTimer)
+    -- a dance without Bleakhold.exe (or before the model exists) shows the race's own dance
+    local anim = U.Clamp(entry.anim or (entry.dance and 69) or 0, 0, 505)
+    local dancing = entry.dance and previewDance(entry)
+    if not entry.dance then
+        previewDance(nil)
+    end
+    model:SetSequence(dancing and 0 or anim)
     previewTimer = ns.After(0.3, function()
         if A.selected == entry then
-            model:SetSequence(anim)
+            if entry.dance and not dancing then
+                dancing = previewDance(entry)
+            end
+            model:SetSequence(dancing and 0 or anim)
         end
     end)
 end
@@ -771,7 +925,7 @@ function A.Refresh()
     local list = A.Filtered(CO.search, A.filter)
     local pages = A.Pages(#list)
     A.page = U.Clamp(A.page, 1, pages)
-    local total = #A.List()
+    local total = #A.Filtered("", A.filter)
     tab.count:SetText(string.upper(A.CategoryLabel(A.filter ~= "all" and A.filter ~= "wheel" and A.filter or nil))
         .. "  |cffECE7DD" .. #list .. "|r of " .. total)
     local first = (A.page - 1) * A.PAGE_SIZE
@@ -781,7 +935,7 @@ function A.Refresh()
         if e then
             setIcon(b.icon, e)
             UI.SetText(b.name, e.name)
-            UI.SetText(b.cmd, e.cmd)
+            UI.SetText(b.cmd, e.dance and A.DanceHasMusic(e) and (e.cmd .. "  with music") or e.cmd)
             local sel = A.selected and A.selected.key == e.key
             UI.Colors(b, sel and C.active or C.card, sel and C.gold or C.border)
             UI.SetColor(b.name, sel and C.goldPale or C.text)
@@ -805,17 +959,27 @@ function A.Refresh()
     tab.next:SetActive(A.page < pages)
 
     local sel = A.selected
-    if sel then
+    if sel and sel.dance then
+        UI.SetText(right.name, sel.name)
+        UI.SetText(right.cmd, sel.cmd .. (A.DanceHasMusic(sel) and "  with music" or "") .. "  -  "
+            .. string.format("%g BPM, %.1f s loop", sel.bpm or 0, sel.seconds or 0))
+    elseif sel then
         UI.SetText(right.name, sel.name)
         UI.SetText(right.cmd, sel.cmd .. "  -  " .. A.CategoryLabel(sel.cat) .. (sel.text and ("  -  " .. sel.text) or ""))
     else
         right.name:SetText("Animations")
         right.cmd:SetText("Pick an animation to preview it.")
     end
+    right.play:SetLabel(sel and sel.dance and "Dance" or (sel and sel.emoji and "Show" or "Play"))
     right.play:SetActive(sel ~= nil)
     right.add:SetActive(sel ~= nil and not A.OnWheel(sel.key))
     A.RefreshWheelEditor()
     local hint = sel and sel.emoji and select(2, A.EmojiState())
+    if not hint and sel and sel.dance then
+        -- without a realm the dance still plays here; only a realm that refuses dances is worth the hint
+        local reason, text = A.DanceState()
+        hint = (reason == "off" or reason == "outdated") and text or nil
+    end
     if not hint then
         local key = A.KeyText()
         hint = key and ("Hold " .. key .. " in the game to use the wheel.")
@@ -1095,6 +1259,74 @@ ns.AddCommand("emote", "play an animation: /bh emote <name>", function(args)
 end)
 
 A.LIST_LINE = 240         -- /bh emoji list: longest line printed
+
+ns.AddCommand("dance", "dance a Bleakhold dance: /bh dance <name>", function(args)
+    local want = strtrim(args or "")
+    local lower = string.lower(want)
+    if lower == "list" then
+        ns.Print(#dances .. " dances (/bh dance <name>, or each dance's own command):")
+        local line = ""
+        for _, e in ipairs(dances) do
+            local item = e.cmd
+            if line ~= "" and #line + 1 + #item > A.LIST_LINE then
+                ns.Print(line)
+                line = ""
+            end
+            line = line == "" and item or (line .. " " .. item)
+        end
+        if line ~= "" then
+            ns.Print(line)
+        end
+        return
+    end
+    if lower == "stop" then
+        if BleakholdDance_StopLocal then
+            BleakholdDance_StopLocal()
+        end
+        ns.Print("Move or turn to stop dancing.")
+        return
+    end
+    if lower == "debug" then
+        if not BleakholdDance_Status then
+            ns.Print("Dances: this game is not Bleakhold.exe.")
+            return
+        end
+        local pack = BleakholdDance_Status()
+        local rig = BleakholdDance_RigStatus and BleakholdDance_RigStatus() or ""
+        ns.Print("Dances: pack " .. (pack == "" and "ok" or pack) .. "; your model " .. (rig == "" and "can dance" or rig)
+            .. "; realm " .. (select(2, A.DanceState()) or "ok") .. ".")
+        return
+    end
+    local entry = want ~= "" and A.DanceByName(want:gsub("^/", ""))
+    if entry then
+        A.SendDance(entry)
+        return
+    end
+    ns.Print("usage: /bh dance <name>, for example /bh dance string swing (/bh dance list shows them all)")
+end)
+
+-- Every dance's own slash command (/stringswing), unless another addon took it first.
+A.danceCommands = {}
+for _, e in ipairs(dances) do
+    local id = "BLEAKHOLDDANCE" .. string.upper(e.danceKey)
+    local taken = false
+    for name, fn in pairs(SlashCmdList) do
+        local i = 1
+        while _G["SLASH_" .. name .. i] do
+            if string.lower(_G["SLASH_" .. name .. i]) == e.cmd then
+                taken = true
+            end
+            i = i + 1
+        end
+    end
+    if not taken then
+        _G["SLASH_" .. id .. "1"] = e.cmd
+        SlashCmdList[id] = function()
+            A.SendDance(e)
+        end
+        A.danceCommands[#A.danceCommands + 1] = e.cmd
+    end
+end
 
 ns.AddCommand("emoji", "show an emoji above your head: /bh emoji <name>", function(args)
     local want = strtrim(args or "")

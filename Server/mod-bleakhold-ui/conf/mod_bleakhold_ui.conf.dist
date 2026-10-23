@@ -162,6 +162,26 @@ BleakholdUi.Emoji.Enable = 1
 BleakholdUi.Emoji.CooldownMs = 2500
 
 ###################################################################################################
+# DANCES (DANCE: a Bleakhold dance until the player moves; the Bleakhold client shows it, stock
+# clients see the stock dance)
+###################################################################################################
+#
+#    BleakholdUi.Dance.Enable
+#        Description: Let players dance the Bleakhold dances (feature bit 128). The dance list is built
+#                     into the module (src/BleakholdDance.h, made by Tools/DanceForge); a dance needs no
+#                     DBC or model change on the server.
+#        Default:     1 - Enabled
+#                     0 - Disabled
+#
+#    BleakholdUi.Dance.CooldownMs
+#        Description: Time a player must wait between two dances, in ms (0 = no limit). The addon
+#                     waits 1.25 s itself; above 1250 some presses are answered "busy".
+#        Default:     1000
+
+BleakholdUi.Dance.Enable = 1
+BleakholdUi.Dance.CooldownMs = 1000
+
+###################################################################################################
 # KEYSTONE RUNS
 ###################################################################################################
 #
