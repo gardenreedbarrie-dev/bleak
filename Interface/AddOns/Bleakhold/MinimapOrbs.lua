@@ -1,7 +1,8 @@
 -- Bleakhold: round buttons around the minimap (Activities, Collections, Season, Leaderboards).
 -- They live on BleakholdOrbHolder, a child of UIParent anchored to the Minimap's centre, never on the
 -- Minimap itself: AddicatUI (DragonUI) collects every button parented to Minimap/MinimapBackdrop into its drawer,
--- and it moves and rescales the Minimap, which the holder follows.
+-- and it moves and rescales the Minimap, which the holder follows. In AddicatUI's editor mode each orb has
+-- an outline of its own (the movers at the end); dropping one slides the orb to that angle, saved as before.
 local ADDON, ns = ...
 local U, UI = ns.U, ns.UI
 local C = UI.C
@@ -81,6 +82,21 @@ function Orbs.Layout(force)
             o.button:SetPoint("CENTER", holder, "CENTER", x, y)
         end
     end
+end
+
+-- Turns orb o towards the screen point x, y (unscaled pixels, like GetCursorPosition) and saves the angle.
+function Orbs.SetAngleTowards(o, x, y)
+    if not (Minimap and x and y) then
+        return
+    end
+    local cx, cy = Minimap:GetCenter()
+    if not cx then
+        return
+    end
+    local s = Minimap:GetEffectiveScale() or 1
+    local a = deg(atan2(y - cy * s, x - cx * s)) % 360
+    ns.cdb.orbs[o.key] = math.floor(a + 0.5)
+    Orbs.Layout(true)
 end
 
 local function statusLines(key)
@@ -163,18 +179,11 @@ local function makeOrb(o)
         self.dragging = false
     end)
     b:SetScript("OnUpdate", function(self)
-        if not self.dragging or not Minimap then
+        if not self.dragging then
             return
         end
         local mx, my = GetCursorPosition()
-        local cx, cy = Minimap:GetCenter()
-        local s = Minimap:GetEffectiveScale() or 1
-        if not (mx and cx) then
-            return
-        end
-        local a = deg(atan2(my - cy * s, mx - cx * s)) % 360
-        ns.cdb.orbs[o.key] = math.floor(a + 0.5)
-        Orbs.Layout(true)
+        Orbs.SetAngleTowards(o, mx, my)
     end)
     o.button = b
     return b
@@ -253,3 +262,35 @@ ns.AddCommand("orbs", "minimap buttons: /bh orbs on|off|reset", function(args)
         Orbs.SetShown(true)
     end
 end)
+
+-- Editor mode (ns.Movers): an orb follows the outline's centre around the ring.
+for _, o in ipairs(Orbs.list) do
+    UI.AddMover({
+        name = "bleakhold_orb_" .. o.key,
+        title = o.title .. " orb",
+        frame = o.button,
+        begin = function()
+            Orbs.Layout(true)
+        end,
+        finish = function()
+            Orbs.Layout(true)
+        end,
+        move = function(region)
+            local x, y = region:GetCenter()
+            local s = region:GetEffectiveScale() or 1
+            if x then
+                Orbs.SetAngleTowards(o, x * s, y * s)
+            end
+        end,
+        reset = function()
+            ns.cdb.orbs[o.key] = nil
+            Orbs.Layout(true)
+        end,
+        isDefault = function()
+            return type(ns.cdb.orbs[o.key]) ~= "number"
+        end,
+        visible = function()
+            return holder:IsShown() and true or false
+        end,
+    })
+end

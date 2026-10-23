@@ -1,7 +1,8 @@
 -- Bleakhold: Mythic+ key tracker (timer, deaths, bosses, enemy forces, affixes) and the end-of-run
 -- summary. Every number is server state (MPS/MP/MPE); the timer only counts on locally between MP
 -- updates. Its own movable frame: AddicatUI (and DragonUI) keeps WatchFrame hidden and replaces it, so the
--- tracker sits beside that tracker when it exists and never changes its frames.
+-- tracker sits beside that tracker when it exists and never changes its frames. AddicatUI's editor mode moves
+-- it through the mover at the end of the position section; the spot stays in BleakholdCharDB either way.
 local ADDON, ns = ...
 local U, UI, Comm = ns.U, ns.UI, ns.Comm
 local C = UI.C
@@ -96,37 +97,75 @@ end
 f.closeBtn = UI.Button(f, 80, 22, "Close", "dark", 11)
 f.closeBtn:SetScript("OnClick", function()
     T.dismissed = S.mplus and S.mplus.runId
-    f:Hide()
+    T.Refresh()
 end)
 
 ------------------------------------------------------------------------------------------------------
--- Position: saved if the player moved it, else beside AddicatUI's (or DragonUI's) tracker, else under the minimap.
+-- Position: saved if the player moved it, else beside AddicatUI's (or DragonUI's) tracker, on the side
+-- facing the middle of the screen, else under the minimap.
 ------------------------------------------------------------------------------------------------------
 UI.MakeMovable(f)
 f:SetClampedToScreen(true)
 
-function T.Anchor()
+T.GAP = 12
+
+function T.SavedPosition()
     local pos = ns.cdb.windows.BleakholdKeyTracker
-    f:ClearAllPoints()
     if type(pos) == "table" and type(pos.point) == "string" and type(pos.x) == "number" and type(pos.y) == "number" then
+        return pos
+    end
+end
+
+function T.Anchor()
+    local pos = T.SavedPosition()
+    local quests = AddicatUI_QuestTrackerFrame or DragonUI_QuestTrackerFrame
+    f:ClearAllPoints()
+    if pos then
         f:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
-    elseif AddicatUI_QuestTrackerFrame or DragonUI_QuestTrackerFrame then
-        f:SetPoint("TOPRIGHT", AddicatUI_QuestTrackerFrame or DragonUI_QuestTrackerFrame, "TOPLEFT", -12, 0)
+    elseif quests then
+        local qx = quests:GetCenter()
+        local ux = UIParent:GetCenter()
+        if qx and ux and qx < ux then
+            f:SetPoint("TOPLEFT", quests, "TOPRIGHT", T.GAP, 0)
+        else
+            f:SetPoint("TOPRIGHT", quests, "TOPLEFT", -T.GAP, 0)
+        end
     else
         f:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -40, -250)
     end
+end
+
+-- Puts the tracker's top edge where `region` has its top edge (same width) and, when save, keeps the spot.
+function T.MoveTo(region, save)
+    local point, relPoint, x, y = UI.TopAnchorOf(region)
+    if not point then
+        return
+    end
+    f:ClearAllPoints()
+    f:SetPoint(point, UIParent, relPoint, x, y)
+    if save then
+        ns.cdb.windows.BleakholdKeyTracker = { point = point, relPoint = relPoint, x = x, y = y }
+    end
+end
+
+function T.ResetPosition()
+    ns.cdb.windows.BleakholdKeyTracker = nil
+    T.Anchor()
 end
 
 ------------------------------------------------------------------------------------------------------
 -- Drawing
 ------------------------------------------------------------------------------------------------------
 local function bossNames(m)
+    if m.bossNames then
+        return m.bossNames
+    end
     local def = ns.Def("D", m.dungeonId)
     return def and def.bosses or {}
 end
 
 function T.UpdateTimer()
-    local m = S.mplus
+    local m = T.current
     if not m or m.result then
         return
     end
@@ -190,7 +229,7 @@ local function layoutRun(m)
         f.forces:Hide()
         f.forcesText:Hide()
     end
-    local affixes = ns.AffixNames(m.affixes)
+    local affixes = m.affixNames or ns.AffixNames(m.affixes)
     if #affixes > 0 then
         UI.SetText(f.affixes, table.concat(affixes, ", "))
         f.affixes:ClearAllPoints()
@@ -265,17 +304,34 @@ local function layoutResult(m)
     f:SetHeight(-y + 40)
 end
 
-function T.Refresh()
+-- A sample run for positioning the tracker (AddicatUI's editor mode) while no run is on.
+T.SAMPLE = {
+    runId = 0, title = "Mythic+ Key Tracker", level = 0, state = 2, elapsedMs = 754000, timeLimitSec = 1800,
+    deaths = 1, deathPenaltySec = 5, forcesCur = 62, forcesMax = 100, bossBits = 3, bossKillSec = { 301, 652 },
+    chestSec = { 1260, 1440 }, bossNames = { "First boss", "Second boss", "Third boss", "Last boss" },
+    affixNames = { "This week's affixes" },
+}
+
+-- The run to show: the server's, unless it is over and its summary dismissed or timed out.
+local function liveRun()
     local m = S.mplus
     if not m or (m.state == 4 and not m.result) or T.dismissed == m.runId then
-        f:Hide()
-        return
+        return nil
     end
     if m.result and m.resultShownAt and GetTime() - m.resultShownAt > T.SUMMARY_TIME then
+        return nil
+    end
+    return m
+end
+
+function T.Refresh()
+    local m = liveRun() or (T.preview and T.SAMPLE) or nil
+    T.current = m
+    if not m then
         f:Hide()
         return
     end
-    UI.SetText(f.title, ns.DungeonName(m.dungeonId) .. ((m.level or 0) > 0 and (" +" .. m.level) or ""))
+    UI.SetText(f.title, (m.title or ns.DungeonName(m.dungeonId)) .. ((m.level or 0) > 0 and (" +" .. m.level) or ""))
     local d = m.deaths or 0
     f.deaths.text:SetText(d .. (d == 1 and " death" or " deaths"))
     if m.result then
@@ -296,9 +352,9 @@ f:SetScript("OnUpdate", function(self, elapsed)
     if acc >= 0.1 then
         acc = 0
         T.UpdateTimer()
-        local m = S.mplus
+        local m = T.current
         if m and m.result and m.resultShownAt and GetTime() - m.resultShownAt > T.SUMMARY_TIME then
-            self:Hide()
+            T.Refresh()
         end
     end
 end)
@@ -321,3 +377,35 @@ ns.On("MPLUS_END", function()
     T.dismissed = nil
     T.Refresh()
 end)
+
+------------------------------------------------------------------------------------------------------
+-- Editor mode (ns.Movers): the sample run shows while nothing real is on, so there is a frame to place.
+------------------------------------------------------------------------------------------------------
+UI.AddMover({
+    name = "bleakhold_keytracker",
+    title = "Mythic+ Key Tracker",
+    frame = f,
+    begin = function()
+        T.preview = true
+        T.Refresh()
+    end,
+    finish = function()
+        T.preview = nil
+        T.Refresh()
+        if f:IsShown() then
+            T.Anchor()
+        end
+    end,
+    move = function(region, done)
+        T.MoveTo(region, done)
+    end,
+    reset = function()
+        T.ResetPosition()
+    end,
+    isDefault = function()
+        return T.SavedPosition() == nil
+    end,
+    visible = function()
+        return true
+    end,
+})

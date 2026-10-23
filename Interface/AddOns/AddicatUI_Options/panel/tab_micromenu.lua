@@ -105,6 +105,17 @@ local function BuildMicromenuTab(scroll)
         end,
     })
 
+    -- Bleakhold registers the launcher; without that addon the button never shows, so the toggle greys out.
+    C:AddToggle(menu, {
+        label = addon.L["Bleakhold Button"],
+        desc = addon.L["Show a micro menu button that opens Bleakhold's windows: activities, collections, the season, the leaderboards and more. It appears only while the Bleakhold addon is loaded."],
+        dbPath = "micromenu.show_launcher",
+        disabled = function() return not (IsAddOnLoaded and IsAddOnLoaded("Bleakhold")) end,
+        callback = function()
+            if addon.RefreshMicroMenuLauncher then addon.RefreshMicroMenuLauncher(true) end
+        end,
+    })
+
     C:AddToggle(menu, {
         label = LO["Hide on Vehicle"],
         desc = LO["Hide micromenu and bags while in a vehicle."],

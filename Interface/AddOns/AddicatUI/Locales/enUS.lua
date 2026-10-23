@@ -356,6 +356,10 @@ L["Sort Guild Bank Tab"] = true
 L["Network"] = true
 L["Latency"] = true
 
+-- Micromenu Bleakhold launcher (the options tab uses these too)
+L["Bleakhold Button"] = true
+L["Show a micro menu button that opens Bleakhold's windows: activities, collections, the season, the leaderboards and more. It appears only while the Bleakhold addon is loaded."] = true
+
 -- ============================================================================
 -- STABILIZATION PATCH STRINGS
 -- ============================================================================

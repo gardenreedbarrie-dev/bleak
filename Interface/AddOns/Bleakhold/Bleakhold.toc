@@ -3,7 +3,7 @@
 ## Notes: Bleakhold server interface: activities, dungeon board, keys, Eclipse Rift, collections, season and leaderboards.
 ## Author: Bleakhold
 ## Version: 1.0.0
-## OptionalDeps: DragonUI, DBM-Core
+## OptionalDeps: AddicatUI, DragonUI, DBM-Core
 ## SavedVariables: BleakholdDB
 ## SavedVariablesPerCharacter: BleakholdCharDB
 
@@ -32,3 +32,4 @@ Season.lua
 Leaderboards.lua
 Graphics.lua
 Demo.lua
+Integration.lua

@@ -621,6 +621,197 @@ local function EnsureStaticPopupEditorHook()
     end)
 end
 
+-- ============================================================================
+-- OTHER ADDONS' FRAMES
+-- ============================================================================
+-- An addon that keeps its own saved position (Bleakhold's key tracker and minimap orbs) hands the editor a
+-- mover. The editor outlines the frame and turns drags, nudges, typed coordinates and resets into calls on
+-- the mover, which places the frame and stores the spot itself: AddicatUI saves nothing for these frames,
+-- so the two addons never hold two positions for one frame. All callbacks run in pcall.
+--   name, title, frame          unique key, label, the frame to outline (any scale)
+--   begin(), finish()           editor opened (show the frame, with sample content when idle) / closed
+--   move(overlay, done)         follow the overlay, a UIParent child; done = dropped or nudged, save it
+--   reset(), isDefault()        forget the saved spot / true when there is none
+--   visible()                   optional; false keeps the frame out of the editor
+
+local externalFrames = {}
+local EXTERNAL_POLL = 0.2
+-- An outline shorter than this carries its label underneath, as the error-messages one does.
+local EXTERNAL_LABEL_INSIDE = 40
+-- Above the outlines of AddicatUI's own frames: the minimap orbs sit on the edge of the minimap's.
+local EXTERNAL_LEVEL = 110
+
+local brokenExternal = setmetatable({}, { __mode = "k" })
+
+local function CallExternal(spec, key, ...)
+    local fn = spec[key]
+    if type(fn) ~= "function" or brokenExternal[fn] then return nil end
+    local ok, result = pcall(fn, ...)
+    if not ok then
+        brokenExternal[fn] = true
+        geterrorhandler()(result)
+        return nil
+    end
+    return result
+end
+
+-- The outline takes the frame's rect in UIParent units; skipped when nothing changed.
+local function FitExternalOverlay(entry)
+    local overlay, frame = entry.overlay, entry.spec.frame
+    local left, bottom = frame:GetLeft(), frame:GetBottom()
+    local width, height = frame:GetWidth(), frame:GetHeight()
+    if not (left and bottom and width and height) then return end
+    local ratio = frame:GetEffectiveScale() / overlay:GetEffectiveScale()
+    left, bottom = left * ratio, bottom * ratio
+    width, height = math.max(width * ratio, 8), math.max(height * ratio, 8)
+    local fit = entry.fit
+    if fit and math.abs(fit[1] - left) < 0.5 and math.abs(fit[2] - bottom) < 0.5
+        and math.abs(fit[3] - width) < 0.5 and math.abs(fit[4] - height) < 0.5
+        and overlay:GetNumPoints() > 0 then
+        return
+    end
+    entry.fit = { left, bottom, width, height }
+    overlay:SetSize(width, height)
+    overlay:ClearAllPoints()
+    overlay:SetPoint("BOTTOMLEFT", UIParent, "BOTTOMLEFT", left, bottom)
+    if overlay.editorText then
+        overlay.editorText:ClearAllPoints()
+        if height < EXTERNAL_LABEL_INSIDE then
+            overlay.editorText:SetPoint("TOP", overlay, "BOTTOM", 0, -3)
+        else
+            overlay.editorText:SetPoint("CENTER", overlay, "CENTER", 0, 0)
+        end
+    end
+end
+
+local function SettleExternal(entry)
+    CallExternal(entry.spec, "move", entry.overlay, true)
+    entry.fit = nil
+    FitExternalOverlay(entry)
+end
+
+-- addon.CreateUIFrame's outline without its locale lookup: these labels come from the other addon.
+local function CreateExternalOverlay(entry)
+    local spec = entry.spec
+    local overlay = CreateFrame("Frame", nil, UIParent)
+    overlay:SetSize(32, 32)
+    overlay:SetFrameStrata("FULLSCREEN")
+    overlay:SetFrameLevel(EXTERNAL_LEVEL)
+    overlay:SetClampedToScreen(true)
+    overlay:RegisterForDrag("LeftButton")
+    overlay:EnableMouse(false)
+    overlay:SetMovable(false)
+    overlay:Hide()
+
+    overlay:SetScript("OnDragStart", function(self)
+        self:StartMoving()
+        entry.moving = true
+        if addon.selectedEditorFrame ~= self then addon.SelectEditorFrame(self) end
+        addon.ClearSelectionTint(self)
+    end)
+    overlay:SetScript("OnDragStop", function(self)
+        self:StopMovingOrSizing()
+        entry.moving = nil
+        SettleExternal(entry)
+        addon.ApplySelectionTint(self)
+    end)
+    overlay:SetScript("OnMouseDown", function(self, button)
+        if button == "LeftButton" then addon.SelectEditorFrame(self) end
+    end)
+    -- While dragged the frame follows the outline; otherwise the outline follows the frame, which can
+    -- change size (a key tracker that gets a real run) or place (orbs riding a minimap that moved).
+    overlay:SetScript("OnUpdate", function(self, elapsed)
+        if entry.moving then
+            CallExternal(spec, "move", self, false)
+            return
+        end
+        entry.elapsed = (entry.elapsed or 0) + elapsed
+        if entry.elapsed >= EXTERNAL_POLL then
+            entry.elapsed = 0
+            FitExternalOverlay(entry)
+        end
+    end)
+
+    addon.AddNineslice(overlay)
+    addon.SetNinesliceState(overlay, false)
+    addon.HideNineslice(overlay)
+    overlay.editorTexture = overlay.NineSlice and overlay.NineSlice.Center
+    overlay.editorText = overlay:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    overlay.editorText:SetPoint("CENTER", overlay, "CENTER", 0, 0)
+    overlay.editorText:SetText(spec.title or spec.name)
+    overlay.editorText:Hide()
+    entry.overlay = overlay
+
+    addon:RegisterEditableFrame({
+        name = spec.name,
+        frame = overlay,
+        configPath = nil, -- the mover saves
+        editorVisible = spec.visible and function()
+            return CallExternal(spec, "visible") and true or false
+        end or nil,
+        showTest = function()
+            CallExternal(spec, "begin")
+            overlay:Show()
+            entry.fit = nil
+            FitExternalOverlay(entry)
+        end,
+        hideTest = function()
+            if entry.moving then
+                overlay:StopMovingOrSizing()
+                entry.moving = nil
+            end
+            overlay:Hide()
+            CallExternal(spec, "finish")
+        end,
+        onNudge = function() SettleExternal(entry) end,
+        resetPosition = function()
+            CallExternal(spec, "reset")
+            entry.fit = nil
+            FitExternalOverlay(entry)
+        end,
+        isDefaultPosition = function()
+            return CallExternal(spec, "isDefault") and true or false
+        end,
+        module = EditorMode,
+    })
+end
+
+local function SetupExternalFrames()
+    for _, entry in ipairs(externalFrames) do
+        if not entry.overlay then CreateExternalOverlay(entry) end
+    end
+end
+
+-- Returns true when the mover was taken. A name already taken (AddicatUI's own or an earlier mover) is refused.
+function EditorMode:RegisterExternalFrame(spec)
+    if type(spec) ~= "table" or type(spec.name) ~= "string" or type(spec.move) ~= "function" then return false end
+    local frame = spec.frame
+    if type(frame) ~= "table" or type(frame.GetLeft) ~= "function" then return false end
+    if addon.EditableFrames[spec.name] then return false end
+    for _, entry in ipairs(externalFrames) do
+        if entry.spec.name == spec.name then return false end
+    end
+    local entry = { spec = spec }
+    externalFrames[#externalFrames + 1] = entry
+    -- Joining an open editor: outline it now, as ShowAllEditableFrames would have.
+    if editorActive then
+        CreateExternalOverlay(entry)
+        local data = addon.EditableFrames[spec.name]
+        if not (data.editorVisible and not data.editorVisible()) then
+            addon.HideUIFrame(entry.overlay)
+            data.showTest()
+        end
+    end
+    return true
+end
+
+function EditorMode:ResetExternalPositions()
+    for _, entry in ipairs(externalFrames) do
+        CallExternal(entry.spec, "reset")
+        entry.fit = nil
+    end
+end
+
 function EditorMode:Show()
     if InCombatLockdown() then
         
@@ -634,6 +825,7 @@ function EditorMode:Show()
     createGridOverlay()
     CreateManager()
     SetupErrorMessagesMover()
+    SetupExternalFrames()
     EnsureStaticPopupEditorHook()
     editorActive = true
     ApplyGridVisibility()
@@ -780,6 +972,9 @@ function EditorMode:ResetAllPositions()
         addon.db.profile.questtracker = addon:CopyTable(addon.defaults.profile.questtracker)
     end
     
+    -- Other addons' frames keep their spots in their own saved variables, which the reload below writes.
+    self:ResetExternalPositions()
+
     -- Reset loot roll position
     if addon.defaults and addon.defaults.profile and addon.defaults.profile.lootroll then
         if not addon.db.profile.lootroll then

@@ -97,11 +97,26 @@ if isAscensionServer then
     EIGHTH_STEM, NINTH_STEM = "PathToAscension", "Challenges"
 end
 
--- A nil slot for a button missing at load keeps # at twelve; Professions follows Character, as in Forever.
+-- One button for another addon's windows, with a flyout listing them (Bleakhold registers its launcher through
+-- addon.RegisterMicroMenuLauncher). MICRO_BUTTONS is captured below, so it exists from the start and stays
+-- suppressed, out of the strip, until a launcher is registered and the option allows it.
+local launcherButton = CreateFrame("Button", "AddicatUI_LauncherMicroButton", UIParent)
+launcherButton:SetSize(32, 40)
+launcherButton:SetPoint("CENTER")
+launcherButton:Hide()
+launcherButton.addicatUISuppressed = true
+-- layoutMicroButtons re-points these; the highlight one carries the glyph, the others stay empty.
+launcherButton:SetNormalTexture("")
+launcherButton:SetPushedTexture("")
+launcherButton:SetHighlightTexture("")
+launcherButton:RegisterForClicks("LeftButtonUp")
+
+-- A nil slot for a button missing at load keeps # at the full count; Professions follows Character, as in
+-- Forever. The launcher sits after the stock panels, before the game menu.
 local MICRO_BUTTONS = {
     MicroButtonFor("Character"), MicroButtonFor("Profession"), MicroButtonFor("Spellbook"), MicroButtonFor("Talent"),
     MicroButtonFor("Achievement"), MicroButtonFor("QuestLog"), MicroButtonFor("Socials"),
-    MicroButtonFor("LFD"), MicroButtonFor(EIGHTH_STEM), MicroButtonFor(NINTH_STEM),
+    MicroButtonFor("LFD"), MicroButtonFor(EIGHTH_STEM), MicroButtonFor(NINTH_STEM), launcherButton,
     MicroButtonFor("MainMenu"), (MicroButtonFor("Help")),
 }
 
@@ -1282,6 +1297,300 @@ local function SetupPVPButton(button)
     button.HandleAddicatUIState()
 end
 
+-- ============================================================================
+-- ADDON LAUNCHER (launcherButton and its flyout)
+-- ============================================================================
+-- spec = { id, title, description, icon, entries = { { title, description, binding, icon, open, isOpen } } }
+-- icon = { file, coords = { left, right, top, bottom }, color = { r, g, b } }; the owner's callbacks run in pcall.
+
+local launcher
+local launcherFlyout
+local LAUNCHER_CHROME = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\Micromenu\\uimicromenu2x'
+local FLYOUT_ROW, FLYOUT_ICON, FLYOUT_PAD_X, FLYOUT_PAD_Y, FLYOUT_MIN_WIDTH, FLYOUT_GAP = 22, 16, 12, 10, 150, 4
+
+local function CallLauncher(fn, ...)
+    if type(fn) ~= "function" then return nil end
+    local ok, result = pcall(fn, ...)
+    if not ok then
+        geterrorhandler()(result)
+        return nil
+    end
+    return result
+end
+
+local function PaintLauncherIcon(texture, icon, gray)
+    local c = icon and icon.coords
+    if not (icon and type(icon.file) == "string" and c) then
+        texture:SetTexture(nil)
+        return
+    end
+    texture:SetTexture(icon.file)
+    texture:SetTexCoord(c[1] or 0, c[2] or 1, c[3] or 0, c[4] or 1)
+    local color = icon.color
+    if gray then
+        texture:SetVertexColor(0.8, 0.8, 0.8)
+    elseif color then
+        texture:SetVertexColor(color[1] or 1, color[2] or 1, color[3] or 1)
+    else
+        texture:SetVertexColor(1, 1, 1)
+    end
+    texture:SetDesaturated(gray and true or false)
+end
+
+-- What every stock micro button shows: the name with its key in brackets, then the newbie line.
+local function ShowLauncherTooltip(owner, title, binding, description)
+    local text = title or ""
+    if binding and MicroButtonTooltipText then text = MicroButtonTooltipText(text, binding) end
+    GameTooltip_AddNewbieTip(owner, text, 1.0, 1.0, 1.0, description)
+end
+
+local function BindingLabel(binding)
+    local key = binding and GetBindingKey(binding)
+    if not key then return nil end
+    if GetBindingText then return GetBindingText(key, "KEY_", 1) end
+    return key
+end
+
+local function LayoutFlyout(flyout)
+    local entries = (launcher and launcher.entries) or {}
+    flyout.title:SetText(launcher and launcher.title or "")
+    local width = flyout.title:GetStringWidth() + 8
+    local y = FLYOUT_PAD_Y + FLYOUT_ROW
+    for index, entry in ipairs(entries) do
+        local row = flyout.rows[index] or flyout.NewRow(index)
+        row.entry = entry
+        PaintLauncherIcon(row.icon, entry.icon, false)
+        row.text:SetText(entry.title or "")
+        local key = BindingLabel(entry.binding)
+        row.detail:SetText(key or "")
+        row.text:SetPoint("RIGHT", key and row.detail or row, key and "LEFT" or "RIGHT", key and -12 or 0, 0)
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", flyout, "TOPLEFT", FLYOUT_PAD_X, -y)
+        row:SetPoint("RIGHT", flyout, "RIGHT", -FLYOUT_PAD_X, 0)
+        row:UnlockHighlight()
+        if CallLauncher(entry.isOpen) then row:LockHighlight() end
+        row:Show()
+        local w = FLYOUT_ICON + 6 + row.text:GetStringWidth() + 8
+        if key then w = w + 12 + row.detail:GetStringWidth() end
+        width = math.max(width, w)
+        y = y + FLYOUT_ROW
+    end
+    for index = #entries + 1, #flyout.rows do flyout.rows[index]:Hide() end
+    flyout:SetSize(math.max(FLYOUT_MIN_WIDTH, width) + FLYOUT_PAD_X * 2, y + FLYOUT_PAD_Y)
+end
+
+-- Opens away from the screen edge the button is nearest to, like the strip's own LFG tooltip.
+local function PlaceFlyout(flyout)
+    flyout:ClearAllPoints()
+    local x, y = launcherButton:GetCenter()
+    local ux, uy = UIParent:GetCenter()
+    local scale = launcherButton:GetEffectiveScale() / UIParent:GetEffectiveScale()
+    local below = y and uy and y * scale > uy
+    local leftward = x and ux and x * scale > ux
+    local horizontal = leftward and "RIGHT" or "LEFT"
+    if below then
+        flyout:SetPoint("TOP" .. horizontal, launcherButton, "BOTTOM" .. horizontal, 0, -FLYOUT_GAP)
+    else
+        flyout:SetPoint("BOTTOM" .. horizontal, launcherButton, "TOP" .. horizontal, 0, FLYOUT_GAP)
+    end
+end
+
+local function EnsureFlyout()
+    if launcherFlyout then return launcherFlyout end
+    local flyout = CreateFrame("Frame", "AddicatUI_LauncherFlyout", UIParent)
+    flyout:SetFrameStrata("DIALOG")
+    flyout:SetClampedToScreen(true)
+    flyout:EnableMouse(true)
+    flyout:Hide()
+    local forever = addon.ForeverUI
+    if forever and forever.SkinMenuBackground then
+        forever.SkinMenuBackground(flyout, "bg")
+    else
+        flyout:SetBackdrop({
+            bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+            edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+            tile = true, tileSize = 16, edgeSize = 16,
+            insets = { left = 5, right = 5, top = 5, bottom = 5 },
+        })
+        flyout:SetBackdropColor(0.05, 0.05, 0.05, 0.95)
+        flyout:SetBackdropBorderColor(0.5, 0.5, 0.5)
+    end
+
+    flyout.title = flyout:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    flyout.title:SetPoint("TOPLEFT", flyout, "TOPLEFT", FLYOUT_PAD_X + 2, -FLYOUT_PAD_Y - 4)
+    flyout.rows = {}
+
+    function flyout.NewRow(index)
+        local row = CreateFrame("Button", nil, flyout)
+        row:SetHeight(FLYOUT_ROW)
+        local highlight = row:CreateTexture(nil, "BACKGROUND")
+        highlight:SetTexture("Interface\\QuestFrame\\UI-QuestTitleHighlight")
+        highlight:SetBlendMode("ADD")
+        highlight:SetAllPoints(row)
+        row:SetHighlightTexture(highlight)
+        row.icon = row:CreateTexture(nil, "ARTWORK")
+        row.icon:SetSize(FLYOUT_ICON, FLYOUT_ICON)
+        row.icon:SetPoint("LEFT", row, "LEFT", 2, 0)
+        row.text = row:CreateFontString(nil, "ARTWORK", "GameFontHighlight")
+        row.text:SetJustifyH("LEFT")
+        row.text:SetPoint("LEFT", row.icon, "RIGHT", 6, 0)
+        row.detail = row:CreateFontString(nil, "ARTWORK", "GameFontDisableSmall")
+        row.detail:SetJustifyH("RIGHT")
+        row.detail:SetPoint("RIGHT", row, "RIGHT", 0, 0)
+        row:RegisterForClicks("LeftButtonUp")
+        row:SetScript("OnClick", function(self)
+            PlaySound("igMainMenuOptionCheckBoxOn")
+            flyout:Hide()
+            CallLauncher(self.entry and self.entry.open)
+        end)
+        row:SetScript("OnEnter", function(self)
+            local entry = self.entry
+            if entry then ShowLauncherTooltip(self, entry.title, entry.binding, entry.description) end
+        end)
+        row:SetScript("OnLeave", function() GameTooltip:Hide() end)
+        flyout.rows[index] = row
+        return row
+    end
+
+    -- Closed by a press anywhere else (the button toggles it itself), by Escape, or with the strip.
+    flyout:SetScript("OnUpdate", function(self)
+        if not launcherButton:IsVisible() then
+            self:Hide()
+            return
+        end
+        local down = IsMouseButtonDown() and true or false
+        local fresh = down and not self.wasDown
+        self.wasDown = down
+        if fresh and not self:IsMouseOver() and not launcherButton:IsMouseOver() then
+            self:Hide()
+        end
+    end)
+    flyout:SetScript("OnShow", function(self)
+        self.wasDown = IsMouseButtonDown() and true or false
+        ApplyMicroButtonPushed(launcherButton, true)
+    end)
+    flyout:SetScript("OnHide", function()
+        ApplyMicroButtonPushed(launcherButton, false)
+    end)
+    if UISpecialFrames then tinsert(UISpecialFrames, "AddicatUI_LauncherFlyout") end
+    launcherFlyout = flyout
+    return flyout
+end
+
+local function ToggleLauncherFlyout()
+    local flyout = EnsureFlyout()
+    if flyout:IsShown() then
+        flyout:Hide()
+        PlaySound("igMainMenuClose")
+        return
+    end
+    if GameTooltip:IsOwned(launcherButton) then GameTooltip:Hide() end
+    LayoutFlyout(flyout)
+    PlaceFlyout(flyout)
+    flyout:Show()
+    PlaySound("igMainMenuOpen")
+end
+
+launcherButton:SetScript("OnClick", ToggleLauncherFlyout)
+launcherButton:SetScript("OnEnter", function(self)
+    if launcherFlyout and launcherFlyout:IsShown() then return end
+    if launcher then ShowLauncherTooltip(self, launcher.title, nil, launcher.description) end
+end)
+launcherButton:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+-- The skin pass for the launcher: chrome like its neighbours, the owner's glyph as its own ARTWORK texture
+-- (the PVP button's pattern), the glyph again as the additive highlight; pushed while the flyout is open.
+local function SetupLauncherButton(button, useGrayscale)
+    local icon = launcher and launcher.icon
+    local offX, offY = button:GetPushedTextOffset()
+    offX, offY = offX or 0, offY or 0
+    local sizeX, sizeY = button:GetSize()
+    local glyphSize = useGrayscale and 12 or 20
+
+    local glyph = button.AddicatUILauncherIcon or button:CreateTexture(nil, "ARTWORK")
+    button.AddicatUILauncherIcon = glyph
+    PaintLauncherIcon(glyph, icon, useGrayscale)
+    glyph:SetSize(glyphSize, glyphSize)
+    glyph:Show()
+
+    local highlight = button:GetHighlightTexture()
+    if highlight then
+        PaintLauncherIcon(highlight, icon, useGrayscale)
+        highlight:ClearAllPoints()
+        highlight:SetSize(glyphSize, glyphSize)
+        highlight:SetPoint("CENTER", glyph, "CENTER", 0, 0)
+    end
+
+    if useGrayscale then
+        if button.AddicatUIBackground then button.AddicatUIBackground:Hide() end
+        if button.AddicatUIBackgroundPushed then button.AddicatUIBackgroundPushed:Hide() end
+    else
+        local bg = button.AddicatUIBackground or button:CreateTexture(nil, 'BACKGROUND')
+        button.AddicatUIBackground = bg
+        bg:SetTexture(LAUNCHER_CHROME)
+        bg:SetTexCoord(0.0654297, 0.12793, 0.330078, 0.490234)
+        bg:ClearAllPoints()
+        bg:SetSize(sizeX, sizeY + 1)
+        bg:SetPoint('CENTER', -1, 1)
+        local bgPushed = button.AddicatUIBackgroundPushed or button:CreateTexture(nil, 'BACKGROUND')
+        button.AddicatUIBackgroundPushed = bgPushed
+        bgPushed:SetTexture(LAUNCHER_CHROME)
+        bgPushed:SetTexCoord(0.0654297, 0.12793, 0.494141, 0.654297)
+        bgPushed:ClearAllPoints()
+        bgPushed:SetSize(sizeX, sizeY + 1)
+        bgPushed:SetPoint('CENTER', -1 + offX, 1 + offY)
+    end
+
+    local open = launcherFlyout and launcherFlyout:IsShown() and true or false
+    button.addicatUIState = button.addicatUIState or {}
+    button.addicatUIState.pushed = open
+    button.addicatUILastState = open
+    button.HandleAddicatUIState = function()
+        local pushed = button.addicatUIState and button.addicatUIState.pushed
+        glyph:ClearAllPoints()
+        glyph:SetPoint('CENTER', button, 'CENTER', pushed and offX or 0, (pushed and offY or 0) + 1)
+        glyph:SetAlpha(pushed and 0.75 or 1)
+        if not useGrayscale then
+            if pushed then
+                button.AddicatUIBackground:Hide()
+                button.AddicatUIBackgroundPushed:Show()
+            else
+                button.AddicatUIBackground:Show()
+                button.AddicatUIBackgroundPushed:Hide()
+            end
+        end
+    end
+    button.HandleAddicatUIState()
+
+    if not button.AddicatUIStateHooks then
+        button:HookScript('OnMouseDown', function(self)
+            ApplyMicroButtonPushed(self, true)
+        end)
+        button:HookScript('OnMouseUp', function(self)
+            ApplyMicroButtonPushed(self, launcherFlyout and launcherFlyout:IsShown() and true or false)
+        end)
+        button.AddicatUIStateHooks = true
+    end
+
+    -- Hovering it reveals a hover-faded strip like its neighbours (mainbars lists the stock names only).
+    -- The flyout stays out of that list: a fade must never turn its mouse off while it is open.
+    if addon.VisibilityFade and addon.VisibilityFade.AddHoverFrames then
+        addon.VisibilityFade.AddHoverFrames("micro", { button })
+    end
+end
+
+-- Shown only with a launcher registered and the option on (micromenu.show_launcher).
+local function SyncLauncherSuppression()
+    local mm = addon.db and addon.db.profile and addon.db.profile.micromenu
+    local wanted = launcher ~= nil and not (mm and mm.show_launcher == false)
+    launcherButton.addicatUISuppressed = (not wanted) or nil
+    if not wanted then
+        if launcherFlyout then launcherFlyout:Hide() end
+        launcherButton:Hide()
+    end
+    return wanted
+end
+
 local function SetupCharacterButton(button)
     -- STEP 1: Use Blizzard's native portrait
     local portraitTexture = MicroButtonPortrait
@@ -1803,6 +2112,7 @@ end
 -- addicatUISuppressed marks a button whose own module has been switched off. Skipping it here as well
 -- as in the skin pass is what closes the gap it would otherwise leave in the strip.
 local function CollectPresentMicroButtons()
+    SyncLauncherSuppression()
     local list = {}
     for i = 1, #MICRO_BUTTONS do
         if MICRO_BUTTONS[i] and not MICRO_BUTTONS[i].addicatUISuppressed then
@@ -2024,7 +2334,9 @@ local function layoutMicroButtons(xOffset)
             local upCoords = not isCharacterButton and not isPVPButton and GetColoredTextureCoords(name, "Up") or nil
             local shouldUseGrayscale = useGrayscale or (not isPVPButton and not upCoords and not isCharacterButton)
 
-            if shouldUseGrayscale then
+            if button == launcherButton then
+                SetupLauncherButton(button, useGrayscale)
+            elseif shouldUseGrayscale then
                 -- Grayscale icons
                 local normalTexture = button:GetNormalTexture()
                 local pushedTexture = button:GetPushedTexture()
@@ -2426,6 +2738,35 @@ function addon.RefreshMicromenuButtons()
     end
     layoutMicroButtons(HasCollectionsButton() and -180 or -166)
     addon.RefreshMicromenu()
+end
+
+-- The micro menu option, a profile switch or a late registration: in or out of the strip, skinned when back.
+function addon.RefreshMicroMenuLauncher(live)
+    if not SyncLauncherSuppression() then
+        if addon.RefreshMicromenu then addon.RefreshMicromenu() end
+    elseif live and IsLoggedIn() then
+        addon.RefreshMicromenuButtons()
+    end
+end
+
+-- Another addon's launcher (Bleakhold's); one at a time, a second id replaces the first. Returns true when taken.
+function addon.RegisterMicroMenuLauncher(spec)
+    if type(spec) ~= "table" or type(spec.entries) ~= "table" then
+        return false
+    end
+    launcher = spec
+    if launcherFlyout then launcherFlyout:Hide() end
+    -- Before login the first skin pass picks it up; after it, combat has to end first.
+    if IsLoggedIn() then
+        if InCombatLockdown() and addon.CombatQueue then
+            addon.CombatQueue:Add("micromenu_launcher", function() addon.RefreshMicroMenuLauncher(true) end)
+        else
+            addon.RefreshMicroMenuLauncher(true)
+        end
+    else
+        SyncLauncherSuppression()
+    end
+    return true
 end
 
 function addon.RefreshBags()

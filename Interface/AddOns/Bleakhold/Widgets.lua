@@ -129,19 +129,30 @@ function UI.SetColor(fs, hex)
     fs:SetTextColor(UI.Rgb(hex))
 end
 
-function UI.SetGlyph(t, name)
-    local i = GLYPH_INDEX[name] or GLYPH_INDEX.dot
+-- left, right, top, bottom of cell i (0-based) of an 8 x 4 atlas.
+local function cellCoords(i)
     local c, r = i % 8, floor(i / 8)
+    return c / 8, (c + 1) / 8, r / 4, (r + 1) / 4
+end
+
+-- The texture and texcoords of a glyph, for frames that draw it themselves (AddicatUI's micro menu).
+function UI.GlyphArt(name)
+    return UI.ART .. "Glyphs", cellCoords(GLYPH_INDEX[name] or GLYPH_INDEX.dot)
+end
+
+function UI.EmoteGlyphArt(name)
+    return UI.ART .. "Emotes", cellCoords(EMOTE_INDEX[name] or EMOTE_INDEX.music)
+end
+
+function UI.SetGlyph(t, name)
     t:SetTexture(UI.ART .. "Glyphs")
-    t:SetTexCoord(c / 8, (c + 1) / 8, r / 4, (r + 1) / 4)
+    t:SetTexCoord(cellCoords(GLYPH_INDEX[name] or GLYPH_INDEX.dot))
 end
 
 -- An emote glyph; unknown names show the music note.
 function UI.SetEmoteGlyph(t, name)
-    local i = EMOTE_INDEX[name] or EMOTE_INDEX.music
-    local c, r = i % 8, floor(i / 8)
     t:SetTexture(UI.ART .. "Emotes")
-    t:SetTexCoord(c / 8, (c + 1) / 8, r / 4, (r + 1) / 4)
+    t:SetTexCoord(cellCoords(EMOTE_INDEX[name] or EMOTE_INDEX.music))
 end
 
 function UI.Glyph(parent, name, size, color, layer)
@@ -419,6 +430,44 @@ function UI.MakeMovable(f, handle)
         f:StopMovingOrSizing()
         savePosition(f)
     end)
+end
+
+-- Where the top edge of `region` sits, as a SetPoint against UIParent from the nearest third of the screen
+-- (left, middle or right): a frame that grows downwards keeps its top, and a spot near a screen edge stays
+-- there at another resolution. Returns point, relPoint, x, y (whole pixels), or nil before it has a place.
+function UI.TopAnchorOf(region)
+    local l, r, t = region:GetLeft(), region:GetRight(), region:GetTop()
+    local ul, ur, ut = UIParent:GetLeft(), UIParent:GetRight(), UIParent:GetTop()
+    if not (l and r and t and ul and ur and ut) or ur <= ul then
+        return nil
+    end
+    local ratio = (region:GetEffectiveScale() or 1) / (UIParent:GetEffectiveScale() or 1)
+    l, r, t = l * ratio, r * ratio, t * ratio
+    local third = (ur - ul) / 3
+    local cx = (l + r) / 2
+    local point, x
+    if cx < ul + third then
+        point, x = "TOPLEFT", l - ul
+    elseif cx > ur - third then
+        point, x = "TOPRIGHT", r - ur
+    else
+        point, x = "TOP", cx - (ul + ur) / 2
+    end
+    return point, point, floor(x + 0.5), floor(t - ut + 0.5)
+end
+
+-- Frames other addons may move for Bleakhold (AddicatUI's editor mode, Integration.lua). Bleakhold keeps
+-- the saved position: a mover moves its frame and stores the spot in BleakholdCharDB itself.
+--   name, title, frame          unique key, label, the frame the editor outlines
+--   begin(), finish()           editor opened (show the frame, sample content when idle) / closed
+--   move(region, done)          follow `region` (a UIParent child over the frame); done = dropped, save it
+--   reset(), isDefault()        forget the saved spot / true when there is none
+--   visible()                   false keeps the frame out of the editor
+ns.Movers = {}
+
+function UI.AddMover(m)
+    ns.Movers[#ns.Movers + 1] = m
+    return m
 end
 
 UI.windows = {}

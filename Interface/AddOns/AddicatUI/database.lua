@@ -438,6 +438,7 @@ local defaults = {
             bags_collapsed = false,
             grayscale_icons = false,
             show_latency_indicator = true,
+            show_launcher = true, -- the Bleakhold button (shown only while Bleakhold registers its launcher)
 
             -- Grayscale icons configuration
             grayscale = {
