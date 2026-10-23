@@ -291,6 +291,25 @@ void BATCHEDRENDERFONTDESC::RenderBatch() {
         return;
     }
 
+    // BLEAKHOLD(glyphfix): rebuild the strings whose texture page was evicted before anything is drawn. Rebuilding
+    // one can evict a page another string uses, so repeat for the strings flagged again, up to four passes.
+    for (uint32_t pass = 0; pass < 4; pass++) {
+        int32_t evicted = 0;
+
+        for (CGxString* string = this->m_strings.Head(); string; string = this->m_strings.Next(string)) {
+            if (pass && !string->m_textureEvicted) {
+                continue;
+            }
+
+            evicted |= string->m_textureEvicted;
+            string->CheckGeometry();
+        }
+
+        if (!evicted) {
+            break;
+        }
+    }
+
     for (CGxString* string = this->m_strings.Head(); string; string = this->m_strings.Next(string)) {
         string->CheckGeometry();
     }
@@ -421,6 +440,26 @@ void TEXTURECACHEROW::EvictGlyph(CHARCODEDESC* desc) {
 // OFFSET: 0x006C5120
 CHARCODEDESC* TEXTURECACHEROW::CreateNewDesc(GLYPHBITMAPDATA* data, uint32_t rowNumber, uint32_t cellHeight) {
     uint32_t width = data->m_glyphCellWidth;
+
+    // BLEAKHOLD(glyphfix): m_widestFreeSlot goes stale as glyphs come and go, so a row could refuse a glyph it has
+    // room for or take one it has not. Recompute it from the glyph list (sorted by pixel): the gap before the first
+    // glyph, the gaps between glyphs and the gap after the last one up to the row's 256 pixels.
+    uint32_t widest = 0;
+    uint32_t firstFree = 0;
+
+    for (CHARCODEDESC* glyph = this->m_glyphlist.Head(); glyph; glyph = this->m_glyphlist.Next(glyph)) {
+        if (glyph->m_glyphStartPixel > firstFree && glyph->m_glyphStartPixel - firstFree > widest) {
+            widest = glyph->m_glyphStartPixel - firstFree;
+        }
+
+        firstFree = glyph->m_glyphEndPixel + 1;
+    }
+
+    if (firstFree < 256 && 256 - firstFree > widest) {
+        widest = 256 - firstFree;
+    }
+
+    this->m_widestFreeSlot = widest;
 
     if (this->m_widestFreeSlot < width) {
         return nullptr;

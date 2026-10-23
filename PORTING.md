@@ -22,12 +22,13 @@ Status: [ ] todo  [x] done  [-] not needed
 | [x] sliders | higher graphics slider max | GlueScriptEvents_Scripts.cpp + GameUI_Scripts.cpp — `Script_GetCVarMax` |
 | [x] goscale | GameObject cat 0/4 view dist scales w/ envDetail | WorldScene.cpp — `CWorldScene::ScaleFadeDist` |
 | [x] hdportraits | portraits 256px instead of 64 (render-target path; CPU fallback stays 64) | PortraitButton.cpp (`RTAlphaSupported` area) |
-| [ ] iconsnap | sharp inline icons | GxuFontUtil.cpp — `ParseEmbeddedTexture` |
-| [ ] glyphfix | garbled font glyphs | GxuFontMiscClasses.cpp — `RenderBatch`, `TEXTURECACHEROW::CreateNewDesc` |
+| [x] iconsnap | sharp inline icons (size and offset snapped to whole pixels) | GxuFontUtil.cpp — `ParseEmbeddedTexture` |
+| [x] glyphfix | garbled font glyphs | GxuFontMiscClasses.cpp — `RenderBatch`, `TEXTURECACHEROW::CreateNewDesc`; GxuFontString.cpp — `ClearInstanceData`, `CheckGeometry`; GxuFontTextureCache.cpp — `TextureCallback` |
 | [x] occluder | Stormwind occluder fix | occluder table (World/Map code) |
 | [x] bluemoon | blue moon in sky | data table @ 0x9D07C0 |
 | [x] notransparency | no char fade on zoom-in | Unit_C.cpp — `CGUnit_C::SetMaxAlpha` |
-| [ ] **CUSTOM lght** (side table of 4 extra point lights per M2 + 5 lights for map chunks, uploaded to VS constants c236+; only works with matching custom shaders) | more dynamic lights (new `.lght` section, light arrays enlarged) | CGxDevice.cpp (`InitLights`, `Light`, `LightEnable`, `LightSet`), CGxDeviceD3d/D3d9Ex/OpenGl `IStateSyncLights`, GxuLight.cpp, MapObj.cpp (`SetRenderModeLight`, `SetupLighting`), MapRenderChunk.cpp `SetVertexShader`, M2Scene.cpp `SelectLights`, M2Light.cpp (`AddLight`, `CameraSpace`, `SetupGxLights`), ShaderEffect.cpp `SetLocalLighting` |
+| [x] lights, part A | fixed-function lighting takes the nearest three point lights (stock dropped the nearest of four) | M2Light.cpp — `SetupGxLights` |
+| [-] **CUSTOM lght** (side table of 4 extra point lights per M2 + 5 lights for map chunks, uploaded to VS constants c236+; only works with matching custom shaders) | more dynamic lights (new `.lght` section, light arrays enlarged). Not ported: nothing shows without the WoW-lights-patch-shader MPQ, which Bleakhold does not ship, and its VS constants c236–c250 are taken by grass wind (c240–c248) and BleakFx (c250) | CGxDevice.cpp (`InitLights`, `Light`, `LightEnable`, `LightSet`), CGxDeviceD3d/D3d9Ex/OpenGl `IStateSyncLights`, GxuLight.cpp, MapObj.cpp (`SetRenderModeLight`, `SetupLighting`), MapRenderChunk.cpp `SetVertexShader`, M2Scene.cpp `SelectLights`, M2Light.cpp (`AddLight`, `CameraSpace`, `SetupGxLights`), ShaderEffect.cpp `SetLocalLighting` |
 
 ## 2. Custom (not from St0ny)
 | Patch | What | Source |
@@ -62,7 +63,7 @@ Status: [ ] todo  [x] done  [-] not needed
 |---|---|---|
 | [x] itemcache | refresh item cache immediately | DanceCache.cpp area (0x6695FD) |
 | [x] timer | always precise timer | Win64/TimeManager.cpp — `Calibrate` |
-| [x] mirrorfix | Mirror Image leak/crash | Unit_C.cpp — `OnReceiveMirrorImageDataFromServer` |
+| [x] mirrorfix | Mirror Image leak/crash (both component allocations) | Unit_C.cpp — `OnReceiveMirrorImageDataFromServer` |
 | [x] wmocube | missing WMO → error cube, not #134 | Map.cpp — `CMap::SafeOpen` |
 | [x] areatrigger | 50 ms area trigger check | Player_C.cpp — `AreaTriggerCheck` |
 | [x] swing (already in decomp) | no swing on right-click | Player_C.cpp — `MeleeModeEnter` |
@@ -83,7 +84,7 @@ Status: [ ] todo  [x] done  [-] not needed
 | [x] bubblerange | chat bubble range 50 yd | ChatBubbleFrame.cpp `Update`, Unit_C.cpp `ChatBubbleShow` |
 | [x] window / maximize | windowed + maximized default | ConsoleDevice_CVar.cpp — `RegisterGxCVars` |
 | [x] windowfix (already in decomp) | no black screen to windowed | Client_CVar.cpp — `DesktopGammaCallback` |
-| [ ] mouse | mouse flicker / camera jump | Win64/Input.cpp — `DispatchMouseButtonChanges`, `CenterMouse`, `OsWindowProc` |
+| [x] mouse (upstream, 5b41f72) | mouse flicker / camera jump | Win32/Win64 Input.cpp — cursor anchor for relative mouse mode |
 | [x] sound | optimized sound settings | SoundInterface2.cpp `Init`, SoundInterface2_CVar.cpp |
 
 ## 6. Security / login
@@ -96,9 +97,6 @@ Status: [ ] todo  [x] done  [-] not needed
 | [x] nohttp | no HTTP to Battle.net | Win64/OsURLDownload.cpp — `DownloadString` |
 
 ## Still open
-- mouse (CenterMouse rewrite + OsWindowProc cursor tracking)
-- glyphfix, iconsnap (font cache hooks)
-- CUSTOM lght (needs the custom shader MPQ it was built for)
 - connect the server's own Mythic+, Dungeon Journey, Eclipse Rift and task systems to Server/mod-bleakhold-ui (src/BleakholdUi.h)
 - server code for the new races: taxi nodes, race/faction change, costume auras, racial riding trainers (an AzerothCore module)
 - HD High Elf and Eredar models (palettized skins, geoset remap, 512 composite)
