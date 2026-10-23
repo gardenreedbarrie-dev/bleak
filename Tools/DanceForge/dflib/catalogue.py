@@ -243,7 +243,7 @@ def render_music_readme(cat, built):
         lines.append("%-4d %-22s %-24s %6g %8.2f" % (d["id"], d["key"], d["name"], dance.bpm,
                                                     loop_ms(dance, fps) / 1000.0))
     lines.append("")
-    return "\r\n".join(lines)
+    return "\n".join(lines)
 
 
 def outputs(repo, cat, built):
