@@ -6,6 +6,7 @@
 #   4. lint the addon, and self-test the linter on a broken addon
 #   5. run the Lua unit tests against the WoW API mock
 #   6. run the glue (login and character creation) scenarios against the glue API mock
+#   7. compile every AddicatUI and AddicatUI_Options Lua file with the client's Lua 5.1
 #
 #   Tools/UiLint/check.sh            (exit code 0 = all clean)
 set -euo pipefail
@@ -42,3 +43,6 @@ echo "== tests"
 echo "== glue"
 "$build/wowlua" -p "$root"/Interface/Bleakhold/Glue/*.lua
 "$here/glue/run.sh" "$build/wowlua"
+
+echo "== AddicatUI"
+python3 -I "$here/aui_syntax.py" "$build/wowlua" "$root/Interface/AddOns" "$build/aui-syntax"
