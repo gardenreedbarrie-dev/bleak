@@ -4,14 +4,7 @@ import math
 
 from dflib.choreo import Dance, bounce
 
-from moves import arms_fk, feet, groove, hands, hips, merge, sway, STANCE, WIDE, ANKLE_Z
-
-
-def _toe_lift(pitch):
-    """How far the ankle rises when the foot tips toes-down by `pitch` degrees with the ball of the foot staying on
-    the ground (in the rest pose the ball is 0.21 in front of the ankle and 0.085 below it)."""
-    p = math.radians(pitch)
-    return 0.085 * math.cos(p) + 0.21 * math.sin(p) - 0.085
+from moves import arms_fk, feet, groove, hands, hips, merge, sway, toe_lift, STANCE, WIDE, ANKLE_Z
 
 
 def _mix(a, b, w):
@@ -328,7 +321,7 @@ def bunny_hop():
 
     def both_feet(x, z=None, pitch=0.0):
         # on the ground the heels come up with the pitch, the balls of the feet stay down
-        z = ANKLE_Z + _toe_lift(pitch) if z is None else z
+        z = ANKLE_Z + toe_lift(pitch) if z is None else z
         return merge(feet(width, x_l=x, x_r=x, z_l=z, z_r=z), foot_pitch_l=pitch, foot_pitch_r=pitch)
 
     def hop(land, x_from, x_to, height, rise, toes):
@@ -558,7 +551,7 @@ def jumping_jacks():
         mid = 0.5 * (w_from + w_to)
         d.key((land - 0.42) % 8.0, ease="inout", **merge(feet(w_from), hips(x=0.0, z=-0.12, pitch=0.0),
                                                          foot_pitch_l=0.0, foot_pitch_r=0.0))
-        toes = ANKLE_Z + _toe_lift(15.0)
+        toes = ANKLE_Z + toe_lift(15.0)
         d.key((land - 0.32) % 8.0, ease="in", **merge(feet(w_from, z_l=toes, z_r=toes), hips(x=0.0, z=-0.02, pitch=0.0),
                                                       foot_pitch_l=15.0, foot_pitch_r=15.0))
         d.key((land - 0.16) % 8.0, ease="out", **merge(feet(mid, z_l=ANKLE_Z + 0.11, z_r=ANKLE_Z + 0.11),
@@ -644,7 +637,7 @@ def boxer_bounce():
     punch(6.5, "cross")
     d.key(6.9, ease="inout", **body)
     # on the balls of the feet, left foot forward
-    balls = ANKLE_Z + _toe_lift(14.0)
+    balls = ANKLE_Z + toe_lift(14.0)
     d.key(0, **merge(feet(STANCE, x_l=0.12, x_r=-0.10, z_l=balls, z_r=balls),
                      foot_pitch_l=14.0, foot_pitch_r=14.0, toe_l=14.0, toe_r=14.0, foot_yaw_l=-10.0,
                      foot_yaw_r=-30.0, knee_l=(1.0, 0.0, 0.0), knee_r=(0.8, -0.5, 0.0)))

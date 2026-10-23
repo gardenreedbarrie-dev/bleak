@@ -10,6 +10,13 @@ STANCE = 0.13          # a relaxed dance stance, a little wider than the rest po
 WIDE = 0.2
 
 
+def toe_lift(pitch):
+    """How far the ankle rises when the foot tips toes-down by `pitch` degrees with the ball of the foot staying on
+    the ground (in the rest pose the ball is 0.21 in front of the ankle and 0.085 below it)."""
+    p = math.radians(pitch)
+    return 0.085 * math.cos(p) + 0.21 * math.sin(p) - 0.085
+
+
 def feet(width=STANCE, x_l=0.0, x_r=0.0, z_l=ANKLE_Z, z_r=ANKLE_Z):
     return {"foot_l": (x_l, width, z_l), "foot_r": (x_r, -width, z_r)}
 

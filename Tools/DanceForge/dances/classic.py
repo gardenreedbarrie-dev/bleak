@@ -417,7 +417,7 @@ def tango_strut():
     d.key(6.4, ease="linear", **merge(
         {"foot_l": (-0.10, 0.03, 0.54), "foot_pitch_l": 50.0, "toe_l": 0.0, "knee_l": (1.0, 0.25, -0.5),
          "foot_yaw_l": 0.0}, body(-0.05, -0.08, 12.0, 10.0, roll=-3.0, hy=-0.035)))
-    d.key(7.25, ease="inout", **merge(ft("l", -0.02, ANKLE_Z + 0.03, 15.0), body(-0.02, -0.11, 2.0, -2.0)))
+    d.key(7.25, ease="inout", **merge(ft("l", -0.02, _ball_z(15.0), 15.0), body(-0.02, -0.11, 2.0, -2.0)))
     d.key(7.25, ease="inout", **ft("r", 0.0))
     # the frame: the left arm out holding the partner's hand, the right arm round the partner's back
     frame = merge(hands((0.22, 0.60, 0.22), (0.36, -0.28, 0.10), (-0.2, 1.0, -0.7), (-0.3, -1.0, 0.3)),
@@ -464,7 +464,7 @@ def mashed_potato():
             "foot_" + kick: _swivel(-_peel(up), w * mk, 22.0 * mk)[:2] + (_ball_z(up),),
             "foot_pitch_" + kick: up, "toe_" + kick: up, "foot_yaw_" + kick: 22.0 * mk, "knee_" + kick: _yaw(25.0 * mk),
             "foot_" + sup: _swivel(-_peel(up), w * ms, 22.0 * ms)[:2] + (_ball_z(up),),
-            "foot_yaw_" + sup: 22.0 * ms, "knee_" + sup: _yaw(25.0 * ms)})
+            "foot_pitch_" + sup: up, "toe_" + sup: up, "foot_yaw_" + sup: 22.0 * ms, "knee_" + sup: _yaw(25.0 * ms)})
         d.key(b, ease="in", **merge(hips(y=0.03 * ms, z=-0.11, roll=-4.0 * ms, pitch=6.0), spine_side=4.0 * ms,
                                     spine_bend=8.0, spine_twist=-8.0 * mk))
         d.key(b + 0.5, ease="out", **merge(hips(y=0.0, z=-0.05, roll=0.0, pitch=4.0), spine_side=0.0,

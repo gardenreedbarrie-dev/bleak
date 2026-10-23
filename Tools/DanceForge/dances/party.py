@@ -4,7 +4,7 @@ import math
 
 from dflib.choreo import Dance
 
-from moves import arms_fk, feet, groove, hands, hips, merge, sway, STANCE, ANKLE_Z
+from moves import arms_fk, feet, groove, hands, hips, merge, sway, toe_lift, STANCE, ANKLE_Z
 
 
 def string_swing():
@@ -37,6 +37,7 @@ def running_man():
     down on every step."""
     d = Dance(bpm=108, beats=4)
     up_z, back_x = 0.36, -0.24
+    back_z = ANKLE_Z + toe_lift(18.0)   # the foot that slides back rides on its ball, heel up
     for k in range(4):
         b = float(k)
         left = k % 2 == 0
@@ -49,10 +50,11 @@ def running_man():
             "foot_pitch_" + lift: 28.0, "foot_pitch_" + plant: 0.0, "toe_" + plant: 0.0})
         # and: the knee steps down in front while the planted foot slides back
         d.key(b + 0.5, ease="in", **{
-            "foot_" + lift: (0.02, sl * STANCE, ANKLE_Z), "foot_" + plant: (back_x, -sl * STANCE, ANKLE_Z + 0.02),
+            "foot_" + lift: (0.02, sl * STANCE, ANKLE_Z), "foot_" + plant: (back_x, -sl * STANCE, back_z),
             "foot_pitch_" + lift: 0.0, "foot_pitch_" + plant: 18.0, "toe_" + plant: 25.0})
         d.key(b, ease="out", **merge(hips(z=-0.02, x=0.02, pitch=4.0), spine_bend=6.0,
-                                     **hands((0.32, 0.22, 0.02), (0.32, -0.22, 0.02), (-1.0, 0.5, -0.3), (-1.0, -0.5, -0.3))))
+                                     **hands((0.32, 0.22, 0.02), (0.32, -0.22, 0.02),
+                                             (-1.0, 0.5, -0.3), (-1.0, -0.5, -0.3))))
         d.key(b + 0.5, ease="in", **merge(hips(z=-0.10, x=0.0, pitch=8.0), spine_bend=12.0,
                                           **hands((0.30, 0.20, -0.18), (0.30, -0.20, -0.18))))
         d.key(b, wrist_l=(20.0, 0.0, 0.0), wrist_r=(20.0, 0.0, 0.0))
@@ -106,7 +108,8 @@ def twist():
             foot_yaw_l=28.0 * side + 6.0, foot_yaw_r=28.0 * side - 6.0,
             **hands((0.26 + 0.1 * side, 0.30, -0.12), (0.26 - 0.1 * side, -0.30, -0.12),
                     (-0.6, 1.0, -0.4), (-0.6, -1.0, -0.4))))
-    d.key(0, **feet(STANCE + 0.04, z_l=ANKLE_Z + 0.035, z_r=ANKLE_Z + 0.035))
+    balls = ANKLE_Z + toe_lift(22.0)
+    d.key(0, **feet(STANCE + 0.04, z_l=balls, z_r=balls))
     d.key(0, foot_pitch_l=22.0, foot_pitch_r=22.0, toe_l=22.0, toe_r=22.0)
     d.follow("head_turn", "spine_twist", gain=0.35, hz=2.8)
     return d

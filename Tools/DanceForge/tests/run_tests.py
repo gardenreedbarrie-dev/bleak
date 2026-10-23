@@ -376,10 +376,11 @@ class TestCatalogue(unittest.TestCase):
             dance = built[d["key"]]
             frames = dance.sample(self.cat["fps"])
             self.assertLess(choreo.check_loop(frames), 72.0, d["key"])
+            # the ball of the foot rests 0.02 above the ground: it may roll down onto the floor, not into it
             for hips, rots in frames:
                 pos = S.positions(hips, rots)
                 for toe in ("ToeL", "ToeR"):
-                    self.assertGreater(pos[S.INDEX[toe]][2], -0.03, "%s: a toe goes into the ground" % d["key"])
+                    self.assertGreater(pos[S.INDEX[toe]][2], 0.0, "%s: a toe goes into the ground" % d["key"])
 
     def test_generated_files_are_current(self):
         r = subprocess.run([sys.executable, "-I", os.path.join(TOOL, "danceforge.py"), "generate", "--check"],

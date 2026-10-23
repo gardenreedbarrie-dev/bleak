@@ -4,9 +4,7 @@ import math
 
 from dflib.choreo import Dance
 
-from moves import arms_fk, feet, groove, hands, hips, merge, sway, STANCE, ANKLE_Z
-
-TOUCH_Z = ANKLE_Z + 0.03     # a foot tapping the floor with the toes, heel up
+from moves import arms_fk, feet, groove, hands, hips, merge, sway, toe_lift, STANCE, ANKLE_Z
 
 
 def _y(v, s):
@@ -18,17 +16,18 @@ def _step_touch(d, width=0.21, inner=0.05, lift=0.07, hip=0.11, touch_pitch=16.0
     """Keys a travelling step touch on every beat: step right, touch left in, step left, touch right in. The
     stepping foot lands wide on the beat, the tapping foot comes in next to it on its toes, and the hips ride over
     the foot that carries the weight."""
+    touch_z = ANKLE_Z + toe_lift(touch_pitch)      # the tapping foot on its toes, heel up
     for k in range(int(d.beats)):
         b = float(k)
         phase = k % 4
         if phase == 0:      # step right: wide stance, weight travelling right
             moved, pos, other, opos, y = "r", (0.0, -width, ANKLE_Z), "l", (0.0, width, ANKLE_Z), 0.0
         elif phase == 1:    # touch left next to the right foot
-            moved, pos, other, opos, y = "l", (0.0, -inner, TOUCH_Z), "r", (0.0, -width, ANKLE_Z), -hip
+            moved, pos, other, opos, y = "l", (0.0, -inner, touch_z), "r", (0.0, -width, ANKLE_Z), -hip
         elif phase == 2:    # step left
             moved, pos, other, opos, y = "l", (0.0, width, ANKLE_Z), "r", (0.0, -width, ANKLE_Z), 0.0
         else:               # touch right next to the left foot
-            moved, pos, other, opos, y = "r", (0.0, inner, TOUCH_Z), "l", (0.0, width, ANKLE_Z), hip
+            moved, pos, other, opos, y = "r", (0.0, inner, touch_z), "l", (0.0, width, ANKLE_Z), hip
         touching = pos[2] > ANKLE_Z
         d.key(b, ease="inout", lift=lift, **{"foot_" + moved: pos})
         d.key(b, ease="inout", **{"foot_" + other: opos, "foot_pitch_" + other: 0.0, "toe_" + other: 0.0,
@@ -179,9 +178,10 @@ def sidekick_pump():
     return d
 
 
-def _hop(d, beat, height=0.06, z=0.04, width=STANCE, pitch=25.0):
-    """Both feet off the floor at `beat` (toes pointed), the hips up with them."""
-    d.key(beat, ease="out", **merge(feet(width, z_l=ANKLE_Z + height, z_r=ANKLE_Z + height),
+def _hop(d, beat, height=0.035, z=0.04, width=STANCE, pitch=25.0):
+    """Both feet off the floor at `beat`, the toes pointed and `height` clear of it, the hips up with them."""
+    ankle = ANKLE_Z + toe_lift(pitch) + height
+    d.key(beat, ease="out", **merge(feet(width, z_l=ankle, z_r=ankle),
                                     foot_pitch_l=pitch, foot_pitch_r=pitch))
     d.key(beat, ease="out", hips=(0.0, 0.0, z))
 
@@ -237,7 +237,7 @@ def hands_up():
     d.key(7.0, ease="inout", hips=(0.0, 0.0, -0.24))
     d.key(7.3, **hands((0.40, 0.36, -0.10), (0.42, -0.40, 0.08)))
     d.key(7.6, **merge(hands((0.24, 0.46, 0.02), (0.20, -0.50, 0.52)), spine_bend=0.0, head_nod=-8.0))
-    _hop(d, 7.55, height=0.12, z=0.10, width=(STANCE + wide) / 2.0)
+    _hop(d, 7.55, height=0.045, z=0.10, width=(STANCE + wide) / 2.0)
     d.key(0, wrist_l=(0.0, 0.0, 0.0), wrist_r=(0.0, 0.0, 0.0))
     d.key(4.6, wrist_l=(-20.0, 0.0, 0.0), wrist_r=(-20.0, 0.0, 0.0))
     d.key(5.6, wrist_l=(-20.0, 0.0, 0.0), wrist_r=(-20.0, 0.0, 0.0))
