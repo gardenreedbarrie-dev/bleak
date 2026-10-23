@@ -91,6 +91,8 @@ impl Dest {
 #[derive(Clone, Debug)]
 pub struct Task {
     pub url: String,
+    /// Another address with the same bytes, tried first; after it fails once, `url` takes over.
+    pub mirror: Option<String>,
     pub dest: Dest,
     pub size: u64,
     pub sha256: String,
@@ -276,14 +278,26 @@ fn fetch_with_retries(ctx: &Ctx, task: &Task, target: &Path) -> Result<()> {
     let part = paths::part_path(target);
     let mut tries = 0u32;
     let mut free_restart = true;
+    let mut mirror = task.mirror.as_deref();
     loop {
         if ctx.should_stop() {
             return Err(Error::cancelled());
         }
-        let failure = match attempt(ctx, task, target, &part) {
+        let failure = match attempt(ctx, task, mirror.unwrap_or(&task.url), target, &part) {
             Ok(()) => return Ok(()),
             Err(Attempt::Cancelled) => return Err(Error::cancelled()),
             Err(Attempt::Fatal(e)) => return Err(e),
+            // The mirror failed (down, moved, or its copy differs): the realm's own copy from here on, resuming
+            // a kept .part; this try is not counted.
+            Err(a) if mirror.is_some() => {
+                let why = match a {
+                    Attempt::Net(e) => e.message,
+                    _ => "its copy did not match the checksum".into(),
+                };
+                log::warn!("{}: the mirror failed ({why}); downloading from the realm's server", task.label);
+                mirror = None;
+                continue;
+            }
             Err(Attempt::Restart) if free_restart => {
                 free_restart = false;
                 log::info!("{}: partial download was stale, starting over", task.label);
@@ -342,7 +356,7 @@ fn io_fatal(what: String, e: &io::Error) -> Attempt {
     Attempt::Fatal(Error::io(what, e))
 }
 
-fn attempt(ctx: &Ctx, task: &Task, target: &Path, part: &Path) -> std::result::Result<(), Attempt> {
+fn attempt(ctx: &Ctx, task: &Task, url: &str, target: &Path, part: &Path) -> std::result::Result<(), Attempt> {
     let mut fb = FileBytes { done: &ctx.done, counted: 0, keep: false };
     let partname = part.display().to_string();
 
@@ -378,7 +392,7 @@ fn attempt(ctx: &Ctx, task: &Task, target: &Path, part: &Path) -> std::result::R
         return Ok(());
     }
 
-    let (mut reader, mut file) = match ctx.http.get_from(&task.url, existing) {
+    let (mut reader, mut file) = match ctx.http.get_from(url, existing) {
         Err(e) => return Err(Attempt::Net(e)),
         Ok(Body::RangeNotSatisfiable) => {
             let _ = fs::remove_file(part);

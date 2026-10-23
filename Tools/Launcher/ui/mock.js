@@ -67,7 +67,7 @@
     const emit = (event, payload) => (listeners[event] || []).slice().forEach((cb) => cb({ event, payload }));
 
     const state = {
-        launcher_version: "1.0.0",
+        launcher_version: "1.1.0",
         phase: "loading",
         message: "",
         installed: true,

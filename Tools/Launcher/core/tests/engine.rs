@@ -13,6 +13,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
 
 use bleakhold_launcher_core::config::LauncherConfig;
+use bleakhold_launcher_core::download::sha256_hex;
 use bleakhold_launcher_core::engine::{Engine, EngineConfig, Phase, ServerView, Sink};
 use bleakhold_launcher_core::http::Timeouts;
 use bleakhold_launcher_core::state::InstallState;
@@ -485,6 +486,33 @@ fn repair_restores_a_damaged_file() {
     rec.wait_phase(Phase::Ready, v);
     assert_eq!(rec.phases(n), [Phase::Verifying, Phase::Downloading, Phase::Ready]);
     assert_eq!(read(&p), bytes(1, 300_000));
+    fs::remove_dir_all(&s.root).unwrap();
+}
+
+#[test]
+fn mirrored_files_come_from_their_mirror() {
+    let srv = TestServer::start();
+    let s = setup("en-mirror");
+    let reforged = bytes(7, 250_000);
+    srv.put("reforged/patch-A.mpq", &reforged);
+    let spec = v1().mirrored("Data/patch-A.MPQ", &reforged, "reforged/patch-A.mpq").mirrored(
+        "Data/patch-B.MPQ",
+        &bytes(8, 90_000),
+        "reforged/patch-B.mpq",
+    );
+    srv.publish(&spec);
+    let (e, rec) = start(config(&srv.base, &public_key_b64(), &s.config));
+    let i = rec.wait_phase(Phase::NeedsInstall, 0);
+    e.install(s.install.to_str().unwrap(), false, false).unwrap();
+    rec.wait_phase(Phase::Ready, i);
+    assert_eq!(read(&s.install.join("Data/patch-A.MPQ")), reforged);
+    assert_eq!(read(&s.install.join("Data/patch-B.MPQ")), bytes(8, 90_000));
+    let a = sha256_hex(&reforged);
+    assert!(srv.hits_for(&format!("objects/{}/{a}", &a[..2])).is_empty(), "patch-A came from its mirror");
+    let b = sha256_hex(&bytes(8, 90_000));
+    assert_eq!(srv.hits_for("reforged/patch-B.mpq").len(), 1, "patch-B's mirror was tried");
+    assert_eq!(srv.hits_for(&format!("objects/{}/{b}", &b[..2])).len(), 1, "then the realm's copy");
+    assert_eq!(InstallState::load(&s.install).files.len(), 8);
     fs::remove_dir_all(&s.root).unwrap();
 }
 

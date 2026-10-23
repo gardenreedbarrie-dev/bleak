@@ -108,6 +108,9 @@ impl TestServer {
             if f.once {
                 e["once"] = json!(true);
             }
+            if let Some(m) = &f.mirror {
+                e["u"] = json!(format!("{}{m}", self.base));
+            }
             files.push(e);
         }
         let mut m = json!({
@@ -142,6 +145,8 @@ pub struct SpecFile {
     pub p: String,
     pub content: Vec<u8>,
     pub once: bool,
+    /// The mirror's path on the test server (`u` = base + this).
+    pub mirror: Option<String>,
 }
 
 pub struct Spec {
@@ -167,12 +172,18 @@ impl Spec {
     }
 
     pub fn file(mut self, p: &str, content: &[u8]) -> Spec {
-        self.files.push(SpecFile { p: p.into(), content: content.to_vec(), once: false });
+        self.files.push(SpecFile { p: p.into(), content: content.to_vec(), once: false, mirror: None });
         self
     }
 
     pub fn once(mut self, p: &str, content: &[u8]) -> Spec {
-        self.files.push(SpecFile { p: p.into(), content: content.to_vec(), once: true });
+        self.files.push(SpecFile { p: p.into(), content: content.to_vec(), once: true, mirror: None });
+        self
+    }
+
+    /// A file with a mirror at `mirror` on the test server (the realm's object is published as well).
+    pub fn mirrored(mut self, p: &str, content: &[u8], mirror: &str) -> Spec {
+        self.files.push(SpecFile { p: p.into(), content: content.to_vec(), once: false, mirror: Some(mirror.into()) });
         self
     }
 }

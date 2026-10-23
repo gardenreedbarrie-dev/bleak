@@ -1083,6 +1083,7 @@ impl Inner {
                 .iter()
                 .map(|j| Task {
                     url: self.http.url(&manifest.object_path(&j.h)),
+                    mirror: j.u.clone(),
                     dest: Dest::Install { root: dir.to_path_buf(), rel: j.p.clone() },
                     size: j.s,
                     sha256: j.h.clone(),

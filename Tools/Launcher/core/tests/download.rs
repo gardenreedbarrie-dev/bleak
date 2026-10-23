@@ -1,5 +1,5 @@
 //! Downloader against a local HTTP server: parallel downloads, resume of an interrupted `.part` with
-//! `Range`, a cut connection, hash mismatch → retry → error, stale `.part`, cancel, speed limit.
+//! `Range`, a cut connection, hash mismatch → retry → error, stale `.part`, cancel, speed limit, mirrors.
 
 mod common;
 
@@ -27,6 +27,7 @@ fn task(srv: &TestServer, root: &Path, rel: &str, content: &[u8]) -> Task {
     let h = srv.put_object(content);
     Task {
         url: format!("{}objects/{}/{h}", srv.base, &h[..2]),
+        mirror: None,
         dest: Dest::Install { root: root.to_path_buf(), rel: rel.into() },
         size: content.len() as u64,
         sha256: h,
@@ -282,5 +283,83 @@ fn on_done_error_stops_the_run() {
         &mut |_, _| Err(bleakhold_launcher_core::Error::io_msg("disk said no")),
     );
     assert_eq!(r.unwrap_err().message, "disk said no");
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+/// A task whose mirror is `mirror/<rel>` on the same test server.
+fn mirrored(srv: &TestServer, root: &Path, rel: &str, content: &[u8]) -> Task {
+    Task { mirror: Some(format!("{}mirror/{rel}", srv.base)), ..task(srv, root, rel, content) }
+}
+
+#[test]
+fn a_mirror_is_used_first() {
+    let srv = TestServer::start();
+    let dir = temp_dir("dl-mirror");
+    let c = bytes(41, 70_000);
+    srv.put("mirror/patch-A.MPQ", &c);
+    let (r, _, _) = run(&srv, &[mirrored(&srv, &dir, "patch-A.MPQ", &c)], &opts(), &Control::new());
+    r.unwrap();
+    assert_eq!(read(&dir.join("patch-A.MPQ")), c);
+    assert_eq!(srv.hits_for("mirror/patch-A.MPQ").len(), 1);
+    assert!(srv.hits_for(&object_path(&c)).is_empty(), "the realm's copy is not touched");
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_missing_mirror_falls_back_to_the_realm() {
+    let srv = TestServer::start();
+    let dir = temp_dir("dl-mirror-404");
+    let c = bytes(42, 50_000);
+    let (r, _, _) = run(&srv, &[mirrored(&srv, &dir, "patch-B.MPQ", &c)], &opts(), &Control::new());
+    r.unwrap();
+    assert_eq!(read(&dir.join("patch-B.MPQ")), c);
+    assert_eq!(srv.hits_for("mirror/patch-B.MPQ").len(), 1, "the mirror is tried once");
+    assert_eq!(srv.hits_for(&object_path(&c)).len(), 1);
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_mirror_with_other_bytes_falls_back_to_the_realm() {
+    // The mirror's file was replaced by a newer version before the realm published it.
+    let srv = TestServer::start();
+    let dir = temp_dir("dl-mirror-other");
+    let c = bytes(43, 60_000);
+    srv.put("mirror/patch-C.MPQ", &bytes(44, 60_000));
+    let (r, _, _) = run(&srv, &[mirrored(&srv, &dir, "patch-C.MPQ", &c)], &opts(), &Control::new());
+    r.unwrap();
+    assert_eq!(read(&dir.join("patch-C.MPQ")), c);
+    assert_eq!(srv.hits_for(&object_path(&c)).len(), 1);
+    assert!(!dir.join("patch-C.MPQ.part").exists());
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_cut_mirror_download_resumes_from_the_realm() {
+    let srv = TestServer::start();
+    let dir = temp_dir("dl-mirror-cut");
+    let c = bytes(45, 200_000);
+    srv.put("mirror/patch-D.MPQ", &c);
+    srv.cut_next("mirror/patch-D.MPQ", 1, 80_000);
+    let (r, progress, _) = run(&srv, &[mirrored(&srv, &dir, "patch-D.MPQ", &c)], &opts(), &Control::new());
+    r.unwrap();
+    assert_eq!(read(&dir.join("patch-D.MPQ")), c);
+    let realm = srv.hits_for(&object_path(&c));
+    assert_eq!(realm.len(), 1);
+    assert_eq!(realm[0].range, Some(80_000), "the realm's copy continues the mirror's .part");
+    assert_eq!(progress.last().unwrap().done_bytes, c.len() as u64);
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+#[test]
+fn a_failing_mirror_does_not_use_up_the_tries() {
+    // The realm's copy is damaged twice: with the mirror's failure counted it would run out of tries.
+    let srv = TestServer::start();
+    let dir = temp_dir("dl-mirror-tries");
+    let c = bytes(46, 40_000);
+    srv.corrupt_next(&object_path(&c), 2);
+    let (r, _, _) = run(&srv, &[mirrored(&srv, &dir, "patch-E.MPQ", &c)], &opts(), &Control::new());
+    r.unwrap();
+    assert_eq!(read(&dir.join("patch-E.MPQ")), c);
+    assert_eq!(srv.hits_for(&object_path(&c)).len(), 3);
     fs::remove_dir_all(&dir).unwrap();
 }

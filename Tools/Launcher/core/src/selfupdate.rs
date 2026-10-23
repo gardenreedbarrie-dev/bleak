@@ -68,6 +68,7 @@ pub fn download(
     let target = new_exe_path(exe);
     let task = Task {
         url: http.url(&object_path(objects, &info.sha256)),
+        mirror: None,
         dest: Dest::Path(target.clone()),
         size: info.size,
         sha256: info.sha256.clone(),

@@ -31,6 +31,10 @@ The launcher knows one base URL (`launcher.json`, compiled in), default `http://
 Content-addressed objects make publishing atomic: the publisher adds new objects, then replaces the manifest, and
 removes unreferenced objects only later, so a player downloading during a publish never gets a mixed set.
 
+A file may also name a mirror (`u`, below): another server with the same bytes, such as Reforged's own download
+storage for Reforged's patches. The launcher tries the mirror first and the realm's object after it, so the
+realm's `objects/` must hold every file, mirrored or not.
+
 ## Manifest (format 1)
 
 UTF-8 JSON. Unknown fields are ignored (newer publishers may add some).
@@ -47,6 +51,7 @@ UTF-8 JSON. Unknown fields are ignored (newer publishers may add some).
   "launcher": { "version": "1.0.0", "size": 8123456, "sha256": "…" },
   "files": [
     { "p": "Data/common.MPQ", "s": 2911342017, "h": "…" },
+    { "p": "Data/patch-A.MPQ", "s": 2708937193, "h": "…", "u": "https://pub-….r2.dev/patch-A.mpq" },
     { "p": "WTF/Config.wtf", "s": 812, "h": "…", "once": true }
   ],
   "news": [ { "title": "…", "date": "2026-10-23", "body": "…", "url": "https://…" } ],
@@ -65,6 +70,8 @@ UTF-8 JSON. Unknown fields are ignored (newer publishers may add some).
   `Data/x`). A manifest without files is rejected too.
 - `s`: size in bytes; `h`: SHA-256, 64 lower-case hex characters.
 - `once`: install when missing, never overwrite or delete (settings files the player may change).
+- `u`: optional mirror of the file, an absolute `http://` or `https://` URL of printable ASCII without spaces, at
+  most 2048 characters (anything else rejects the manifest). It is fetched like an object and checked against `h`.
 - `cache_epoch`: when it differs from the one stored locally, the launcher empties `Cache/` before the next start.
 - `launcher`: the newest launcher; its object is `objects/<h0h1>/<sha256>` like any file.
 - `exe`: a valid path ending in `.exe`. The launcher starts it only when it is among `files` (not `once`): Play
@@ -121,7 +128,9 @@ so, and `install` is refused.
    keeping the `.part`). A resumed `.part` that turns out stale (from an older version of the file) starts over
    once without counting a try. Then rename over the target (replaces on Windows; a read-only target is made
    writable first). A target in use (the game is running) stops the update with error `game_running`; Update and
-   Repair refuse to start while `Bleakhold.exe` runs.
+   Repair refuse to start while `Bleakhold.exe` runs. A file with a mirror (`u`) is fetched from the mirror first;
+   when that try fails in any way (unreachable, an HTTP error, a cut connection, other bytes), the realm's object
+   takes over for the normal tries, continuing a kept `.part`, and the mirror's failure is not counted as a try.
 5. Delete files the state lists that the manifest no longer lists (never `once` files, never files the launcher did
    not install: a player's own addons and screenshots are safe). Paths compare case-insensitively: a case-only
    rename never deletes the file just downloaded. Folders left empty are removed.

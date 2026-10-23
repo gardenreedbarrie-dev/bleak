@@ -32,11 +32,13 @@ pub struct Job {
     pub s: u64,
     pub h: String,
     pub once: bool,
+    /// The file's mirror, if the manifest names one.
+    pub u: Option<String>,
 }
 
 impl From<&FileEntry> for Job {
     fn from(f: &FileEntry) -> Job {
-        Job { p: f.p.clone(), s: f.s, h: f.h.clone(), once: f.once }
+        Job { p: f.p.clone(), s: f.s, h: f.h.clone(), once: f.once, u: f.u.clone() }
     }
 }
 

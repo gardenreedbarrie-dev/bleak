@@ -22,6 +22,9 @@ pub struct FileEntry {
     /// Install when missing, never overwrite or delete.
     #[serde(default)]
     pub once: bool,
+    /// A mirror: another address serving the same bytes, tried before the realm's `objects/` copy.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub u: Option<String>,
 }
 
 /// The newest launcher.
@@ -110,6 +113,9 @@ impl Manifest {
             if !is_sha256_hex(&f.h) {
                 return Err(format!("{:?}: bad hash {:?}", f.p, f.h));
             }
+            if let Some(u) = &f.u {
+                validate_mirror(u).map_err(|e| format!("{:?}: mirror {e}", f.p))?;
+            }
         }
         // The executable is started only when it is among the files (its hash is what Play checks); a
         // manifest without it is still valid for downloading.
@@ -183,6 +189,24 @@ pub fn validate_host(h: &str) -> std::result::Result<(), String> {
     Ok(())
 }
 
+/// An absolute `http://` or `https://` URL of printable ASCII (no spaces), at most 2048 characters.
+pub fn validate_mirror(u: &str) -> std::result::Result<(), String> {
+    let rest = u.strip_prefix("https://").or_else(|| u.strip_prefix("http://"));
+    let Some(rest) = rest else {
+        return Err(format!("{u:?} is not an http(s) URL"));
+    };
+    if u.len() > 2048 {
+        return Err("is too long".into());
+    }
+    if rest.is_empty() || rest.starts_with('/') {
+        return Err(format!("{u:?} has no host"));
+    }
+    if !u.bytes().all(|b| b.is_ascii_graphic()) {
+        return Err(format!("{u:?} has spaces, control or non-ASCII characters"));
+    }
+    Ok(())
+}
+
 fn validate_objects(o: &str) -> std::result::Result<(), String> {
     let trimmed = o.strip_suffix('/').unwrap_or(o);
     if trimmed.is_empty() {
@@ -231,6 +255,20 @@ mod tests {
         assert_eq!(m.object_path(H), format!("objects/ba/{H}"));
         assert_eq!(m.server.as_ref().unwrap().world_port, 8085);
         assert_eq!(m.launcher.as_ref().unwrap().version, "1.2.0");
+        assert!(m.files.iter().all(|f| f.u.is_none()));
+    }
+
+    #[test]
+    fn mirrors() {
+        let mut v = base();
+        v["files"][0]["u"] = json!("https://pub-0123.r2.dev/patch-A.mpq");
+        let m = parse(&v).unwrap();
+        assert_eq!(m.files[0].u.as_deref(), Some("https://pub-0123.r2.dev/patch-A.mpq"));
+        for bad in ["ftp://x/y", "objects/ab/x", "https://", "https:///x", "https://a b/c", "https://x/\u{e9}"] {
+            rejects(|v| v["files"][0]["u"] = json!(bad), "mirror");
+        }
+        rejects(|v| v["files"][0]["u"] = json!(format!("https://x/{}", "a".repeat(2048))), "too long");
+        rejects(|v| v["files"][0]["u"] = json!(5), "could not be read");
     }
 
     #[test]
