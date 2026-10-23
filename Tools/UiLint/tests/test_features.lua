@@ -41,6 +41,68 @@ test("chat: /w2 whispers a two-word name, or opens a whisper to it", function(M,
     H.eq(ns.Chat.FitBytes("ab\195\169", 4), "ab\195\169")
 end)
 
+local function editBox()
+    local box = { attr = {} }
+    function box:SetAttribute(k, v) self.attr[k] = v end
+    function box:GetAttribute(k) return self.attr[k] end
+    function box:SetText(t) self.text = t end
+    return box
+end
+
+test("chat: /w takes a quoted two-word name whole, and keeps the stock extraction otherwise", function(M, ns)
+    local extract = M.env.ChatEdit_ExtractTellTarget
+    H.eq(extract, ns.Chat.ExtractTellTarget, "the stock extraction is wrapped")
+    local box = editBox()
+    H.eq(extract(box, ' "Arthas Menethil" the throne awaits'), true)
+    H.eq(box.attr.tellTarget, "Arthas Menethil")
+    H.eq(box.attr.chatType, "WHISPER")
+    H.eq(box.text, "the throne awaits")
+    H.eq(M.headerUpdated, box, "the chat header names the target")
+    box = editBox()
+    H.eq(extract(box, ' "Arthas Mene'), false, "an open quote: still typing")
+    H.eq(box.attr.tellTarget, nil)
+    -- unquoted: the stock rules (a two-word name on the autocomplete list stays whole)
+    M.autocomplete["Jaina Proudmoore"] = true
+    box = editBox()
+    H.eq(extract(box, "Jaina Proudmoore hello"), true)
+    H.eq(box.attr.tellTarget, "Jaina Proudmoore")
+    H.eq(box.text, "hello")
+    H.eq(ns.db.options.hintTwoNameWhisper, nil, "no hint for a two-word target")
+    box = editBox()
+    H.eq(extract(box, "Thrall lok'tar"), true)
+    H.eq(box.attr.tellTarget, "Thrall")
+    H.eq(ns.db.options.hintTwoNameWhisper, true, "a one-word target shows the hint once")
+    local printed = #M.chat
+    extract(editBox(), "Thrall again")
+    H.eq(#M.chat, printed, "only once")
+end)
+
+test("chat: /friend takes a quoted name or two capitalised words as one name", function(M, ns)
+    local friend = M.env.SlashCmdList.FRIENDS
+    friend("Arthas Menethil")
+    H.eq(M.friended.name, "Arthas Menethil")
+    H.eq(M.friended.note, "")
+    friend('"Sylvanas Windrunner" ranger')
+    H.eq(M.friended.name, "Sylvanas Windrunner")
+    H.eq(M.friended.note, "ranger")
+    friend("\195\137lise Dupont")
+    H.eq(M.friended.name, "\195\137lise Dupont", "a capital letter outside ASCII")
+    friend("Thrall warchief")
+    H.eq(M.friended.name, "Thrall", "lower-case second word: the stock name and note")
+    H.eq(M.friended.note, "warchief")
+    M.friendsPanel = nil
+    friend("")
+    H.eq(M.friendsPanel, true, "no name: the stock command (friends panel)")
+end)
+
+test("chat: the stock 12-letter name boxes take 25 letters", function(M, ns)
+    for _, which in ipairs({ "ADD_GUILDMEMBER", "ADD_TEAMMEMBER", "ADD_RAIDMEMBER", "ADD_MUTE" }) do
+        H.eq(M.env.StaticPopupDialogs[which].maxLetters, 25, which)
+    end
+    H.eq(M.env.StaticPopupDialogs.ADD_FRIEND.maxLetters, 77, "longer boxes are left alone")
+    H.eq(M.env.SendMailNameEditBox:GetMaxLetters(), 25)
+end)
+
 ------------------------------------------------------------------------------------------------------
 -- Toast
 ------------------------------------------------------------------------------------------------------

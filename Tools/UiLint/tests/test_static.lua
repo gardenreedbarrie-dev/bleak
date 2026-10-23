@@ -109,7 +109,7 @@ test("globals created at runtime are Bleakhold-prefixed (or required by FrameXML
     H.ok(#fresh > 10, "addon globals present")
     for k, v in pairs(M.env) do
         if type(k) == "string" and type(v) == "table" and v.__otype and v.__name == k then
-            if not (k:find("^Bleakhold") or k:find("^ChatFrame") or ({ UIParent = 1, Minimap = 1, MinimapCluster = 1, MinimapBackdrop = 1, GameTooltip = 1, ItemRefTooltip = 1, ShoppingTooltip1 = 1, ShoppingTooltip2 = 1, UIErrorsFrame = 1, WatchFrame = 1 })[k]) then
+            if not (k:find("^Bleakhold") or k:find("^ChatFrame") or ({ UIParent = 1, Minimap = 1, MinimapCluster = 1, MinimapBackdrop = 1, GameTooltip = 1, ItemRefTooltip = 1, ShoppingTooltip1 = 1, ShoppingTooltip2 = 1, UIErrorsFrame = 1, WatchFrame = 1, SendMailNameEditBox = 1 })[k]) then
                 error("unexpected named frame " .. k)
             end
         end

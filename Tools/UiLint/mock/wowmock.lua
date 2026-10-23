@@ -478,7 +478,8 @@ return function(opts)
     end
     function IMPL.GetItem(self) if self.__item then return self.__item[1], self.__item[2] end end
     function IMPL.AddMessage(self, msg) table.insert(M.chat, { frame = self, msg = msg }) end
-    function IMPL.SetMaxLetters() end
+    function IMPL.SetMaxLetters(self, n) self.__maxLetters = n end
+    function IMPL.GetMaxLetters(self) return self.__maxLetters or 0 end
 
     ------------------------------------------------------------------------------------------------
     -- Global C functions
@@ -619,6 +620,39 @@ return function(opts)
     end
     env.ChatEdit_InsertLink = function(link) M.insertedLink = link return true end
     env.ChatFrame_SendTell = function(name) M.tellOpened = name end
+    -- Stock chat pieces the addon wraps, as FrameXML 3.3.5a has them (ChatFrame.lua), with the autocomplete list
+    -- (friends, guild, group, recent) reduced to exact names in M.autocomplete.
+    M.autocomplete = {}
+    env.ChatEdit_UpdateHeader = function(box) M.headerUpdated = box end
+    env.ChatEdit_ExtractTellTarget = function(editBox, msg)
+        local target = msg:match("%s*(.*)")
+        if not target or not target:find("%s") or target:sub(1, 1) == "|" then return false end
+        if M.autocomplete[target] then return false end
+        while target:find("%s") do
+            target = target:match("(.+)%s+[^%s]*")
+            if M.autocomplete[target] then break end
+        end
+        msg = msg:sub(#target + 2)
+        editBox:SetAttribute("tellTarget", target)
+        editBox:SetAttribute("chatType", "WHISPER")
+        editBox:SetText(msg)
+        env.ChatEdit_UpdateHeader(editBox)
+        return true
+    end
+    env.AddOrRemoveFriend = function(name, note) M.friended = { name = name, note = note } end
+    env.SlashCmdList.FRIENDS = function(msg)
+        local player, note = msg:match("%s*([^%s]+)%s*(.*)")
+        if player and player ~= "" then
+            env.AddOrRemoveFriend(player, note)
+        else
+            M.friendsPanel = true
+        end
+    end
+    env.StaticPopupDialogs = {
+        ADD_GUILDMEMBER = { maxLetters = 12 }, ADD_TEAMMEMBER = { maxLetters = 12 },
+        ADD_RAIDMEMBER = { maxLetters = 12 }, ADD_MUTE = { maxLetters = 12 }, ADD_FRIEND = { maxLetters = 77 },
+    }
+    new("EditBox", "SendMailNameEditBox", env.UIParent):SetMaxLetters(12)
     env.DressUpItemLink = function(link) M.dressedUp = link end
     -- GetMinimapShape, DragonUI*, DBM: absent unless a test sets them
 

@@ -1,7 +1,8 @@
 -- Bleakhold: colour the server's announcement tags in chat ([Raid Legacy], [Server First], [Season],
 -- [Queue], [Record], [Case]) and let each chat window hide a tag. The server sends these as plain system text
 -- that reads fine without the addon; links in the message are left exactly as the server sent them.
--- Also /w2 for whispers to two-word character names (the server's mod-two-names).
+-- Also /w2 for whispers to two-word character names (the server's mod-two-names), quoted names in /w,
+-- two-word names in /friend and name boxes long enough for them.
 local ADDON, ns = ...
 local Data = ns.Data
 
@@ -114,3 +115,81 @@ end
 SLASH_BLEAKHOLDTELL1 = "/w2"
 SLASH_BLEAKHOLDTELL2 = "/tell2"
 SlashCmdList["BLEAKHOLDTELL"] = Chat.Whisper2
+
+-- Typed /w with a two-word name. The stock extraction keeps a two-word target only when it is on the autocomplete
+-- list, so `/w Arthas Menethil hi` whispers "Arthas" (who may be someone else). A quoted name is taken whole:
+-- /w "Arthas Menethil" hi. The first time a /w takes a one-word target, a hint names the quoted form and /w2.
+local stockExtractTellTarget = ChatEdit_ExtractTellTarget
+
+local function hintTwoNames()
+    local options = ns.db and ns.db.options
+    if not options or options.hintTwoNameWhisper then
+        return
+    end
+    options.hintTwoNameWhisper = true
+    ns.Print('two-word names: /w "First Last" message, or /w2 First Last message')
+end
+
+function Chat.ExtractTellTarget(editBox, msg)
+    msg = msg or ""
+    local name, rest = msg:match('^%s*"([^"]+)"%s(.*)$')
+    name = name and name:match("^%s*(.-)%s*$")
+    if name and name ~= "" then
+        editBox:SetAttribute("tellTarget", name)
+        editBox:SetAttribute("chatType", "WHISPER")
+        editBox:SetText(rest)
+        ChatEdit_UpdateHeader(editBox)
+        return true
+    end
+    if msg:match('^%s*"') then
+        return false    -- the quoted name is still being typed
+    end
+    local taken = stockExtractTellTarget and stockExtractTellTarget(editBox, msg)
+    if taken and not (editBox:GetAttribute("tellTarget") or ""):find(" ", 1, true) then
+        hintTwoNames()
+    end
+    return taken
+end
+
+if stockExtractTellTarget then
+    ChatEdit_ExtractTellTarget = Chat.ExtractTellTarget
+end
+
+-- /friend with a two-word name: the stock command adds (or, for a friend, REMOVES) the first word and makes the
+-- second the note. A quoted name, or two capitalised words, is one name; anything else goes to the stock command.
+local CAPITALISED = "[%u\192-\255][%a\128-\255]*"
+
+function Chat.Friend(msg, editBox)
+    msg = msg or ""
+    local name, note = msg:match('^%s*"([^"]+)"%s*(.-)%s*$')
+    if not name then
+        local first, last, rest = msg:match("^%s*(" .. CAPITALISED .. ")%s+(" .. CAPITALISED .. ")%s*(.-)%s*$")
+        if first then
+            name, note = first .. " " .. last, rest
+        end
+    end
+    name = name and name:match("^%s*(.-)%s*$")
+    if name and name ~= "" then
+        AddOrRemoveFriend(name, note)
+    elseif Chat.stockFriends then
+        Chat.stockFriends(msg, editBox)
+    end
+end
+
+if SlashCmdList and SlashCmdList.FRIENDS then
+    Chat.stockFriends = SlashCmdList.FRIENDS
+    SlashCmdList.FRIENDS = Chat.Friend
+end
+
+-- Name boxes the stock interface stops at 12 letters; two-word names are up to 25 (TwoNames.MaxNameLength).
+-- The engine also cuts text set from code, so Mail's Reply and shift-clicked names were cut too.
+local NAME_LETTERS = 25
+for _, which in ipairs({ "ADD_GUILDMEMBER", "ADD_TEAMMEMBER", "ADD_RAIDMEMBER", "ADD_MUTE" }) do
+    local dialog = StaticPopupDialogs and StaticPopupDialogs[which]
+    if dialog and (dialog.maxLetters or 0) < NAME_LETTERS then
+        dialog.maxLetters = NAME_LETTERS
+    end
+end
+if SendMailNameEditBox and SendMailNameEditBox.SetMaxLetters then
+    SendMailNameEditBox:SetMaxLetters(NAME_LETTERS)
+end

@@ -26,6 +26,10 @@ ChatEdit_InsertLink
 ChatFrame_SendTell
 DressUpItemLink
 GetMinimapShape
+ChatEdit_ExtractTellTarget
+ChatEdit_UpdateHeader
+StaticPopupDialogs
+SendMailNameEditBox
 # Optional addons (always checked for nil before use)
 DragonUI
 DragonUI_QuestTrackerFrame

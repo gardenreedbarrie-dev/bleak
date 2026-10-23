@@ -20,7 +20,7 @@ What you get:
   switches to the Bleakhold painting
 - First Name and Last Name boxes in character creation; the server needs the mod-two-names module for
   two-word names (the last name can be left empty). In game, whisper a two-word name by clicking it, with /r,
-  or with /w2 First Last message
+  with /w "First Last" message or with /w2 First Last message; /friend First Last adds a two-word friend
 - the Bleakhold interface (Interface\AddOns\Bleakhold): type /bh in game, /bh help for commands,
   /bh demo to look at every window with sample data
 - AddicatUI, the retail-style interface (Interface\AddOns\AddicatUI): it needs its art, the AddicatUI_Art
