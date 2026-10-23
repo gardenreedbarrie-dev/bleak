@@ -17,6 +17,12 @@ The client and the server talk with small hidden addon messages (the protocol is
 It never invents game rules: what a key scores, what the war effort counts, what a task pays, how the
 Rift scales is decided by your systems or by rows you write.
 
+**Where to change it:** this folder in the Bleakhold client repository (`Server/mod-bleakhold-ui`) is the
+module's only source, so the client and the server always speak the same protocol. The Bleakhold server
+repository copies it to its `modules/mod-bleakhold-ui` every hour, without `tests/`
+(`.github/workflows/sync-bleakhold-ui.yml` there; the Actions tab runs it at once). A change made in the
+server's copy is overwritten by the next sync.
+
 ---
 
 ## 1. Install
