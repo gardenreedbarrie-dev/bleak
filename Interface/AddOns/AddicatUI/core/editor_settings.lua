@@ -1886,8 +1886,13 @@ local function NoDarkMode() return not addon.ApplyDarkMode end
 local function NoButtons() return not addon.RefreshButtons end
 local function NoCooldowns() return not addon.RefreshCooldowns end
 
+-- The Bleakhold theme sets these colours itself (Options > Enhancements > Interface Theme).
+local function BleakTheme()
+    return addon.IsBleakTheme and addon.IsBleakTheme() or false
+end
+
 local function DarkOff()
-    return ModuleField("darkmode", "enabled") ~= true
+    return ModuleField("darkmode", "enabled") ~= true or BleakTheme()
 end
 
 -- Options keeps the font size in two places; the second one is what the hotkey styling reads.
@@ -1951,6 +1956,7 @@ E.Register("__manager", { settings = {
     Section(T("Dark Mode"), true, NoDarkMode),
     Check(T("Enable Dark Mode"), "modules.darkmode.enabled", nil, {
         hidden = NoDarkMode,
+        disabled = BleakTheme,
         get = function() return ModuleField("darkmode", "enabled") == true end,
         set = function(value)
             E.Flush()

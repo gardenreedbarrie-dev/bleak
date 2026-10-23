@@ -519,7 +519,7 @@ function LibKeyBound.Binder:OnKeyDown(key)
 
 	local openChatKey = GetBindingKey('OPENCHAT')
 	if openChatKey and key == openChatKey then
-		ChatFrameEditBox:Show()
+		ChatFrame_OpenChat("")
 		return
 	end
 
