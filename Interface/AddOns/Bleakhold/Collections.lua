@@ -3,8 +3,8 @@
 -- Legacy Sets: eras rail, set pieces grid (hover = item tooltip, click = try on, shift-click = link),
 -- where the set drops, and a DressUpModel preview. Collected state and the outfit unlock come from
 -- the server (SET); Save outfit is an intent (OUTFIT) the server checks.
--- Defines the global ToggleCollectionsJournal (if nothing else did) so AddicatUI's Pets & Mounts button
--- opens this window instead of its own.
+-- Without AddicatUI or DragonUI, defines the global ToggleCollectionsJournal (if nothing else did) for addons
+-- that open a server's collections window through it.
 local ADDON, ns = ...
 local U, UI, Comm, Data = ns.U, ns.UI, ns.Comm, ns.Data
 local C = UI.C
@@ -799,8 +799,15 @@ UI.RegisterOpener("collections", function(toggle) open(nil, toggle) end)
 UI.RegisterOpener("collections-legacy", function(toggle) open("legacy", toggle) end)
 ns.AddCommand("collections", "open Collections", function() open(nil, true) end)
 
--- AddicatUI's (DragonUI's) Pets & Mounts window defers to a server collections window through this global.
-if type(ToggleCollectionsJournal) ~= "function" then
+-- AddicatUI's and DragonUI's Pets & Mounts button opens a server's collections window through this global when
+-- one exists. Their own journal summons, dismisses and picks a random mount, which this window does not, so with
+-- either loaded (both load before Bleakhold) the global stays theirs to leave undefined; Collections stays on the
+-- Bleakhold button, /bh collections and its key binding.
+local function journalAddonLoaded()
+    return IsAddOnLoaded and (IsAddOnLoaded("AddicatUI") or IsAddOnLoaded("DragonUI")) and true or false
+end
+
+if type(ToggleCollectionsJournal) ~= "function" and not journalAddonLoaded() then
     ToggleCollectionsJournal = function()
         open(nil, true)
     end

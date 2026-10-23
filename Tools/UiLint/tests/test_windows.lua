@@ -234,11 +234,17 @@ test("Collections: mounts and pets are counted on the client", function(M, ns)
     H.ok(texts(M, "No pets yet.") > 0)
 end)
 
-test("ToggleCollectionsJournal opens Collections (DragonUI hook)", function(M, ns)
+test("ToggleCollectionsJournal opens Collections when no journal addon is loaded", function(M, ns)
     H.eq(type(M.env.ToggleCollectionsJournal), "function")
     M.env.ToggleCollectionsJournal()
     H.ok(M.env.BleakholdCollectionsFrame:IsShown())
 end)
+
+test("with AddicatUI or DragonUI loaded, their Pets & Mounts journal keeps the button", function(M, ns)
+    H.eq(M.env.ToggleCollectionsJournal, nil, "AddicatUI opens its own journal, which can summon")
+    ns.UI.Open("collections")
+    H.ok(M.env.BleakholdCollectionsFrame:IsShown(), "Collections still opens from Bleakhold")
+end, { before = function(M) M.addons.AddicatUI = true end })
 
 test("ToggleCollectionsJournal of another addon is left alone", function(M, ns)
     H.eq(M.env.ToggleCollectionsJournal, M.preexisting)
