@@ -178,6 +178,8 @@ local function loginScenario()
     if art then
         check(GlueDialogButton1:GetNormalTexture():GetTexture():find("LoginButtonPrimary") ~= nil, "Okay uses the primary art")
         check(GlueDialogBackground:GetBackdrop() == nil and #BleakholdGlue.Dialog.pieces >= 9, "dialog 9-slice frame")
+        local corner = BleakholdGlue.Dialog.pieces[4]
+        check(math.abs(corner:GetWidth() - BleakholdGlue.px(56)) < 0.01, "dialog corners at the design size (art at 2x)")
     end
     GlueDialogButton1:Click()
     check(not GlueDialog:IsShown(), "Okay closes the dialog")

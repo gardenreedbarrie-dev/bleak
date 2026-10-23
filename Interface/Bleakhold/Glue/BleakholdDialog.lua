@@ -43,8 +43,10 @@ local function buildFrame()
 
     bg:SetBackdrop(nil)
 
+    -- The art is drawn at twice the design size: the 112-texel corners are 56 design px, and the brass edge
+    -- (64 texels in) then meets the dialog's edge, art.margin = 32 design px outside it.
     local m = BH.px(art.margin)
-    local c = BH.px(art.corner)
+    local c = BH.px(art.corner / 2)
     local t0, t1, t2, t3 = 0, art.corner, art.width - art.corner, art.width
     local cuts = { t0 / art.width, t1 / art.width, t2 / art.width, t3 / art.width }
     local pieces = {}
