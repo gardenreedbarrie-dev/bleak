@@ -1041,6 +1041,9 @@ local defaults = {
                 use_custom_color = false, -- Override presets with custom color
                 custom_color = { r = 0.15, g = 0.15, b = 0.15 } -- Custom tint RGB
             },
+            theme = {
+                style = "bleakhold", -- "bleakhold" (dark slate and gold, client fonts) or "classic" (the DragonUI look)
+            },
             nameplates = {
                 enabled = true,
                 barWidth = 150, -- ~Blizzard plate width

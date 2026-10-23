@@ -32,6 +32,11 @@ local function IsEnabled(moduleName)
     return GetModuleField(moduleName, "enabled") == true
 end
 
+-- The Bleakhold theme drives the dark mode walker with its own palette.
+local function IsBleakTheme()
+    return addon.IsBleakTheme ~= nil and addon.IsBleakTheme()
+end
+
 -- ============================================================================
 -- TAB BUILDER
 -- ============================================================================
@@ -42,11 +47,48 @@ local function BuildEnhancementsTab(scroll)
     C:AddSpacer(scroll)
 
     -- ====================================================================
+    -- INTERFACE THEME
+    -- ====================================================================
+    local L = addon.L
+    local themeSection = C:AddSection(scroll, L["Interface Theme"])
+
+    C:AddDescription(themeSection, L["Bleakhold dresses AddicatUI like the rest of Bleakhold: dark slate surfaces and muted gold borders on unit frames, action bars, micro menu, minimap, bags, cast and XP bars, buff borders, tooltips, menus, loot windows, chat and nameplates, with the client's own fonts. Icons, portraits and health, mana and class colours are left alone. Classic keeps the original DragonUI look and its Dark Mode. Colours switch at once; fonts follow after a /reload."])
+
+    C:AddDropdown(themeSection, {
+        label = L["Theme"],
+        values = {
+            bleakhold = L["Bleakhold"],
+            classic = L["Classic (DragonUI)"],
+        },
+        getFunc = function()
+            return addon.GetUITheme and addon.GetUITheme() or "bleakhold"
+        end,
+        setFunc = function(val)
+            if addon.SetUITheme then
+                addon.SetUITheme(val)
+            else
+                EnsureModuleTable("theme").style = val
+            end
+        end,
+        callback = function()
+            -- Rebuild tab so the Dark Mode controls update their disabled state
+            Panel:SelectTab("enhancements")
+        end,
+        width = 200,
+    })
+
+    C:AddSpacer(scroll)
+
+    -- ====================================================================
     -- DARK MODE
     -- ====================================================================
     local darkSection = C:AddSection(scroll, LO["Dark Mode"])
 
     C:AddDescription(darkSection, LO["Darkens UI borders and chrome only: action bar borders, unit frame borders, minimap border, bag slot borders, micro menu, castbar borders, and decorative elements. Icons, portraits, and abilities are never affected."])
+
+    if IsBleakTheme() then
+        C:AddDescription(darkSection, L["The Bleakhold theme sets these colours itself. Choose the Classic theme above to use Dark Mode."])
+    end
 
     C:AddToggle(darkSection, {
         label = LO["Enable Dark Mode"],
@@ -64,6 +106,7 @@ local function BuildEnhancementsTab(scroll)
             -- Rebuild tab so the intensity dropdown updates its disabled state
             Panel:SelectTab("enhancements")
         end,
+        disabled = IsBleakTheme,
         requiresReload = true,
     })
 
@@ -83,7 +126,9 @@ local function BuildEnhancementsTab(scroll)
         callback = function()
             if addon.RefreshDarkMode then addon.RefreshDarkMode(true) end
         end,
-        disabled = function() return not IsEnabled("darkmode") or GetModuleField("darkmode", "use_custom_color") == true end,
+        disabled = function()
+            return not IsEnabled("darkmode") or IsBleakTheme() or GetModuleField("darkmode", "use_custom_color") == true
+        end,
         width = 200,
     })
 
@@ -96,7 +141,7 @@ local function BuildEnhancementsTab(scroll)
             if addon.RefreshDarkMode then addon.RefreshDarkMode(true) end
             Panel:SelectTab("enhancements")
         end,
-        disabled = function() return not IsEnabled("darkmode") end,
+        disabled = function() return not IsEnabled("darkmode") or IsBleakTheme() end,
         requiresReload = false,
     })
 
@@ -113,6 +158,7 @@ local function BuildEnhancementsTab(scroll)
         callback = function()
             if addon.RefreshDarkMode then addon.RefreshDarkMode(true) end
         end,
+        disabled = IsBleakTheme,
         hasAlpha = false,
     })
 

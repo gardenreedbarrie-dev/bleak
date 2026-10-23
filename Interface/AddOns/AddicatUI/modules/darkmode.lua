@@ -7,6 +7,8 @@ local addon = select(2, ...)
 -- Surgical darkening of UI chrome: ONLY borders, backgrounds, and frame art.
 -- Never darkens ability icons, portraits, or interactive content.
 -- Supports 3 intensity presets: Light, Medium, Dark.
+-- The Bleakhold theme (bleaktheme.lua) runs this same walker with its palette:
+-- muted gold on borders and frame art, slate on backgrounds.
 -- ============================================================================
 
 -- Module state tracking
@@ -20,13 +22,6 @@ local DarkModeModule = {
     darkenedTextures = {} -- Track all darkened textures for clean restore
 }
 
--- Register with ModuleRegistry (if available)
-if addon.RegisterModule then
-    addon:RegisterModule("darkmode", DarkModeModule,
-        addon.L["Dark Mode"],
-        addon.L["Darken UI borders and chrome"])
-end
-
 -- ============================================================================
 -- CONFIGURATION FUNCTIONS
 -- ============================================================================
@@ -35,8 +30,29 @@ local function GetModuleConfig()
     return addon:GetModuleConfig("darkmode")
 end
 
+-- The theme's tint table while the Bleakhold theme is on, nil on the classic look.
+local function GetThemeTints()
+    if addon.IsBleakTheme and addon.IsBleakTheme() then
+        return addon.BleakTheme and addon.BleakTheme.tints
+    end
+    return nil
+end
+
+local function IsThemeActive()
+    return GetThemeTints() ~= nil
+end
+
+-- The walker runs for Dark Mode or the Bleakhold theme; the theme's palette wins while it is on.
 local function IsModuleEnabled()
-    return addon:IsModuleEnabled("darkmode")
+    return addon:IsModuleEnabled("darkmode") or IsThemeActive()
+end
+
+-- Register with ModuleRegistry (if available)
+if addon.RegisterModule then
+    addon:RegisterModule("darkmode", DarkModeModule,
+        addon.L["Dark Mode"],
+        addon.L["Darken UI borders and chrome"],
+        { isEnabled = IsModuleEnabled })
 end
 
 -- ============================================================================
@@ -61,6 +77,12 @@ local ufTintCache = { 1, 1, 1 }
 local auraTintCache = { 1, 1, 1 }
 
 local function GetTintValues()
+    local theme = GetThemeTints()
+    if theme then
+        local t = theme.chrome
+        tintCache[1], tintCache[2], tintCache[3] = t[1], t[2], t[3]
+        return tintCache
+    end
     local config = GetModuleConfig()
     if config and config.use_custom_color and config.custom_color then
         local c = config.custom_color
@@ -73,10 +95,21 @@ local function GetTintValues()
     return tintCache
 end
 
+-- Backgrounds and slot art: the theme's slate while it is on, the caller's tint otherwise.
+local surfaceTintCache = { 1, 1, 1 }
+local function SurfaceTint(fallback)
+    local theme = GetThemeTints()
+    if not theme then return fallback end
+    local t = theme.surface
+    surfaceTintCache[1], surfaceTintCache[2], surfaceTintCache[3] = t[1], t[2], t[3]
+    return surfaceTintCache
+end
+
 -- Action button frames take the Buttons border colour under the dark tint, plus its alpha.
 local frameTintCache = { 1, 1, 1 }
 local function GetFrameTintValues()
-    local tint = GetTintValues()
+    local theme = GetThemeTints()
+    local tint = theme and theme.button or GetTintValues()
     local r, g, b, a = 1, 1, 1, nil
     if addon.GetButtonFrameColor then
         r, g, b, a = addon.GetButtonFrameColor()
@@ -89,6 +122,12 @@ end
 -- Unit frames need to be noticeably darker than other UI chrome
 -- due to their color composition (gold borders on dark backgrounds)
 local function GetUFTintValues()
+    local theme = GetThemeTints()
+    if theme then
+        local t = theme.unitframe
+        ufTintCache[1], ufTintCache[2], ufTintCache[3] = t[1], t[2], t[3]
+        return ufTintCache
+    end
     local config = GetModuleConfig()
     if config and config.use_custom_color and config.custom_color then
         local c = config.custom_color
@@ -207,6 +246,7 @@ end
 
 local function DarkenActionButtonBorders(tint)
     local frameTint = GetFrameTintValues()
+    local surface = SurfaceTint(tint)
     for n = 1, #ACTION_BUTTON_NAMES, 2 do
         local button = _G[ACTION_BUTTON_NAMES[n]]
         if button then
@@ -215,7 +255,7 @@ local function DarkenActionButtonBorders(tint)
             DarkenButtonFrame(button, normal, frameTint)
             -- Darken background slot texture (created by AddicatUI buttons module)
             if button.background and button.background.GetObjectType and button.background:GetObjectType() == "Texture" then
-                DarkenTexture(button.background, tint)
+                DarkenTexture(button.background, surface)
             end
             -- DO NOT touch the "Icon" texture — that's the ability icon
         end
@@ -228,13 +268,14 @@ end
 -- -----------------------------------------------------------------------
 local function DarkenStanceButtonBorders(tint)
     local frameTint = GetFrameTintValues()
+    local surface = SurfaceTint(tint)
     for i = 1, 10 do
         local button = _G["ShapeshiftButton" .. i]
         if button then
             local normal = _G["ShapeshiftButton" .. i .. "NormalTexture"] or (button.GetNormalTexture and button:GetNormalTexture())
             DarkenButtonFrame(button, normal, frameTint)
             if button.background and button.background:GetObjectType() == "Texture" then
-                DarkenTexture(button.background, tint)
+                DarkenTexture(button.background, surface)
             end
         end
     end
@@ -245,6 +286,7 @@ end
 -- -----------------------------------------------------------------------
 local function DarkenPetButtonBorders(tint)
     local frameTint = GetFrameTintValues()
+    local surface = SurfaceTint(tint)
     for i = 1, 10 do
         local button = _G["PetActionButton" .. i]
         if button then
@@ -252,7 +294,7 @@ local function DarkenPetButtonBorders(tint)
                            or (button.GetNormalTexture and button:GetNormalTexture())
             DarkenButtonFrame(button, normal, frameTint)
             if button.background and button.background:GetObjectType() == "Texture" then
-                DarkenTexture(button.background, tint)
+                DarkenTexture(button.background, surface)
             end
         end
     end
@@ -304,13 +346,14 @@ end
 -- These are purely decorative chrome, safe to darken entirely.
 -- -----------------------------------------------------------------------
 local function DarkenMainBarArt(tint)
-    -- MainMenuBarArtFrame: all regions are decorative art
+    local surface = SurfaceTint(tint)
+    -- MainMenuBarArtFrame: all regions are decorative art (the end caps get the chrome tint below)
     local artFrame = _G["MainMenuBarArtFrame"]
     if artFrame and artFrame.GetRegions then
         local regions = { artFrame:GetRegions() }
         for _, region in ipairs(regions) do
             if region and region.GetObjectType and region:GetObjectType() == "Texture" then
-                DarkenTexture(region, tint)
+                DarkenTexture(region, surface)
             end
         end
     end
@@ -354,7 +397,7 @@ local function DarkenMainBarArt(tint)
             for _, pieceName in ipairs(NINESLICE_PIECES) do
                 local piece = mainBarFrame.BorderArt[pieceName]
                 if piece and piece.GetObjectType and piece:GetObjectType() == "Texture" then
-                    DarkenTexture(piece, tint)
+                    DarkenTexture(piece, pieceName == "Center" and surface or tint)
                 end
             end
         end
@@ -363,7 +406,7 @@ local function DarkenMainBarArt(tint)
             for _, pieceName in ipairs(NINESLICE_PIECES) do
                 local piece = mainBarFrame.Background[pieceName]
                 if piece and piece.GetObjectType and piece:GetObjectType() == "Texture" then
-                    DarkenTexture(piece, tint)
+                    DarkenTexture(piece, surface)
                 end
             end
         end
@@ -375,7 +418,7 @@ local function DarkenMainBarArt(tint)
         local regions = { stanceBar:GetRegions() }
         for _, region in ipairs(regions) do
             if region and region.GetObjectType and region:GetObjectType() == "Texture" then
-                DarkenTexture(region, tint)
+                DarkenTexture(region, surface)
             end
         end
     end
@@ -442,6 +485,7 @@ local function DarkenFrameBorderTextures(frame, tint)
 end
 
 local function DarkenUnitFrameBorders(tint)
+    local surface = SurfaceTint(tint)
     -- Player frame (Blizzard)
     DarkenFrameBorderTextures(_G["PlayerFrame"], tint)
     local playerTex = _G["PlayerFrameTexture"]
@@ -462,11 +506,11 @@ local function DarkenUnitFrameBorders(tint)
         end
         -- Background
         if dragonFrame.PlayerFrameBackground then
-            DarkenTexture(dragonFrame.PlayerFrameBackground, tint)
+            DarkenTexture(dragonFrame.PlayerFrameBackground, surface)
         end
         local bgGlobal = _G["AddicatUIPlayerFrameBackground"]
         if bgGlobal and bgGlobal ~= dragonFrame.PlayerFrameBackground then
-            DarkenTexture(bgGlobal, tint)
+            DarkenTexture(bgGlobal, surface)
         end
         -- Deco (small dot decoration)
         if dragonFrame.PlayerFrameDeco then
@@ -504,7 +548,7 @@ local function DarkenUnitFrameBorders(tint)
     local dragonTargetBorder = _G["AddicatUI_TargetBorder"]
     if dragonTargetBorder then DarkenTexture(dragonTargetBorder, tint) end
     local dragonTargetBG = _G["AddicatUI_TargetBG"]
-    if dragonTargetBG then DarkenTexture(dragonTargetBG, tint) end
+    if dragonTargetBG then DarkenTexture(dragonTargetBG, surface) end
     local dragonTargetElite = _G["AddicatUI_TargetElite"]
     if dragonTargetElite then DarkenTexture(dragonTargetElite, tint) end
     local dragonTargetElitePaw = _G["AddicatUI_TargetElitePaw"]
@@ -520,7 +564,7 @@ local function DarkenUnitFrameBorders(tint)
     local totBorder = _G["ToTBorder"]
     if totBorder then DarkenTexture(totBorder, tint) end
     local totBg = _G["ToTBG"]
-    if totBg then DarkenTexture(totBg, tint) end
+    if totBg then DarkenTexture(totBg, surface) end
 
     -- Focus frame
     DarkenFrameBorderTextures(_G["FocusFrame"], tint)
@@ -530,7 +574,7 @@ local function DarkenUnitFrameBorders(tint)
     local dragonFocusBorder = _G["AddicatUI_FocusBorder"]
     if dragonFocusBorder then DarkenTexture(dragonFocusBorder, tint) end
     local dragonFocusBG = _G["AddicatUI_FocusBG"]
-    if dragonFocusBG then DarkenTexture(dragonFocusBG, tint) end
+    if dragonFocusBG then DarkenTexture(dragonFocusBG, surface) end
     local dragonFocusElite = _G["AddicatUI_FocusElite"]
     if dragonFocusElite then DarkenTexture(dragonFocusElite, tint) end
     local dragonFocusElitePaw = _G["AddicatUI_FocusElitePaw"]
@@ -546,7 +590,7 @@ local function DarkenUnitFrameBorders(tint)
     local tofBorder = _G["ToFBorder"]
     if tofBorder then DarkenTexture(tofBorder, tint) end
     local tofBg = _G["ToFBG"]
-    if tofBg then DarkenTexture(tofBg, tint) end
+    if tofBg then DarkenTexture(tofBg, surface) end
 
     -- Pet frame
     DarkenFrameBorderTextures(_G["PetFrame"], tint)
@@ -557,7 +601,7 @@ local function DarkenUnitFrameBorders(tint)
     local petBorder = _G["AddicatUIPetFrameBorder"]
     if petBorder then DarkenTexture(petBorder, tint) end
     local petBg = _G["AddicatUIPetFrameBackground"]
-    if petBg then DarkenTexture(petBg, tint) end
+    if petBg then DarkenTexture(petBg, surface) end
 
     -- Party frames
     for i = 1, 4 do
@@ -614,6 +658,7 @@ end
 -- AddicatUI bags use customBorder (overlay) and background textures.
 -- -----------------------------------------------------------------------
 local function DarkenBagBorders(tint)
+    local surface = SurfaceTint(tint)
     -- Individual bag slots (CharacterBag0-3Slot) have:
     --   .customBorder = bag border overlay (OVERLAY)
     --   .background   = bg texture (BACKGROUND)
@@ -627,7 +672,7 @@ local function DarkenBagBorders(tint)
         local btn = _G[name]
         if btn then
             if btn.customBorder then DarkenTexture(btn.customBorder, tint) end
-            if btn.background then DarkenTexture(btn.background, tint) end
+            if btn.background then DarkenTexture(btn.background, surface) end
         end
     end
 
@@ -698,6 +743,7 @@ end
 -- NEVER the normal/pushed textures (those are the icons in AddicatUI).
 -- -----------------------------------------------------------------------
 local function DarkenMicroMenuBorders(tint)
+    tint = SurfaceTint(tint)
     local microNames = {
         "CharacterMicroButton",
         "ProfessionMicroButton",
@@ -710,6 +756,7 @@ local function DarkenMicroMenuBorders(tint)
         "LFDMicroButton",
         "MainMenuMicroButton",
         "HelpMicroButton",
+        "AddicatUI_LauncherMicroButton", -- Bleakhold's launcher, skinned like its neighbours
     }
     for _, name in ipairs(microNames) do
         local btn = _G[name]
@@ -725,15 +772,25 @@ local function DarkenMicroMenuBorders(tint)
             -- DO NOT touch GetNormalTexture/GetPushedTexture — those are icons
         end
     end
+
+    -- The launcher's flyout: ForeverUI's 9-slice menu art, all of it plate (built on first open)
+    local flyout = _G["AddicatUI_LauncherFlyout"]
+    local cells = flyout and flyout._fuMenuBg
+    if cells then
+        for _, texture in pairs(cells) do
+            DarkenTexture(texture, tint)
+        end
+    end
 end
 
 -- -----------------------------------------------------------------------
 -- ADDON BUTTON SKINNING: darken the circle border overlay on minimap buttons
 -- -----------------------------------------------------------------------
 local function DarkenAddonButtonBorders(tint)
-    -- Scan Minimap and MinimapBackdrop children for skinned addon buttons
-    local parents = { _G["Minimap"], _G["MinimapBackdrop"] }
-    for _, parent in ipairs(parents) do
+    -- Scan Minimap, MinimapBackdrop and the icon collector's children for skinned addon buttons
+    local parents = { _G["Minimap"], _G["MinimapBackdrop"], _G["AddicatUI_MinimapIconCollector"] }
+    for i = 1, 3 do
+        local parent = parents[i]
         if parent and parent.GetChildren then
             for _, child in ipairs({ parent:GetChildren() }) do
                 if child.AddicatUI_Skinned and child.circle then
@@ -766,7 +823,7 @@ end
 local function DarkenCompactRaidFrameManager(tint)
     local manager = _G["CompactRaidFrameManager"]
     if manager then
-        DarkenFrameRootTextures(manager, tint)
+        DarkenFrameRootTextures(manager, SurfaceTint(tint))
     end
 
     local toggle = _G["CompactRaidFrameManagerToggleButton"]
@@ -822,6 +879,7 @@ local function DarkenCastbarBorders(tint)
         local bar = _G[name]
         if bar and bar.GetRegions then
             -- Darken ARTWORK/BACKGROUND layer textures (border + bg) but SKIP icons
+            local bgTint = SurfaceTint(tint)
             for _, region in ipairs({ bar:GetRegions() }) do
                 if region and region.GetObjectType and region:GetObjectType() == "Texture" then
                     local layer = region:GetDrawLayer()
@@ -835,7 +893,7 @@ local function DarkenCastbarBorders(tint)
                             if type(tex) == "string" and tex:find("UI%-Quickslot") then
                                 -- This is the icon border ring — do NOT darken
                             else
-                                DarkenTexture(region, tint)
+                                DarkenTexture(region, layer == "BACKGROUND" and bgTint or tint)
                             end
                         end
                     end
@@ -858,9 +916,10 @@ local function DarkenCastbarBorders(tint)
         -- Darken the text background frame border
         local textBG = _G[name .. "TextBG"]
         if textBG and textBG.GetRegions then
+            local textTint = SurfaceTint(tint)
             for _, region in ipairs({ textBG:GetRegions() }) do
                 if region and region.GetObjectType and region:GetObjectType() == "Texture" then
-                    DarkenTexture(region, tint)
+                    DarkenTexture(region, textTint)
                 end
             end
         end
@@ -868,10 +927,15 @@ local function DarkenCastbarBorders(tint)
 end
 
 -- Modules that build their art late hand it over here so every sweep and restore covers it.
+-- kind "surface" marks backgrounds, which take the theme's slate instead of the chrome tint.
 local chromeSources = {}
+local chromeKinds = {}
 
-local function DarkenChromeSource(source, tint)
+local function DarkenChromeSource(source, kind, tint)
     local textures = source()
+    if kind == "surface" then
+        tint = SurfaceTint(tint)
+    end
     for i = 1, #textures do
         DarkenTexture(textures[i], tint)
     end
@@ -879,7 +943,7 @@ end
 
 local function DarkenRegisteredChrome(tint)
     for i = 1, #chromeSources do
-        DarkenChromeSource(chromeSources[i], tint)
+        DarkenChromeSource(chromeSources[i], chromeKinds[i], tint)
     end
 end
 
@@ -921,7 +985,7 @@ local function ReDarkenButton(button)
     end
     -- Re-darken background slot texture (created by AddicatUI buttons module)
     if button.background and button.background.GetObjectType and button.background:GetObjectType() == "Texture" then
-        DarkenTexture(button.background, tint)
+        DarkenTexture(button.background, SurfaceTint(tint))
     end
 end
 
@@ -929,7 +993,14 @@ end
 local RestoreDarkMode
 
 -- White aura mask reads lighter than action-bar chrome at the same vertex color; crush toward black.
+-- The theme's aura colour is final as it is: on a white mask the vertex colour is what shows.
 local function GetAuraBorderTintValues()
+    local theme = GetThemeTints()
+    if theme then
+        local t = theme.aura
+        auraTintCache[1], auraTintCache[2], auraTintCache[3] = t[1], t[2], t[3]
+        return auraTintCache
+    end
     local tint = GetTintValues()
     auraTintCache[1], auraTintCache[2], auraTintCache[3] = tint[1] * tint[1], tint[2] * tint[2], tint[3] * tint[3]
     return auraTintCache
@@ -1124,15 +1195,18 @@ local function SetupBarRefreshHooks()
         end)
     end
 
-    -- Hook PetActionBar_Update: fires when pet bar refreshes (summon, dismiss, action changes)
+    -- Hook PetActionBar_Update: fires when pet bar refreshes (summon, dismiss, action changes).
+    -- It also runs on every pet UNIT_AURA/UNIT_FLAGS, so a burst shares one pending pass.
     if PetActionBar_Update then
-        hooksecurefunc("PetActionBar_Update", function()
+        local function PetBarSweep()
+            DarkModeModule.petSweepPending = false
             if not DarkModeModule.applied then return end
-            addon:After(0.05, function()
-                if not DarkModeModule.applied then return end
-                local tint = GetTintValues()
-                DarkenPetButtonBorders(tint)
-            end)
+            DarkenPetButtonBorders(GetTintValues())
+        end
+        hooksecurefunc("PetActionBar_Update", function()
+            if not DarkModeModule.applied or DarkModeModule.petSweepPending then return end
+            DarkModeModule.petSweepPending = true
+            addon:After(0.05, PetBarSweep)
         end)
     end
 
@@ -1187,6 +1261,130 @@ local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("ADDON_LOADED")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 
+-- Hooks and events behind the re-darken passes; idempotent, so a runtime theme switch can call it too.
+local function InstallRuntimeHooks()
+    -- Setup hooks ONCE (before ApplyDarkMode so they catch future updates)
+    SetupBarRefreshHooks()
+    InstallVertexColorGuards()
+
+    -- Hook player frame refresh so dark mode re-applies after decoration/fat bar changes
+    if not DarkModeModule.hooks.playerFrameHooked then
+        if addon.PlayerFrame and addon.PlayerFrame.RefreshPlayerFrame then
+            local origRefresh = addon.PlayerFrame.RefreshPlayerFrame
+            addon.PlayerFrame.RefreshPlayerFrame = function(...)
+                origRefresh(...)
+                -- Re-darken UF borders after player frame rebuilds its textures
+                if DarkModeModule.applied then
+                    addon:After(0.05, function()
+                        if not DarkModeModule.applied then return end
+                        local ufTint = GetUFTintValues()
+                        DarkenUnitFrameBorders(ufTint)
+                    end)
+                end
+            end
+            -- Also update the .Refresh alias
+            addon.PlayerFrame.Refresh = addon.PlayerFrame.RefreshPlayerFrame
+        end
+
+        -- Hook PlayerFrame_UpdateArt — Blizzard calls this during reload/vehicle transitions
+        -- which triggers ChangePlayerframe() and recreates decoration textures, losing dark tints
+        if PlayerFrame_UpdateArt then
+            hooksecurefunc("PlayerFrame_UpdateArt", function()
+                if DarkModeModule.applied then
+                    addon:After(0.1, function()
+                        if not DarkModeModule.applied then return end
+                        local ufTint = GetUFTintValues()
+                        DarkenUnitFrameBorders(ufTint)
+                    end)
+                end
+            end)
+        end
+
+        DarkModeModule.hooks.playerFrameHooked = true
+    end
+
+    -- Hook TargetFrame_Update / FocusFrame_Update so dark mode re-applies
+    -- to custom AddicatUI border/background textures after Blizzard refreshes.
+    -- Throttled to avoid excessive re-darkening on rapid fire events.
+    if not DarkModeModule.hooks.targetFocusHooked then
+        local lastUFRefresh = 0
+        local function ThrottledUFRedarken()
+            if not DarkModeModule.applied then return end
+            local now = GetTime()
+            if now - lastUFRefresh < 0.15 then return end
+            lastUFRefresh = now
+
+            -- Apply immediately to avoid one-frame flashes when target/focus
+            -- backgrounds are refreshed to their default colors.
+            local ufTint = GetUFTintValues()
+            DarkenUnitFrameBorders(ufTint)
+
+            -- Keep a short safety pass for delayed Blizzard refreshes.
+            addon:After(0.03, function()
+                if not DarkModeModule.applied then return end
+                local delayedTint = GetUFTintValues()
+                DarkenUnitFrameBorders(delayedTint)
+            end)
+
+            -- Extra pass for first target/focus creation right after reload.
+            addon:After(0.10, function()
+                if not DarkModeModule.applied then return end
+                local delayedTint = GetUFTintValues()
+                DarkenUnitFrameBorders(delayedTint)
+            end)
+        end
+
+        if TargetFrame_Update then
+            hooksecurefunc("TargetFrame_Update", ThrottledUFRedarken)
+        end
+        if FocusFrame_Update then
+            hooksecurefunc("FocusFrame_Update", ThrottledUFRedarken)
+        end
+
+        DarkModeModule.hooks.targetFocusHooked = true
+    end
+
+    -- Micro menu re-skins (the launcher arrives late, when Bleakhold registers it) and the
+    -- launcher's flyout, which is only built on its first click.
+    if not DarkModeModule.hooks.microHooked then
+        local function RedarkenMicroMenu()
+            if not DarkModeModule.applied then return end
+            DarkenMicroMenuBorders(GetTintValues())
+        end
+        for _, fnName in ipairs({ "RefreshMicromenuButtons", "RefreshMicroMenuLauncher" }) do
+            if type(addon[fnName]) == "function" then
+                hooksecurefunc(addon, fnName, RedarkenMicroMenu)
+            end
+        end
+        local launcher = _G["AddicatUI_LauncherMicroButton"]
+        if launcher then
+            launcher:HookScript("OnClick", RedarkenMicroMenu)
+        end
+        DarkModeModule.hooks.microHooked = true
+    end
+
+    -- Register bar-change events for full re-darken of all buttons
+    if not DarkModeModule.hooks.barEventsRegistered then
+        eventFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
+        eventFrame:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
+        eventFrame:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
+        eventFrame:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
+        eventFrame:RegisterEvent("SPELL_UPDATE_USABLE")
+        eventFrame:RegisterEvent("ACTIONBAR_UPDATE_STATE")
+        eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+        eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
+        eventFrame:RegisterEvent("PLAYER_TARGET_CHANGED")
+        eventFrame:RegisterEvent("PLAYER_FOCUS_CHANGED")
+        eventFrame:RegisterEvent("UNIT_ENTERED_VEHICLE")
+        eventFrame:RegisterEvent("UNIT_EXITED_VEHICLE")
+        eventFrame:RegisterEvent("PET_BAR_UPDATE")
+        eventFrame:RegisterEvent("PLAYER_ALIVE")
+        eventFrame:RegisterEvent("PLAYER_UNGHOST")
+        eventFrame:RegisterEvent("UPDATE_SHAPESHIFT_FORMS")
+        DarkModeModule.hooks.barEventsRegistered = true
+    end
+end
+
 eventFrame:SetScript("OnEvent", function(self, event, arg1)
     if event == "ADDON_LOADED" and arg1 == "AddicatUI" then
         if not IsModuleEnabled() then return end
@@ -1209,107 +1407,7 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
     elseif event == "PLAYER_ENTERING_WORLD" then
         if not IsModuleEnabled() then return end
 
-        -- Setup hooks ONCE (before ApplyDarkMode so they catch future updates)
-        SetupBarRefreshHooks()
-        InstallVertexColorGuards()
-
-        -- Hook player frame refresh so dark mode re-applies after decoration/fat bar changes
-        if not DarkModeModule.hooks.playerFrameHooked then
-            if addon.PlayerFrame and addon.PlayerFrame.RefreshPlayerFrame then
-                local origRefresh = addon.PlayerFrame.RefreshPlayerFrame
-                addon.PlayerFrame.RefreshPlayerFrame = function(...)
-                    origRefresh(...)
-                    -- Re-darken UF borders after player frame rebuilds its textures
-                    if DarkModeModule.applied then
-                        addon:After(0.05, function()
-                            if not DarkModeModule.applied then return end
-                            local ufTint = GetUFTintValues()
-                            DarkenUnitFrameBorders(ufTint)
-                        end)
-                    end
-                end
-                -- Also update the .Refresh alias
-                addon.PlayerFrame.Refresh = addon.PlayerFrame.RefreshPlayerFrame
-            end
-
-            -- Hook PlayerFrame_UpdateArt — Blizzard calls this during reload/vehicle transitions
-            -- which triggers ChangePlayerframe() and recreates decoration textures, losing dark tints
-            if PlayerFrame_UpdateArt then
-                hooksecurefunc("PlayerFrame_UpdateArt", function()
-                    if DarkModeModule.applied then
-                        addon:After(0.1, function()
-                            if not DarkModeModule.applied then return end
-                            local ufTint = GetUFTintValues()
-                            DarkenUnitFrameBorders(ufTint)
-                        end)
-                    end
-                end)
-            end
-
-            DarkModeModule.hooks.playerFrameHooked = true
-        end
-
-        -- Hook TargetFrame_Update / FocusFrame_Update so dark mode re-applies
-        -- to custom AddicatUI border/background textures after Blizzard refreshes.
-        -- Throttled to avoid excessive re-darkening on rapid fire events.
-        if not DarkModeModule.hooks.targetFocusHooked then
-            local lastUFRefresh = 0
-            local function ThrottledUFRedarken()
-                if not DarkModeModule.applied then return end
-                local now = GetTime()
-                if now - lastUFRefresh < 0.15 then return end
-                lastUFRefresh = now
-
-                -- Apply immediately to avoid one-frame flashes when target/focus
-                -- backgrounds are refreshed to their default colors.
-                local ufTint = GetUFTintValues()
-                DarkenUnitFrameBorders(ufTint)
-
-                -- Keep a short safety pass for delayed Blizzard refreshes.
-                addon:After(0.03, function()
-                    if not DarkModeModule.applied then return end
-                    local delayedTint = GetUFTintValues()
-                    DarkenUnitFrameBorders(delayedTint)
-                end)
-
-                -- Extra pass for first target/focus creation right after reload.
-                addon:After(0.10, function()
-                    if not DarkModeModule.applied then return end
-                    local delayedTint = GetUFTintValues()
-                    DarkenUnitFrameBorders(delayedTint)
-                end)
-            end
-
-            if TargetFrame_Update then
-                hooksecurefunc("TargetFrame_Update", ThrottledUFRedarken)
-            end
-            if FocusFrame_Update then
-                hooksecurefunc("FocusFrame_Update", ThrottledUFRedarken)
-            end
-
-            DarkModeModule.hooks.targetFocusHooked = true
-        end
-
-        -- Register bar-change events for full re-darken of all buttons
-        if not DarkModeModule.hooks.barEventsRegistered then
-            self:RegisterEvent("UPDATE_SHAPESHIFT_FORM")
-            self:RegisterEvent("UPDATE_BONUS_ACTIONBAR")
-            self:RegisterEvent("ACTIONBAR_PAGE_CHANGED")
-            self:RegisterEvent("ACTIONBAR_SLOT_CHANGED")
-            self:RegisterEvent("SPELL_UPDATE_USABLE")
-            self:RegisterEvent("ACTIONBAR_UPDATE_STATE")
-            self:RegisterEvent("PLAYER_REGEN_DISABLED")
-            self:RegisterEvent("PLAYER_REGEN_ENABLED")
-            self:RegisterEvent("PLAYER_TARGET_CHANGED")
-            self:RegisterEvent("PLAYER_FOCUS_CHANGED")
-            self:RegisterEvent("UNIT_ENTERED_VEHICLE")
-            self:RegisterEvent("UNIT_EXITED_VEHICLE")
-            self:RegisterEvent("PET_BAR_UPDATE")
-            self:RegisterEvent("PLAYER_ALIVE")
-            self:RegisterEvent("PLAYER_UNGHOST")
-            self:RegisterEvent("UPDATE_SHAPESHIFT_FORMS")
-            DarkModeModule.hooks.barEventsRegistered = true
-        end
+        InstallRuntimeHooks()
 
         -- Apply immediately so the first target/focus after /reload is already dark.
         ApplyDarkMode()
@@ -1464,8 +1562,23 @@ end)
 
 -- Export for external use
 addon.ApplyDarkMode = ApplyDarkMode
-addon.RestoreDarkMode = RestoreDarkMode
 addon.RefreshDarkMode = RefreshDarkMode
+
+-- While the Bleakhold theme is on it owns the tint, so the Dark Mode toggles cannot strip it.
+addon.RestoreDarkMode = function(resetAuraBorders)
+    if IsThemeActive() then return end
+    return RestoreDarkMode(resetAuraBorders)
+end
+
+-- Theme switched at runtime: re-run the walker with the new palette, or hand every texture back.
+addon.RefreshDarkModeForTheme = function()
+    if IsModuleEnabled() then
+        InstallRuntimeHooks()
+        RefreshDarkMode(true)
+    else
+        RestoreDarkMode(true)
+    end
+end
 
 -- Lightweight re-darken for UF borders only (called from player.lua after dragon recreation)
 addon.RefreshDarkModeUnitFrames = function()
@@ -1475,9 +1588,11 @@ addon.RefreshDarkModeUnitFrames = function()
 end
 
 -- Plates recycle constantly, so their chrome pulls the tint on demand instead of being swept.
+-- Callers paint rings in the action-button art, which the theme gives its button tint.
 addon.GetDarkModeTint = function()
     if not IsModuleEnabled() or not DarkModeModule.applied then return nil end
-    return GetTintValues()
+    local theme = GetThemeTints()
+    return theme and theme.button or GetTintValues()
 end
 
 -- Cheap enough for per-SetVertexColor checks in the buttons frame tint.
@@ -1486,11 +1601,20 @@ addon.IsDarkModeApplied = function()
 end
 
 -- source() returns the module's chrome textures; it is called on every apply.
-addon.RegisterDarkModeChrome = function(source)
-    chromeSources[#chromeSources + 1] = source
+-- kind: nil for borders and frame art, "surface" for backgrounds.
+addon.RegisterDarkModeChrome = function(source, kind)
+    local n = #chromeSources + 1
+    chromeSources[n] = source
+    chromeKinds[n] = kind
     if DarkModeModule.applied then
-        DarkenChromeSource(source, GetTintValues())
+        DarkenChromeSource(source, kind, GetTintValues())
     end
+end
+
+-- Re-run every registered source (a module built more of its chrome after the last apply).
+addon.RefreshDarkModeChrome = function()
+    if not DarkModeModule.applied then return end
+    DarkenRegisteredChrome(GetTintValues())
 end
 
 -- Re-darken castbar borders (called from castbar.lua after lazy castbar creation)

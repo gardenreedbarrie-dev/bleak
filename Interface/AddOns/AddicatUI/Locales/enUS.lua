@@ -1173,3 +1173,14 @@ L["Mail"] = true
 L["Retail-style mail window with Open All button"] = true
 L["Open All"] = true
 L["Opening..."] = true
+
+-- ============================================================================
+-- INTERFACE THEME
+-- ============================================================================
+L["Interface Theme"] = true
+L["Bleakhold's dark slate and gold look for AddicatUI"] = true
+L["Theme"] = true
+L["Bleakhold"] = true
+L["Classic (DragonUI)"] = true
+L["Bleakhold dresses AddicatUI like the rest of Bleakhold: dark slate surfaces and muted gold borders on unit frames, action bars, micro menu, minimap, bags, cast and XP bars, buff borders, tooltips, menus, loot windows, chat and nameplates, with the client's own fonts. Icons, portraits and health, mana and class colours are left alone. Classic keeps the original DragonUI look and its Dark Mode. Colours switch at once; fonts follow after a /reload."] = true
+L["The Bleakhold theme sets these colours itself. Choose the Classic theme above to use Dark Mode."] = true

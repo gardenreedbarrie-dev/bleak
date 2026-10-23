@@ -59,7 +59,7 @@ Fonts.PRIMARY = LOCALE_SYSTEM_FONTS[_locale] or "Fonts\\FRIZQT__.TTF"
 
 --- Action bar font (hotkeys, macros, cooldowns, page numbers).
 -- Uses expressway.ttf on Latin and Cyrillic locales for a modern Dragonflight look,
--- falls back to the locale system font on CJK.
+-- falls back to the locale system font on CJK. The Bleakhold theme swaps it (see SetStyle).
 Fonts.ACTIONBAR = LOCALE_CJK_FONTS[_locale]
     or [[Interface\AddOns\AddicatUI_Art\Fonts\expressway.ttf]]
 
@@ -77,6 +77,43 @@ Fonts.needsSystemFont = _needsSystemFont
 
 --- The raw locale string (e.g. "enUS", "koKR").
 Fonts.locale = _locale
+
+--- Title font (window and menu headers). PRIMARY on the classic look.
+Fonts.TITLE = Fonts.PRIMARY
+
+-- ============================================================================
+-- THEME STYLES
+-- ============================================================================
+
+-- The Bleakhold theme (modules/bleaktheme.lua) draws with the client's own faces, the ones the
+-- Bleakhold addon uses: FRIZQT__ body, ARIALN narrow, MORPHEUS titles. CJK and ruRU keep their
+-- system font, so every style has the glyphs it needs.
+local STYLES = {
+    classic = {
+        ACTIONBAR = Fonts.ACTIONBAR,
+        NARROW = Fonts.NARROW,
+        TITLE = Fonts.PRIMARY,
+    },
+    bleakhold = {
+        ACTIONBAR = Fonts.ARIALN,
+        NARROW = Fonts.ARIALN,
+        TITLE = LOCALE_SYSTEM_FONTS[_locale] or "Fonts\\MORPHEUS.TTF",
+    },
+}
+
+--- Active style ("classic" until the theme module reads the profile).
+Fonts.style = "classic"
+
+--- Point ACTIONBAR, NARROW and TITLE at a style's faces ("bleakhold" or "classic").
+-- Text picks these up when it is built, so text that already exists keeps its face until /reload.
+function Fonts.SetStyle(style)
+    if not STYLES[style] then
+        style = "classic"
+    end
+    local set = STYLES[style]
+    Fonts.ACTIONBAR, Fonts.NARROW, Fonts.TITLE = set.ACTIONBAR, set.NARROW, set.TITLE
+    Fonts.style = style
+end
 
 -- ============================================================================
 -- EXPORT

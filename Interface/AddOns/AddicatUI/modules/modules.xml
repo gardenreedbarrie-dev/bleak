@@ -59,7 +59,10 @@
     
     <!-- Dark Mode module -->
     <Script file="darkmode.lua"/>
-    
+
+    <!-- Bleakhold theme (drives the dark mode walker with its palette; must load after it) -->
+    <Script file="bleaktheme.lua"/>
+
     <!-- Tooltip Enhancement module -->
     <Script file="tooltip.lua"/>
     
