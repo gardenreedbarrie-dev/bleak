@@ -9,6 +9,11 @@ BLEAKHOLD_COMMUNITY_URL = BLEAKHOLD_URL
 
 BLEAKHOLD_SUBTITLE = "Wrath of the Lich King Extra"
 
+-- "classic": the stock login screen with its 3D scene and form, which a login patch restyles (WoW Forever's
+-- patch-J.MPQ puts the old Dark Portal there); Bleakhold only hides the Blizzard account buttons. "bleakhold":
+-- the Bleakhold painting, logo and form.
+BLEAKHOLD_LOGIN_SCREEN = "classic"
+
 -- true: character creation has a First Name and a Last Name box (the server's mod-two-names accepts "First
 -- Last"); false: the stock single name box.
 BLEAKHOLD_TWO_NAMES = true

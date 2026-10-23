@@ -1,6 +1,10 @@
 -- Bleakhold glue: the login screen (Main board, 1920x1080, and the Kit board's field, button and checkbox
 -- states).
 --
+-- BLEAKHOLD_LOGIN_SCREEN (BleakholdStrings.lua) picks the look. "classic" keeps the stock screen, 3D scene and
+-- form included, so a login patch shows (WoW Forever's patch-J.MPQ); only the Blizzard account buttons are
+-- hidden. "bleakhold" is the design below. Both keep the login gates and the Bleakhold menu links.
+--
 -- The stock AccountLogin frames stay what they are, with their scripts: the account and password fields, the
 -- Login button, the remember-name checkbox and the menu buttons are restyled and moved, the 3D login scene is
 -- replaced by the painting, and the logo, subtitle and site link are added. The login flow is the stock one
@@ -38,6 +42,9 @@ local LEFT_MENU = { "AccountLoginManageAccountButton", "AccountLoginCommunityBut
 local RIGHT_MENU = { "AccountLoginCinematicsButton", "AccountLoginCreditsButton", "OptionsButton", "AccountLoginExitButton" }
 local HIDDEN = { "AccountLoginLogo", "WorldOfWarcraftRating", "AccountLoginTOSButton", "AccountLoginUpgradeAccountButton",
                  "AccountLoginShowLauncher" }
+-- The classic screen keeps the logo (a login patch replaces its texture) and hides only Blizzard's account pieces.
+local CLASSIC_HIDDEN = { "WorldOfWarcraftRating", "AccountLoginTOSButton", "AccountLoginUpgradeAccountButton",
+                         "AccountLoginShowLauncher" }
 
 -- ------------------------------------------------------------------------------------------------ fonts
 
@@ -191,6 +198,23 @@ local function hideStock()
     end
 
     if SHOW_LAUNCHER then
+        for _, region in ipairs(BH.FindRegions(AccountLoginShowLauncher, "FontString", SHOW_LAUNCHER)) do
+            region:Hide()
+        end
+    end
+end
+
+-- The classic screen: everything stock except Blizzard's account pieces. Hidden again on every show as well.
+local function hideClassic()
+    for _, name in ipairs(CLASSIC_HIDDEN) do
+        local frame = _G[name]
+
+        if frame then
+            frame:Hide()
+        end
+    end
+
+    if SHOW_LAUNCHER and AccountLoginShowLauncher then
         for _, region in ipairs(BH.FindRegions(AccountLoginShowLauncher, "FontString", SHOW_LAUNCHER)) do
             region:Hide()
         end
@@ -616,8 +640,38 @@ end
 
 -- -------------------------------------------------------------------------------------------- install
 
+-- The login gates, the Login button rule and the agreements, for both screens.
+local function installGates()
+    BH.Try(acceptAgreements)
+
+    for _, edit in ipairs({ AccountLoginAccountEdit, AccountLoginPasswordEdit }) do
+        BH.HookScript(edit, "OnTextChanged", login.UpdateLoginButton)
+    end
+
+    -- The safety net for the scan gate, right before the stock login.
+    BH.WrapGlobal("AccountLogin_Login", login.ContinuePastScan, login.UpdateLoginButton)
+
+    local events = CreateFrame("Frame", "BleakholdLoginEvents", AccountLogin)
+    events:RegisterEvent("SCANDLL_ERROR")
+    events:SetScript("OnEvent", function(self, event)
+        BH.Try(onScanError)
+    end)
+end
+
 local function install()
     if not AccountLogin or not AccountLoginUI then
+        return
+    end
+
+    login.classic = BLEAKHOLD_LOGIN_SCREEN ~= "bleakhold"
+    installGates()
+
+    if login.classic then
+        BH.Try(hideClassic)
+        BH.HookScript(AccountLogin, "OnShow", function()
+            hideClassic()
+            login.UpdateLoginButton()
+        end)
         return
     end
 
@@ -629,14 +683,9 @@ local function install()
     BH.Try(buildCheckbox)
     BH.Try(hideStock)
     BH.Try(login.Layout)
-    BH.Try(acceptAgreements)
 
     BH.HookScript(AccountLogin, "OnShow", onLoginShow)
     BH.HookScript(AccountLogin, "OnSizeChanged", login.FitBackground)
-
-    for _, edit in ipairs({ AccountLoginAccountEdit, AccountLoginPasswordEdit }) do
-        BH.HookScript(edit, "OnTextChanged", login.UpdateLoginButton)
-    end
 
     if AccountLoginTokenEdit then
         BH.HookScript(AccountLoginTokenEdit, "OnShow", login.Layout)
@@ -646,20 +695,11 @@ local function install()
     -- Stock code that moves the form (the account-list dropdown) runs before our layout again.
     BH.WrapGlobal("AccountLogin_SetupAccountListDDL", nil, login.Layout)
 
-    -- The safety net for the scan gate, right before the stock login.
-    BH.WrapGlobal("AccountLogin_Login", login.ContinuePastScan, login.UpdateLoginButton)
-
     -- Fade the painting with the form when the screen leaves for character select.
     BH.WrapGlobal("GlueFrameFadeOut", nil, function(frame, timeToFade)
         if frame == AccountLoginUI and login.backdrop and GlueFrameFade then
             GlueFrameFade(login.backdrop, timeToFade, "OUT")
         end
-    end)
-
-    local events = CreateFrame("Frame", "BleakholdLoginEvents", AccountLogin)
-    events:RegisterEvent("SCANDLL_ERROR")
-    events:SetScript("OnEvent", function(self, event)
-        BH.Try(onScanError)
     end)
 end
 

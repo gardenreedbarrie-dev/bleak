@@ -313,7 +313,7 @@ effect; they are the `bleakFx*` CVars, saved in `Config.wtf`.
 
 The client loads `Interface\Bleakhold\Glue\BleakholdGlue.toc` right after the stock
 `Interface\GlueXML\GlueXML.toc` on every glue load (BLEAKHOLD(loginui), `CGlueMgr::Resume`). Those files
-restyle and extend the stock screens from Lua: the Bleakhold login screen, a restyled dialog with a connecting
+restyle and extend the stock screens from Lua: the login screen, a restyled dialog with a connecting
 progress bar, and character creation with the High Elf and Eredar races and a First Name and a Last Name box
 (the server's mod-two-names accepts "First Last"; the last name is optional). No Blizzard file is replaced, so
 this works with signature checks on or off.
@@ -322,6 +322,10 @@ this works with signature checks on or off.
   (or `<client>\Interface\Bleakhold\Glue\`), or pack it into a `Data\patch-?.MPQ` under the same path, before
   starting the client. Without it the stock screens appear. Do not use `<client>\Interface\GlueXML`: the client
   renames that folder on every glue load.
+- Login screen: `BLEAKHOLD_LOGIN_SCREEN` in `BleakholdStrings.lua`. `"classic"` (the default) keeps the stock
+  3D login scene and form, so a login patch in `Data` shows there; WoW Forever's `patch-J.MPQ` (by space_slam,
+  not part of this repository) puts the old Dark Portal scene, its music and the WoW Forever loading screens in.
+  Only Blizzard's account buttons are hidden. `"bleakhold"` shows the Bleakhold painting, logo and form instead.
 - Settings (links, skipping the agreement screens, the Login button waiting for both fields, two names on or
   off) are at the top of `BleakholdStrings.lua`.
 - Tests: `Tools/UiLint/glue/run.sh` runs the login, race and name scenarios against a mock of the glue API

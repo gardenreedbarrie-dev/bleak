@@ -8,7 +8,7 @@ root="$(cd "$here/../../.." && pwd)"
 wowlua="${1:-$here/../build/wowlua}"
 glue="$root/Interface/Bleakhold/Glue"
 rc=0
-for s in login login-noart login-noscanevent login-stockignoresscan login-autoaccept races12 races12-female races10 races13 \
+for s in login login-classic login-noart login-noscanevent login-stockignoresscan login-autoaccept races12 races12-female races10 races13 \
          races12-noart names names-off names-paid; do
     "$wowlua" "$here/tests.lua" "$here" "$glue" "$s" || rc=1
 done

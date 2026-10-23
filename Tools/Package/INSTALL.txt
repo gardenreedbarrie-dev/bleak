@@ -14,8 +14,10 @@ PLAYERS
 3. Start Bleakhold.exe.
 
 What you get:
-- the Bleakhold login screen and character creation with High Elf and Eredar
-  (Data\Interface\Bleakhold\Glue)
+- the Bleakhold login and character creation with High Elf and Eredar (Data\Interface\Bleakhold\Glue).
+  The login screen is the classic 3D one: put a login patch such as WoW Forever's patch-J.MPQ into Data and
+  it shows. BLEAKHOLD_LOGIN_SCREEN = "bleakhold" in Data\Interface\Bleakhold\Glue\BleakholdStrings.lua
+  switches to the Bleakhold painting
 - First Name and Last Name boxes in character creation; the server needs the mod-two-names module for
   two-word names (the last name can be left empty). In game, whisper a two-word name by clicking it, with /r,
   or with /w2 First Last message

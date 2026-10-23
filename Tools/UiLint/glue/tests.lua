@@ -45,6 +45,9 @@ for _, entry in ipairs(entries) do
     local path = GLUE .. "/" .. entry:gsub("\\", "/")
     check(exists(path), "TOC entry resolves: " .. entry)
     if SCENARIO == "login-autoaccept" and entry == "BleakholdLogin.lua" then BLEAKHOLD_AUTO_ACCEPT_AGREEMENTS = true end
+    if entry == "BleakholdLogin.lua" and SCENARIO:find("^login") and SCENARIO ~= "login-classic" then
+        BLEAKHOLD_LOGIN_SCREEN = "bleakhold"
+    end
     if SCENARIO == "names-off" and entry == "BleakholdNames.lua" then BLEAKHOLD_TWO_NAMES = false end
     local ok, err = pcall(dofile, path)
     check(ok, "loads without error: " .. entry .. (ok and "" or (" -> " .. tostring(err))))
@@ -214,6 +217,42 @@ local function loginScenario()
     check(accountY > -px(649), "form moved up for the authenticator field")
     local _, _, _, _, buttonY = AccountLoginLoginButton:GetPoint(1)
     check(-buttonY / (768 / 1080) + 60 + 22 + 22 <= 980.01, "form ends above the footer")
+
+    check(#BLEAKHOLD_GLUE_ERRORS == 0, "no caught errors: " .. table.concat(BLEAKHOLD_GLUE_ERRORS, " | "))
+    check(#MOCK.messages == 0, "no message() popups")
+end
+
+-- The classic screen (the default): the stock 3D scene and form stay, the gates and links still work.
+local function classicScenario()
+    check(BLEAKHOLD_LOGIN_SCREEN == "classic", "classic is the default login screen")
+    check(AccountLogin._model ~= nil, "classic: stock 3D scene kept")
+    check(BleakholdLoginBackdrop == nil and BleakholdLoginLogo == nil and BleakholdLoginSiteLink == nil, "classic: no painting, logo or link")
+    check(AccountLoginAccountEdit:GetBackdrop() ~= nil, "classic: stock field backdrop kept")
+    check(AccountLoginLoginButton:GetNormalTexture():GetTexture():find("Glue%-Panel") ~= nil, "classic: stock Login button art kept")
+
+    SetGlueScreen("login")
+    check(TOSFrame:IsShown() and not AccountLoginUI:IsShown(), "classic: EULA screen first")
+    TOSAccept:Click()
+    TOSAccept:Click()
+    MOCK.idle()
+    check(IsScanDLLFinished(), "classic: scan error answered with ScanDLLContinueAnyway")
+    check(AccountLoginUI:IsShown(), "classic: login form shown after the scan")
+    check(AccountLoginLogo:IsShown(), "classic: the logo stays (a login patch replaces its texture)")
+    check(not AccountLoginTOSButton:IsShown() and not AccountLoginUpgradeAccountButton:IsShown(), "classic: Blizzard account buttons hidden")
+
+    check(AccountLoginLoginButton:IsEnabled() == nil, "classic: Login disabled while empty")
+    AccountLoginAccountEdit:SetText("Adventurer")
+    AccountLoginPasswordEdit:SetText("dragonfire")
+    check(AccountLoginLoginButton:IsEnabled() == 1, "classic: Login enabled with both")
+    AccountLoginLoginButton:Click()
+    check(MOCK.logins[#MOCK.logins] == "logon ADVENTURER", "classic: Login reaches DefaultServerLogin past the gate: " .. tostring(MOCK.logins[#MOCK.logins]))
+
+    AccountLoginManageAccountButton:Click()
+    check(MOCK.launched[#MOCK.launched] == BLEAKHOLD_ACCOUNT_URL, "classic: Manage Account opens Bleakhold's page")
+    AccountLogin:Hide()
+    AccountLoginTOSButton:Show()
+    SetGlueScreen("login")
+    check(not AccountLoginTOSButton:IsShown(), "classic: hidden again on the next show")
 
     check(#BLEAKHOLD_GLUE_ERRORS == 0, "no caught errors: " .. table.concat(BLEAKHOLD_GLUE_ERRORS, " | "))
     check(#MOCK.messages == 0, "no message() popups")
@@ -436,7 +475,8 @@ local function namesScenario()
 end
 
 local ok, err = pcall(function()
-    if SCENARIO:find("^login") then loginScenario()
+    if SCENARIO == "login-classic" then classicScenario()
+    elseif SCENARIO:find("^login") then loginScenario()
     elseif SCENARIO:find("^names") then namesScenario()
     elseif SCENARIO == "races12" then racesScenario(12)
     elseif SCENARIO == "races12-female" then racesScenario(12, true)
