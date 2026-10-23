@@ -19,4 +19,8 @@ Data.dances = {
     { id = 3, key = "twist_it", name = "Twist It", cmd = "/twistit", cat = "classic", bpm = 152, seconds = 3.17 },
     { id = 4, key = "raise_the_roof", name = "Raise the Roof", cmd = "/raisetheroof", cat = "party", bpm = 100, seconds = 2.40 },
     { id = 5, key = "mech_bot", name = "Mech Bot", cmd = "/mechbot", cat = "street", bpm = 104, seconds = 4.60 },
+    { id = 6, key = "cabbage_patch", name = "Cabbage Patch", cmd = "/cabbagepatch", cat = "street", bpm = 104, seconds = 2.30 },
+    { id = 7, key = "sprinkler", name = "Sprinkler", cmd = "/sprinkler", cat = "fun", bpm = 100, seconds = 2.40 },
+    { id = 8, key = "lawnmower", name = "Lawnmower", cmd = "/lawnmower", cat = "fun", bpm = 110, seconds = 4.37 },
+    { id = 9, key = "shopping_cart", name = "Shopping Cart", cmd = "/shoppingcart", cat = "fun", bpm = 108, seconds = 4.43 },
 }

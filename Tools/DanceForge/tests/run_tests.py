@@ -35,6 +35,7 @@ import synth  # noqa: E402
 # files carry the key's name and ids go on the wire); new dances are appended here when they are added.
 FROZEN_KEYS = [
     "string_swing", "running_man", "disco_fever", "twist_it", "raise_the_roof", "mech_bot",
+    "cabbage_patch", "sprinkler", "lawnmower", "shopping_cart",
 ]
 
 KIND = {RT.MAP: 1, RT.SPINE: 2, RT.NECK: 3, RT.RIGID: 4, RT.PELVIS: 5, RT.ROOT: 6, RT.STILL: 7}

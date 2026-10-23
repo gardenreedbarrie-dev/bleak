@@ -159,3 +159,104 @@ DANCES = {
     "raise_the_roof": raise_the_roof,
     "robot": robot,
 }
+
+
+def cabbage_patch():
+    """Fists stir a big pot in front of the chest, round and round, with the hips circling the other way and the
+    knees bouncing."""
+    d = Dance(bpm=104, beats=4)
+    steps = 16
+    for k in range(steps):
+        b = k * 4.0 / steps
+        a = 2.0 * math.pi * k / 8.0          # two circles per loop
+        x, z = 0.30 + 0.09 * math.cos(a), -0.02 + 0.10 * math.sin(a)
+        side = math.sin(a)
+        d.key(b, ease="linear", **merge(
+            hands((x, 0.12, z), (x - 0.02, -0.12, z), (-0.3, 1.0, -0.6), (-0.3, -1.0, -0.6)),
+            hips(x=-0.03 * math.cos(a), y=0.04 * side, z=-0.07),
+            spine_bend=10.0 + 6.0 * math.cos(a), spine_side=-6.0 * side, head_tilt=4.0 * side,
+            wrist_l=(30.0, 0.0, 90.0), wrist_r=(30.0, 0.0, 90.0)))
+    d.key(0, **feet(STANCE + 0.04))
+    d.overlay(groove(depth=0.035, per_beat=1, chest=3.0, nod=4.0))
+    return d
+
+
+def sprinkler():
+    """One hand behind the head, the other arm out straight, sweeping across in jerks like a lawn sprinkler and
+    swinging back in one go."""
+    d = Dance(bpm=100, beats=4)
+    steps = [(-60.0 + 30.0 * k) for k in range(6)]
+    for k, swing in enumerate(steps):
+        b = k * 0.5
+        d.key(b, ease="snap", **merge(
+            arms_fk(right=(swing * -1.0 + 40.0, 5.0, 4.0, 0.0)),
+            hips(z=-0.06, yaw=-6.0 + 3.0 * k), spine_twist=-12.0 + 6.0 * k, head_turn=-15.0 + 7.0 * k))
+    d.key(3.0, ease="snap", **merge(arms_fk(right=(-20.0, 5.0, 4.0, 0.0)), hips(z=-0.06, yaw=9.0),
+                                    spine_twist=18.0, head_turn=20.0))
+    d.key(3.5, ease="inout", **merge(arms_fk(right=(100.0, 5.0, 4.0, 0.0)), hips(z=-0.06, yaw=-6.0),
+                                     spine_twist=-12.0, head_turn=-15.0))
+    d.key(0, **merge(hands(left=(-0.02, 0.10, 0.42), elbow_l=(0.0, 1.0, 0.3)), wrist_l=(-20.0, 0.0, 0.0)))
+    d.key(0, **feet(STANCE + 0.03))
+    d.overlay(groove(depth=0.03, per_beat=2, chest=1.5, nod=2.0))
+    return d
+
+
+def lawnmower():
+    """Bend down, grab the cord and yank it: twice it splutters, the third pull starts it and the mower gets pushed
+    around."""
+    d = Dance(bpm=110, beats=8)
+    for k in range(3):
+        b = k * 1.5
+        d.key(b, ease="inout", **merge(
+            hands(right=(0.30, -0.06, -0.55), elbow_r=(-1.0, -0.3, -0.3)),
+            hips(z=-0.14, x=-0.05, pitch=12.0), spine_bend=32.0, head_nod=10.0))
+        d.key(b + 0.6, ease="out", **merge(
+            hands(right=(0.05, -0.38, 0.25), elbow_r=(-0.5, -1.0, -0.2)),
+            hips(z=-0.05, x=0.0, pitch=4.0, yaw=-18.0), spine_bend=6.0, spine_twist=-25.0, head_nod=-8.0))
+    # the mower runs: push it forward and back with both hands
+    for k in range(4):
+        b = 4.5 + k * 0.85
+        fwd = k % 2 == 0
+        d.key(b, ease="inout", **merge(
+            hands((0.38 if fwd else 0.22, 0.14, -0.22), (0.38 if fwd else 0.22, -0.14, -0.22)),
+            hips(z=-0.08, x=0.04 if fwd else -0.02, pitch=8.0, yaw=0.0), spine_bend=18.0 if fwd else 10.0,
+            spine_twist=0.0, head_nod=0.0))
+    d.key(0, **merge(hands(left=(0.18, 0.22, -0.30)), feet(STANCE + 0.05, x_l=0.12, x_r=-0.08)))
+    d.key(4.5, **hands(left=(0.38, 0.14, -0.22)))
+    d.overlay(groove(depth=0.02, per_beat=1, chest=1.0, nod=1.5))
+    return d
+
+
+def shopping_cart():
+    """Reach up to a shelf, grab something and toss it into the cart, pushing the cart a little after every grab;
+    left and right in turn."""
+    d = Dance(bpm=108, beats=8)
+    for k in range(4):
+        b = k * 2.0
+        left = k % 2 == 0
+        s = 1.0 if left else -1.0
+        reach = (0.20, 0.42 * s, 0.45)
+        toss = (0.30, 0.05 * s, -0.05)
+        grab = {"hand_l": reach} if left else {"hand_r": reach}
+        drop = {"hand_l": toss} if left else {"hand_r": toss}
+        d.key(b, ease="out", **merge(grab, hips(z=-0.03, yaw=12.0 * s, roll=-6.0 * s), spine_side=10.0 * s,
+                                     spine_twist=14.0 * s, head_turn=25.0 * s, head_nod=-12.0))
+        d.key(b + 0.5, ease="in", **merge(drop, hips(z=-0.08, yaw=0.0, roll=0.0), spine_side=0.0,
+                                          spine_twist=0.0, head_turn=0.0, head_nod=8.0))
+        # both hands on the handle and a push
+        d.key(b + 1.0, ease="inout", **merge(hands((0.30, 0.16, -0.20), (0.30, -0.16, -0.20)),
+                                             hips(z=-0.06, x=0.04), spine_bend=10.0))
+        d.key(b + 1.5, ease="inout", **merge(hands((0.42, 0.16, -0.22), (0.42, -0.16, -0.22)),
+                                             hips(z=-0.07, x=0.0), spine_bend=14.0))
+    d.key(0, **merge(feet(STANCE + 0.03), hands(right=(0.30, -0.16, -0.20))))
+    d.key(2.0, **hands(left=(0.30, 0.16, -0.20)))
+    d.overlay(groove(depth=0.025, per_beat=1, chest=2.0, nod=2.5))
+    return d
+
+
+DANCES.update({
+    "cabbage_patch": cabbage_patch,
+    "sprinkler": sprinkler,
+    "lawnmower": lawnmower,
+    "shopping_cart": shopping_cart,
+})

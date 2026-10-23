@@ -70,7 +70,11 @@ test("animations: tab lists, searches, filters and pages", function(M, ns)
     H.eq(tab.entries[1].name:GetText(), "Kneel")
     H.ok(not tab.entries[2]:IsShown(), "one match")
     ns.Collections.searchBox:SetText("/sh")
-    H.eq(#A.Filtered(ns.Collections.search, A.filter), 2, "search by command: /shy, /shout")
+    local shDances = 0
+    for _, d in ipairs(ns.Data.dances) do
+        shDances = shDances + (d.cmd:sub(1, 3) == "/sh" and 1 or 0)
+    end
+    H.eq(#A.Filtered(ns.Collections.search, A.filter), 2 + shDances, "search by command: /shy, /shout and dances")
     ns.Collections.searchBox:SetText("zzzz")
     H.ok(tab.empty:IsShown() and not tab.entries[1]:IsShown(), "no match message")
     ns.Collections.searchBox:SetText("")

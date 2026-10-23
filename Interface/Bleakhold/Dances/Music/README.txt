@@ -22,3 +22,7 @@ id   key (file name)        dance                       BPM loop (s)
 3    twist_it               Twist It                    152     3.17
 4    raise_the_roof         Raise the Roof              100     2.40
 5    mech_bot               Mech Bot                    104     4.60
+6    cabbage_patch          Cabbage Patch               104     2.30
+7    sprinkler              Sprinkler                   100     2.40
+8    lawnmower              Lawnmower                   110     4.37
+9    shopping_cart          Shopping Cart               108     4.43

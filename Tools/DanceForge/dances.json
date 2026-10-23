@@ -17,6 +17,10 @@
     { "id": 2, "key": "disco_fever", "name": "Disco Fever", "command": "discofever", "category": "classic", "source": "party:disco_point" },
     { "id": 3, "key": "twist_it", "name": "Twist It", "command": "twistit", "category": "classic", "source": "party:twist" },
     { "id": 4, "key": "raise_the_roof", "name": "Raise the Roof", "command": "raisetheroof", "category": "party", "source": "party:raise_the_roof" },
-    { "id": 5, "key": "mech_bot", "name": "Mech Bot", "command": "mechbot", "category": "street", "source": "party:robot" }
+    { "id": 5, "key": "mech_bot", "name": "Mech Bot", "command": "mechbot", "category": "street", "source": "party:robot" },
+    { "id": 6, "key": "cabbage_patch", "name": "Cabbage Patch", "command": "cabbagepatch", "category": "street", "source": "party:cabbage_patch" },
+    { "id": 7, "key": "sprinkler", "name": "Sprinkler", "command": "sprinkler", "category": "fun", "source": "party:sprinkler" },
+    { "id": 8, "key": "lawnmower", "name": "Lawnmower", "command": "lawnmower", "category": "fun", "source": "party:lawnmower" },
+    { "id": 9, "key": "shopping_cart", "name": "Shopping Cart", "command": "shoppingcart", "category": "fun", "source": "party:shopping_cart" }
   ]
 }

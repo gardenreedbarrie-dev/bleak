@@ -14,18 +14,20 @@
 namespace Bleakhold
 {
     // DANCE ids 0 .. DanceCatalogueCount - 1 exist; the client has a clip for each of them.
-    inline constexpr uint32_t DanceCatalogueCount = 6;
+    inline constexpr uint32_t DanceCatalogueCount = 10;
     static_assert(DanceCatalogueCount >= 1 && DanceCatalogueCount <= 1024,
         "the dance catalogue (Tools/DanceForge/dances.json) must hold 1..1024 entries (Proto::MaxDances)");
 
     // Length of one loop of each dance in ms (the kit is sent again at the start of every loop).
     inline constexpr uint32_t DanceLoopMs[DanceCatalogueCount] = {
-        2033, 2233, 4300, 3166, 2400, 4600
+        2033, 2233, 4300, 3166, 2400, 4600, 2300, 2400,
+        4366, 4433
     };
 
     // Key of each id (for logs), the same as the addon's Data.dances.
     inline constexpr char const* DanceCatalogueKeys[DanceCatalogueCount] = {
-        "string_swing", "running_man", "disco_fever", "twist_it", "raise_the_roof", "mech_bot"
+        "string_swing", "running_man", "disco_fever", "twist_it", "raise_the_roof", "mech_bot", "cabbage_patch", "sprinkler",
+        "lawnmower", "shopping_cart"
     };
 }
 
