@@ -246,6 +246,16 @@ ignore the packet.
   `Interface/Bleakhold/Emoji`); the text emotes are drawn with the Bangers font (SIL Open Font License 1.1).
   `Interface/Bleakhold/Emoji/NOTICE.md` names the source of every file.
 
+## AddicatUI
+
+AddicatUI is Bleakhold's interface: action bars, unit frames, cast bars, minimap, micro menu, bags, chat,
+nameplates, world map, spellbook and talents in a retail style, with an editor mode and profiles (`/aui`). It is a
+fork of [DragonUI](https://github.com/NeticSoul/DragonUI) by NeticSoul and contributors (MIT), in
+`Interface/AddOns/AddicatUI` and `AddicatUI_Options`. DragonUI's art is World of Warcraft artwork and is not in this
+repository: it comes as a separate addon, `AddicatUI_Art`, which AddicatUI needs (without it the game leaves
+AddicatUI off). `Tools/AddicatUI/README.md` says how it is made and fetched; the CI package builds it as its own
+artifact only when asked to (the workflow's `addicatui_art` input).
+
 ## Transmog
 
 Collections > Transmog is the transmog window for realms running mod-transmog-plus: the character between its
@@ -414,6 +424,7 @@ this works with signature checks on or off.
 | `Interface/Bleakhold/Emoji/` | Emoji bubble art (BLP, made by `Tools/EmojiForge`) with its licences and `NOTICE.md` |
 | `Interface/Bleakhold/Dances/` | Where the dance pack (`Dances.bdc`, built by `Tools/DanceForge`) and the dances' music go |
 | `Interface/AddOns/Bleakhold/` | Bleakhold UI addon (Activities, Mythic+, Rift, Collections with Transmog and Animations, emote wheel, Season, Leaderboards) |
+| `Interface/AddOns/AddicatUI*/` | AddicatUI, the retail-style interface (a fork of DragonUI; its art is fetched separately, `Tools/AddicatUI`) |
 | `Tools/UiLint/` | Lint and unit tests for the Bleakhold Lua (host Lua built from the client's own source) |
 | `Tools/GrassWind/` | Tests of the grass wind shader patch (a stand-in shader, made-up bytecode and a vs_3_0 emulator) |
 | `docs/BleakholdProtocol.md` | Message protocol between the Bleakhold server module and the UI |

@@ -1134,7 +1134,7 @@ SwipeStyle.pie = {
 
 -- squareSwirl: pre-rendered square radial flipbook. 3.3.5a cannot mask a
 -- diagonal/radial region at runtime, so each atlas cell is one ready state.
-local SQUARE_SWIRL_TEXTURE = "Interface\\AddOns\\AddicatUI\\Textures\\Nameplates\\cooldown-square-swirl-edge"
+local SQUARE_SWIRL_TEXTURE = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Nameplates\\cooldown-square-swirl-edge"
 local SQUARE_SWIRL_GRID = 30
 local SQUARE_SWIRL_FRAMES = SQUARE_SWIRL_GRID * SQUARE_SWIRL_GRID
 -- 32px frames in 34px cells: the 1px copied border keeps filtering off the next frame's needle.

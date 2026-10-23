@@ -1,8 +1,8 @@
 ## Interface: 30300
-## Title: |cff1784d1AddicatUI|r |cffffffffOptions|r
+## Title: |cffC9A25AAddicatUI|r |cffffffffOptions|r
 ## Notes: |cffcaf7faConfiguration UI for AddicatUI|r
-## Author: NeticSoul
-## Version: 2.5
+## Author: Bleakhold; DragonUI by NeticSoul
+## Version: 1.0.0 (DragonUI 2.5)
 ## LoadOnDemand: 1
 ## Dependencies: AddicatUI
 ## X-License: MIT for project-authored code; Blizzard art, fonts and bundled libraries keep their own terms (see THIRD_PARTY_NOTICES)

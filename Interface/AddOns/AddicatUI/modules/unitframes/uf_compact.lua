@@ -4,7 +4,7 @@
 local addon = select(2, ...)
 local UF = addon.UF
 
-local ART = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Compact\\"
+local ART = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Compact\\"
 local FOREVER_ART = ART .. "Forever\\"
 
 local function Copy(source)
@@ -83,7 +83,7 @@ end
 
 -- The player's fills close at both ends; the target and ToT ones run dark under the ring.
 UF.TEXTURES.compact = {
-    BAR_PREFIX = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Player-PortraitOn-Bar-",
+    BAR_PREFIX = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Player-PortraitOn-Bar-",
 }
 
 -- Bent cells from export_compact.py; band, top, combo (beside the combo column) and nose.x from the frame end.

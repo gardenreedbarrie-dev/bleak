@@ -21,77 +21,77 @@ local UF = addon.UF
 UF.TEXTURES = {
     -- Target-style frames (TargetFrame, FocusFrame)
     targetStyle = {
-        BACKGROUND     = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Target\\UI-HUD-UnitFrame-Target-PortraitOn-BACKGROUND",
-        BACKGROUND_FAT = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Target\\UI-HUD-UnitFrame-Target-PortraitOn-BACKGROUND-Fat",
-        BORDER         = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Target\\UI-HUD-UnitFrame-Target-PortraitOn-BORDER",
-        BORDER_FAT     = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Target\\UI-HUD-UnitFrame-Target-PortraitOn-BORDER-Fat",
-        BAR_PREFIX     = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Target-PortraitOn-Bar-",
-        NAME_BACKGROUND = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Target\\NameBackground",
-        BOSS           = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\uiunitframeboss2x",
-        THREAT         = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Target\\ui-hud-unitframe-target-portraiton-incombat-2x",
-        THREAT_NUMERIC = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\uiunitframe",
+        BACKGROUND     = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Target\\UI-HUD-UnitFrame-Target-PortraitOn-BACKGROUND",
+        BACKGROUND_FAT = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Target\\UI-HUD-UnitFrame-Target-PortraitOn-BACKGROUND-Fat",
+        BORDER         = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Target\\UI-HUD-UnitFrame-Target-PortraitOn-BORDER",
+        BORDER_FAT     = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Target\\UI-HUD-UnitFrame-Target-PortraitOn-BORDER-Fat",
+        BAR_PREFIX     = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Target-PortraitOn-Bar-",
+        NAME_BACKGROUND = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Target\\NameBackground",
+        BOSS           = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\uiunitframeboss2x",
+        THREAT         = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Target\\ui-hud-unitframe-target-portraiton-incombat-2x",
+        THREAT_NUMERIC = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\uiunitframe",
     },
 
     -- Small-style frames (ToT, FoT, Pet)
     smallStyle = {
-        BACKGROUND = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Small\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-BACKGROUND",
-        BORDER     = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Small\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-BORDER",
-        BAR_PREFIX = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-",
-        BOSS       = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\uiunitframeboss2x",
+        BACKGROUND = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Small\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-BACKGROUND",
+        BORDER     = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Small\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-BORDER",
+        BAR_PREFIX = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-",
+        BOSS       = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\uiunitframeboss2x",
     },
 
     -- Player frame (unique textures)
     -- NOTE: Vehicle border uses atlas 'PlayerFrame-TextureFrame-Vehicle' from UnitFrame.blp (defined in Atlas.lua)
     player = {
-        BASE          = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\uiunitframe",
-        BASE_FAT      = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\uiunitframe-fat",
-        HEALTH_BAR    = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Player-PortraitOn-Bar-Health",
-        HEALTH_STATUS = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Player-PortraitOn-Bar-Health-Status",
-        BORDER        = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Player\\UI-HUD-UnitFrame-Player-PortraitOn-BORDER",
-        BORDER_FAT    = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Player\\UI-HUD-UnitFrame-Player-PortraitOn-BORDER-Fat",
-        REST_ICON     = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Player\\PlayerRestFlipbook",
-        RUNE_TEXTURE  = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Player\\ClassOverlayDeathKnightRunes",
-        RUNE_TEXTURE_PURPLE = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Player\\ClassOverlayDeathKnightRunes_Purple",
-        LFG_ICONS     = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Player\\LFGRoleIcons",
+        BASE          = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\uiunitframe",
+        BASE_FAT      = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\uiunitframe-fat",
+        HEALTH_BAR    = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Player-PortraitOn-Bar-Health",
+        HEALTH_STATUS = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Player-PortraitOn-Bar-Health-Status",
+        BORDER        = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Player\\UI-HUD-UnitFrame-Player-PortraitOn-BORDER",
+        BORDER_FAT    = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Player\\UI-HUD-UnitFrame-Player-PortraitOn-BORDER-Fat",
+        REST_ICON     = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Player\\PlayerRestFlipbook",
+        RUNE_TEXTURE  = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Player\\ClassOverlayDeathKnightRunes",
+        RUNE_TEXTURE_PURPLE = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Player\\ClassOverlayDeathKnightRunes_Purple",
+        LFG_ICONS     = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Player\\LFGRoleIcons",
         POWER_BARS = {
-            MANA        = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Player-PortraitOn-Bar-Mana",
-            RAGE        = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Player-PortraitOn-Bar-Rage",
-            FOCUS       = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Player-PortraitOn-Bar-Focus",
-            ENERGY      = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Player-PortraitOn-Bar-Energy",
-            RUNIC_POWER = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Player-PortraitOn-Bar-RunicPower",
+            MANA        = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Player-PortraitOn-Bar-Mana",
+            RAGE        = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Player-PortraitOn-Bar-Rage",
+            FOCUS       = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Player-PortraitOn-Bar-Focus",
+            ENERGY      = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Player-PortraitOn-Bar-Energy",
+            RUNIC_POWER = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-Player-PortraitOn-Bar-RunicPower",
         },
     },
 
     -- Party frames (unique textures)
     party = {
-        healthBarStatus = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Party\\UI-HUD-UnitFrame-Party-PortraitOn-Bar-Health-Status",
-        frame           = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Party\\uipartyframe",
-        border          = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Small\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-BORDER",
-        healthBar       = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Party\\UI-HUD-UnitFrame-Party-PortraitOn-Bar-Health",
-        manaBar         = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Party\\UI-HUD-UnitFrame-Party-PortraitOn-Bar-Mana",
-        focusBar        = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Party\\UI-HUD-UnitFrame-Party-PortraitOn-Bar-Focus",
-        rageBar         = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Party\\UI-HUD-UnitFrame-Party-PortraitOn-Bar-Rage",
-        energyBar       = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Party\\UI-HUD-UnitFrame-Party-PortraitOn-Bar-Energy",
-        runicPowerBar   = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Party\\UI-HUD-UnitFrame-Party-PortraitOn-Bar-RunicPower",
+        healthBarStatus = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Party\\UI-HUD-UnitFrame-Party-PortraitOn-Bar-Health-Status",
+        frame           = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Party\\uipartyframe",
+        border          = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Small\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-BORDER",
+        healthBar       = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Party\\UI-HUD-UnitFrame-Party-PortraitOn-Bar-Health",
+        manaBar         = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Party\\UI-HUD-UnitFrame-Party-PortraitOn-Bar-Mana",
+        focusBar        = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Party\\UI-HUD-UnitFrame-Party-PortraitOn-Bar-Focus",
+        rageBar         = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Party\\UI-HUD-UnitFrame-Party-PortraitOn-Bar-Rage",
+        energyBar       = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Party\\UI-HUD-UnitFrame-Party-PortraitOn-Bar-Energy",
+        runicPowerBar   = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Party\\UI-HUD-UnitFrame-Party-PortraitOn-Bar-RunicPower",
     },
 
     -- Pet frame (constructs paths from prefix)
     pet = {
-        SMALL_FRAME_PATH = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Small\\",
-        UNITFRAME_PATH   = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Bars\\",
+        SMALL_FRAME_PATH = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Small\\",
+        UNITFRAME_PATH   = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Bars\\",
         TOT_BASE         = "UI-HUD-UnitFrame-TargetofTarget-PortraitOn-",
         -- Pre-computed power textures (same as smallStyle BAR_PREFIX + power name)
         POWER_TEXTURES = {
-            MANA        = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-Mana",
-            FOCUS       = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-Focus",
-            RAGE        = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-Rage",
-            ENERGY      = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-Energy",
-            RUNIC_POWER = "Interface\\Addons\\AddicatUI\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-RunicPower",
+            MANA        = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-Mana",
+            FOCUS       = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-Focus",
+            RAGE        = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-Rage",
+            ENERGY      = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-Energy",
+            RUNIC_POWER = "Interface\\Addons\\AddicatUI_Art\\Textures\\UnitFrames\\Bars\\UI-HUD-UnitFrame-TargetofTarget-PortraitOn-Bar-RunicPower",
         },
     },
 
     -- Shared class icon texture (used by class portrait system)
-    CLASS_ICON_ALTERNATIVE_PREFIX = "Interface\\AddOns\\AddicatUI\\Textures\\ClassIcons\\",
+    CLASS_ICON_ALTERNATIVE_PREFIX = "Interface\\AddOns\\AddicatUI_Art\\Textures\\ClassIcons\\",
     CLASS_ICON_ALTERNATIVE_SUFFIX = ".blp",
     CLASS_ICON = "Interface\\TargetingFrame\\UI-Classes-Circles",
 }
@@ -193,7 +193,7 @@ end
 -- PVP BADGE (WoW Forever style)
 -- ============================================================================
 
-local PVP_BADGE_SHEET = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\pvpforever"
+local PVP_BADGE_SHEET = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\pvpforever"
 -- Forever draws its 1x atlases at 0.8; our portraits are ~0.93 the size of its 60/58 px ones.
 local PVP_BADGE_SCALE = 0.8 * 0.93
 -- { left, right, top, bottom, width, height, axis }: Forever's @2x cells at 1x sizes; axis = emblem off-centre.
@@ -205,7 +205,7 @@ local PVP_BADGE_PARTS = {
 }
 
 -- Retail's PvP art at 2x in the layouts of Blizzard's UI-PVP-<kind> (64x64) and UI-Group-PVP-<faction> (32x32).
-local PVP_HD = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\PvP\\"
+local PVP_HD = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\PvP\\"
 local CLASSIC_PVP_HD = { Alliance = PVP_HD .. "Alliance", Horde = PVP_HD .. "Horde", FFA = PVP_HD .. "FFA" }
 -- Party frames draw factions from GroupFrame's own sheet, but FFA from the TargetingFrame one.
 local GROUP_PVP_HD = { Alliance = PVP_HD .. "Group-Alliance", Horde = PVP_HD .. "Group-Horde" }

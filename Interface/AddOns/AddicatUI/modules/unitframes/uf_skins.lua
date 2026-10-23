@@ -4,7 +4,7 @@
 local addon = select(2, ...)
 local UF = addon.UF
 
-local ART = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\"
+local ART = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\"
 local FULL_TEXCOORD = { 0, 1, 0, 1 }
 
 -- Piece x, y are added to the offset the module already anchors with (SetPoint convention, +y up).

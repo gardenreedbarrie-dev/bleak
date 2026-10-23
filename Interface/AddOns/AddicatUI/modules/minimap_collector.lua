@@ -42,7 +42,7 @@ local ANIM_DURATION   = 0.14
 local ANIM_SHRINK     = 0.35
 local HIGHLIGHT_TEX   = "Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight"
 local WHITE_TEX       = "Interface\\Buttons\\WHITE8X8"
-local BORDER_TEX      = "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\border_buttons.tga"
+local BORDER_TEX      = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\border_buttons.tga"
 local GOLD_R, GOLD_G, GOLD_B = 1.0, 0.82, 0.20
 -- The Forever ring's band, lifted a little so a 1 px line still reads as that bronze.
 local BRONZE_R, BRONZE_G, BRONZE_B = 0.62, 0.45, 0.26

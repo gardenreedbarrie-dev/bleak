@@ -8,7 +8,7 @@ addon.UnitFrameLayersKit = kit
 
 local STATUSBAR = "Interface\\TargetingFrame\\UI-StatusBar"
 local STATUSBAR_GLOW = "Interface\\TargetingFrame\\UI-StatusBar-Glow"
-local LAYER_ART = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Layers\\"
+local LAYER_ART = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Layers\\"
 
 kit.STATUSBAR = STATUSBAR
 kit.LAYER_ART = LAYER_ART

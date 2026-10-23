@@ -23,6 +23,9 @@ What you get:
   or with /w2 First Last message
 - the Bleakhold interface (Interface\AddOns\Bleakhold): type /bh in game, /bh help for commands,
   /bh demo to look at every window with sample data
+- AddicatUI, the retail-style interface (Interface\AddOns\AddicatUI): it needs its art, the AddicatUI_Art
+  addon, which comes separately (your server gives it to you); without it the game leaves AddicatUI off.
+  /aui opens its settings, /aui edit moves the frames. Do not use it together with DragonUI
 - the emote wheel: hold Ctrl+G, point at an emote and let go (a short tap keeps it open for clicking);
   set it up in Collections > Animations (/bh animations). Ctrl+G is only taken when it is free; any key
   can be set in Key Bindings > Bleakhold

@@ -61,7 +61,7 @@ Fonts.PRIMARY = LOCALE_SYSTEM_FONTS[_locale] or "Fonts\\FRIZQT__.TTF"
 -- Uses expressway.ttf on Latin and Cyrillic locales for a modern Dragonflight look,
 -- falls back to the locale system font on CJK.
 Fonts.ACTIONBAR = LOCALE_CJK_FONTS[_locale]
-    or [[Interface\AddOns\AddicatUI\Fonts\expressway.ttf]]
+    or [[Interface\AddOns\AddicatUI_Art\Fonts\expressway.ttf]]
 
 --- Narrow UI font (options panel, editor mode labels).
 -- PTSansNarrow.ttf on Latin and Cyrillic locales, locale system font on CJK.

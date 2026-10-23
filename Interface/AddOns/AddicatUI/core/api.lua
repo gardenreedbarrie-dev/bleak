@@ -96,7 +96,7 @@ end
 addon.frames = addon.frames or {}
 
 -- Editor mode texture base path
-local EDITMODE_TEXTURE_BASE = 'Interface\\AddOns\\AddicatUI\\Textures\\Editmode\\'
+local EDITMODE_TEXTURE_BASE = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\Editmode\\'
 
 -- Nineslice texture coordinates
 local NINESLICE_COORDS = {

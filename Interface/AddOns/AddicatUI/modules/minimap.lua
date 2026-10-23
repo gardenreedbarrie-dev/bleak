@@ -79,22 +79,22 @@ local mapUnscaledHeight = Minimap:GetHeight() * 1.36 / blipScale
 -- Drawn width: 284 was tuned under Texture:SetRotation, which draws the art 1/sqrt(2) smaller.
 local BORDER_TO_MAP_RATIO = 284 / math.sqrt(2) / mapUnscaledWidth
 
-local ADDICATUI_MINIMAP_MASK = "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\uiminimapmask.tga"
+local ADDICATUI_MINIMAP_MASK = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\uiminimapmask.tga"
 local VANILLA_MINIMAP_MASK = "Textures\\MinimapMask"
-local ADDICATUI_MINIMAP_CIRCLE = "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\uiminimapborder.tga"
-local FOREVER_MINIMAP_MASK = "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\forever_mask.tga"
-local FOREVER_MINIMAP_CIRCLE = "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\forever_circle"
-local FOREVER_MINIMAP_POINTER = "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\forever_pointer"
+local ADDICATUI_MINIMAP_CIRCLE = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\uiminimapborder.tga"
+local FOREVER_MINIMAP_MASK = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\forever_mask.tga"
+local FOREVER_MINIMAP_CIRCLE = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\forever_circle"
+local FOREVER_MINIMAP_POINTER = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\forever_pointer"
 local SQUARE_MINIMAP_MASK = "Interface\\Buttons\\WHITE8X8"
-local ADDICATUI_SQUARE_FRAME = "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\uiminimapsquareborder.tga"
-local ADDICATUI_SQUARE_COLLECTOR_ICON = "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\collector_toggle_square.tga"
+local ADDICATUI_SQUARE_FRAME = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\uiminimapsquareborder.tga"
+local ADDICATUI_SQUARE_COLLECTOR_ICON = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\collector_toggle_square.tga"
 -- The icon is the frame's left chevron cut on 64 art texels, centred 201 texels left of centre.
 local ADDICATUI_SQUARE_ARROW_SIZE, ADDICATUI_SQUARE_ARROW_X = 64, -201
 -- Art texels across the map in game: the line sits ~2% inside the map's edge (measured, not 389).
 local ADDICATUI_SQUARE_MAP_TEXELS = 397
-local FOREVER_SQUARE_FRAME = "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\forever_square_frame.tga"
-local FOREVER_SQUARE_FRAME_ROUNDED = "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\forever_square_frame_rounded.tga"
-local FOREVER_SQUARE_POINTER = "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\forever_square_pointer.tga"
+local FOREVER_SQUARE_FRAME = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\forever_square_frame.tga"
+local FOREVER_SQUARE_FRAME_ROUNDED = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\forever_square_frame_rounded.tga"
+local FOREVER_SQUARE_POINTER = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\forever_square_pointer.tga"
 -- The square frame's line runs 389 px apart in its 512 px art.
 local ADDICATUI_SQUARE_SPAN = 389
 -- The map's width inside the round ring's 256 px art: the square keeps the round style's map size.
@@ -129,8 +129,8 @@ local GAMETIME_DAWN, GAMETIME_DUSK = 5 * 60 + 30, 21 * 60
 
 local ADDON_ORBIT_RADIUS = 15
 local ADDICATUI_SETTINGS_BUTTON_SIZE = 21
-local ADDICATUI_SETTINGS_BUTTON_ICON = "Interface\\AddOns\\AddicatUI\\Textures\\UI\\INV_Misc_Head_Dragon_01"
-local ADDICATUI_CLASSIC_COLLECTOR_ICON = "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\collector_toggle.tga"
+local ADDICATUI_SETTINGS_BUTTON_ICON = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UI\\INV_Misc_Head_Dragon_01"
+local ADDICATUI_CLASSIC_COLLECTOR_ICON = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\collector_toggle.tga"
 
 local MAP_PIN_NAME_FRAGMENTS = {
     "Archy", "GameTimeFrame", "GatherMatePin", "GatherNote", "HandyNotesPin", "HelpOpenTicketButton",
@@ -1237,10 +1237,10 @@ local function ReplaceBlizzardFrame(frame)
     end
 
     -- POI (Point of Interest) Custom Textures
-    minimapFrame:SetStaticPOIArrowTexture("Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\poi-static")
-    minimapFrame:SetCorpsePOIArrowTexture("Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\poi-corpse")
-    minimapFrame:SetPOIArrowTexture("Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\poi-guard")
-    minimapFrame:SetPlayerTexture("Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\poi-player")
+    minimapFrame:SetStaticPOIArrowTexture("Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\poi-static")
+    minimapFrame:SetCorpsePOIArrowTexture("Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\poi-corpse")
+    minimapFrame:SetPOIArrowTexture("Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\poi-guard")
+    minimapFrame:SetPlayerTexture("Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\poi-player")
 
     -- Player arrow size (configurable)
     local playerArrowSize = addon.db and addon.db.profile and addon.db.profile.minimap and
@@ -1255,7 +1255,7 @@ local function ReplaceBlizzardFrame(frame)
         useNewBlipStyle = true -- Default to new style
     end
 
-    local blipTexture = useNewBlipStyle and "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\objecticons" or
+    local blipTexture = useNewBlipStyle and "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\objecticons" or
                             'Interface\\Minimap\\ObjectIcons'
     minimapFrame:SetBlipTexture(blipTexture)
 
@@ -1273,7 +1273,7 @@ local function ReplaceBlizzardFrame(frame)
                                addon.db.profile.minimap.blip_skin
             if useNew == nil then useNew = true end
 
-            local tex = useNew and "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\objecticons" or
+            local tex = useNew and "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\objecticons" or
                             'Interface\\Minimap\\ObjectIcons'
 
             MinimapModule._settingBlipTexture = true
@@ -1281,10 +1281,10 @@ local function ReplaceBlizzardFrame(frame)
             MinimapModule._settingBlipTexture = false
 
             -- Re-apply POI textures (Carbonite resets these on init)
-            Minimap:SetStaticPOIArrowTexture("Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\poi-static")
-            Minimap:SetCorpsePOIArrowTexture("Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\poi-corpse")
-            Minimap:SetPOIArrowTexture("Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\poi-guard")
-            Minimap:SetPlayerTexture("Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\poi-player")
+            Minimap:SetStaticPOIArrowTexture("Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\poi-static")
+            Minimap:SetCorpsePOIArrowTexture("Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\poi-corpse")
+            Minimap:SetPOIArrowTexture("Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\poi-guard")
+            Minimap:SetPlayerTexture("Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\poi-player")
             -- Only re-apply mask if not in hybrid mode (SexyMap controls the mask/shape)
             local hybridCheck = MinimapModule.sexyMapHybridMode
                 or (addon.db and addon.db.profile and addon.db.profile.modules
@@ -1622,7 +1622,7 @@ local function CreateMinimapBorderFrame(width, height)
     do
         local texture = minimapBorderFrame:CreateTexture(nil, "BORDER")
         texture:SetAllPoints(minimapBorderFrame)
-        texture:SetTexture("Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\MinimapBorder.blp")
+        texture:SetTexture("Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\MinimapBorder.blp")
         texture:SetAlpha(0)
 
         minimapBorderFrame.border = texture
@@ -1661,7 +1661,7 @@ local function fadeout(frame)
     FadeAddonButton(frame, "UIFrameFadeOut", 0.2)
 end
 
-local ADDON_ICON_RING = "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\border_buttons.tga"
+local ADDON_ICON_RING = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\border_buttons.tga"
 local ADDON_ICON_FADE_SCRIPTS = { OnEnter = fadein, OnLeave = fadeout }
 
 -- Returns the size factor the current style draws button rings at; sizes the ring too when given one.
@@ -2905,10 +2905,10 @@ local function ApplyBlipTextureForFadeVisibility(shouldShow)
     if not settings then return end
     local texture
     if shouldShow then
-        texture = settings.blip_skin and "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\objecticons"
+        texture = settings.blip_skin and "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\objecticons"
             or 'Interface\\Minimap\\ObjectIcons'
     else
-        texture = "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\blip_blank"
+        texture = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\blip_blank"
     end
     MinimapModule._settingBlipTexture = true
     Minimap:SetBlipTexture(texture)
@@ -3149,7 +3149,7 @@ function MinimapModule:UpdateSettings()
             useNewBlipStyle = true -- Default to new style
         end
 
-        local blipTexture = useNewBlipStyle and "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\objecticons" or
+        local blipTexture = useNewBlipStyle and "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\objecticons" or
                                 'Interface\\Minimap\\ObjectIcons'
         -- Use re-entrancy guard to avoid triggering our own SetBlipTexture hook
         MinimapModule._settingBlipTexture = true
@@ -3443,7 +3443,7 @@ function MinimapModule:ApplyAllSettings()
 
     --  APPLY BLIP TEXTURE (NEW VS OLD STYLE)
     if settings.blip_skin ~= nil and Minimap then
-        local blipTexture = settings.blip_skin and "Interface\\AddOns\\AddicatUI\\Textures\\Minimap\\objecticons" or
+        local blipTexture = settings.blip_skin and "Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\objecticons" or
                                 'Interface\\Minimap\\ObjectIcons'
         Minimap:SetBlipTexture(blipTexture)
     end

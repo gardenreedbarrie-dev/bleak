@@ -2,6 +2,11 @@ name: Build Bleakhold Client
 
 on:
   workflow_dispatch:
+    inputs:
+      addicatui_art:
+        description: "Also build the AddicatUI art package (DragonUI's World of Warcraft artwork, fetched from upstream)"
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths-ignore:
@@ -47,12 +52,40 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "DanceForge could not build the dance pack" }
           Copy-Item -Recurse Interface/Bleakhold/Dances/Music "$p/Data/Interface/Bleakhold/Dances/Music"
           Copy-Item -Recurse Interface/AddOns/Bleakhold "$p/Interface/AddOns/Bleakhold"
+          # AddicatUI's code; its art (AddicatUI_Art) is not game-data free and comes separately (Tools/AddicatUI)
+          Copy-Item -Recurse Interface/AddOns/AddicatUI "$p/Interface/AddOns/AddicatUI"
+          Copy-Item -Recurse Interface/AddOns/AddicatUI_Options "$p/Interface/AddOns/AddicatUI_Options"
           Copy-Item build/raceforge/dist/BleakholdRaceForge.exe "$p/Tools"
           Copy-Item Tools/Package/INSTALL.txt $p
           if (-not (Test-Path "$p/Bleakhold.exe")) { throw "Bleakhold.exe missing from the package" }
           if (Get-ChildItem -Recurse $p -Filter *.dll) { throw "the package must not contain DLLs" }
           if (-not (Test-Path "$p/Data/Interface/Bleakhold/Emoji/Emoji000.blp")) { throw "emoji art missing from the package" }
           if (-not (Test-Path "$p/Data/Interface/Bleakhold/Dances/Dances.bdc")) { throw "dance pack missing from the package" }
+
+      # DragonUI's artwork for AddicatUI (World of Warcraft art): only when asked for, as an artifact of its own.
+      - name: AddicatUI art
+        if: ${{ inputs.addicatui_art }}
+        shell: pwsh
+        run: |
+          $up = (Get-Content Tools/AddicatUI/UPSTREAM).Split(" ")
+          git clone --filter=blob:none $up[0] build/dragonui
+          if ($LASTEXITCODE -ne 0) { throw "could not fetch DragonUI" }
+          git -C build/dragonui checkout --quiet $up[1]
+          if ($LASTEXITCODE -ne 0) { throw "DragonUI has no commit $($up[1])" }
+          $a = "package-art/Bleakhold-AddicatUI-Art/Interface/AddOns"
+          New-Item -ItemType Directory -Force $a | Out-Null
+          python Tools/AddicatUI/sync_dragonui.py art build/dragonui $a
+          if ($LASTEXITCODE -ne 0) { throw "sync_dragonui.py art failed" }
+          if (-not (Test-Path "$a/AddicatUI_Art/AddicatUI_Art.toc")) { throw "AddicatUI_Art missing" }
+
+      - name: Upload AddicatUI art
+        if: ${{ inputs.addicatui_art }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: addicatui-art
+          path: package-art/
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Upload package
         uses: actions/upload-artifact@v4

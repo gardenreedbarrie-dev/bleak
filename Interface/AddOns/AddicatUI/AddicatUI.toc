@@ -1,8 +1,9 @@
 ## Interface: 30300
-## Title: |cff1784d1AddicatUI|r
-## Notes: |cffcaf7faRetail-inspired modular UI addon for WoW 3.3.5a (WotLK).|r
-## Version: 2.5
-## Author: NeticSoul
+## Title: |cffC9A25AAddicatUI|r
+## Notes: |cffcaf7faBleakhold's interface, built on DragonUI by NeticSoul and contributors.|r
+## Version: 1.0.0 (DragonUI 2.5)
+## Author: Bleakhold; DragonUI by NeticSoul
+## Dependencies: AddicatUI_Art
 ## SavedVariables: AddicatUIDB
 ## OptionalDeps: Blizzard_TimeManager
 ## X-License: MIT for project-authored code; Blizzard art, fonts and bundled libraries keep their own terms (see THIRD_PARTY_NOTICES)

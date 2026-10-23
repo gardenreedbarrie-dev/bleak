@@ -29,5 +29,6 @@ GetMinimapShape
 # Optional addons (always checked for nil before use)
 DragonUI
 DragonUI_QuestTrackerFrame
+AddicatUI_QuestTrackerFrame
 DragonUIObjectiveTracker
 DBM

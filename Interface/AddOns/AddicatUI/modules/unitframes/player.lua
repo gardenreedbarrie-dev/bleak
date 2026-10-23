@@ -62,14 +62,14 @@ local PLAYER_BORDER_WIDTH = 256
 local PLAYER_BORDER_HEIGHT = 128
 
 -- Dedicated player corner embellishment (normal state) from standalone texture.
-local PLAYER_CORNER_TEXTURE = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Player\\ui-hud-unitframe-player-portraiton-cornerembellishment-2x"
+local PLAYER_CORNER_TEXTURE = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Player\\ui-hud-unitframe-player-portraiton-cornerembellishment-2x"
 local PLAYER_CORNER_TEX_COORDS = {
     0, 44 / 64,
     0, 44 / 64
 }
 
 -- Combat icon uses the white crossed-swords glyph from atlas crop.
-local PLAYER_COMBAT_ICON_TEXTURE = "Interface\\AddOns\\AddicatUI\\Textures\\UnitFrames\\Player\\uiunitframe2x_ptr_icons_crop"
+local PLAYER_COMBAT_ICON_TEXTURE = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Player\\uiunitframe2x_ptr_icons_crop"
 local PLAYER_COMBAT_ICON_TEX_COORDS = {
     2 / 256, 32 / 256,   -- x: 2..31 (exclusive right edge at 32)
     63 / 256, 90 / 256   -- y: 63..89 (exclusive bottom edge at 90)
@@ -77,10 +77,10 @@ local PLAYER_COMBAT_ICON_TEX_COORDS = {
 
 -- Coordinates for elite/rare glows (inverted target frame)
 local ELITE_GLOW_COORDINATES = {
-    -- Using the correct texture: 'Interface\\Addons\\AddicatUI\\Textures\\UI\\UnitFrame'
+    -- Using the correct texture: 'Interface\\Addons\\AddicatUI_Art\\Textures\\UI\\UnitFrame'
     texCoord = {0.2061015625, 0, 0.537109375, 0.712890625},
     size = {209, 90},
-    texture = 'Interface\\Addons\\AddicatUI\\Textures\\UI\\UnitFrame'
+    texture = 'Interface\\Addons\\AddicatUI_Art\\Textures\\UI\\UnitFrame'
 }
 
 -- Combat Flash animation settings *NO Elite activated

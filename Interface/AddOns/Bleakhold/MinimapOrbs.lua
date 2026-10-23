@@ -1,6 +1,6 @@
 -- Bleakhold: round buttons around the minimap (Activities, Collections, Season, Leaderboards).
 -- They live on BleakholdOrbHolder, a child of UIParent anchored to the Minimap's centre, never on the
--- Minimap itself: DragonUI collects every button parented to Minimap/MinimapBackdrop into its drawer,
+-- Minimap itself: AddicatUI (DragonUI) collects every button parented to Minimap/MinimapBackdrop into its drawer,
 -- and it moves and rescales the Minimap, which the holder follows.
 local ADDON, ns = ...
 local U, UI = ns.U, ns.UI

@@ -13,14 +13,14 @@ local SPELL_ID = 61304
 local GAP, BLIZZARD_GAP = 4, 8
 local MOVER_MIN_HEIGHT = 16
 
-local CASTBAR_ART = "Interface\\AddOns\\AddicatUI\\Textures\\Castbar\\"
+local CASTBAR_ART = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Castbar\\"
 local SOLID = "Interface\\Buttons\\WHITE8X8"
 -- crop = the square, fully opaque core {l, r, t, b}; those fills also vary along x, so they need it per frame.
 local FILLS = {
     castbar = { file = CASTBAR_ART .. "CastingBarStandard2", crop = { 10 / 512, 502 / 512, 4 / 32, 28 / 32 } },
     classic = { file = "Interface\\TargetingFrame\\UI-StatusBar" },
     flat = { file = SOLID },
-    smooth = { file = "Interface\\AddOns\\AddicatUI\\Textures\\Nameplates\\bar-fill", crop = { 12 / 512, 502 / 512, 2 / 32, 30 / 32 } },
+    smooth = { file = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Nameplates\\bar-fill", crop = { 12 / 512, 502 / 512, 2 / 32, 30 / 32 } },
 }
 local CASTBAR_BG = { 8 / 1024, 416 / 1024, 188 / 512, 214 / 512 }
 

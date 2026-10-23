@@ -9,7 +9,7 @@ NP.atlas = NP.atlas or {}
 local A = NP.atlas
 local abs = math.abs
 
-local RETAIL = "Interface\\AddOns\\AddicatUI\\Textures\\Nameplates\\Retail\\"
+local RETAIL = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Nameplates\\Retail\\"
 
 A.SHEET = {
     plate = RETAIL .. "nameplate-atlas",

@@ -3,7 +3,7 @@
 -- Legacy Sets: eras rail, set pieces grid (hover = item tooltip, click = try on, shift-click = link),
 -- where the set drops, and a DressUpModel preview. Collected state and the outfit unlock come from
 -- the server (SET); Save outfit is an intent (OUTFIT) the server checks.
--- Defines the global ToggleCollectionsJournal (if nothing else did) so DragonUI's Pets & Mounts button
+-- Defines the global ToggleCollectionsJournal (if nothing else did) so AddicatUI's Pets & Mounts button
 -- opens this window instead of its own.
 local ADDON, ns = ...
 local U, UI, Comm, Data = ns.U, ns.UI, ns.Comm, ns.Data
@@ -799,7 +799,7 @@ UI.RegisterOpener("collections", function(toggle) open(nil, toggle) end)
 UI.RegisterOpener("collections-legacy", function(toggle) open("legacy", toggle) end)
 ns.AddCommand("collections", "open Collections", function() open(nil, true) end)
 
--- DragonUI's Pets & Mounts window defers to a server collections window through this global.
+-- AddicatUI's (DragonUI's) Pets & Mounts window defers to a server collections window through this global.
 if type(ToggleCollectionsJournal) ~= "function" then
     ToggleCollectionsJournal = function()
         open(nil, true)

@@ -270,7 +270,7 @@ local function IsBagnonBagToggleButton(widget)
 end
 
 -- Lock icon texture, sized 12x12 and anchored to the slot's top-right corner.
-local LOCK_MARKER_TEXTURE = "Interface\\AddOns\\AddicatUI\\Textures\\UI\\BagSortLock"
+local LOCK_MARKER_TEXTURE = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UI\\BagSortLock"
 local LOCK_MARKER_SIZE = 12
 local LOCK_MARKER_OFFSET_X = -1
 local LOCK_MARKER_OFFSET_Y = -1
@@ -1404,7 +1404,7 @@ end
 -- ============================================================================
 
 -- Retail INV_Pet_Broom, the art behind retail's bag cleanup button; the 3.3.5a client has no broom icon.
-local SORT_ICON_TEXTURE = "Interface\\AddOns\\AddicatUI\\Textures\\UI\\BagSortBroom"
+local SORT_ICON_TEXTURE = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UI\\BagSortBroom"
 
 local function CreateActionButton(name, parent, onClick, tooltipTitle, scale, iconPath, tooltipLines)
     scale = scale or 1.0

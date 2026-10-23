@@ -181,7 +181,7 @@ else
 end
 
 -- The fifth field names the file: AddicatUI's colour sheet predates the professions icon.
-local PROFESSIONS_MICRO = 'Interface\\AddOns\\AddicatUI\\Textures\\Professions\\MicroButton'
+local PROFESSIONS_MICRO = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\Professions\\MicroButton'
 MicromenuAtlas["UI-HUD-MicroMenu-Professions-Up"] = {0, 0.25, 0, 0.3203125, PROFESSIONS_MICRO}
 MicromenuAtlas["UI-HUD-MicroMenu-Professions-Down"] = {0.25, 0.5, 0, 0.3203125, PROFESSIONS_MICRO}
 MicromenuAtlas["UI-HUD-MicroMenu-Professions-Mouseover"] = {0.5, 0.75, 0, 0.3203125, PROFESSIONS_MICRO}
@@ -574,7 +574,7 @@ local function UpdateCharacterPortraitVisibility()
         charBtn.AddicatUICharHighlight:SetAllPoints(MicroButtonPortrait)
     end
     if charBtn and charBtn.AddicatUIBackground then
-        local microTexture = 'Interface\\AddOns\\AddicatUI\\Textures\\Micromenu\\uimicromenu2x'
+        local microTexture = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\Micromenu\\uimicromenu2x'
 
         -- Rehydrate texture data in case a late UI pass stripped it.
         charBtn.AddicatUIBackground:SetTexture(microTexture)
@@ -602,7 +602,7 @@ local function UpdateCharacterPortraitVisibility()
         end
     elseif charBtn and not (addon and addon.db and addon.db.profile and addon.db.profile.micromenu and addon.db.profile.micromenu.grayscale_icons) then
         -- Late safety net: if background was removed, recreate it for colored mode.
-        local microTexture = 'Interface\\AddOns\\AddicatUI\\Textures\\Micromenu\\uimicromenu2x'
+        local microTexture = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\Micromenu\\uimicromenu2x'
         local dx, dy = -1, 1
         local offX, offY = charBtn:GetPushedTextOffset()
         local sizeX, sizeY = charBtn:GetSize()
@@ -1126,9 +1126,9 @@ local function SetupPVPButton(button)
     -- Instead of fighting WoW's internal NormalTexture alpha management,
     -- we create our own ARTWORK texture (AddicatUIPVPIcon) that we control
     -- exclusively, just like Character uses MicroButtonPortrait.
-    local microTexture = 'Interface\\AddOns\\AddicatUI\\Textures\\Micromenu\\micropvp'
+    local microTexture = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\Micromenu\\micropvp'
     local englishFaction = UnitFactionGroup('player')
-    local backgroundTexture = 'Interface\\AddOns\\AddicatUI\\Textures\\Micromenu\\uimicromenu2x'
+    local backgroundTexture = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\Micromenu\\uimicromenu2x'
     local buttonWidth, buttonHeight = button:GetSize()
     local dx, dy = -1, 1
     local offX, offY = button:GetPushedTextOffset()
@@ -1399,7 +1399,7 @@ local function SetupCharacterButton(button)
 
     -- STEP 3: Background only (like other buttons)
     if not button.AddicatUIBackground then
-        local microTexture = 'Interface\\AddOns\\AddicatUI\\Textures\\Micromenu\\uimicromenu2x'
+        local microTexture = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\Micromenu\\uimicromenu2x'
         local dx, dy = -1, 1
         local offX, offY = button:GetPushedTextOffset()
         local sizeX, sizeY = button:GetSize()
@@ -1441,7 +1441,7 @@ local function SetupCharacterButton(button)
         button.HandleAddicatUIState()
     else
         -- Re-apply geometry/visibility every pass to survive late Blizzard updates.
-        local microTexture = 'Interface\\AddOns\\AddicatUI\\Textures\\Micromenu\\uimicromenu2x'
+        local microTexture = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\Micromenu\\uimicromenu2x'
         local dx, dy = -1, 1
         local offX, offY = button:GetPushedTextOffset()
         local sizeX, sizeY = button:GetSize()
@@ -2060,7 +2060,7 @@ local function layoutMicroButtons(xOffset)
                 SetupCharacterButton(button)
             else
                 -- Colored icons
-                local microTexture = 'Interface\\AddOns\\AddicatUI\\Textures\\Micromenu\\uimicromenu2x'
+                local microTexture = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\Micromenu\\uimicromenu2x'
 
                 local downCoords = GetColoredTextureCoords(name, "Down")
                 local disabledCoords = GetColoredTextureCoords(name, "Disabled")
@@ -2073,7 +2073,7 @@ local function layoutMicroButtons(xOffset)
 
                 -- Add/update background (colored mode only)
                 if not button.AddicatUIBackground then
-                    local backgroundTexture = 'Interface\\AddOns\\AddicatUI\\Textures\\Micromenu\\uimicromenu2x'
+                    local backgroundTexture = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\Micromenu\\uimicromenu2x'
                     local dx, dy = -1, 1
                     local offX, offY = button:GetPushedTextOffset()
                     local sizeX, sizeY = button:GetSize()
@@ -2183,7 +2183,7 @@ local function layoutMicroButtons(xOffset)
                     end
                 else
                     -- Re-apply size/position/visibility in case a late Blizzard pass altered regions.
-                    local backgroundTexture = 'Interface\\AddOns\\AddicatUI\\Textures\\Micromenu\\uimicromenu2x'
+                    local backgroundTexture = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\Micromenu\\uimicromenu2x'
                     local dx, dy = -1, 1
                     local offX, offY = button:GetPushedTextOffset()
                     local sizeX, sizeY = button:GetSize()

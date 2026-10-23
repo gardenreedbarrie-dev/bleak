@@ -23,7 +23,7 @@ local WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT = 520, 300
 local WINDOW_MAX_WIDTH, WINDOW_MAX_HEIGHT = 1400, 1000
 local SCALE_STEPS = { 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2 }
 
-local ADDICATUI_ICON = { icon = "Interface\\AddOns\\AddicatUI\\Textures\\UI\\INV_Misc_Head_Dragon_01", crop = true }
+local ADDICATUI_ICON = { icon = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UI\\INV_Misc_Head_Dragon_01", crop = true }
 local FALLBACK_ICON = { icon = "Interface\\Icons\\INV_Box_01" }
 
 -- ============================================================================
@@ -290,7 +290,7 @@ local function Prober()
         prober = holder:CreateTexture(nil, "ARTWORK")
         prober:SetPoint("CENTER")
         -- SetTexture's answer only proves a file exists if it refuses one that cannot.
-        probeWorks = not prober:SetTexture("Interface\\AddOns\\AddicatUI\\Textures\\no-such-file-probe")
+        probeWorks = not prober:SetTexture("Interface\\AddOns\\AddicatUI_Art\\Textures\\no-such-file-probe")
     end
     return probeWorks and prober
 end

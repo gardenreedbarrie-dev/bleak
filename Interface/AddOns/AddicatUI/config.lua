@@ -20,7 +20,7 @@ function addon.RefreshLocale()
     _localeMeta.__index = _acl:GetLocale("AddicatUI", addon.GetActiveLocale())
 end
 
-addon._dir = [[Interface\AddOns\AddicatUI\Textures\]];
+addon._dir = [[Interface\AddOns\AddicatUI_Art\Textures\]];
 
 -- Use centralized font system (loaded via core/fonts.lua before this file)
 local _actionbarFont = addon.Fonts.ACTIONBAR

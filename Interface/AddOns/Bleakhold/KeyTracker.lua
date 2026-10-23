@@ -1,7 +1,7 @@
 -- Bleakhold: Mythic+ key tracker (timer, deaths, bosses, enemy forces, affixes) and the end-of-run
 -- summary. Every number is server state (MPS/MP/MPE); the timer only counts on locally between MP
--- updates. Its own movable frame: DragonUI keeps WatchFrame hidden and replaces it, so the tracker
--- sits beside DragonUI's tracker when that exists and never changes DragonUI's frames.
+-- updates. Its own movable frame: AddicatUI (and DragonUI) keeps WatchFrame hidden and replaces it, so the
+-- tracker sits beside that tracker when it exists and never changes its frames.
 local ADDON, ns = ...
 local U, UI, Comm = ns.U, ns.UI, ns.Comm
 local C = UI.C
@@ -100,7 +100,7 @@ f.closeBtn:SetScript("OnClick", function()
 end)
 
 ------------------------------------------------------------------------------------------------------
--- Position: saved if the player moved it, else beside DragonUI's tracker, else under the minimap.
+-- Position: saved if the player moved it, else beside AddicatUI's (or DragonUI's) tracker, else under the minimap.
 ------------------------------------------------------------------------------------------------------
 UI.MakeMovable(f)
 f:SetClampedToScreen(true)
@@ -110,8 +110,8 @@ function T.Anchor()
     f:ClearAllPoints()
     if type(pos) == "table" and type(pos.point) == "string" and type(pos.x) == "number" and type(pos.y) == "number" then
         f:SetPoint(pos.point, UIParent, pos.relPoint or pos.point, pos.x, pos.y)
-    elseif DragonUI_QuestTrackerFrame then
-        f:SetPoint("TOPRIGHT", DragonUI_QuestTrackerFrame, "TOPLEFT", -12, 0)
+    elseif AddicatUI_QuestTrackerFrame or DragonUI_QuestTrackerFrame then
+        f:SetPoint("TOPRIGHT", AddicatUI_QuestTrackerFrame or DragonUI_QuestTrackerFrame, "TOPLEFT", -12, 0)
     else
         f:SetPoint("TOPRIGHT", UIParent, "TOPRIGHT", -40, -250)
     end

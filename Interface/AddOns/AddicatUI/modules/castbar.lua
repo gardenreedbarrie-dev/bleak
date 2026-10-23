@@ -21,7 +21,7 @@ local GetSpellTexture, GetSpellInfo = GetSpellTexture, GetSpellInfo
 -- CONSTANTS AND TEXTURES
 -- ============================================================================
 
-local TEXTURE_PATH = "Interface\\AddOns\\AddicatUI\\Textures\\Castbar\\"
+local TEXTURE_PATH = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Castbar\\"
 local TEXTURES = {
     atlas = TEXTURE_PATH .. "uicastingbar2x",
     atlasSmall = TEXTURE_PATH .. "uicastingbar",
@@ -729,7 +729,7 @@ local function ShowSuccessFlash(unitType)
 end
 
 -- Retail's cast_interrupt_outerglow isn't shipped; AddicatUI's own soft halo stands in, tinted red.
-local INTERRUPT_GLOW_TEXTURE = "Interface\\AddOns\\AddicatUI\\Textures\\Nameplates\\combat-glow"
+local INTERRUPT_GLOW_TEXTURE = "Interface\\AddOns\\AddicatUI_Art\\Textures\\Nameplates\\combat-glow"
 local INTERRUPT_GLOW_FADE = 1.0
 -- Retail InterruptShakeAnim: still for 0.1s, then four hops 0.05s apart that add up to zero.
 local INTERRUPT_SHAKE_HOPS = { { -1, 1 }, { 1, -2 }, { 1, 2 }, { -1, -1 } }
