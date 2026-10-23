@@ -413,3 +413,18 @@ CMakeSettings.json
 
 # The dance pack is built from Tools/DanceForge (danceforge.py pack); the CI package carries it.
 Interface/Bleakhold/Dances/Dances.bdc
+
+# AddicatUI: DragonUI's artwork, the Expressway font and the game-data tables are not published here; the CI
+# package step fetches them (Tools/AddicatUI/sync_dragonui.py art)
+Interface/AddOns/AddicatUI/Textures/
+Interface/AddOns/AddicatUI_Options/Textures/
+Interface/AddOns/AddicatUI/Fonts/expressway.ttf
+Interface/AddOns/AddicatUI/modules/worldmap/fogdata.lua
+Interface/AddOns/AddicatUI/modules/worldmap/entrancedata.lua
+Interface/AddOns/AddicatUI/modules/worldmap/flightpointdata.lua
+Interface/AddOns/AddicatUI/modules/worldmap/graveyarddata.lua
+Interface/AddOns/AddicatUI/modules/worldmap/inndata.lua
+Interface/AddOns/AddicatUI/modules/spellbook/trainerdata.lua
+Interface/AddOns/AddicatUI/data/aura_durations.lua
+Interface/AddOns/AddicatUI/data/companion_traits.lua
+Interface/AddOns/AddicatUI/data/mount_speeds.lua

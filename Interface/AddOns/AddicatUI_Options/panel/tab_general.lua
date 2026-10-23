@@ -1,0 +1,690 @@
+-- Copyright (c) 2026 NeticSoul. Licensed under the MIT License; see LICENSE.
+
+--[[
+================================================================================
+AddicatUI Options Panel - General Tab
+================================================================================
+Editor Mode, KeyBind Mode, and general settings.
+================================================================================
+]]
+
+local addon = AddicatUI
+if not addon then return end
+
+local AceGUI = LibStub("AceGUI-3.0")
+local C = addon.PanelControls
+local Panel = addon.OptionsPanel
+local LO = addon.LO
+local FUI = addon.ForeverUI
+
+-- ============================================================================
+-- PRESET SYSTEM HELPERS
+-- ============================================================================
+
+-- Keys to exclude from preset snapshots (they are meta / self-referencing)
+local EXCLUDED_KEYS = { presets = true, version = true }
+
+local Serializer = {}
+LibStub("AceSerializer-3.0"):Embed(Serializer)
+local LibDeflate = LibStub("LibDeflate")
+
+-- ============================================================================
+-- EXPORT / IMPORT HELPERS
+-- ============================================================================
+
+local EXPORT_HEADER = "!DUI1!"
+
+local function ExportPresetToString(presetEntry)
+    local serialized = Serializer:Serialize(presetEntry.data)
+    if not serialized then return nil end
+    local compressed = LibDeflate:CompressDeflate(serialized)
+    if not compressed then return nil end
+    local encoded = LibDeflate:EncodeForPrint(compressed)
+    if not encoded then return nil end
+    return EXPORT_HEADER .. encoded
+end
+
+local function ImportPresetFromString(str)
+    if type(str) ~= "string" then return nil, "empty" end
+    str = strtrim(str)
+    if str == "" then return nil, "empty" end
+    if str:sub(1, #EXPORT_HEADER) ~= EXPORT_HEADER then return nil, "header" end
+    local payload = str:sub(#EXPORT_HEADER + 1)
+    if payload == "" then return nil, "payload" end
+    local decoded = LibDeflate:DecodeForPrint(payload)
+    if not decoded then return nil, "decode" end
+    local decompressed = LibDeflate:DecompressDeflate(decoded)
+    if not decompressed then return nil, "decompress" end
+    local ok, data = Serializer:Deserialize(decompressed)
+    if not ok or type(data) ~= "table" then return nil, "deserialize" end
+    return data
+end
+
+-- ============================================================================
+-- IMPORT / EXPORT POPUP FRAME  (shared, reusable)
+-- ============================================================================
+
+local importExportFrame
+
+local function GetImportExportFrame()
+    if importExportFrame then return importExportFrame end
+
+    local f = FUI.CreateDialog("AddicatUI_ImportExportFrame", UIParent, {
+        width = 500,
+        height = 350,
+        strata = "FULLSCREEN_DIALOG",
+        closable = true,
+        solid = true,
+    })
+    f:SetPoint("CENTER")
+    C.LiftOnShow(f)
+    tinsert(UISpecialFrames, "AddicatUI_ImportExportFrame")
+
+    f.title = f.TitleText
+
+    local content = f.Content
+
+    -- Scrollframe + EditBox
+    local sf = CreateFrame("ScrollFrame", "AddicatUI_IEScrollFrame", content, "UIPanelScrollFrameTemplate")
+    sf:SetPoint("TOPLEFT", content, "TOPLEFT", 8, 0)
+    sf:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -30, 40)
+
+    local well = content:CreateTexture(nil, "BACKGROUND")
+    well:SetTexture(0, 0, 0, 0.45)
+    well:SetPoint("TOPLEFT", sf, "TOPLEFT", -6, 6)
+    well:SetPoint("BOTTOMRIGHT", sf, "BOTTOMRIGHT", 26, -6)
+
+    local eb = CreateFrame("EditBox", "AddicatUI_IEEditBox", sf)
+    eb:SetMultiLine(true)
+    eb:SetAutoFocus(false)
+    eb:SetFontObject(ChatFontNormal)
+    eb:SetWidth(420)
+    eb:SetScript("OnEscapePressed", function(self) self:ClearFocus(); f:Hide() end)
+    sf:SetScrollChild(eb)
+    FUI.SkinScrollBar(sf)
+    f.editBox = eb
+    f.scrollFrame = sf
+
+    -- Bottom button row
+    f.btn1 = FUI.CreateButton(content, nil, 120, 22)
+    f.btn1:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", 0, 0)
+
+    f.btn2 = FUI.CreateButton(content, LO["Cancel"] or "Cancel", 120, 22)
+    f.btn2:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 0, 0)
+    f.btn2:SetScript("OnClick", function() f:Hide() end)
+
+    importExportFrame = f
+    return f
+end
+
+local function ShowExportFrame(presetName, exportString)
+    local f = GetImportExportFrame()
+    f.title:SetText(LO["Export Preset"] or "Export Preset")
+    f.editBox:SetText(exportString)
+    f.editBox:SetScript("OnTextChanged", function(self)
+        self:SetText(exportString)  -- prevent editing
+    end)
+    f.editBox:SetCursorPosition(0)
+    f.btn1:SetText(LO["Select All"] or "Select All")
+    f.btn1:SetScript("OnClick", function()
+        f.editBox:SetFocus()
+        f.editBox:HighlightText()
+    end)
+    f.btn2:SetText(LO["Close"] or "Close")
+    f.btn2:SetScript("OnClick", function() f:Hide() end)
+    f:Show()
+    f.editBox:SetFocus()
+    f.editBox:HighlightText()
+end
+
+local function ShowImportFrame()
+    local f = GetImportExportFrame()
+    f.title:SetText(LO["Import Preset"] or "Import Preset")
+    f.editBox:SetText("")
+    f.editBox:SetScript("OnTextChanged", nil)  -- allow editing
+    f.btn1:SetText(LO["Import"] or "Import")
+    f.btn1:SetScript("OnClick", function()
+        local text = strtrim(f.editBox:GetText())
+        if text == "" then return end
+        local data, errType = ImportPresetFromString(text)
+        if not data then
+            local msg = LO["Invalid preset string."] or "Invalid preset string."
+            if errType == "header" then
+                msg = LO["Not a valid AddicatUI preset string."] or "Not a valid AddicatUI preset string."
+            end
+            addon:Error(msg)
+            return
+        end
+        f:Hide()
+        -- Ask for a name
+        local dialog = StaticPopup_Show("ADDICATUI_PRESET_IMPORT_NAME")
+        if dialog then
+            dialog.data = data
+        end
+    end)
+    f.btn2:SetText(LO["Cancel"] or "Cancel")
+    f.btn2:SetScript("OnClick", function() f:Hide() end)
+    f:Show()
+    f.editBox:SetFocus()
+end
+
+-- Create a clean deep copy excluding certain top-level keys
+local function SnapshotProfile()
+    local snapshot = {}
+    for key, value in pairs(addon.db.profile) do
+        if not EXCLUDED_KEYS[key] then
+            if type(value) == "table" then
+                snapshot[key] = addon.DeepCopy(value)
+            else
+                snapshot[key] = value
+            end
+        end
+    end
+    return snapshot
+end
+
+-- Restore a snapshot into the current profile (preserves presets + version)
+local function RestoreSnapshot(snapshot)
+    if not snapshot then return end
+    for key, value in pairs(snapshot) do
+        if not EXCLUDED_KEYS[key] then
+            if type(value) == "table" then
+                addon.db.profile[key] = addon.DeepCopy(value)
+            else
+                addon.db.profile[key] = value
+            end
+        end
+    end
+end
+
+-- Get the presets table, creating it if needed
+local function GetPresets()
+    if not addon.db or not addon.db.profile then return {} end
+    if not addon.db.profile.presets then
+        addon.db.profile.presets = {}
+    end
+    return addon.db.profile.presets
+end
+
+-- Generate a unique preset name to avoid collisions
+local function UniquePresetName(baseName)
+    local presets = GetPresets()
+    if not presets[baseName] then return baseName end
+    local i = 2
+    while presets[baseName .. " (" .. i .. ")"] do
+        i = i + 1
+    end
+    return baseName .. " (" .. i .. ")"
+end
+
+-- ============================================================================
+-- STATIC POPUP: NAME INPUT
+-- ============================================================================
+
+StaticPopupDialogs["ADDICATUI_PRESET_NAME"] = {
+    text = LO["Enter a name for this preset:"],
+    button1 = LO["Save"],
+    button2 = LO["Cancel"],
+    hasEditBox = true,
+    maxLetters = 40,
+    OnShow = function(self)
+        local eb = self.editBox or _G[self:GetName() .. "EditBox"]
+        if eb then
+            eb:SetText(self.data or (LO["Preset"] .. " 1"))
+            eb:HighlightText()
+            eb:SetFocus()
+        end
+    end,
+    OnAccept = function(self)
+        local eb = self.editBox or _G[self:GetName() .. "EditBox"]
+        local name = eb and eb:GetText() and strtrim(eb:GetText())
+        if not name or name == "" then return end
+        -- Sanitize: remove pipe characters to prevent color code injection
+        name = name:gsub("|", "")
+        if name == "" then return end
+        local presets = GetPresets()
+        presets[name] = {
+            data = SnapshotProfile(),
+            date = date("%Y-%m-%d %H:%M"),
+        }
+        addon:Print((LO["Preset saved: "] or "Preset saved: ") .. name)
+        -- Refresh the General tab to show the new preset
+        if Panel.currentTab == "general" then
+            Panel:SelectTab("general")
+        end
+    end,
+    EditBoxOnEnterPressed = function(self)
+        local parent = self:GetParent()
+        StaticPopupDialogs["ADDICATUI_PRESET_NAME"].OnAccept(parent)
+        parent:Hide()
+    end,
+    EditBoxOnEscapePressed = function(self)
+        self:GetParent():Hide()
+    end,
+    timeout = 0,
+    whileDead = 1,
+    hideOnEscape = 1,
+    preferredIndex = 3,
+}
+
+StaticPopupDialogs["ADDICATUI_PRESET_LOAD"] = {
+    text = LO["Load preset '%s'? This will overwrite your current layout settings."],
+    button1 = LO["Load"],
+    button2 = LO["Cancel"],
+    OnAccept = function(self)
+        local name = self.data
+        local presets = GetPresets()
+        if presets[name] and presets[name].data then
+            RestoreSnapshot(presets[name].data)
+            addon:Print((LO["Preset loaded: "] or "Preset loaded: ") .. name)
+            ReloadUI()
+        end
+    end,
+    timeout = 0,
+    whileDead = 1,
+    hideOnEscape = 1,
+    preferredIndex = 3,
+}
+
+StaticPopupDialogs["ADDICATUI_PRESET_DELETE"] = {
+    text = LO["Delete preset '%s'? This cannot be undone."],
+    button1 = LO["Delete"],
+    button2 = LO["Cancel"],
+    OnAccept = function(self)
+        local name = self.data
+        local presets = GetPresets()
+        if presets[name] then
+            presets[name] = nil
+            addon:Print((LO["Preset deleted: "] or "Preset deleted: ") .. name)
+            if Panel.currentTab == "general" then
+                Panel:SelectTab("general")
+            end
+        end
+    end,
+    timeout = 0,
+    whileDead = 1,
+    hideOnEscape = 1,
+    preferredIndex = 3,
+}
+
+-- ============================================================================
+-- STATIC POPUP: IMPORT NAME INPUT
+-- ============================================================================
+
+StaticPopupDialogs["ADDICATUI_PRESET_IMPORT_NAME"] = {
+    text = LO["Enter a name for the imported preset:"],
+    button1 = LO["Save"],
+    button2 = LO["Cancel"],
+    hasEditBox = true,
+    maxLetters = 40,
+    OnShow = function(self)
+        local eb = self.editBox or _G[self:GetName() .. "EditBox"]
+        if eb then
+            eb:SetText(UniquePresetName(LO["Imported Preset"] or "Imported Preset"))
+            eb:HighlightText()
+            eb:SetFocus()
+        end
+    end,
+    OnAccept = function(self)
+        local eb = self.editBox or _G[self:GetName() .. "EditBox"]
+        local name = eb and eb:GetText() and strtrim(eb:GetText())
+        if not name or name == "" then return end
+        name = name:gsub("|", "")
+        if name == "" then return end
+        local importedData = self.data
+        if not importedData or type(importedData) ~= "table" then return end
+        local presets = GetPresets()
+        presets[name] = {
+            data = addon.DeepCopy(importedData),
+            date = date("%Y-%m-%d %H:%M"),
+        }
+        addon:Print((LO["Preset imported: "] or "Preset imported: ") .. name)
+        if Panel.currentTab == "general" then
+            Panel:SelectTab("general")
+        end
+    end,
+    EditBoxOnEnterPressed = function(self)
+        local parent = self:GetParent()
+        StaticPopupDialogs["ADDICATUI_PRESET_IMPORT_NAME"].OnAccept(parent)
+        parent:Hide()
+    end,
+    EditBoxOnEscapePressed = function(self)
+        self:GetParent():Hide()
+    end,
+    timeout = 0,
+    whileDead = 1,
+    hideOnEscape = 1,
+    preferredIndex = 3,
+}
+
+-- ============================================================================
+-- GENERAL TAB BUILDER
+-- ============================================================================
+
+local function BuildGeneralTab(scroll)
+    -- ====================================================================
+    -- ABOUT
+    -- ====================================================================
+    local about = C:AddSection(scroll, LO["About"])
+
+    C:AddLabel(about, "|cff" .. C.Theme.accentHex .. LO["AddicatUI"] .. " v2.5|r")
+    C:AddDescription(about, LO["Bringing the retail WoW look to 3.3.5a, inspired by Dragonflight UI."])
+    C:AddSpacer(about)
+    C:AddDescription(about, LO["Created and maintained by NeticSoul, with community contributions."])
+    C:AddSpacer(about)
+    C:AddDescription(about, LO["Use the tabs on the left to configure modules, action bars, unit frames, minimap, and more."])
+    C:AddSpacer(about)
+    C:AddDescription(about, LO["Commands: /addicatui, /aui, /pi — /addicatui edit (editor) — /addicatui help"])
+    C:AddSpacer(about)
+    C:AddDescription(about, LO["GitHub (select and Ctrl+C to copy):"])
+    C:AddCopyableText(about, "https://github.com/NeticSoul/AddicatUI")
+
+    C:AddSpacer(scroll)
+
+    -- ====================================================================
+    -- LANGUAGE
+    -- ====================================================================
+    local language = C:AddSection(scroll, LO["Language"])
+
+    C:AddDescription(language, LO["Choose the language used by the AddicatUI interface."])
+
+    local localeNames = {
+        enUS = "English",
+        esES = "Español",
+        esMX = "Español (México)",
+        ptBR = "Português",
+        deDE = "Deutsch",
+        frFR = "Français",
+        ruRU = "Русский",
+        zhCN = "简体中文",
+        zhTW = "繁體中文",
+        koKR = "한국어",
+    }
+
+    -- Hide languages the client font cannot draw; their names would already show as "?" here.
+    local localeValues = { auto = LO["Follow the client language"] }
+    for code, name in pairs(localeNames) do
+        if not addon.CanRenderLocale or addon.CanRenderLocale(code) then
+            localeValues[code] = name
+        end
+    end
+
+    C:AddDropdown(language, {
+        label = LO["Language"],
+        desc  = LO["Choose the language used by the AddicatUI interface."],
+        values = localeValues,
+        getFunc = function()
+            return (addon.db and addon.db.global and addon.db.global.locale) or "auto"
+        end,
+        setFunc = function(value)
+            if addon.db and addon.db.global then
+                addon.db.global.locale = value
+            end
+        end,
+        callback = function()
+            StaticPopup_Show("ADDICATUI_RELOAD_UI")
+        end,
+        width = 200,
+    })
+
+    local TextSystem = addon.TextSystem
+    local localeUnits = TextSystem and TextSystem.GetLocaleUnitsLabel()
+    if localeUnits then
+        C:AddDropdown(language, {
+            label = LO["Number Abbreviations"],
+            desc  = LO["How unit frames, nameplates and the resource display shorten large numbers."],
+            values = {
+                auto = localeUnits,
+                western = "k / M",
+            },
+            getFunc = function()
+                return (addon.db and addon.db.global and addon.db.global.numberUnits) or "auto"
+            end,
+            setFunc = function(value)
+                if addon.db and addon.db.global then
+                    addon.db.global.numberUnits = value
+                end
+            end,
+            callback = function()
+                TextSystem.RefreshNumberTexts()
+            end,
+            width = 200,
+        })
+    end
+
+    C:AddSpacer(scroll)
+
+    -- ====================================================================
+    -- QUICK ACCESS
+    -- ====================================================================
+    local actions = C:AddSection(scroll, LO["Quick Actions"])
+
+    C:AddDescription(actions, LO["Jump to popular settings sections."])
+
+    C:AddButton(actions, {
+        label = LO["Dark Mode"],
+        desc = LO["Configure dark tinting for all UI chrome."],
+        width = 200,
+        callback = function() Panel:SelectTab("enhancements", { label = LO["Enable Dark Mode"] }) end,
+    })
+
+    C:AddButton(actions, {
+        label = LO["Fat Health Bar"],
+        desc = LO["Full-width health bar that fills the entire player frame."],
+        width = 200,
+        callback = function()
+            Panel:SelectTab("unitframes", { subTab = "player", dbPath = "unitframe.player.fat_healthbar" })
+        end,
+    })
+
+    C:AddButton(actions, {
+        label = LO["Dragon Decoration"],
+        desc = LO["Add a decorative dragon to your player frame."],
+        width = 200,
+        callback = function()
+            Panel:SelectTab("unitframes", { subTab = "player", dbPath = "unitframe.player.dragon_decoration" })
+        end,
+    })
+
+    C:AddButton(actions, {
+        label = LO["Unit Frame Layers"],
+        desc = LO["Heal prediction, absorb shields and animated health loss."],
+        width = 200,
+        callback = function() Panel:SelectTab("enhancements", { label = LO["Enable Unit Frame Layers"] }) end,
+    })
+
+    C:AddButton(actions, {
+        label = LO["Action Bar Layout"],
+        desc = LO["Change columns, rows, and buttons shown per action bar."],
+        width = 200,
+        callback = function()
+            Panel:SelectTab("actionbars", { subTab = "layout", dbPath = "mainbars.player.columns" })
+        end,
+    })
+
+    C:AddButton(actions, {
+        label = LO["Grayscale Icons"],
+        desc = LO["Switch micro menu icons between colored and grayscale style."],
+        width = 200,
+        callback = function() Panel:SelectTab("micromenu", { dbPath = "micromenu.grayscale_icons" }) end,
+    })
+
+    C:AddSpacer(scroll)
+
+    -- ====================================================================
+    -- LAYOUT PRESETS
+    -- ====================================================================
+    local presets = C:AddSection(scroll, LO["Layout Presets"])
+
+    C:AddDescription(presets, LO["Save and restore complete UI layouts. Each preset captures all positions, scales, and settings."])
+
+    C:AddSpacer(presets)
+
+    -- Collect sorted preset names
+    local presetData = GetPresets()
+    local presetNames = {}
+    for name in pairs(presetData) do
+        presetNames[#presetNames + 1] = name
+    end
+    table.sort(presetNames)
+
+    if #presetNames == 0 then
+        C:AddLabel(presets, "|cff888888" .. LO["No presets saved yet."] .. "|r")
+        C:AddSpacer(presets)
+    else
+        -- Preset list: clickable labels that trigger load on click
+        for _, name in ipairs(presetNames) do
+            local entry = presetData[name]
+            local dateStr = entry.date or ""
+
+            local row = AceGUI:Create("SimpleGroup")
+            row:SetFullWidth(true)
+            row:SetLayout("Flow")
+            presets:AddChild(row)
+
+            local btn = AceGUI:Create("InteractiveLabel")
+            btn:SetWidth(350)
+            btn:SetText("  |cffFFFFFF" .. name .. "|r  |cff666666" .. dateStr .. "|r")
+            if btn.label then
+                btn.label:SetFont(C.Theme.font, 12, "")
+            end
+
+            -- Hover highlight frame (visual feedback only)
+            local hlFrame = CreateFrame("Frame", nil, btn.frame)
+            hlFrame:SetAllPoints(btn.frame)
+            hlFrame:SetFrameLevel(btn.frame:GetFrameLevel())
+            local hlTex = hlFrame:CreateTexture(nil, "BACKGROUND")
+            hlTex:SetAllPoints()
+            hlTex:SetTexture("Interface\\ChatFrame\\ChatFrameBackground")
+            local accent = C.Theme.accent
+            hlTex:SetVertexColor(accent[1], accent[2], accent[3], 0)
+
+            btn:SetCallback("OnClick", function()
+                local dialog = StaticPopup_Show("ADDICATUI_PRESET_LOAD", name)
+                if dialog then dialog.data = name end
+            end)
+            btn:SetCallback("OnEnter", function()
+                hlTex:SetVertexColor(accent[1], accent[2], accent[3], 0.12)
+            end)
+            btn:SetCallback("OnLeave", function()
+                hlTex:SetVertexColor(accent[1], accent[2], accent[3], 0)
+            end)
+
+            row:AddChild(btn)
+        end
+
+        C:AddSpacer(presets)
+    end
+
+    -- Action buttons row
+    local btnRow = C:AddRow(presets)
+
+    -- SAVE NEW
+    C:AddButton(btnRow, {
+        label = LO["Save New Preset"],
+        width = 140,
+        desc = LO["Save your current UI layout as a new preset."],
+        callback = function()
+            local defaultName = UniquePresetName(LO["Preset"] or "Preset")
+            local dialog = StaticPopup_Show("ADDICATUI_PRESET_NAME")
+            if dialog then dialog.data = defaultName end
+        end,
+    })
+
+    -- LOAD (enabled only when a preset can be selected)
+    if #presetNames > 0 then
+        -- Build dropdown values
+        local ddValues = {}
+        for _, name in ipairs(presetNames) do
+            ddValues[name] = name
+        end
+
+        C:AddDropdown(btnRow, {
+            label = LO["Load Preset"],
+            values = ddValues,
+            width = 180,
+            setFunc = function(value)
+                if value then
+                    local dialog = StaticPopup_Show("ADDICATUI_PRESET_LOAD", value)
+                    if dialog then dialog.data = value end
+                end
+            end,
+        })
+
+        C:AddDropdown(btnRow, {
+            label = LO["Delete Preset"],
+            values = ddValues,
+            width = 180,
+            setFunc = function(value)
+                if value then
+                    local dialog = StaticPopup_Show("ADDICATUI_PRESET_DELETE", value)
+                    if dialog then dialog.data = value end
+                end
+            end,
+        })
+
+        C:AddDropdown(btnRow, {
+            label = LO["Duplicate Preset"],
+            values = ddValues,
+            width = 180,
+            setFunc = function(value)
+                if value and presetData[value] then
+                    local newName = UniquePresetName(value)
+                    presetData[newName] = {
+                        data = addon.DeepCopy(presetData[value].data),
+                        date = date("%Y-%m-%d %H:%M"),
+                    }
+                    addon:Print((LO["Preset duplicated: "] or "Preset duplicated: ") .. newName)
+                    Panel:SelectTab("general")
+                end
+            end,
+        })
+
+        C:AddDropdown(btnRow, {
+            label = LO["Export Preset"],
+            values = ddValues,
+            width = 180,
+            setFunc = function(value)
+                if value and presetData[value] then
+                    local exportStr = ExportPresetToString(presetData[value])
+                    if exportStr then
+                        ShowExportFrame(value, exportStr)
+                    else
+                        addon:Error(LO["Failed to export preset."] or "Failed to export preset.")
+                    end
+                end
+            end,
+        })
+    end
+
+    -- Import button (always available, even with no presets)
+    C:AddButton(btnRow, {
+        label = LO["Import Preset"],
+        width = 140,
+        desc = LO["Import a preset from a text string shared by another player."],
+        callback = function()
+            ShowImportFrame()
+        end,
+    })
+
+    C:AddSpacer(scroll)
+
+    -- ====================================================================
+    -- SETTINGS WINDOW
+    -- ====================================================================
+    local window = C:AddSection(scroll, LO["Settings Window"])
+
+    C:AddSlider(window, {
+        label = LO["Scale"],
+        desc = LO["Size of this window on top of your UI scale; 1.0 matches the other panels. It never grows past the screen."],
+        min = 0.75,
+        max = 2,
+        step = 0.05,
+        width = 200,
+        getFunc = function() return Panel:GetScale() end,
+        setFunc = function(val) Panel:SetScale(val) end,
+    })
+end
+
+-- Register the tab
+Panel:RegisterTab("general", LO["General"], BuildGeneralTab, 1)
