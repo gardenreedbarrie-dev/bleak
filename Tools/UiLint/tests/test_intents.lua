@@ -87,7 +87,15 @@ test("Comm.Send refuses anything that is not an intent", function(M, ns)
     H.ok(C.stats.refused >= 14)
 end)
 
-test("SendAddonMessage is only called by Comm (BHc) and Countdown (DBM pull timer)", function(M, ns)
+-- The requests mod-transmog-plus understands (TransmogAddonProtocol.cpp, Dispatch).
+local TRANSMOG_COMMANDS = {
+    GetTransmogStatus = true, GetCollectionStatus = true, GetAvailableTransmogs = true, Apply = true, Remove = true,
+    RemoveAll = true, CalculateCost = true, RequestPortable = true, GetSources = true, GetMissing = true,
+    GetOutfits = true, SaveOutfit = true, DeleteOutfit = true, GetIllusions = true, ApplyIllusion = true,
+    GetBackpacks = true, ApplyBackpack = true, GetForms = true, ApplyForm = true,
+}
+
+test("SendAddonMessage is only called by Comm (BHc), Countdown (DBM pull timer) and Transmog", function(M, ns)
     for _, file in ipairs(M.loaded) do
         local text = host_readfile(addonDir .. "/" .. file):gsub("%-%-[^\n]*", "")
         local n = 0
@@ -95,6 +103,9 @@ test("SendAddonMessage is only called by Comm (BHc) and Countdown (DBM pull time
         if file == "Comm.lua" then
             H.eq(n, 1, "Comm.lua sends in one place")
             H.contains(text, 'SendAddonMessage(Comm.PREFIX_OUT, body, "WHISPER", ns.PlayerName())')
+        elseif file == "Transmog.lua" then
+            H.eq(n, 1, "Transmog.lua sends in one place")
+            H.contains(text, 'SendAddonMessage(prefix, msg, "WHISPER", me)')
         elseif file == "Countdown.lua" then
             for line in text:gmatch("[^\n]*SendAddonMessage%([^\n]*") do
                 H.contains(line, "CD.DBM_PREFIX", "Countdown only sends the DBM prefix")
@@ -136,6 +147,15 @@ test("clicking every button of every window sends only valid intents (live mode)
             n = n + 1
             H.eq(s.channel, "WHISPER")
             H.eq(s.target, M.playerName)
+        elseif s.prefix == "transmog" then
+            H.eq(s.channel, "WHISPER")
+            H.eq(s.target, M.playerName)
+            H.ok(TRANSMOG_COMMANDS[s.msg:match("^(%a+)") or ""], "a mod-transmog-plus request: " .. s.msg)
+            H.ok(#s.msg + #s.prefix + 1 <= 255, "within the addon message limit")
+        elseif s.prefix == "BHMOG" then
+            H.eq(s.channel, "WHISPER")
+            H.eq(s.target, M.playerName)
+            H.eq(s.msg, "B?", "mod-bleakhold: only the coin balance is asked for")
         else
             H.eq(s.prefix, "DBMv4-PT", "unexpected addon prefix " .. s.prefix)
         end

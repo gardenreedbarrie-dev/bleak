@@ -184,7 +184,7 @@ See `Tools/RaceForge/README.md` for the race settings (`races.json`) and what th
 
 The in-game Bleakhold interface is a built-in addon in `Interface/AddOns/Bleakhold`:
 - Activities: daily and weekly tasks, the Dungeon Journey board and queue, keystones, Eclipse Rift.
-- Collections, Season and Leaderboards windows.
+- Collections, Season and Leaderboards windows; Collections > Transmog is the transmog window (below).
 - Minimap buttons, the Mythic+ tracker and keystone countdown (with a DBM pull bar), task toasts, item tooltip
   lines and coloured server announcements.
 
@@ -245,6 +245,18 @@ ignore the packet.
   SIL Open Font License 1.1 and its README puts image resources under the Apache License 2.0, so both texts are in
   `Interface/Bleakhold/Emoji`); the text emotes are drawn with the Bangers font (SIL Open Font License 1.1).
   `Interface/Bleakhold/Emoji/NOTICE.md` names the source of every file.
+
+## Transmog
+
+Collections > Transmog is the transmog window for realms running mod-transmog-plus: the character between its
+transmog slots, the looks the selected slot can take as 3D tiles (search by item name, pages, the looks not
+collected yet), the price and Apply, outfits saved for the account, hiding a slot, taking everything off, and
+weapon illusions. The transmogrifier NPC opens it, as do `/transmog` (when the realm allows transmog anywhere) and
+`/bh mog`; it speaks the module's own addon protocol (prefix `transmog`), so it needs nothing else on the server.
+Browsing works anywhere; away from the NPC, Apply asks the realm first. With mod-bleakhold, a look not collected
+yet can be unlocked for Bleakhold Coins (`.mog unlock`). If the module's own `Transmog` addon is installed too,
+that addon answers the NPC and `/transmog`. Tiles that frame a race badly can be moved for that race and body part
+with `/bh mog camera <depth> <side> <height>` (`/bh mog camera reset` undoes it).
 
 ## Dances
 
@@ -390,7 +402,7 @@ this works with signature checks on or off.
 | `Interface/Bleakhold/Glue/` | Bleakhold login screen and character creation (glue Lua, art, fonts) |
 | `Interface/Bleakhold/Emoji/` | Emoji bubble art (BLP, made by `Tools/EmojiForge`) with its licences and `NOTICE.md` |
 | `Interface/Bleakhold/Dances/` | Where the dance pack (`Dances.bdc`, built by `Tools/DanceForge`) and the dances' music go |
-| `Interface/AddOns/Bleakhold/` | Bleakhold UI addon (Activities, Mythic+, Rift, Collections with Animations, emote wheel, Season, Leaderboards) |
+| `Interface/AddOns/Bleakhold/` | Bleakhold UI addon (Activities, Mythic+, Rift, Collections with Transmog and Animations, emote wheel, Season, Leaderboards) |
 | `Tools/UiLint/` | Lint and unit tests for the Bleakhold Lua (host Lua built from the client's own source) |
 | `Tools/GrassWind/` | Tests of the grass wind shader patch (a stand-in shader, made-up bytecode and a vs_3_0 emulator) |
 | `docs/BleakholdProtocol.md` | Message protocol between the Bleakhold server module and the UI |

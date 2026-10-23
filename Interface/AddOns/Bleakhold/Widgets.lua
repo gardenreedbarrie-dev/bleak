@@ -183,6 +183,7 @@ end
 local STYLES = {
     gold = { bg = C.gold, border = C.gold, fg = C.bg, hover = C.goldLight },
     teal = { bg = C.teal, border = C.teal, fg = C.bg, hover = "8FD6E4" },
+    green = { bg = "3C8D3F", border = "5DB660", fg = "F2F7EE", hover = "8FE08F" },
     ghost = { bg = nil, border = C.chipBorder, fg = C.goldLight, hover = C.gold },
     dark = { bg = C.chip, border = C.chipBorder, fg = C.text, hover = C.gold },
     tab = { bg = nil, border = C.border, fg = C.mid, hover = C.gold },
@@ -724,6 +725,8 @@ end
 function UI.CopyBox(text, value)
     local d = getDialog()
     UI.SetText(d.text, text)
+    d.edit:SetScript("OnEnterPressed", nil)
+    d.edit:SetMaxLetters(0)
     d.ok:Hide()
     d.cancel:SetLabel("Close")
     d.cancel:ClearAllPoints()
@@ -733,6 +736,36 @@ function UI.CopyBox(text, value)
     d:Show()
     d.edit:SetFocus()
     d.edit:HighlightText()
+    return d
+end
+
+-- Ask for a short text (an outfit's name): Enter or the accept button hands it to onAccept, trimmed and
+-- non-empty.
+function UI.Prompt(text, value, onAccept, acceptLabel, maxLetters)
+    local d = getDialog()
+    UI.SetText(d.text, text)
+    local function accept()
+        local v = (d.edit:GetText() or ""):match("^%s*(.-)%s*$")
+        if v == "" then
+            return
+        end
+        d:Hide()
+        if onAccept then
+            ns.SafeCall(onAccept, v)
+        end
+    end
+    d.edit:Show()
+    d.edit:SetMaxLetters(maxLetters or 0)
+    d.edit:SetText(value or "")
+    d.edit:SetScript("OnEnterPressed", accept)
+    d.ok:Show()
+    d.ok:SetLabel(acceptLabel or "Accept")
+    d.ok:SetScript("OnClick", accept)
+    d.cancel:SetLabel("Cancel")
+    d.cancel:ClearAllPoints()
+    d.cancel:SetPoint("BOTTOMLEFT", d, "BOTTOM", 6, 14)
+    d:Show()
+    d.edit:SetFocus()
     return d
 end
 

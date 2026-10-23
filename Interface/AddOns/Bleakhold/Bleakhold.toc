@@ -26,6 +26,7 @@ KeyTracker.lua
 Countdown.lua
 Collections.lua
 Animations.lua
+Transmog.lua
 Season.lua
 Leaderboards.lua
 Graphics.lua

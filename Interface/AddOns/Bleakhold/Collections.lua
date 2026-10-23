@@ -1,5 +1,5 @@
--- Bleakhold: Collections window. Tabs Transmog / Looks of Later Ages / Legacy Sets / Mounts / Pets /
--- Animations (built by Animations.lua).
+-- Bleakhold: Collections window. Tabs Transmog (built by Transmog.lua) / Looks of Later Ages / Legacy Sets /
+-- Mounts / Pets / Animations (built by Animations.lua).
 -- Legacy Sets: eras rail, set pieces grid (hover = item tooltip, click = try on, shift-click = link),
 -- where the set drops, and a DressUpModel preview. Collected state and the outfit unlock come from
 -- the server (SET); Save outfit is an intent (OUTFIT) the server checks.
@@ -718,25 +718,26 @@ function CO.Refresh()
     legacy:Hide()
     summary:Hide()
     companions:Hide()
-    local A = ns.Animations
+    local A, TM = ns.Animations, ns.Transmog
     if A and CO.tab ~= "animations" then
         A.HideTab()
     end
-    search.hint:SetText(CO.tab == "animations" and "Search dances and emotes" or "Search sets, pieces, dungeons")
+    if TM and CO.tab ~= "transmog" then
+        TM.HideTab()
+    end
+    local hints = { animations = "Search dances and emotes", transmog = "Search looks by item name" }
+    search.hint:SetText(hints[CO.tab] or "Search sets, pieces, dungeons")
     local coll = S.coll
     if CO.tab == "animations" and A then
         A.ShowTab()
+    elseif CO.tab == "transmog" and TM then
+        TM.ShowTab()
     elseif CO.tab == "legacy" then
         legacy:Show()
         CO.RefreshLegacy()
     elseif CO.tab == "mounts" or CO.tab == "pets" then
         companions:Show()
         refreshCompanions(CO.tab == "mounts" and "MOUNT" or "CRITTER")
-    elseif CO.tab == "transmog" then
-        summary:Show()
-        summary.big:SetText(coll and coll.transmogOwned and U.Commas(coll.transmogOwned) or "-")
-        summary.sub:SetText("appearances collected for your account")
-        summary.text:SetText("Looks you have earned can be applied at a transmogrifier.")
     else
         summary:Show()
         summary.big:SetText(coll and coll.laterOwned and countText(coll.laterOwned, coll.laterTotal) or "-")
