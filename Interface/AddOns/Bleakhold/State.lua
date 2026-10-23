@@ -745,6 +745,54 @@ Comm.Handle("ERR", function(r)
     end
 end)
 
+------------------------------------------------------------------------------------------------------
+-- Cases (section 15): which items are cases, what a case holds, and what opening one gave
+------------------------------------------------------------------------------------------------------
+S.cases = {}        -- [caseItemId] = true
+S.caseDefs = {}     -- [caseItemId] = { id, title, text, keyItem, keyCount, rewards = { { itemId, count, chance, tier } } }
+
+Comm.Handle("CASES", function(r)
+    local list = {}
+    for i = 1, math.min(#r, 200) do
+        local id = U.Int(r[i][1], nil, 1, INT32)
+        if id then
+            list[id] = true
+        end
+    end
+    S.cases = list
+    changed("CASES")
+end)
+
+Comm.Handle("CASE", function(r)
+    local f = r[1]
+    local id = U.Int(f[1], nil, 1, INT32)
+    if not id then
+        return
+    end
+    local c = { id = id, title = U.Str(f[2], nil, 60), text = U.Str(f[3], nil, 120), keyItem = U.Int(f[4], nil, 1, INT32),
+        keyCount = U.Int(f[5], 1, 1, 255), rewards = {} }
+    for i = 2, math.min(#r, 61) do
+        local g = r[i]
+        local item = U.Int(g[1], nil, 1, INT32)
+        if item then
+            c.rewards[#c.rewards + 1] = { itemId = item, count = U.Int(g[2], 1, 1, 10000), chance = U.Int(g[3], 0, 0, 10000),
+                tier = U.Int(g[4], 1, 0, 7) }
+        end
+    end
+    S.caseDefs[id] = c
+    S.cases[id] = true
+    changed("CASE")
+end)
+
+Comm.Handle("UNBOX", function(r)
+    local f = r[1]
+    local e = { caseItemId = U.Int(f[1], nil, 1, INT32), index = U.Int(f[2], nil, 1, 60), itemId = U.Int(f[3], nil, 1, INT32),
+        count = U.Int(f[4], 1, 1, 10000) }
+    if e.caseItemId and e.index and e.itemId then
+        ns.Fire("UNBOX", e)
+    end
+end)
+
 local TOAST_TARGETS = { tasks = true, dungeons = true, keys = true, rift = true, collections = true, season = true, leaderboards = true }
 Comm.Handle("TOAST", function(r)
     local f = r[1]
@@ -772,4 +820,7 @@ ns.On("HELLO", function(s)
     Comm.Get("QUEUE")
     Comm.Get("MPLUS")
     Comm.Get("LIDX")
+    if Comm.HasFeature(Comm.FEATURE.CASES) then
+        Comm.Get("CASES")
+    end
 end)

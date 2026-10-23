@@ -7,6 +7,7 @@
  */
 
 #include "BleakholdData.h"
+#include "BleakholdCases.h"
 #include "BleakholdCodec.h"
 #include "BleakholdDance.h"
 #include "BleakholdEmoji.h"
@@ -15,8 +16,11 @@
 #include "DatabaseEnv.h"
 #include "GameTime.h"
 #include "Log.h"
+#include "Item.h"
 #include "ObjectAccessor.h"
+#include "ObjectMgr.h"
 #include "Player.h"
+#include "Random.h"
 #include "World.h"
 
 #include <algorithm>
@@ -321,6 +325,63 @@ namespace Bleakhold
         LOG_INFO("server.loading", ">> Bleakhold: {} affixes, {} eras, {} task templates, {} dungeons, {} legacy tiers, {} seasons, "
             "{} schedule weeks, {} legacy sets", _tableDefs.affixes.size(), _tableDefs.eras.size(), _tableDefs.taskTemplates.size(),
             _tableDefs.dungeons.size(), _tableDefs.legacyTiers.size(), _seasons.size(), _schedule.size(), _sets.size());
+
+        // cases (section 15): enabled cases with at least one reward whose item exists
+        std::vector<CaseRow> cases;
+        if (QueryResult r = WorldDatabase.Query("SELECT `item_id`, `title`, `description`, `key_item_id`, `key_count`, `announce_tier` "
+                "FROM `bleakhold_case` WHERE `enabled` <> 0 ORDER BY `item_id`"))
+            do
+            {
+                Field* f = r->Fetch();
+                CaseRow c;
+                c.itemId = f[0].Get<uint32>();
+                c.title = f[1].Get<std::string>();
+                c.text = f[2].Get<std::string>();
+                c.keyItemId = f[3].Get<uint32>();
+                c.keyCount = std::max<uint32>(1, f[4].Get<uint8>());
+                c.announceTier = f[5].Get<uint8>();
+                ItemTemplate const* proto = sObjectMgr->GetItemTemplate(c.itemId);
+                if (!proto)
+                {
+                    LOG_ERROR("module", "[Bleakhold] bleakhold_case: item {} does not exist; case skipped", c.itemId);
+                    continue;
+                }
+                if (c.title.empty())
+                    c.title = proto->Name1;
+                if (c.keyItemId && !sObjectMgr->GetItemTemplate(c.keyItemId))
+                {
+                    LOG_ERROR("module", "[Bleakhold] bleakhold_case {}: key item {} does not exist; case skipped", c.itemId, c.keyItemId);
+                    continue;
+                }
+                cases.push_back(std::move(c));
+            } while (r->NextRow() && cases.size() < MaxCases);
+        if (QueryResult r = WorldDatabase.Query("SELECT `case_item_id`, `item_id`, `count`, `weight`, `tier` FROM `bleakhold_case_reward` "
+                "ORDER BY `case_item_id`, `sort`, `item_id`"))
+            do
+            {
+                Field* f = r->Fetch();
+                uint32 const caseId = f[0].Get<uint32>(), itemId = f[1].Get<uint32>(), weight = f[3].Get<uint32>();
+                auto it = std::find_if(cases.begin(), cases.end(), [&](CaseRow const& c) { return c.itemId == caseId; });
+                if (it == cases.end() || weight == 0 || it->items.size() >= MaxCaseRewards)
+                    continue;
+                ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
+                if (!proto)
+                {
+                    LOG_ERROR("module", "[Bleakhold] bleakhold_case_reward: item {} (case {}) does not exist; reward skipped", itemId, caseId);
+                    continue;
+                }
+                int32 const tier = f[4].Get<int8>();
+                it->items.push_back(itemId);
+                it->counts.push_back(std::clamp<uint32>(f[2].Get<uint16>(), 1, std::max<uint32>(1, proto->GetMaxStackSize())));
+                it->weights.push_back(weight);
+                it->tiers.push_back(uint8_t(tier < 0 ? std::min<uint32>(proto->Quality, 6) : std::min<int32>(tier, 6)));
+            } while (r->NextRow());
+        cases.erase(std::remove_if(cases.begin(), cases.end(), [](CaseRow const& c) {
+            if (c.items.empty())
+                LOG_ERROR("module", "[Bleakhold] bleakhold_case {} has no reward; case skipped", c.itemId);
+            return c.items.empty();
+        }), cases.end());
+        _cases = std::move(cases);
     }
 
     void Data::LoadCharactersLocked()
@@ -457,6 +518,7 @@ namespace Bleakhold
         c.schedule = _schedule.size();
         c.seasons = _seasons.size();
         c.sets = _sets.size();
+        c.cases = _cases.size();
         c.lbRows = _lb.size();
         c.firsts = _firsts.size();
         for (auto const& [season, players] : _wePlayers)
@@ -1187,6 +1249,128 @@ namespace Bleakhold
     }
 
     // =============================================================================================
+    // Cases (section 15)
+    // =============================================================================================
+    bool Data::HasCases()
+    {
+        std::lock_guard<std::mutex> guard(_lock);
+        return !_cases.empty();
+    }
+
+    CaseList Data::CaseIds()
+    {
+        std::lock_guard<std::mutex> guard(_lock);
+        CaseList out;
+        for (CaseRow const& c : _cases)
+            out.caseItemIds.push_back(c.itemId);
+        return out;
+    }
+
+    Opt<CaseInfo> Data::CaseFor(uint32_t caseItemId)
+    {
+        std::lock_guard<std::mutex> guard(_lock);
+        for (CaseRow const& c : _cases)
+        {
+            if (c.itemId != caseItemId)
+                continue;
+            CaseInfo info;
+            info.caseItemId = c.itemId;
+            info.title = c.title;
+            info.text = c.text;
+            info.keyItemId = c.keyItemId;
+            info.keyCount = c.keyItemId ? c.keyCount : 0;
+            std::vector<uint32_t> const chances = Cases::Chances(c.weights);
+            for (std::size_t i = 0; i < c.items.size(); ++i)
+                info.rewards.push_back({ c.items[i], c.counts[i], chances[i], c.tiers[i] });
+            return info;
+        }
+        return std::nullopt;
+    }
+
+    void Data::OpenCase(Player* player, Intent const& intent)
+    {
+        // world thread (the chat hook); the cooldown (BleakholdUi.Case.CooldownMs) is the Endpoint's and
+        // BleakholdUi.Case.Enable is Mgr::Dispatch's, so both also hold for a custom handler
+        CaseRow c;
+        bool any = false;
+        {
+            std::lock_guard<std::mutex> guard(_lock);
+            any = !_cases.empty();
+            for (CaseRow const& row : _cases)
+                if (row.itemId == intent.caseItemId)
+                    c = row;
+        }
+        if (!any)
+        {
+            Ui::Refuse(player, intent, "unavailable", "Cases are turned off on this realm.");
+            return;
+        }
+        if (!c.itemId)
+        {
+            Ui::Refuse(player, intent, "unknown_case", "That is not a case.");
+            return;
+        }
+        if (!player->IsInWorld())
+            return;
+        if (!player->HasItemCount(c.itemId, 1))
+        {
+            Ui::Refuse(player, intent, "no_case", "You have no such case in your bags.");
+            return;
+        }
+        if (c.keyItemId && !player->HasItemCount(c.keyItemId, c.keyCount))
+        {
+            Ui::Refuse(player, intent, "no_key", "You need the case's key to open it.");
+            return;
+        }
+        uint64_t const total = Cases::TotalWeight(c.weights);
+        std::size_t const index = Cases::Pick(c.weights, urand(0, uint32(std::min<uint64_t>(total, 0xFFFFFFFFull) - 1)));
+        if (index >= c.items.size())
+            return;
+        uint32_t const itemId = c.items[index], count = c.counts[index];
+        ItemPosCountVec dest;
+        InventoryResult const room = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, dest, itemId, count);
+        if (room != EQUIP_ERR_OK)
+        {
+            // the case stays: the player opens it again with room (or once a unique reward is gone)
+            Ui::Refuse(player, intent, "bags_full", room == EQUIP_ERR_CANT_CARRY_MORE_OF_THIS
+                ? "You cannot carry more of the reward the case rolled. Your case was not used."
+                : "Make room in your bags first. Your case was not used.");
+            return;
+        }
+        // the case and its key go first, so a failure below can never hand out a reward for nothing
+        player->DestroyItemCount(c.itemId, 1, true);
+        if (c.keyItemId)
+            player->DestroyItemCount(c.keyItemId, c.keyCount, true);
+        Item* item = player->StoreNewItem(dest, itemId, true, Item::GenerateItemRandomPropertyId(itemId));
+        if (!item)
+        {
+            LOG_ERROR("module", "[Bleakhold] case {}: could not give item {} to {}", c.itemId, itemId, player->GetName());
+            return;
+        }
+        player->SendNewItem(item, count, true, false);
+        LOG_INFO("module", "[Bleakhold] {} opened case {} and got {} x{}", player->GetName(), c.itemId, itemId, count);
+
+        Unbox won;
+        won.caseItemId = c.itemId;
+        won.rewardIndex = uint32_t(index + 1);
+        won.itemId = itemId;
+        won.count = count;
+        Ui::SendUnbox(player, won);
+
+        if (c.announceTier && c.tiers[index] >= c.announceTier)
+        {
+            ItemTemplate const* proto = sObjectMgr->GetItemTemplate(itemId);
+            if (proto)
+            {
+                char color[9];
+                std::snprintf(color, sizeof(color), "%08x", ItemQualityColors[std::min<uint32>(proto->Quality, MAX_ITEM_QUALITY - 1)]);
+                std::string const link = "|c" + std::string(color) + "|Hitem:" + std::to_string(itemId) + ":0:0:0:0:0:0:0:0|h[" + proto->Name1 + "]|h|r";
+                Ui::Announce(Ui::AnnounceTag::Case, player->GetName() + " found " + link + " in " + c.title + "!");
+            }
+        }
+    }
+
+    // =============================================================================================
     // Default providers and handlers
     // =============================================================================================
     void Data::RegisterDefaults()
@@ -1222,10 +1406,16 @@ namespace Bleakhold
         m.SetDefaultProvider(Topic::Firsts, [](Player* p, TopicRequest const&) { Ui::SendFirsts(p, Data::Instance().Firsts()); });
         m.SetDefaultProvider(Topic::Mplus, [](Player* p, TopicRequest const&) { Mgr::Instance().SendRunTo(p); });
         m.SetDefaultProvider(Topic::Def, [](Player* p, TopicRequest const&) { Mgr::Instance().SendDefinitions(p); });
+        m.SetDefaultProvider(Topic::Cases, [](Player* p, TopicRequest const&) { Ui::SendCases(p, Data::Instance().CaseIds()); });
+        m.SetDefaultProvider(Topic::Case, [](Player* p, TopicRequest const& req) {
+            if (Opt<CaseInfo> c = Data::Instance().CaseFor(req.arg1))
+                Ui::SendCase(p, *c);
+        });
 
         m.SetDefaultHandler(IntentType::LeaderboardQuery, [](Player* p, Intent const& in) { Data::Instance().AnswerLeaderboard(p, in); });
         m.SetDefaultHandler(IntentType::WarEffortHandIn, [](Player* p, Intent const& in) { Data::Instance().HandIn(p, in); });
         m.SetDefaultHandler(IntentType::Emoji, [](Player* p, Intent const& in) { Data::Instance().Emoji(p, in); });
         m.SetDefaultHandler(IntentType::Dance, [](Player* p, Intent const& in) { Data::Instance().Dance(p, in); });
+        m.SetDefaultHandler(IntentType::CaseOpen, [](Player* p, Intent const& in) { Data::Instance().OpenCase(p, in); });
     }
 }

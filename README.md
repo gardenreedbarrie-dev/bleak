@@ -258,6 +258,17 @@ yet can be unlocked for Bleakhold Coins (`.mog unlock`). If the module's own `Tr
 that addon answers the NPC and `/transmog`. Tiles that frame a race badly can be moved for that race and body part
 with `/bh mog camera <depth> <side> <height>` (`/bh mog camera reset` undoes it).
 
+## Cases
+
+A case is an item that holds one of several rewards. Right-clicking one in the bags opens the case window: the
+case's rewards with their chances (`CONTAINS ONE OF THE FOLLOWING`), a reel of reward cards under a gold marker
+and Unlock. Unlock asks the server to open one (`CASEOPEN`, `docs/BleakholdProtocol.md` section 15); the reel
+spins at once, and when the server names the reward (already in the bags) it slows down to stop on it. A click
+on the reel skips the show. A case may need a key item. `/bh case` opens the first case in the bags. The server
+module decides everything: the cases and their weighted rewards are two world tables
+(`Server/mod-bleakhold-ui/data/sql/db-world/02_bleakhold_case_tables.sql`), and a rare reward is announced to the
+realm with a `[Case]` line.
+
 ## Dances
 
 Bleakhold dances are full-body dances any character can do: pick one in Collections > Animations (the Dances

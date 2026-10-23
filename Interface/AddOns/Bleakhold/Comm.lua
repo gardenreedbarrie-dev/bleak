@@ -232,7 +232,7 @@ local function token(maxLen) return { kind = "token", max = maxLen } end
 
 Comm.TOPICS = {
     WEEK = 0, ERA = 0, TASKS = 0, KEY = 0, BOARD = 0, QUEUE = 0, MPLUS = 0, RIFT = 0, COLL = 0,
-    SET = 2, LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1,
+    SET = 2, LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1, CASES = 0, CASE = 1,
 }
 
 Comm.INTENTS = {
@@ -253,6 +253,7 @@ Comm.INTENTS = {
     PING = { int(0, INT32) },
     EMOJI = { int(0, 255) },                                          -- emoji id (the server checks its catalogue)
     DANCE = { int(0, 1023) },                                         -- dance id (the server checks its catalogue)
+    CASEOPEN = { int(1, INT32) },                                     -- case item id (from CASES)
 }
 
 local function checkField(spec, v)
@@ -783,7 +784,7 @@ end)
 
 -- Feature bits from HELLO (the server can hide boards that are not ready).
 Comm.FEATURE = { RIFT_SCORE = 1, SHARDS = 2, DBM_BY_SERVER = 4, SEASON = 8, LEADERBOARDS = 16, COLLECTIONS = 32,
-    EMOJI = 64, DANCE = 128 }
+    EMOJI = 64, DANCE = 128, CASES = 256 }
 
 function Comm.HasFeature(bitValue)
     local f = Comm.server and Comm.server.features or 0

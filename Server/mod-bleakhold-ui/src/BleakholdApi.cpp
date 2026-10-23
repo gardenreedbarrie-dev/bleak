@@ -84,6 +84,21 @@ namespace Bleakhold::Ui
         M().Push(player, "SET", Topic::Count, nullptr, [&](uint32_t) { return EncodeLegacySet(m); });
     }
 
+    void SendCases(Player* player, CaseList const& m)
+    {
+        M().Push(player, "CASES", Topic::Count, nullptr, [&](uint32_t) { return EncodeCases(m); });
+    }
+
+    void SendCase(Player* player, CaseInfo const& m)
+    {
+        M().Push(player, "CASE", Topic::Count, nullptr, [&](uint32_t) { return EncodeCase(m); });
+    }
+
+    void SendUnbox(Player* player, Unbox const& m)
+    {
+        M().Push(player, "UNBOX", Topic::Count, nullptr, [&](uint32_t) { return EncodeUnbox(m); });
+    }
+
     void RiftStatus(Player* player, RiftState const& m)
     {
         M().Push(player, "RIFT", Topic::Count, [&](PlayerSlot& s) { s.rift = m; }, [&](uint32_t) { return EncodeRift(m); });

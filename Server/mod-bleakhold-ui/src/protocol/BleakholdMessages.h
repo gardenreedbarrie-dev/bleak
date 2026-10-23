@@ -56,6 +56,7 @@ namespace Bleakhold
         FeatureCollections = 32,
         FeatureEmoji = 64,            // emoji bubbles (EMOJI, section 13)
         FeatureDance = 128,           // Bleakhold dances (DANCE, section 14)
+        FeatureCases = 256,           // cases (CASEOPEN, section 15)
     };
 
     // One reward line of MPE / RIFTE.
@@ -378,6 +379,27 @@ namespace Bleakhold
     struct ServerFirst { std::string kindKey, text, who; Opt<uint32_t> dateEpoch; };
     struct FirstsList { std::vector<ServerFirst> entries; };  // newest first
 
+    // CASES, CASE, UNBOX (section 15)
+    inline constexpr std::size_t MaxCases = 200;
+    inline constexpr std::size_t MaxCaseRewards = 60;
+    struct CaseList { std::vector<uint32_t> caseItemIds; };
+    struct CaseReward
+    {
+        uint32_t itemId = 0;
+        uint32_t count = 1;
+        uint32_t chance = 0;                 // in 1/10000
+        uint8_t tier = 0;                    // card colour, 0 poor .. 6 artifact
+    };
+    struct CaseInfo
+    {
+        uint32_t caseItemId = 0;
+        std::string title, text;
+        uint32_t keyItemId = 0;              // 0: no key
+        uint32_t keyCount = 0;
+        std::vector<CaseReward> rewards;     // display order
+    };
+    struct Unbox { uint32_t caseItemId = 0, rewardIndex = 0, itemId = 0, count = 1; };   // rewardIndex from 1
+
     // ---------------------------------------------------------------------------------------------
     // Encoders: payload of each op (without frame header). `rev` is the revision of the topic.
     // ---------------------------------------------------------------------------------------------
@@ -405,6 +427,9 @@ namespace Bleakhold
     std::string EncodeLeaderboard(Leaderboard const& m);
     std::string EncodeLeaderboardMe(LeaderboardMe const& m);
     std::string EncodeFirsts(FirstsList const& m);
+    std::string EncodeCases(CaseList const& m);
+    std::string EncodeCase(CaseInfo const& m);
+    std::string EncodeUnbox(Unbox const& m);
 
     // DEF: one payload per non-empty kind, in a fixed order, followed by "Z,<dataVer>".
     std::vector<std::string> EncodeDefinitions(Definitions const& d, uint32_t dataVer);

@@ -69,6 +69,13 @@ namespace Bleakhold
         // DANCE: starts the dance (emote state and kit) and keeps sending the kit at every loop (section 14).
         void Dance(Player* player, Intent const& intent);
 
+        // ---- cases (bleakhold_case, section 15) ----
+        bool HasCases();
+        CaseList CaseIds();
+        Opt<CaseInfo> CaseFor(uint32_t caseItemId);
+        // CASEOPEN: takes the case (and its key), rolls a reward by weight, gives it and answers UNBOX.
+        void OpenCase(Player* player, Intent const& intent);
+
         // ---- the module's own records (any thread) ----
         void RecordRun(Ui::LeaderboardEntry const& entry);
         bool RecordFirst(std::string_view firstId, std::string_view kindKey, std::string_view text, std::string_view who);
@@ -78,7 +85,7 @@ namespace Bleakhold
         // leaves the leaderboard rows (they keep the names) and its war effort points stay only in the totals.
         void ForgetCharacter(uint32_t lowGuid);
 
-        struct Counts { std::size_t defs = 0, schedule = 0, seasons = 0, sets = 0, lbRows = 0, firsts = 0, weRows = 0; };
+        struct Counts { std::size_t defs = 0, schedule = 0, seasons = 0, sets = 0, lbRows = 0, firsts = 0, weRows = 0, cases = 0; };
         Counts GetCounts();
 
     private:
@@ -112,6 +119,15 @@ namespace Bleakhold
             std::vector<uint32_t> memberGuids;
         };
         struct FirstRow { std::string id, kind, text, who; uint32_t date = 0; };
+        struct CaseRow
+        {
+            uint32_t itemId = 0;
+            std::string title, text;
+            uint32_t keyItemId = 0, keyCount = 0;
+            uint8_t announceTier = 0;        // 0: never
+            std::vector<uint32_t> items, counts, weights;
+            std::vector<uint8_t> tiers;
+        };
 
         void LoadWorldLocked();
         void LoadCharactersLocked();
@@ -130,6 +146,7 @@ namespace Bleakhold
         std::vector<RankRow> _ranks;
         std::vector<RewardRow> _rewards;
         std::vector<SetRow> _sets;
+        std::vector<CaseRow> _cases;
 
         // definitions after your editors, and their encoded DEF payloads
         std::vector<std::function<void(Definitions&)>> _editors;

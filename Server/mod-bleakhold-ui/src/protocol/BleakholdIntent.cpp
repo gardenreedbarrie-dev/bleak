@@ -39,6 +39,7 @@ namespace Bleakhold
             { "PING", IntentType::Ping },
             { "EMOJI", IntentType::Emoji },
             { "DANCE", IntentType::Dance },
+            { "CASEOPEN", IntentType::CaseOpen },
         }};
 
         struct TopicInfo
@@ -63,6 +64,8 @@ namespace Bleakhold
             { "RIFT", Topic::Rift, 0 },
             { "SET", Topic::Set, 2 },
             { "DEF", Topic::Def, 1 },
+            { "CASES", Topic::Cases, 0 },
+            { "CASE", Topic::Case, 1 },
         }};
 
         constexpr char const* DropNames[] = {
@@ -153,6 +156,7 @@ namespace Bleakhold
                 case IntentType::Ping: return 1;
                 case IntentType::Emoji: return 1;
                 case IntentType::Dance: return 1;
+                case IntentType::CaseOpen: return 1;
                 default: return -1;
             }
         }
@@ -187,6 +191,8 @@ namespace Bleakhold
                 }
                 else if (info->topic == Topic::Def)
                     BH_TRY(Int(f[1], 0, 0, req.arg1));   // "DEF,0": all kinds
+                else if (info->topic == Topic::Case)
+                    BH_TRY(Int(f[1], 1, Int32Max, req.arg1));
                 out.topics.push_back(req);
             }
             return DropReason::None;
@@ -275,6 +281,9 @@ namespace Bleakhold
                     break;
                 case IntentType::Dance:
                     BH_TRY(Int(f[0], 0, Proto::MaxDances - 1, out.danceId));
+                    break;
+                case IntentType::CaseOpen:
+                    BH_TRY(Int(f[0], 1, Int32Max, out.caseItemId));
                     break;
                 default:
                     break;
@@ -428,7 +437,7 @@ namespace Bleakhold
                     out += TopicName(t.topic);
                     if (t.topic == Topic::Set)
                         out += "," + n(t.arg1) + "," + n(t.arg2);
-                    else if (t.topic == Topic::Def)
+                    else if (t.topic == Topic::Def || t.topic == Topic::Case)
                         out += "," + n(t.arg1);
                 }
                 return out;
@@ -456,6 +465,8 @@ namespace Bleakhold
                 return n(in.emojiId);
             case IntentType::Dance:
                 return n(in.danceId);
+            case IntentType::CaseOpen:
+                return n(in.caseItemId);
             default:
                 return std::string();
         }

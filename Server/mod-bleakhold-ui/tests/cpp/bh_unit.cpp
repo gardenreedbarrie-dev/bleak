@@ -11,6 +11,7 @@
 #include "BleakholdEndpoint.h"
 #include "BleakholdIntent.h"
 #include "BleakholdMessages.h"
+#include "../../src/BleakholdCases.h"
 #include "../../src/BleakholdDance.h"
 #include "../../src/BleakholdEmoji.h"
 
@@ -251,6 +252,42 @@ TEST("every C> example of the document is accepted and re-encodes byte for byte"
     CHECK(Parse("1 DANCE j 1/1 5", &in) == DropReason::None);
     CHECK(in.type == IntentType::Dance && in.danceId == 5 && in.seq == 19);
     CHECK(Parse("1 DANCE j 1/1 1023", &in) == DropReason::None && in.danceId == 1023);
+    CHECK(Parse("1 CASEOPEN l 1/1 990001", &in) == DropReason::None);
+    CHECK(in.type == IntentType::CaseOpen && in.caseItemId == 990001 && in.seq == 21);
+    CHECK(Parse("1 GET k 1/1 CASES;CASE,990001", &in) == DropReason::None);
+    CHECK(in.topics.size() == 2 && in.topics[0].topic == Topic::Cases && in.topics[1].topic == Topic::Case &&
+        in.topics[1].arg1 == 990001);
+}
+
+TEST("cases: chances add up to 10000 and the roll follows the weights")
+{
+    using namespace Bleakhold::Cases;
+    std::vector<uint32_t> c = Chances({ 12, 12, 12, 12, 12, 12, 12, 12, 4 });
+    uint32_t sum = 0;
+    for (uint32_t v : c)
+        sum += v;
+    CHECK(sum == 10000u);
+    CHECK(c[0] == 1200 || c[0] == 1201);
+    CHECK(c[8] == 400u);
+    c = Chances({ 1, 1, 1 });
+    CHECK(c[0] + c[1] + c[2] == 10000 && c[0] == 3334 && c[1] == 3333 && c[2] == 3333);
+    c = Chances({ 5, 0, 5 });
+    CHECK(c[0] == 5000 && c[1] == 0 && c[2] == 5000);
+    c = Chances({ 0, 0 });
+    CHECK(c[0] == 0 && c[1] == 0);
+    c = Chances({ 4000000000u, 4000000000u, 1 });   // big weights do not overflow
+    CHECK(c[0] + c[1] + c[2] == 10000 && c[0] == 5000 && c[2] == 0);
+    std::vector<uint32_t> const w = { 45, 45, 10 };
+    CHECK(TotalWeight(w) == 100u);
+    CHECK(Pick(w, 0) == 0u);
+    CHECK(Pick(w, 44) == 0u);
+    CHECK(Pick(w, 45) == 1u);
+    CHECK(Pick(w, 89) == 1u);
+    CHECK(Pick(w, 90) == 2u);
+    CHECK(Pick(w, 99) == 2u);
+    CHECK(Pick(w, 100) == 3u);                    // out of range: none
+    CHECK(Pick({ 0, 3 }, 0) == 1u);               // a weight of 0 is never picked
+    CHECK(Pick({}, 0) == 0u);
 }
 
 TEST("dance catalogue fits the protocol")
@@ -370,6 +407,14 @@ TEST("malformed client messages are dropped with the right reason")
         { "BHc\t1 DANCE 1 1/1", DropReason::FieldCount },
         { "BHc\t1 DANCE 1 1/1 1,2", DropReason::FieldCount },
         { "BHc\t1 DANCE 1 1/1 a", DropReason::BadField },
+        { "BHc\t1 CASEOPEN 1 1/1 0", DropReason::OutOfRange },
+        { "BHc\t1 CASEOPEN 1 1/1 2147483648", DropReason::OutOfRange },
+        { "BHc\t1 CASEOPEN 1 1/1", DropReason::FieldCount },
+        { "BHc\t1 CASEOPEN 1 1/1 1,2", DropReason::FieldCount },
+        { "BHc\t1 CASEOPEN 1 1/1 x", DropReason::BadField },
+        { "BHc\t1 GET 1 1/1 CASE", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 CASE,0", DropReason::OutOfRange },
+        { "BHc\t1 GET 1 1/1 CASES,1", DropReason::BadTopic },
         { "BHc\t1 HELLO 1 1/1 1,1.0 beta,0,enUS", DropReason::BadField },
         { "BHc\t1 HELLO 1 1/1 1,,0,enUS", DropReason::BadField },
         { "BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUSenUSx", DropReason::BadField },
@@ -525,6 +570,11 @@ TEST("endpoint: per-op limits of section 8")
     ReceiveResult dn = Feed(ep, "1 DANCE t 1/1 2", 30500, &in);
     CHECK(dn.verdict == Verdict::Refused && in.type == IntentType::Dance && in.danceId == 2);
     CHECK(Feed(ep, "1 DANCE u 1/1 2", 31100).verdict == Verdict::Accepted);
+    // CASEOPEN: 1 per second
+    CHECK(Feed(ep, "1 CASEOPEN v 1/1 990001", 40000).verdict == Verdict::Accepted);
+    ReceiveResult cs = Feed(ep, "1 CASEOPEN w 1/1 990002", 40500, &in);
+    CHECK(cs.verdict == Verdict::Refused && in.type == IntentType::CaseOpen && in.caseItemId == 990002);
+    CHECK(Feed(ep, "1 CASEOPEN x 1/1 990002", 41100).verdict == Verdict::Accepted);
 }
 
 TEST("endpoint: the same action twice within the window is ignored")
@@ -545,6 +595,9 @@ TEST("endpoint: the same action twice within the window is ignored")
     // DANCE: the same dance again at once is dropped too
     CHECK(Feed(ep, "1 DANCE c 1/1 3", 20000).verdict == Verdict::Accepted);
     CHECK(Feed(ep, "1 DANCE d 1/1 3", 20400).reason == DropReason::Duplicate);
+    // CASEOPEN: the same case again at once is dropped too (section 15)
+    CHECK(Feed(ep, "1 CASEOPEN e 1/1 990001", 30000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CASEOPEN f 1/1 990001", 30400).reason == DropReason::Duplicate);
 }
 
 TEST("endpoint: SEQ per message, revisions per topic, snapshots reset by HELLO")
@@ -746,6 +799,18 @@ static std::map<std::string, std::string> BuiltExamples()
         d3.recordScore = 3100; d3.recordName = "Brenna"; d3.locked = false;
         b.dungeons = { d1, d2, d3 };
         m["BOARD 3k"] = EncodeBoard(4, b);
+    }
+    {
+        CaseList list;
+        list.caseItemIds = { 990001, 990002 };
+        m["CASES 4"] = EncodeCases(list);
+        CaseInfo c;
+        c.caseItemId = 990001; c.title = "Glaive Case"; c.text = "Unlock it to receive one of the items below.";
+        c.rewards = { { 32837, 1, 1200, 4 }, { 32838, 1, 400, 5 } };
+        m["CASE 5"] = EncodeCase(c);
+        Unbox u;
+        u.caseItemId = 990001; u.rewardIndex = 2; u.itemId = 32838; u.count = 1;
+        m["UNBOX 6"] = EncodeUnbox(u);
     }
     return m;
 }

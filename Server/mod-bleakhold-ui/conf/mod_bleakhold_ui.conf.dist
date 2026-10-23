@@ -182,6 +182,24 @@ BleakholdUi.Dance.Enable = 1
 BleakholdUi.Dance.CooldownMs = 1000
 
 ###################################################################################################
+# CASES (CASEOPEN: open a case item for one of its rewards; the cases are the world tables
+# bleakhold_case and bleakhold_case_reward, data/sql/db-world/02_bleakhold_case_tables.sql)
+###################################################################################################
+#
+#    BleakholdUi.Case.Enable
+#        Description: Let players open cases (feature bit 256 when at least one case is set up).
+#        Default:     1 - Enabled
+#                     0 - Disabled
+#
+#    BleakholdUi.Case.CooldownMs
+#        Description: Time a player must wait between two cases, in ms (0 = no limit). The addon waits
+#                     for each answer, and its reel takes about 6 s unless the player skips it.
+#        Default:     1000
+
+BleakholdUi.Case.Enable = 1
+BleakholdUi.Case.CooldownMs = 1000
+
+###################################################################################################
 # KEYSTONE RUNS
 ###################################################################################################
 #
@@ -198,7 +216,7 @@ BleakholdUi.KeyRun.HeartbeatSec = 15
 BleakholdUi.KeyRun.ServerPullTimer = 0
 
 ###################################################################################################
-# CHAT ANNOUNCEMENTS ([Raid Legacy], [Server First], [Season], [Queue], [Record])
+# CHAT ANNOUNCEMENTS ([Raid Legacy], [Server First], [Season], [Queue], [Record], [Case])
 ###################################################################################################
 #
 #    BleakholdUi.Announce.ColorTagsWithoutAddon
@@ -215,6 +233,7 @@ BleakholdUi.Announce.Color.ServerFirst = "FF9D3B"
 BleakholdUi.Announce.Color.Season = "6CC6D9"
 BleakholdUi.Announce.Color.Queue = "9FD8E5"
 BleakholdUi.Announce.Color.Record = "F1D9A0"
+BleakholdUi.Announce.Color.Case = "C9A2F5"
 
 ###################################################################################################
 # WAR EFFORT TOKEN HAND-IN (the "Hand in" button of the Season window)

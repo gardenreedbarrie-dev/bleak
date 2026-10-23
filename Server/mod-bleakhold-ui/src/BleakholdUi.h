@@ -59,7 +59,8 @@ namespace Bleakhold::Ui
     //   Defaults: TCLAIM TREROLL QJOIN QLEAVE QREPLY KMODE KSTART KCANCEL BCLAIM OUTFIT -> ERR "unavailable";
     //   WEHANDIN -> token hand-in from mod_bleakhold_ui.conf (BleakholdUi.WarEffort.*), else "unavailable";
     //   LBQ -> the module's own leaderboard tables; EMOJI -> emoji bubble (BleakholdUi.Emoji.*);
-    //   DANCE -> Bleakhold dance (BleakholdUi.Dance.*).
+    //   DANCE -> Bleakhold dance (BleakholdUi.Dance.*); CASEOPEN -> the module's cases (bleakhold_case,
+    //   BleakholdUi.Case.*).
     //   HELLO, GET and PING are handled by the module.
     using IntentHandler = std::function<void(Player* player, Intent const& intent)>;
     void OnIntent(IntentType type, IntentHandler handler);
@@ -120,6 +121,9 @@ namespace Bleakhold::Ui
     // Unrevisioned states and events
     // =============================================================================================
     void SendLegacySet(Player* player, LegacySet const& set);         // SET (answer to GET SET,tier,class)
+    void SendCases(Player* player, CaseList const& cases);            // CASES (section 15)
+    void SendCase(Player* player, CaseInfo const& info);              // CASE (answer to GET CASE,item)
+    void SendUnbox(Player* player, Unbox const& won);                // UNBOX (answer to CASEOPEN)
     void RiftStatus(Player* player, RiftState const& rift);           // RIFT (remembered for GET RIFT)
     void RiftEnded(Player* player, RiftEnd const& summary);           // RIFTE
     void SendLeaderboard(Player* player, Leaderboard const& page);    // LB
@@ -171,7 +175,7 @@ namespace Bleakhold::Ui
     // =============================================================================================
     // Server-wide chat announcements (CHAT_MSG_SYSTEM with a tag the addon colours and can hide)
     // =============================================================================================
-    enum class AnnounceTag : uint8_t { RaidLegacy, ServerFirst, Season, Queue, Record };
+    enum class AnnounceTag : uint8_t { RaidLegacy, ServerFirst, Season, Queue, Record, Case };
     // To every online player. `text` is server text and may contain real |Hitem:...|h links.
     void Announce(AnnounceTag tag, std::string_view text);
     void AnnounceTo(Player* player, AnnounceTag tag, std::string_view text);

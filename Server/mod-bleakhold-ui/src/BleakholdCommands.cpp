@@ -288,6 +288,7 @@ public:
         Mgr::Instance().ForEachReadyPlayer([](Player* p) {
             Mgr::Instance().Refresh(p, Topic::Era);
             Mgr::Instance().Refresh(p, Topic::Season);
+            Mgr::Instance().Refresh(p, Topic::Cases);   // the case list may have changed (section 15)
         });
         handler->PSendSysMessage("Bleakhold: configuration and world tables reloaded; data version {} -> {}.", before, after);
         return true;

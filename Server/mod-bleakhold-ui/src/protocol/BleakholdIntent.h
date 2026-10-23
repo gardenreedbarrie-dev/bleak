@@ -38,6 +38,7 @@ namespace Bleakhold
         Ping,             // PING     nonce
         Emoji,            // EMOJI    emojiId
         Dance,            // DANCE    danceId
+        CaseOpen,         // CASEOPEN caseItemId
         Count
     };
 
@@ -45,7 +46,7 @@ namespace Bleakhold
     enum class Topic : uint8_t
     {
         Week, Era, Tasks, Key, Board, Queue, Coll, Lidx, Season,   // revisioned
-        Firsts, Mplus, Rift, Set, Def,
+        Firsts, Mplus, Rift, Set, Def, Cases, Case,
         Count
     };
     inline constexpr uint8_t RevisionedTopicCount = 9;
@@ -59,7 +60,7 @@ namespace Bleakhold
     struct TopicRequest
     {
         Topic topic = Topic::Week;
-        uint32_t arg1 = 0;  // SET: legacy tier; DEF: 0
+        uint32_t arg1 = 0;  // SET: legacy tier; DEF: 0; CASE: the case item id
         uint32_t arg2 = 0;  // SET: class id
     };
 
@@ -116,6 +117,9 @@ namespace Bleakhold
 
         // DANCE: 0..1023 (the server checks it against its catalogue)
         uint32_t danceId = 0;
+
+        // CASEOPEN: an item id (the server checks it is a case)
+        uint32_t caseItemId = 0;
     };
 
     // Why a message was not accepted.

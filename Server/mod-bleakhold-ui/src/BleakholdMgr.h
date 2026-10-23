@@ -46,7 +46,7 @@ namespace Bleakhold
         uint32_t heartbeatMs = 15000;
         bool serverPullTimer = false;
         bool colorTagsWithoutAddon = true;
-        std::array<std::string, 5> tagColors{ { "E5C07B", "FF9D3B", "6CC6D9", "9FD8E5", "F1D9A0" } };
+        std::array<std::string, 6> tagColors{ { "E5C07B", "FF9D3B", "6CC6D9", "9FD8E5", "F1D9A0", "C9A2F5" } };
         uint32_t tokenItemId = 0;
         uint32_t pointsPerToken = 0;
         uint32_t tokenPart = 1;
@@ -54,6 +54,7 @@ namespace Bleakhold
         uint32_t leaderboardMaxRows = 1000;
         bool emojiEnable = true;              // EMOJI (the catalogue is BleakholdEmoji.h)
         bool danceEnable = true;              // DANCE (the catalogue is BleakholdDance.h)
+        bool caseEnable = true;               // CASEOPEN (feature bit 256 also needs a case, Data::HasCases)
     };
 
     struct OutItem

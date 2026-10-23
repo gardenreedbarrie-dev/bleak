@@ -56,7 +56,7 @@ You should see `mod-bleakhold-ui` in CMake's list of modules.
 
 | Folder | Database | What it creates |
 |---|---|---|
-| `data/sql/db-world/` | world (`acore_world`) | the definition tables, with the UI's own names and texts filled in |
+| `data/sql/db-world/` | world (`acore_world`) | the definition tables, with the UI's own names and texts filled in, and the case tables (empty) |
 | `data/sql/db-characters/` | characters (`acore_characters`) | leaderboards, server firsts, war effort points |
 
 Nothing to do if your `worldserver.conf` has `Updates.EnableDatabases = 7` (the default): the
@@ -108,6 +108,7 @@ To change names, texts, the week schedule or seasons later: edit the `bleakhold_
 | Collections counts | | `SendCollections` |
 | Emoji bubbles (Animations tab, emote wheel, `/bh emoji`) | everything: the module checks `EMOJI` and shows the emoji over the player's head to everyone nearby; config `BleakholdUi.Emoji.*` | nothing (players need the Bleakhold client to see the bubbles) |
 | Dances (Animations tab, emote wheel, `/bh dance`, each dance's own command) | everything: the module checks `DANCE`, starts the stock dance (emote state) and tells everyone nearby which Bleakhold dance it is, again at every loop; config `BleakholdUi.Dance.*` | nothing (players need the Bleakhold client to see the dances; stock clients see the stock dance) |
+| Cases (right-click a case item: the case window with its rewards and chances, Unlock and the reel) | everything: the module answers `GET CASES` / `GET CASE`, checks `CASEOPEN` (the case, its key, bag room), rolls the reward by weight, swaps the case for it, answers `UNBOX` and announces rare rewards (`[Case]`); config `BleakholdUi.Case.*` | the cases: rows in `bleakhold_case` and `bleakhold_case_reward` (see `data/sql/db-world/02_bleakhold_case_tables.sql`), and the case items themselves (any item, no spell needed) |
 
 Buttons whose system is not connected yet answer the player with "This is not available on this realm
 yet." Set `BleakholdUi.Feature.*` in the config when a system goes live (the UI hides what is not).

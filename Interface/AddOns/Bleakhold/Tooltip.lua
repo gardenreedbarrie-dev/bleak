@@ -63,6 +63,10 @@ function Tooltip.Lines(id)
             lines[#lines + 1] = { "Depleted", C.red }
         end
     end
+    if ns.S.cases and ns.S.cases[id] then
+        lines[#lines + 1] = { " " }
+        lines[#lines + 1] = { "Case: right-click to see what it holds and unlock it", C.epic, true }
+    end
     return lines
 end
 

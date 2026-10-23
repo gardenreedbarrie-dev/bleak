@@ -212,4 +212,5 @@ Data.chatTags = {
     { tag = "Season", color = "6CC6D9", key = "season" },
     { tag = "Queue", color = "9FD8E5", key = "queue" },
     { tag = "Record", color = "F1D9A0", key = "record" },
+    { tag = "Case", color = "C9A2F5", key = "case" },
 }

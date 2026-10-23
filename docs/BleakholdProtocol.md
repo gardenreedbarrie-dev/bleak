@@ -160,7 +160,7 @@ These topics are revisioned. The first field of the first record of every messag
   ignored as a duplicate. A gap, or a delta before any snapshot, makes the client send `GET <topic>`;
   answer with a snapshot.
 - Unrevisioned ops (`MPS`, `MP`, `MPE`, `RIFT`, `RIFTE`, `SET`, `LB`, `LBME`, `FIRSTS`, `DEF`, `TOAST`,
-  `ERR`, `HELLO`, `PONG`) are full states or events; each one stands alone.
+  `ERR`, `HELLO`, `PONG`, `CASES`, `CASE`, `UNBOX`) are full states or events; each one stands alone.
 
 Push a new snapshot or delta whenever something changes (task progress, queue state, keystone, run
 events). The client also asks with `GET` when a window opens; answer every `GET` with the current
@@ -190,6 +190,7 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `PING` | `nonce` | answer with `PONG` |
 | `EMOJI` | `emojiId` | show emoji `emojiId` above the player's head to everyone nearby (section 13). `emojiId`: 0..255, an index into the emoji catalogue, `Tools/EmojiForge/emojis.json` |
 | `DANCE` | `danceId` | dance Bleakhold dance `danceId` until the player moves (section 14). `danceId`: 0..1023, an index into the dance catalogue, `Tools/DanceForge/dances.json` |
+| `CASEOPEN` | `caseItemId` | open one case `caseItemId` from the player's bags (section 15) |
 
 `GET` topics and what to send back:
 
@@ -200,6 +201,8 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `RIFT` | | `RIFT` |
 | `SET` | `tier, classId` | `SET` for that legacy tier and class |
 | `DEF` | `0` (all kinds) | every `DEF` kind, then `DEF Z` |
+| `CASES` | | `CASES` (section 15) |
+| `CASE` | `caseItemId` | `CASE` for that case; nothing when it is not one (section 15) |
 
 Examples:
 
@@ -223,6 +226,8 @@ C> 1 LBQ g 1/1 K,1,0,0,2
 C> 1 PING h 1/1 12345
 C> 1 EMOJI i 1/1 7
 C> 1 DANCE j 1/1 5
+C> 1 GET k 1/1 CASES;CASE,990001
+C> 1 CASEOPEN l 1/1 990001
 ```
 
 ## 7. Server to client
@@ -243,7 +248,7 @@ may define more with `DEF X`), item ids are item template entries.
   cache the client sends `GET DEF,0`.
 - `featureBits`: 1 Rift scoring live, 2 Shards live, 4 the server sends the DBM pull timer itself
   (section 9), 8 season live, 16 leaderboards live, 32 collections live, 64 emoji bubbles live (section 13),
-  128 dances live (section 14).
+  128 dances live (section 14), 256 cases live (section 15).
 - `dailyResetEpoch`/`weeklyResetEpoch`: the next resets (Unix time).
 - `siteUrl`: shown for copying under the leaderboards (there is no web browser in game).
 
@@ -510,6 +515,7 @@ does not throttle addon messages for you (AzerothCore's addon flood check is not
 | `TCLAIM`, `TREROLL`, `BCLAIM`, `OUTFIT`, `WEHANDIN` | 2 per second together; idempotent anyway |
 | `EMOJI` | 1 per `BleakholdUi.Emoji.CooldownMs` (2.5 s); the addon waits 3.25 s itself |
 | `DANCE` | 1 per `BleakholdUi.Dance.CooldownMs` (1 s); the addon waits 1.25 s itself |
+| `CASEOPEN` | 1 per `BleakholdUi.Case.CooldownMs` (1 s); the addon waits for `UNBOX` or `ERR` (at most 5 s) |
 
 Also bound the work a single message can cause (for example a `GET LIDX` answer is cached per player
 rather than rebuilt on every request).
@@ -540,6 +546,7 @@ lets each chat window hide a tag (`/bh chat`):
 | `[Season] ` | season and war effort news |
 | `[Queue] ` | a group search started (sent to the whole server) |
 | `[Record] ` | a new run record |
+| `[Case] ` | a rare reward from a case (section 15) |
 
 Without the addon the lines are still readable as plain text.
 
@@ -648,3 +655,55 @@ dance's music at the unit when `Interface\Bleakhold\Dances\Music\<key>.mp3` (or 
 Like chat from them, the Bleakhold client does not show dances of players on the viewer's ignore list. Any unit
 can carry the kit, so a server script can make a creature dance too (`creature->SetEmoteState(EMOTE_STATE_DANCE)`
 and `creature->SendPlaySpellVisual(910000 + danceId)`, again every loop).
+
+## 15. Cases
+
+A case is an item that holds one of several rewards. Right-clicking one in the bags opens the case window
+(the addon knows the case items from `CASES`), which shows every reward the case can give and its chance;
+Unlock sends `CASEOPEN caseItemId`. The server decides everything: it checks the case and its key, rolls the
+reward by weight, takes the case (and the key), gives the reward and answers `UNBOX`. The window's spinning
+reel only shows where the roll already landed. A case item needs no spell or loot of its own; a stock client
+just cannot open it.
+
+`CASES`: one record per case, `caseItemId` (at most 200). Sent for `GET CASES`, and again whenever the list
+changes (a reload).
+
+`CASE` (answer to `GET CASE,caseItemId`): the first record is the case, the others its rewards in display
+order (at most 60).
+
+`caseItemId, title, text, keyItemId, keyCount`, then per reward `itemId, count, chance, tier`
+
+- `title`: the window's title (the case item's name when the server leaves it empty); `text`: one line under it.
+- `keyItemId`, `keyCount`: an item the player needs (and loses) to open the case; empty or 0 for none.
+- `chance`: the reward's chance in 1/10000 (`1200` is 12 %); the chances add up to 10000 give or take rounding.
+- `tier`: the colour of the reward's card, 0 (poor) to 6 (artifact) like item quality; usually the item's quality,
+  but a server may mark a jackpot higher.
+
+`UNBOX` (answer to `CASEOPEN`): `caseItemId, rewardIndex, itemId, count`. `rewardIndex` is the reward's
+position in `CASE`, from 1. The reward is already in the player's bags when it arrives.
+
+The server checks `CASEOPEN`, in this order:
+
+| Check | Answer |
+|---|---|
+| malformed | dropped silently (section 1) |
+| the same `caseItemId` as the player's last accepted `CASEOPEN`, within 1 s | dropped silently |
+| the player's cooldown (`BleakholdUi.Case.CooldownMs`, section 8) has not run out | `ERR` `busy` |
+| cases are off on the realm (`BleakholdUi.Case.Enable = 0`, or no case: no feature bit 256) | `ERR` `unavailable` |
+| `caseItemId` is not a case | `ERR` `unknown_case` |
+| the player is not in the world | dropped silently |
+| the player has no such case in the bags | `ERR` `no_case` |
+| the case needs a key the player does not have | `ERR` `no_key` |
+| the bags have no room for the reward (or it is unique and the player has it); the case stays | `ERR` `bags_full` |
+
+When every check passes, the server takes one case and the key from the bags, adds the reward (with the usual
+"You receive item" message) and sends `UNBOX`. A reward whose tier is at least the case's announce tier is
+told to the realm with a `[Case]` line (section 10).
+
+```
+C> 1 GET k 1/1 CASES;CASE,990001
+S> 1 CASES 4 1/1 990001;990002
+S> 1 CASE 5 1/1 990001,Glaive Case,Unlock it to receive one of the items below.;32837,1,1200,4;32838,1,400,5
+C> 1 CASEOPEN l 1/1 990001
+S> 1 UNBOX 6 1/1 990001,2,32838,1
+```

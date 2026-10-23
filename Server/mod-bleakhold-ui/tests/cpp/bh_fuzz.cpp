@@ -94,7 +94,7 @@ namespace
             std::vector<std::string> recs = Split(payload, ';');
             if (recs.size() > 8)
                 return false;
-            static std::regex const plain("WEEK|ERA|TASKS|KEY|BOARD|QUEUE|COLL|LIDX|SEASON|FIRSTS|MPLUS|RIFT");
+            static std::regex const plain("WEEK|ERA|TASKS|KEY|BOARD|QUEUE|COLL|LIDX|SEASON|FIRSTS|MPLUS|RIFT|CASES");
             for (std::string const& r : recs)
             {
                 std::vector<std::string> f = Split(r, ',');
@@ -103,6 +103,8 @@ namespace
                 if (f.size() == 3 && f[0] == "SET" && RefInt(f[1], 0, I32) && RefInt(f[2], 0, I32))
                     continue;
                 if (f.size() == 2 && f[0] == "DEF" && RefInt(f[1], 0, 0))
+                    continue;
+                if (f.size() == 2 && f[0] == "CASE" && RefInt(f[1], 1, I32))
                     continue;
                 return false;
             }
@@ -140,6 +142,8 @@ namespace
             return n(1) && RefInt(f[0], 0, 255);
         if (op == "DANCE")
             return n(1) && RefInt(f[0], 0, 1023);
+        if (op == "CASEOPEN")
+            return n(1) && RefInt(f[0], 1, I32);
         return false;
     }
 
@@ -291,7 +295,7 @@ namespace
             "1 TCLAIM 4 1/1 103", "1 TREROLL 5 1/1 101", "1 QJOIN 6 1/1 D,389,2,4,3", "1 QJOIN 7 1/1 R,0,0,4,1", "1 QREPLY 8 1/1 77,1",
             "1 QLEAVE 9 1/1", "1 KMODE a 1/1 2", "1 KSTART b 1/1", "1 KCANCEL c 1/1", "1 BCLAIM d 1/1 55", "1 WEHANDIN e 1/1",
             "1 OUTFIT f 1/1 201", "1 LBQ g 1/1 K,1,0,0,2", "1 PING h 1/1 12345", "1 EMOJI i 1/1 7", "1 DANCE j 1/1 5",
-            "1 WEEK 2s 1/1 3,4",
+            "1 GET k 1/1 CASES;CASE,990001", "1 CASEOPEN l 1/1 990001", "1 WEEK 2s 1/1 3,4",
             "2 HELLO 1 1/1 2,2.0,7,deDE",
         };
     }
@@ -300,7 +304,7 @@ namespace
     {
         static char const dict[] = { ',', ';', ':', '~', '%', ' ', '/', '\t', '\0', '-', '+', '0', '1', '9', 'A', 'Z', 'a', 'z', '.', '_',
             static_cast<char>(0x80), static_cast<char>(0xC3), static_cast<char>(0xFF), '\n', 'E', 'x' };
-        static char const* const words[] = { "2147483647", "2147483648", "-1", "0", "00000000000000000001", "999", "1000", "SET", "DEF", "WEEK",
+        static char const* const words[] = { "2147483647", "2147483648", "-1", "0", "00000000000000000001", "999", "1000", "SET", "DEF", "WEEK", "CASE", "CASES",
             "HELLO", "GET", "BHc\t", "BHs\t", "1/1", "1/2", "99/99", "zzzzzz", "%00", "%2C", "\xC3\xA9", ";;", ",,", "R,0", "D,0" };
         int const steps = 1 + static_cast<int>(rng() % 4);
         for (int i = 0; i < steps; ++i)

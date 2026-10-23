@@ -31,7 +31,8 @@ namespace Bleakhold
 {
     namespace
     {
-        constexpr char const* TagNames[] = { "Raid Legacy", "Server First", "Season", "Queue", "Record" };
+        constexpr char const* TagNames[] = { "Raid Legacy", "Server First", "Season", "Queue", "Record", "Case" };
+        constexpr std::size_t TagCount = sizeof(TagNames) / sizeof(TagNames[0]);
         constexpr uint64_t RunMaxAgeMs = 6ull * 3600 * 1000;
         constexpr uint64_t SweepIntervalMs = 60000;
 
@@ -40,6 +41,7 @@ namespace Bleakhold
         char const* const TextNotLeader = "Only the group leader can do that.";
         char const* const TextEmojiOff = "Emojis are turned off on this realm.";
         char const* const TextDanceOff = "Dances are turned off on this realm.";
+        char const* const TextCaseOff = "Cases are turned off on this realm.";
 
         bool IsHex6(std::string const& s)
         {
@@ -131,6 +133,8 @@ namespace Bleakhold
         c.danceEnable = sConfigMgr->GetOption<bool>("BleakholdUi.Dance.Enable", true);
         if (c.danceEnable)
             bits |= FeatureDance;  // the catalogue is never empty (static_assert in BleakholdDance.h)
+        // FeatureCases also needs a case in bleakhold_case: SendHello adds it
+        c.caseEnable = sConfigMgr->GetOption<bool>("BleakholdUi.Case.Enable", true);
         c.serverPullTimer = sConfigMgr->GetOption<bool>("BleakholdUi.KeyRun.ServerPullTimer", false);
         if (c.serverPullTimer)
             bits |= FeatureServerPullTimer;
@@ -155,10 +159,12 @@ namespace Bleakhold
         l.duplicateWindowMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.DuplicateWindowMs", 1000);
         l.emojiIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.Emoji.CooldownMs", 2500);
         l.danceIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.Dance.CooldownMs", 1000);
+        l.caseIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.Case.CooldownMs", 1000);
 
         c.heartbeatMs = 1000 * std::max<uint32_t>(1, sConfigMgr->GetOption<uint32_t>("BleakholdUi.KeyRun.HeartbeatSec", 15));
         c.colorTagsWithoutAddon = sConfigMgr->GetOption<bool>("BleakholdUi.Announce.ColorTagsWithoutAddon", true);
-        char const* const colorKeys[] = { "RaidLegacy", "ServerFirst", "Season", "Queue", "Record" };
+        char const* const colorKeys[] = { "RaidLegacy", "ServerFirst", "Season", "Queue", "Record", "Case" };
+        static_assert(sizeof(colorKeys) / sizeof(colorKeys[0]) == TagCount, "one colour per tag");
         for (std::size_t i = 0; i < c.tagColors.size(); ++i)
         {
             std::string const v = sConfigMgr->GetOption<std::string>(std::string("BleakholdUi.Announce.Color.") + colorKeys[i], c.tagColors[i]);
@@ -385,6 +391,13 @@ namespace Bleakhold
             return;
         }
 
+        // BleakholdUi.Case.Enable holds for a custom CASEOPEN handler too (section 15).
+        if (intent.type == IntentType::CaseOpen && !_cfg.caseEnable)
+        {
+            Refuse(player, intent, "unavailable", TextCaseOff);
+            return;
+        }
+
         Ui::IntentHandler handler;
         {
             std::lock_guard<std::recursive_mutex> guard(_lock);
@@ -402,6 +415,7 @@ namespace Bleakhold
         // Data first: never hold the Mgr lock while taking the Data lock.
         uint32_t const season = Data::Instance().CurrentSeason();
         std::pair<uint32_t, uint32_t> const resets = Data::Instance().ResetTimes();
+        bool const cases = _cfg.caseEnable && Data::Instance().HasCases();
 
         HelloReply h;
         h.proto = Proto::ProtocolVersion;
@@ -409,7 +423,7 @@ namespace Bleakhold
         h.serverEpoch = static_cast<uint32_t>(GameTime::GetGameTime().count());
         h.utcOffsetMin = _cfg.utcOffsetAuto ? LocalUtcOffsetMinutes() : _cfg.utcOffsetMin;
         h.dataVer = DataVersion();
-        h.featureBits = _cfg.featureBits;
+        h.featureBits = _cfg.featureBits | (cases ? FeatureCases : 0);
         if (season)
             h.seasonId = season;
         if (resets.first)
@@ -423,7 +437,7 @@ namespace Bleakhold
 
     void Mgr::Refresh(Player* player, Topic topic)
     {
-        if (!player || topic >= Topic::Count || topic == Topic::Set)
+        if (!player || topic >= Topic::Count || topic == Topic::Set || topic == Topic::Case)
             return;
         if (!OnWorldThread())
         {
@@ -665,7 +679,7 @@ namespace Bleakhold
         if (!Enabled())
             return;
         uint8_t const t = static_cast<uint8_t>(tag);
-        if (t >= 5)
+        if (t >= TagCount)
             return;
         std::lock_guard<std::recursive_mutex> guard(_lock);
         if (onlyGuid)

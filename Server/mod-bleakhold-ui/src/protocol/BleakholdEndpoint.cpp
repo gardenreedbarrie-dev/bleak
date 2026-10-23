@@ -57,6 +57,7 @@ namespace Bleakhold::Proto
             b.Configure(1, perInterval(l.keyIntervalMs));
         _emoji.Configure(1, perInterval(l.emojiIntervalMs));
         _dance.Configure(1, perInterval(l.danceIntervalMs));
+        _case.Configure(1, perInterval(l.caseIntervalMs));
     }
 
     void Endpoint::CountDrop(uint64_t nowMs, ReceiveResult& r)
@@ -89,6 +90,7 @@ namespace Bleakhold::Proto
             case IntentType::KeyCancel: return _key[2].Take(nowMs);
             case IntentType::Emoji: return _emoji.Take(nowMs);
             case IntentType::Dance: return _dance.Take(nowMs);
+            case IntentType::CaseOpen: return _case.Take(nowMs);
             case IntentType::TaskClaim:
             case IntentType::TaskReroll:
             case IntentType::BountyClaim:
@@ -119,6 +121,8 @@ namespace Bleakhold::Proto
             std::string key = TopicName(t.topic);
             if (t.topic == Topic::Set)
                 key += "," + std::to_string(t.arg1) + "," + std::to_string(t.arg2);
+            else if (t.topic == Topic::Case)
+                key += "," + std::to_string(t.arg1);
             // a small request with a large answer: the client asks for these once per login or window
             bool const heavy = t.topic == Topic::Def || t.topic == Topic::Lidx || t.topic == Topic::Board;
             uint64_t const interval = heavy ? std::max(_limits.getTopicIntervalMs, _limits.heavyTopicIntervalMs) : _limits.getTopicIntervalMs;

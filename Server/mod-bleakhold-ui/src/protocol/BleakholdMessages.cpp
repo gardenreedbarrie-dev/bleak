@@ -218,6 +218,47 @@ namespace Bleakhold
         return w.Take();
     }
 
+    std::string EncodeCases(CaseList const& m)
+    {
+        PayloadWriter w;
+        std::size_t n = 0;
+        for (uint32_t id : m.caseItemIds)
+        {
+            if (n++ >= MaxCases)
+                break;
+            if (n > 1)
+                w.Record();
+            w.Int(id);
+        }
+        return w.Take();
+    }
+
+    std::string EncodeCase(CaseInfo const& m)
+    {
+        PayloadWriter w;
+        w.Int(m.caseItemId).Text(m.title, 60).Text(m.text, 120);
+        if (m.keyItemId)
+            w.Int(m.keyItemId).Int(std::max<uint32_t>(1, m.keyCount));
+        else
+            w.Empty().Empty();
+        std::size_t n = 0;
+        for (CaseReward const& r : m.rewards)
+        {
+            if (n++ >= MaxCaseRewards)
+                break;
+            w.Record().Int(r.itemId).Int(std::max<uint32_t>(1, r.count)).Int(std::min<uint32_t>(r.chance, 10000))
+                .Int(std::min<uint8_t>(r.tier, 6));
+        }
+        return w.Take();
+    }
+
+    std::string EncodeUnbox(Unbox const& m)
+    {
+        PayloadWriter w;
+        w.Int(m.caseItemId).Int(m.rewardIndex).Int(m.itemId).Int(std::max<uint32_t>(1, m.count));
+        return w.Take();
+    }
+
     std::string EncodeSeason(uint32_t rev, SeasonState const& m)
     {
         PayloadWriter w;

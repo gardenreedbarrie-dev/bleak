@@ -1,5 +1,5 @@
 -- Bleakhold: colour the server's announcement tags in chat ([Raid Legacy], [Server First], [Season],
--- [Queue], [Record]) and let each chat window hide a tag. The server sends these as plain system text
+-- [Queue], [Record], [Case]) and let each chat window hide a tag. The server sends these as plain system text
 -- that reads fine without the addon; links in the message are left exactly as the server sent them.
 -- Also /w2 for whispers to two-word character names (the server's mod-two-names).
 local ADDON, ns = ...

@@ -77,6 +77,10 @@ function FX.examples(M)
         LB = { { "K", 1, 0, 0, 1, 3 }, { 1, 602, 15, 300, now, { { "Aldric", 1 } }, "" } },
         LBME = { { "K", 42, 12, 9, 602, 154, 580 } },
         FIRSTS = { { "echo", "Echo of Ragnaros defeated", "Ironvow", now } },
+        CASES = { { 990001 }, { 990002 } },
+        CASE = { { 990001, "Glaive Case", "Unlock it to receive one of the items below.", "", "" }, { 32837, 1, 1200, 4 },
+            { 32838, 1, 400, 5 } },
+        UNBOX = { { 990001, 2, 32838, 1 } },
     }
 end
 

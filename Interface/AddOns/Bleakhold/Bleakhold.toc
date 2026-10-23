@@ -27,6 +27,7 @@ Countdown.lua
 Collections.lua
 Animations.lua
 Transmog.lua
+Cases.lua
 Season.lua
 Leaderboards.lua
 Graphics.lua
