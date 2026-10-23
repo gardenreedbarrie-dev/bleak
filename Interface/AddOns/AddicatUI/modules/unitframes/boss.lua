@@ -713,10 +713,11 @@ local function HookHealthBarColor()
 
     hooksecurefunc("UnitFrameHealthBar_Update", function(statusbar, unit)
         if not statusbar or statusbar.lockValues then return end
+        -- Every unit bar hears every unit's UNIT_HEALTH: the cheap unit test goes before the pattern.
+        if unit ~= statusbar.unit then return end
         -- A public hook point: UnitFrameHealthBar_OnEvent forwards whatever its event carried, and
         -- another addon's bar can deliver a number here, which used to throw on the string match.
         if type(unit) ~= "string" or not unit:match("^boss%d$") then return end
-        if unit ~= statusbar.unit then return end
         if InCombatLockdown() then return end
 
         -- Re-enforce bar sizing — Blizzard can reset during combat

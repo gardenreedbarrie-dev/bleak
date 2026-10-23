@@ -363,9 +363,12 @@ function NP.discovery.ReassertNativeFontChrome(plateData)
     ReassertNativeFontString(plateData.levelText)
 end
 
+-- Hoisted: every cast-bar hide runs this, so a literal here was a new table per plate per refresh.
+local CAST_CHROME_KEYS = { "castBarBorder", "castBarShield", "castBarIcon" }
+
 -- Native regions only: hover and target refreshes run this mid-cast, after the spark was placed.
 function NP.discovery.HideCastChrome(plateData)
-    for _, key in ipairs({ "castBarBorder", "castBarShield", "castBarIcon" }) do
+    for _, key in ipairs(CAST_CHROME_KEYS) do
         local region = plateData[key]
         if region and region.Hide then
             region:Hide()

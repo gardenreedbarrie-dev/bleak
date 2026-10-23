@@ -80,7 +80,8 @@ local function StopCountdown(cooldown, blankText)
 end
 
 function addon.CooldownText:UpdateText(elapsed)
-    if not self:GetParent().action or not self.remain then
+    -- Every action button that ever showed a countdown keeps this OnUpdate: the idle test goes first.
+    if not self.remain or not self:GetParent().action then
         return
     end
 
@@ -121,7 +122,8 @@ function addon.CooldownText:OnSetCooldown(start, duration)
     -- The metatable hook fires for ALL CooldownFrame:SetCooldown calls.
     -- Buff frames lack .action, and processing them causes unnecessary
     -- SetPoint/Show calls that interfere with the sweep animation.
-    if not self:GetParent() or not self:GetParent().action then
+    local parent = self:GetParent()
+    if not parent or not parent.action then
         return
     end
 
@@ -269,13 +271,35 @@ function addon.InitializeCooldowns()
         cd._dui_sweepProtected = true
     end
 
+    -- Runs on every TargetFrame_UpdateAuras (each target/focus UNIT_AURA): the 48 names are built
+    -- once per frame, and a frame whose 48 cooldowns all exist and are protected is not walked again.
+    local cooldownNames = {}
+    local fullyProtected = {}
+
     -- Scan and protect all existing aura cooldown frames for a given parent
     local function ProtectAuraCooldownsForFrame(frameName)
-        for i = 1, MAX_TARGET_BUFFS do
-            ProtectCooldownSweep(_G[frameName .. "Buff" .. i .. "Cooldown"])
+        if fullyProtected[frameName] then return end
+        local names = cooldownNames[frameName]
+        if not names then
+            names = {}
+            for i = 1, MAX_TARGET_BUFFS do
+                names[#names + 1] = frameName .. "Buff" .. i .. "Cooldown"
+            end
+            for i = 1, MAX_TARGET_DEBUFFS do
+                names[#names + 1] = frameName .. "Debuff" .. i .. "Cooldown"
+            end
+            cooldownNames[frameName] = names
         end
-        for i = 1, MAX_TARGET_DEBUFFS do
-            ProtectCooldownSweep(_G[frameName .. "Debuff" .. i .. "Cooldown"])
+        local complete = true
+        for i = 1, #names do
+            local cd = _G[names[i]]
+            ProtectCooldownSweep(cd)
+            if not (cd and cd._dui_sweepProtected) then
+                complete = false
+            end
+        end
+        if complete then
+            fullyProtected[frameName] = true
         end
     end
 

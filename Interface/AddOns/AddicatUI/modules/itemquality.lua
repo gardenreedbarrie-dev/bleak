@@ -637,7 +637,13 @@ eventFrame:SetScript("OnEvent", function(self, event, arg1)
 
     elseif event == "PLAYER_EQUIPMENT_CHANGED" then
         if not IsModuleEnabled() then return end
-        addon:After(0.2, UpdateAllCharacterSlots)
+        -- One event per slot: an equipment set swap would otherwise queue a full sweep per item.
+        if ItemQualityModule.characterSweepPending then return end
+        ItemQualityModule.characterSweepPending = true
+        addon:After(0.2, function()
+            ItemQualityModule.characterSweepPending = false
+            UpdateAllCharacterSlots()
+        end)
 
     elseif event == "BAG_UPDATE" then
         if not IsModuleEnabled() then return end

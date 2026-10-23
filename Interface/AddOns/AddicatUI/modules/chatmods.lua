@@ -965,25 +965,44 @@ local URL_CHAT_EVENTS = {
     "CHAT_MSG_WHISPER", "CHAT_MSG_BN_WHISPER", "CHAT_MSG_BN_CONVERSATION",
 }
 
+-- Every chat frame showing a channel runs the filter on the same message, so the last answer is kept.
+local lastURLInput, lastURLOutput
+
 local function URLFilter(self, event, msg, ...)
     if not msg then return end
     if not ChatModsModule.applied then
         return false, msg, ...
     end
-    if not find(msg, ".", 1, true) then
+    -- Every TLD pattern needs a dot before a letter, the IP one a dot after a digit: most lines have neither.
+    if not (find(msg, "%.%a") or find(msg, "%d%.")) then
         return
     end
 
+    if msg == lastURLInput then
+        if lastURLOutput then
+            return false, lastURLOutput, ...
+        end
+        return
+    end
+
+    local result
     for i = 1, #URL_TLD_PATTERNS do
         local newmsg, found = gsub(msg, URL_TLD_PATTERNS[i], URL_HYPERLINK_TEMPLATE)
         if found > 0 then
-            return false, newmsg, ...
+            result = newmsg
+            break
         end
     end
-    -- IP address pattern
-    local newmsg, found = gsub(msg, URL_IP_PATTERN, URL_HYPERLINK_TEMPLATE)
-    if found > 0 then
-        return false, newmsg, ...
+    if not result then
+        -- IP address pattern
+        local newmsg, found = gsub(msg, URL_IP_PATTERN, URL_HYPERLINK_TEMPLATE)
+        if found > 0 then
+            result = newmsg
+        end
+    end
+    lastURLInput, lastURLOutput = msg, result
+    if result then
+        return false, result, ...
     end
 end
 

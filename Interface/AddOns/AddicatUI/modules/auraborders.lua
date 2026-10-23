@@ -561,21 +561,35 @@ local function InstallHooks()
     end
 
     if type(TargetFrame_UpdateAuras) == "function" then
+        -- Runs on every target/focus UNIT_AURA: the 48 button names and 16 border names are built once.
+        local auraNames = {}
+        for _, frameName in ipairs({ "TargetFrame", "FocusFrame" }) do
+            local names = { buffs = {}, debuffs = {}, borders = {} }
+            for i = 1, MAX_TARGET_BUFFS do
+                names.buffs[i] = frameName .. "Buff" .. i
+            end
+            for i = 1, MAX_TARGET_DEBUFFS do
+                names.debuffs[i] = frameName .. "Debuff" .. i
+                names.borders[i] = names.debuffs[i] .. "Border"
+            end
+            auraNames[frameName] = names
+        end
+
         hooksecurefunc("TargetFrame_UpdateAuras", function(frame)
             local frameName = frame and frame.GetName and frame:GetName()
-            if frameName ~= "TargetFrame" and frameName ~= "FocusFrame" then return end
+            local names = frameName and auraNames[frameName]
+            if not names then return end
 
             for i = 1, MAX_TARGET_BUFFS do
-                local buff = _G[frameName .. "Buff" .. i]
+                local buff = _G[names.buffs[i]]
                 if buff and buff:IsShown() then
                     StyleAura(buff, false, nil, true)
                 end
             end
             for i = 1, MAX_TARGET_DEBUFFS do
-                local dName = frameName .. "Debuff" .. i
-                local debuff = _G[dName]
+                local debuff = _G[names.debuffs[i]]
                 if debuff and debuff:IsShown() then
-                    StyleAura(debuff, true, dName .. "Border", true)
+                    StyleAura(debuff, true, names.borders[i], true)
                 end
             end
         end)

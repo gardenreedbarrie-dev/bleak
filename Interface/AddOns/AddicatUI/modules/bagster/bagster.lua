@@ -397,6 +397,7 @@ local function GetSetDisplayName(name)
 end
 
 -- Localize auction item classes
+local _
 L.Weapon, L.Armor, L.Container, L.Consumable, L.Glyph, L.TradeGood, _, _, L.Recipe, L.Gem, L.Misc, L.Quest = GetAuctionItemClasses()
 L.Devices, L.Explosives = select(10, GetAuctionItemSubClasses(6))
 L.SimpleGem = select(8, GetAuctionItemSubClasses(7))

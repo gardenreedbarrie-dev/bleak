@@ -1542,7 +1542,12 @@ function UF.TargetStyle.Create(opts)
 
         elseif event == "UNIT_THREAT_SITUATION_UPDATE"
             or event == "UNIT_THREAT_LIST_UPDATE" then
-            UpdateThreat()
+            -- A raid fires these for every member and mob; the player's threat on this unit changes
+            -- only with this unit's threat list (or the player's situation, or a unitless reset).
+            local unit = ...
+            if not unit or unit == unitToken or unit == "player" then
+                UpdateThreat()
+            end
 
         elseif event == "UNIT_FACTION" then
             local unit = ...

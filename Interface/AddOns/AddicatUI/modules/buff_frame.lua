@@ -613,15 +613,10 @@ function BuffFrameModule:UpdateLayoutPreview()
 end
 
 -- Count active buffs on a unit
-local function GetUnitBuffCount(unit, range)
-    local count = 0
-    for index = 1, range do
-        local name = UnitBuff(unit, index)
-        if name then
-            count = count + 1
-        end
-    end
-    return count
+-- Buff indices have no gaps, so the first one answers whether there are any (UNIT_AURA runs this
+-- on every player aura change, and the old 16-index count only ever fed a "> 0" test).
+local function HasUnitBuffs(unit)
+    return UnitBuff(unit, 1) ~= nil
 end
 
 -- ============================================================================
@@ -1240,9 +1235,9 @@ function BuffFrameModule:Enable()
         if buffsHiddenByToggle and not IsToggleButtonEnabled() then
             SetBuffsCollapsed(false)
         end
-        local hasBuffs = GetUnitBuffCount("player", 16) > 0
+        local hasBuffs = HasUnitBuffs("player")
         if not hasBuffs and UnitExists and UnitExists("vehicle") then
-            hasBuffs = GetUnitBuffCount("vehicle", 16) > 0
+            hasBuffs = HasUnitBuffs("vehicle")
         end
         ShowToggleButtonIf(hasBuffs)
     end
@@ -1409,7 +1404,7 @@ function BuffFrameModule:Enable()
         buffFrame:SetScript("OnEvent", function(self, event, unit)
             if event == "PLAYER_ENTERING_WORLD" then
                 ReplaceBlizzardFrame(addicatUIBuffFrame)
-                ShowToggleButtonIf(GetUnitBuffCount("player", 16) > 0)
+                ShowToggleButtonIf(HasUnitBuffs("player"))
                 BuffFrameModule:UpdatePosition()
                 
                 -- Restore buff toggle state from saved profile
@@ -1425,17 +1420,17 @@ function BuffFrameModule:Enable()
                 end
             elseif event == "UNIT_AURA" then
                 if unit == 'vehicle' then
-                    ShowToggleButtonIf(GetUnitBuffCount("vehicle", 16) > 0)
+                    ShowToggleButtonIf(HasUnitBuffs("vehicle"))
                 elseif unit == 'player' then
-                    ShowToggleButtonIf(GetUnitBuffCount("player", 16) > 0)
+                    ShowToggleButtonIf(HasUnitBuffs("player"))
                 end
             elseif event == "UNIT_ENTERED_VEHICLE" then
                 if unit == 'player' then
-                    ShowToggleButtonIf(GetUnitBuffCount("vehicle", 16) > 0)
+                    ShowToggleButtonIf(HasUnitBuffs("vehicle"))
                 end
             elseif event == "UNIT_EXITED_VEHICLE" then
                 if unit == 'player' then
-                    ShowToggleButtonIf(GetUnitBuffCount("player", 16) > 0)
+                    ShowToggleButtonIf(HasUnitBuffs("player"))
                 end
             end
         end)

@@ -2041,6 +2041,8 @@ end)
 -- because SetValue hooks clip to zero-width and UnitExists may briefly return false.
 -- These events force a full texture refresh to recover from that state.
 
+local PARTY_UNIT_INDEX = { party1 = 1, party2 = 2, party3 = 3, party4 = 4 }
+
 local recoveryFrame = CreateFrame("Frame")
 recoveryFrame:RegisterEvent("PARTY_MEMBERS_CHANGED")   -- Party composition changes (join/leave/role swap)
 recoveryFrame:RegisterEvent("RAID_ROSTER_UPDATE")
@@ -2096,8 +2098,8 @@ recoveryFrame:SetScript("OnEvent", function(self, event, unit)
 
     -- For UNIT_HEALTH, only process party units
     if event == "UNIT_HEALTH" then
-        if not unit or not unit:match("^party%d$") then return end
-        local frameIndex = tonumber(unit:match("party(%d)"))
+        -- Fires for every raid member and target: a table lookup instead of two pattern matches.
+        local frameIndex = unit and PARTY_UNIT_INDEX[unit]
         if frameIndex then
             local frame = _G['PartyMemberFrame' .. frameIndex]
             if frame and UnitExists(unit) then

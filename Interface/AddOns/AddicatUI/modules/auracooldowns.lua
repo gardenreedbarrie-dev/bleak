@@ -151,9 +151,7 @@ local function GetAuraTypeConfig(isDebuff)
     }
 end
 
-local function ResolveUnitKey(cooldown)
-    if not cooldown then return nil end
-
+local function ResolveUnitKeyUncached(cooldown)
     local name = cooldown.GetName and cooldown:GetName()
     if name then
         if name:find("^TargetFrame") then
@@ -174,6 +172,18 @@ local function ResolveUnitKey(cooldown)
     end
 
     return nil
+end
+
+-- Frame names never change, and this runs ten times a second for every tracked icon.
+local function ResolveUnitKey(cooldown)
+    if not cooldown then return nil end
+
+    local unitKey = cooldown._duiAuraUnitKey
+    if unitKey == nil then
+        unitKey = ResolveUnitKeyUncached(cooldown) or false
+        cooldown._duiAuraUnitKey = unitKey
+    end
+    return unitKey or nil
 end
 
 local function IsDebuffCooldown(cooldown)
@@ -375,7 +385,13 @@ local function UpdateAllTrackedCooldowns()
     if not tracked then return end
 
     for cooldown in pairs(tracked) do
-        UpdateCooldownText(cooldown)
+        -- An icon with no running timer and no text up has nothing to count down; the aura scans and
+        -- the SetCooldown hook still style and update it the moment it gets one.
+        local text = cooldown._duiAuraText
+        if ((cooldown._duiAuraStart or 0) > 0 and (cooldown._duiAuraDuration or 0) > 0)
+            or (text and text:IsShown()) then
+            UpdateCooldownText(cooldown)
+        end
     end
 end
 
@@ -440,17 +456,35 @@ local function GetAuraTiming(unitToken, index, isDebuff)
     return start, duration
 end
 
+-- "TargetFrameBuff7Cooldown" and the like, built once instead of 48 concatenations per UNIT_AURA.
+local cooldownNames = {}
+local function GetCooldownNames(frameName)
+    local names = cooldownNames[frameName]
+    if not names then
+        names = { buffs = {}, debuffs = {} }
+        for i = 1, MAX_AURA_BUFFS do
+            names.buffs[i] = frameName .. "Buff" .. i .. "Cooldown"
+        end
+        for i = 1, MAX_AURA_DEBUFFS do
+            names.debuffs[i] = frameName .. "Debuff" .. i .. "Cooldown"
+        end
+        cooldownNames[frameName] = names
+    end
+    return names
+end
+
 local function ScanAuraCooldownsForFrame(frameName)
     local unitToken = GetUnitTokenForFrame(frameName)
+    local names = GetCooldownNames(frameName)
 
     for i = 1, MAX_AURA_BUFFS do
         local start, duration = GetAuraTiming(unitToken, i, false)
-        TrackCooldown(_G[frameName .. "Buff" .. i .. "Cooldown"], start, duration)
+        TrackCooldown(_G[names.buffs[i]], start, duration)
     end
 
     for i = 1, MAX_AURA_DEBUFFS do
         local start, duration = GetAuraTiming(unitToken, i, true)
-        TrackCooldown(_G[frameName .. "Debuff" .. i .. "Cooldown"], start, duration)
+        TrackCooldown(_G[names.debuffs[i]], start, duration)
     end
 end
 

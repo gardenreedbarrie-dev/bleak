@@ -1072,30 +1072,43 @@ local function SetCastText(unitType, text)
     end
 end
 
+-- Runs every frame per casting bar: the "%.Nf" patterns are built once per precision, not per call.
+local precisionFormats = {}
+local function PrecisionFormat(precision)
+    local pattern = precisionFormats[precision]
+    if not pattern then
+        pattern = '%.' .. precision .. 'f'
+        precisionFormats[precision] = pattern
+    end
+    return pattern
+end
+
 local function ApplyTimeTexts(unitType, frames, cfg, seconds, secondsMax)
-    local timeText = format('%.' .. (cfg.precision_time or 1) .. 'f', seconds)
+    if unitType == "player" then
+        -- Simple mode shows no time on the player bar, so nothing is formatted for it.
+        local textMode = cfg.text_mode or "simple"
+        if textMode ~= "simple" and frames.timeValue and frames.timeMax then
+            frames.timeValue:SetText(format(PrecisionFormat(cfg.precision_time or 1), seconds))
+            frames.timeMax:SetText(' / ' .. format(PrecisionFormat(cfg.precision_max or 1), secondsMax))
+        end
+        return
+    end
+
+    local timeText = format(PrecisionFormat(cfg.precision_time or 1), seconds)
     local fullText
 
     if cfg.precision_max and cfg.precision_max > 0 then
-        local maxText = format('%.' .. cfg.precision_max .. 'f', secondsMax)
+        local maxText = format(PrecisionFormat(cfg.precision_max), secondsMax)
         fullText = timeText .. ' / ' .. maxText
     else
         fullText = timeText .. 's'
     end
 
-    if unitType == "player" then
-        local textMode = cfg.text_mode or "simple"
-        if textMode ~= "simple" and frames.timeValue and frames.timeMax then
-            frames.timeValue:SetText(timeText)
-            frames.timeMax:SetText(' / ' .. format('%.' .. (cfg.precision_max or 1) .. 'f', secondsMax))
-        end
-    else
-        if frames.castTimeText then
-            frames.castTimeText:SetText(fullText)
-        end
-        if frames.castTimeTextCompact then
-            frames.castTimeTextCompact:SetText(fullText)
-        end
+    if frames.castTimeText then
+        frames.castTimeText:SetText(fullText)
+    end
+    if frames.castTimeTextCompact then
+        frames.castTimeTextCompact:SetText(fullText)
     end
 end
 
@@ -1463,6 +1476,7 @@ end
 
 function CastbarModule:HandleCastStart_Simple(unitType, unit, isChanneling)
     local spell, icon, startTime, endTime, notInterruptible, castID
+    local _
 
     if isChanneling then
         spell, _, _, icon, startTime, endTime, _, notInterruptible = UnitChannelInfo(unit)
@@ -1786,6 +1800,7 @@ function CastbarModule:HandleCastDelayed_Simple(unitType, unit)
     end
     
     local spell, startTime, endTime
+    local _
     
     if castbar.castingEx then
         spell, _, _, _, startTime, endTime = UnitCastingInfo(unit)

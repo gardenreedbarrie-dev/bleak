@@ -908,7 +908,15 @@ local function build()
     -- drive WorldMapFrame_UpdateMap from our own execution and block the blob frame in combat.
     events:RegisterEvent("WORLD_MAP_UPDATE")
     events:RegisterEvent("QUEST_POI_UPDATE")
-    events:SetScript("OnEvent", OT.Refresh)
+    -- These come in bursts (a kill or a loot fires several QUEST_LOG_UPDATEs, every map query a
+    -- WORLD_MAP_UPDATE), and each rebuild re-reads the whole log: one rebuild on the next frame.
+    local pending = CreateFrame("Frame")
+    pending:Hide()
+    pending:SetScript("OnUpdate", function(self)
+        self:Hide()
+        OT.Refresh()
+    end)
+    events:SetScript("OnEvent", function() pending:Show() end)
 
     if WatchFrame_Update then hooksecurefunc("WatchFrame_Update", afterWatchFrameUpdate) end
     -- The map's own pick reaches the tracker's buttons too (WorldMapFrame_SelectQuestFrame).
