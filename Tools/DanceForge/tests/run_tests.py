@@ -43,6 +43,8 @@ FROZEN_KEYS = [
     "arm_roll", "charleston", "salsa_step", "hustle_roll", "cossack_kicks", "tavern_jig",
     "lindy_kick", "tango_strut", "mashed_potato", "hand_jive", "swim_stroke", "line_dance",
     "can_can", "light_bulb",
+    "air_guitar", "headbanger", "noodle_arms", "flex_show", "tribal_stomp", "bunny_hop",
+    "drum_solo", "dj_scratch", "conductor", "jumping_jacks", "boxer_bounce", "ghoul_shuffle",
 ]
 
 KIND = {RT.MAP: 1, RT.SPINE: 2, RT.NECK: 3, RT.RIGID: 4, RT.PELVIS: 5, RT.ROOT: 6, RT.STILL: 7}

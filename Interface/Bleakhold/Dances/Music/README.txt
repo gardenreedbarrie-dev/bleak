@@ -64,3 +64,15 @@ id   key (file name)        dance                       BPM loop (s)
 45   line_dance             Line Dance                  128     7.50
 46   can_can                Can-Can                     150     3.20
 47   light_bulb             Light Bulb                  128     3.73
+48   air_guitar             Air Guitar                  132     3.63
+49   headbanger             Headbanger                  140     3.43
+50   noodle_arms            Noodle Arms                 112     4.30
+51   flex_show              Flex Show                   100     4.80
+52   tribal_stomp           Tribal Stomp                 96     5.00
+53   bunny_hop              Bunny Hop                   120     4.00
+54   drum_solo              Drum Solo                   120     4.00
+55   dj_scratch             DJ Scratch                  124     3.87
+56   conductor              Conductor                    96     5.00
+57   jumping_jacks          Jumping Jacks               120     4.00
+58   boxer_bounce           Boxer Bounce                128     3.73
+59   ghoul_shuffle          Ghoul Shuffle               100     4.80

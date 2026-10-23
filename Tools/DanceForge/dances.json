@@ -59,6 +59,18 @@
     { "id": 44, "key": "swim_stroke", "name": "Swim Stroke", "command": "swimstroke", "category": "classic", "source": "classic:swim_stroke" },
     { "id": 45, "key": "line_dance", "name": "Line Dance", "command": "linedance", "category": "classic", "source": "classic:line_dance" },
     { "id": 46, "key": "can_can", "name": "Can-Can", "command": "cancan", "category": "classic", "source": "classic:can_can" },
-    { "id": 47, "key": "light_bulb", "name": "Light Bulb", "command": "lightbulb", "category": "classic", "source": "classic:light_bulb" }
+    { "id": 47, "key": "light_bulb", "name": "Light Bulb", "command": "lightbulb", "category": "classic", "source": "classic:light_bulb" },
+    { "id": 48, "key": "air_guitar", "name": "Air Guitar", "command": "airguitar", "category": "fun", "source": "fun:air_guitar" },
+    { "id": 49, "key": "headbanger", "name": "Headbanger", "command": "headbanger", "category": "fun", "source": "fun:headbanger" },
+    { "id": 50, "key": "noodle_arms", "name": "Noodle Arms", "command": "noodlearms", "category": "fun", "source": "fun:noodle_arms" },
+    { "id": 51, "key": "flex_show", "name": "Flex Show", "command": "flexshow", "category": "fun", "source": "fun:flex_show" },
+    { "id": 52, "key": "tribal_stomp", "name": "Tribal Stomp", "command": "tribalstomp", "category": "fun", "source": "fun:tribal_stomp" },
+    { "id": 53, "key": "bunny_hop", "name": "Bunny Hop", "command": "bunnyhop", "category": "fun", "source": "fun:bunny_hop" },
+    { "id": 54, "key": "drum_solo", "name": "Drum Solo", "command": "drumsolo", "category": "fun", "source": "fun:drum_solo" },
+    { "id": 55, "key": "dj_scratch", "name": "DJ Scratch", "command": "djscratch", "category": "fun", "source": "fun:dj_scratch" },
+    { "id": 56, "key": "conductor", "name": "Conductor", "command": "conductor", "category": "fun", "source": "fun:conductor" },
+    { "id": 57, "key": "jumping_jacks", "name": "Jumping Jacks", "command": "jumpingjacks", "category": "fun", "source": "fun:jumping_jacks" },
+    { "id": 58, "key": "boxer_bounce", "name": "Boxer Bounce", "command": "boxerbounce", "category": "fun", "source": "fun:boxer_bounce" },
+    { "id": 59, "key": "ghoul_shuffle", "name": "Ghoul Shuffle", "command": "ghoulshuffle", "category": "fun", "source": "fun:ghoul_shuffle" }
   ]
 }
