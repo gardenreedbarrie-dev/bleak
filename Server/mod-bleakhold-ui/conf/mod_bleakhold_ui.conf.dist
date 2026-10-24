@@ -237,8 +237,9 @@ BleakholdUi.Case.CooldownMs = 1000
 #
 #    BleakholdUi.Camp.FireEntry
 #        Description: gameobject_template entry of the camp fire: a generic object or a spell focus with no
-#                     script and no linked trap (else the Basic Campfire, 29784, is used). 194300 "Toasty
-#                     Fire" is a WotLK bonfire that also works as a cooking fire.
+#                     script, no linked trap and a focus in BleakholdUi.Camp.AllowedFocusIds (else the Basic
+#                     Campfire, 29784, is used). 194300 "Toasty Fire" is a WotLK bonfire that also works as a
+#                     cooking fire (focus 4).
 #        Default:     194300
 #
 #    BleakholdUi.Camp.ExtraFireEntries
@@ -293,10 +294,19 @@ BleakholdUi.Case.CooldownMs = 1000
 #    BleakholdUi.Camp.Profession.<Name>
 #        Description: The camp objects of a profession: six ids, the gameobject entries of tiers 1, 2 and 3,
 #                     then the buff spell of tiers 1, 2 and 3 (0 = none). "0" alone: no camp objects for that
-#                     profession. Objects must be generic objects or spell foci with no script and no trap;
-#                     buffs should be self auras (a party aura would reach players who never settled). Ids
-#                     that do not exist are logged at startup and left out. A Blacksmithing object of tier 2
-#                     or 3 is a camp anvil (REPAIR).
+#                     profession. Objects must be generic objects or spell foci with no script and no trap
+#                     (a spell focus only with a focus of BleakholdUi.Camp.AllowedFocusIds); buffs should be
+#                     self auras (a party aura would reach players who never settled). Ids that do not exist
+#                     or break these rules are logged at startup and left out. A Blacksmithing object of tier
+#                     2 or 3 is a camp anvil (REPAIR).
+#
+#    BleakholdUi.Camp.AllowedFocusIds
+#        Description: The spell foci (SpellFocusObject.dbc ids, any separator) a camp object or the camp fire
+#                     may be, so recipes that need that station work at a camp: the common ones found in
+#                     every town or lit by anyone. A game object with any other focus is a crafting station
+#                     tied to a place (Alchemy Lab 663, Mana Loom 1426, moonwells, the Death Knight runeforge)
+#                     and is refused at startup. Keep 4 for a camp fire that is a cooking fire.
+#        Default:     "1,3,4" - anvil, forge, cooking fire
 #
 #    BleakholdUi.Repair.Enable
 #        Description: Blacksmiths repair anywhere with REPAIR (feature bit 2048). REPAIR at a camp anvil only
@@ -350,7 +360,8 @@ BleakholdUi.Camp.WarmthSpell = 0
 BleakholdUi.Camp.FoodXpPct = 5
 BleakholdUi.Camp.MaxXpPct = 25
 BleakholdUi.Camp.TierSkill = "75,225,375"
-BleakholdUi.Camp.Profession.Alchemy = "190678,190444,187115,8113,12177,23738"
+BleakholdUi.Camp.AllowedFocusIds = "1,3,4"
+BleakholdUi.Camp.Profession.Alchemy = "190678,190444,190689,8113,12177,23738"
 BleakholdUi.Camp.Profession.Blacksmithing = "201893,189626,171715,8094,12175,23767"
 BleakholdUi.Camp.Profession.Enchanting = "186746,181361,184723,8097,12176,23766"
 BleakholdUi.Camp.Profession.Engineering = "193585,193668,184624,8116,12174,23736"
@@ -360,7 +371,7 @@ BleakholdUi.Camp.Profession.Jewelcrafting = "188190,184909,188048,8119,12179,237
 BleakholdUi.Camp.Profession.Leatherworking = "188221,176461,188223,8100,12178,23737"
 BleakholdUi.Camp.Profession.Mining = "190386,180780,123207,8100,12178,23737"
 BleakholdUi.Camp.Profession.Skinning = "19875,180692,187983,8116,12174,22817"
-BleakholdUi.Camp.Profession.Tailoring = "181077,200297,184803,8100,12178,22818"
+BleakholdUi.Camp.Profession.Tailoring = "181077,200297,188216,8100,12178,22818"
 BleakholdUi.Camp.Profession.Cooking = "181790,3769,186143,24870,57288,57399"
 BleakholdUi.Camp.Profession.FirstAid = "181129,180676,178226,8094,12175,23769"
 BleakholdUi.Camp.Profession.Fishing = "186614,181143,190226,7840,12177,22820"

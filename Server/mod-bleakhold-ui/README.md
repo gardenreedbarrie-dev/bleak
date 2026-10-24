@@ -407,8 +407,12 @@ Intents (`Ui::OnIntent(IntentType::..., handler)`): `TaskClaim` (`in.taskUid`), 
   this task now?) is your handler's job; refuse with `Ui::Refuse`.
 - Camping checks everything on the server: no camp in combat, water, the air, cities, dungeons, raids,
   battlegrounds or arenas; fires only count on the continents; camp rest ends the moment combat starts
-  (rest allows a logout in combat); the warmth and food bonus is added once (after the other modules' XP
-  multipliers, at most `BleakholdUi.Camp.MaxXpPct`); cooldowns survive a relog; a repair is all or nothing.
+  (rest allows a logout in combat) and never ends inn, city or guild house rest; the warmth and food bonus is
+  added once (after the other modules' XP multipliers, at most `BleakholdUi.Camp.MaxXpPct`); cooldowns
+  survive a relog; a repair is all or nothing.
+- Camp objects and camp fires are decoration: the module refuses at startup any that has a script, AI or
+  trap, or is a crafting station tied to a place (a spell focus outside `BleakholdUi.Camp.AllowedFocusIds`,
+  by default anvil, forge and cooking fire), so no Alchemy Lab or Mana Loom can be carried into the field.
 
 ## 6. Tests
 

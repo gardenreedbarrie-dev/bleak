@@ -748,7 +748,8 @@ battleground or arena.
 map and phase, alive, out of combat, not on a flight path or a vehicle, not in a free-for-all PvP area (a world arena
 such as Gurubashi) and not between maps. A player at a fire
 rests (`R`): rested XP builds up as at an inn, and a logout there counts as an inn logout. Leaving the radius, combat,
-death or the fire going out ends that rest at once (inn and city rest are never touched). After
+death or the fire going out ends that rest at once. Other rest is never touched: inn and city rest go on, and a player
+who already rests some other way (a guild house) keeps that rest and gets no camp rest on top. After
 `BleakholdUi.Camp.SettleTime` (60 s) at the same fire the player settles (`C`): they get the buff of every camp object
 at that fire (for `BleakholdUi.Camp.BuffDuration`, 3600 s, unless the spell is passive or permanent) and Campfire
 Warmth for `BleakholdUi.Camp.WarmthDuration` (1800 s). Combat or another fire starts the settle time over. Settling
@@ -761,12 +762,14 @@ player is at. A fire holds three, one per player. The player places the highest 
 (`BleakholdUi.Camp.TierSkill`: 75, 225, 375 for tiers 1, 2, 3); objects stand around the fire and last as long as it
 (objects at a fire that never goes out last `BleakholdUi.Camp.FireDuration`). `CAMP P` puts out the player's fire with
 its objects: the fire they stand at when it is theirs (a camp fire, or a Basic Campfire they lit), else their camp
-fire wherever it is. The professions and their default objects (`BleakholdUi.Camp.Profession.<Name>` sets the objects
-and buffs):
+fire wherever it is. Camp objects are decoration: none is a crafting station tied to a place. Only the common stations
+of `BleakholdUi.Camp.AllowedFocusIds` (anvil, forge, cooking fire) work at a camp for recipes that need one; the server
+refuses any other spell focus as a camp object or camp fire at startup. The professions and their default objects
+(`BleakholdUi.Camp.Profession.<Name>` sets the objects and buffs):
 
 | `skill` | Profession | Tier 1 | Tier 2 | Tier 3 |
 |---|---|---|---|---|
-| 171 | Alchemy | Apothecary Vials and Bottles | Alchemist's Table | Alchemy Lab |
+| 171 | Alchemy | Apothecary Vials and Bottles | Alchemist's Table | Alchemy set (Apothecary Table, Round) |
 | 164 | Blacksmithing | Anvil | Forge | The Great Anvil |
 | 333 | Enchanting | Blue Ground Rune | Night Elf Moon Crystal | Rune Circle |
 | 202 | Engineering | Lunchbox Tools | Gnome Terminal | Toshley's Turbo Tesla Turret |
@@ -776,7 +779,7 @@ and buffs):
 | 165 | Leatherworking | Leather Shirt on a stand | Meat Rack | Hanging Cloak |
 | 186 | Mining | Rock Rubble | Bar stack | Goblin Smelting Pot |
 | 393 | Skinning | Fresh Carcass | Skin pile | High Quality Fur |
-| 197 | Tailoring | Rug | Clothesline | Mana Loom |
+| 197 | Tailoring | Rug | Clothesline | Dress form (Armor Stand) |
 | 185 | Cooking | Cookpot | Potbelly Stove | Clay Oven |
 | 129 | First Aid | Bandage Crates | Bandage pile | Hospital Bed |
 | 356 | Fishing | Water Bucket | Fish of the Day | Rowboat |

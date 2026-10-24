@@ -90,13 +90,22 @@ local function gapOf(op)
     return op == "REPAIR" and CP.REPAIR_GAP or CP.GAP
 end
 
-local function send(op, ...)
+-- Whether intents can go out: the realm answered HELLO with a protocol this addon speaks. The actions check this
+-- before the feature bits, which read as all off until HELLO is answered.
+local function connected()
     if Comm.outdated then
         notice(nil, "Your Bleakhold addon is out of date.")
         return false
     end
     if not Comm.ready then
         notice(nil, "Not connected to the realm.")
+        return false
+    end
+    return true
+end
+
+local function send(op, ...)
+    if not connected() then
         return false
     end
     local now = GetTime()
@@ -127,6 +136,9 @@ local function refuse(code)
 end
 
 function CP.MakeCamp()
+    if not connected() then
+        return false
+    end
     if not featureCamp() then
         notice("camp_off")
         return false
@@ -146,13 +158,20 @@ function CP.PlaceObject(skill)
 end
 
 function CP.PackUp()
+    if not connected() then
+        return false
+    end
     if not featureCamp() then
+        notice("camp_off")
         return false
     end
     return send("CAMP", "P")
 end
 
 function CP.Glide()
+    if not connected() then
+        return false
+    end
     if not featureGlide() then
         notice("glide_off")
         return false
@@ -169,6 +188,9 @@ function CP.Glide()
 end
 
 function CP.Repair()
+    if not connected() then
+        return false
+    end
     if not featureRepair() then
         notice("repair_off")
         return false

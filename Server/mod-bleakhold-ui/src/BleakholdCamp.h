@@ -15,7 +15,9 @@
  * Rest: a player at a fire gets the core's REST_FLAG_IN_FACTION_AREA bit (the core has no camp bit); outside an area that
  * has the faction rest flag that bit can only be the camp's. The core's rest mask keeps inn and city rest when the bit
  * goes, and the bit is still set when the core saves a player who logs out at the fire, so that logout counts as an inn
- * logout. The RESTING player flag such a logout leaves in the characters table is cleared at the next login.
+ * logout. The RESTING player flag such a logout leaves in the characters table is cleared at the next login. A player
+ * who already rests without any rest bit (Player::SetRestState: mod-guildhouse) gets no camp bit at all
+ * (CampRules::MaySetCampRestBit): taking it off later would end that rest too.
  */
 
 #ifndef BLEAKHOLD_CAMP_H
@@ -48,6 +50,7 @@ namespace Bleakhold
         uint32_t fireSec = 900;
         uint32_t fireEntry = 194300;         // the camp fire's gameobject_template entry
         std::vector<uint32_t> extraFireEntries;
+        std::vector<uint32_t> allowedFocusIds{ 1, 3, 4 };   // spell foci camp objects and fires may carry
         float radius = 10.0f;
         uint32_t settleSec = 60;
         uint32_t buffSec = 3600;

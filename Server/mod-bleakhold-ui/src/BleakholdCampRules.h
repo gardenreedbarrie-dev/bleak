@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -107,6 +108,45 @@ namespace Bleakhold::CampRules
         return (fieldRepairOn && blacksmithSkill > 0 && blacksmithSkill >= minSkill) || (campOn && anvilAtFire);
     }
 
+    // What a repair cost: the money that went (Player::DurabilityRepairAll returns the cost only when a guild bank
+    // pays, and 0 when the player pays).
+    inline uint32_t MoneySpent(uint32_t before, uint32_t after)
+    {
+        return before > after ? before - after : 0;
+    }
+
+    // Copper as the toasts write it: "1g 2s 3c", "2s 0c", "0c".
+    inline std::string MoneyText(uint32_t copper)
+    {
+        std::string out;
+        if (copper >= 10000)
+            out += std::to_string(copper / 10000) + "g ";
+        if (copper >= 100)
+            out += std::to_string(copper / 100 % 100) + "s ";
+        out += std::to_string(copper % 100) + "c";
+        return out;
+    }
+
+    // Camp rest uses the core's REST_FLAG_IN_FACTION_AREA bit (BleakholdCamp.h). The camp sets it only when taking it
+    // off again cannot end anyone else's rest: the core clears PLAYER_FLAGS_RESTING when the last rest bit goes, and a
+    // player who rests with no rest bit at all got that rest from Player::SetRestState (mod-guildhouse in a guild
+    // house). Such a player already rests, so the camp leaves the rest alone; leaving the fire, combat and logout then
+    // have no camp bit to take off. With an inn or city bit set, the camp's bit is safe: that bit keeps the rest.
+    inline bool MaySetCampRestBit(bool resting, bool anyRestBit)
+    {
+        return !resting || anyRestBit;
+    }
+
+    // The spell foci a camp object or camp fire may carry (BleakholdUi.Camp.AllowedFocusIds): the common stations
+    // found in every town or lit by anyone, anvil (1), forge (3) and cooking fire (4). Every other focus belongs to a
+    // station tied to a place (Alchemy Lab 663, Mana Loom 1426, a moonwell, the Death Knight runeforge, ...), which a
+    // camp object would carry into the field; such a template is refused. A focus of 0 is no station at all.
+    inline constexpr std::string_view DefaultAllowedFocusIds = "1,3,4";
+    inline bool FocusAllowed(uint32_t focusId, std::vector<uint32_t> const& allowed)
+    {
+        return focusId == 0 || std::find(allowed.begin(), allowed.end(), focusId) != allowed.end();
+    }
+
     // Where camp object slot 0..2 stands around a fire: on a circle of `distance` yards, 120 degrees apart, slot 0
     // beyond the fire as seen by the one who made it (they stand in front of it, on the other side), facing the fire.
     struct Offset { float x = 0, y = 0, angle = 0; };
@@ -136,13 +176,16 @@ namespace Bleakhold::CampRules
         Tiers buffs{};               // spell ids
     };
 
-    // The defaults (camping-assets.md): every object is an existing script-free, trap-free game object; the buffs
-    // are scrolls (tiers 1 and 2; one scroll at a time, as in the core's spell groups), Sayge's fortunes and other
-    // buffs that belong to no stacking group (tier 3), and Well Fed for cooks (which also counts as Well Fed for the
-    // food XP bonus, and replaces other food). Only self buffs: a party aura would reach players who never settled.
-    // Spell values were not checked against Spell.dbc: change them in mod_bleakhold_ui.conf after a look in game.
+    // The defaults (camping-assets.md): every object is an existing script-free, trap-free game object, and no
+    // crafting station tied to a place (FocusAllowed: the tier 3 Alchemy object is the Apothecary Table 190689, the
+    // Alchemy Lab's look without its focus, and the Tailoring one the Armor Stand 188216 instead of the Mana Loom);
+    // the buffs are scrolls (tiers 1 and 2; one scroll at a time, as in the core's spell groups), Sayge's fortunes and
+    // other buffs that belong to no stacking group (tier 3), and Well Fed for cooks (which also counts as Well Fed for
+    // the food XP bonus, and replaces other food). Only self buffs: a party aura would reach players who never
+    // settled. Spell values were not checked against Spell.dbc: change them in mod_bleakhold_ui.conf after a look in
+    // game.
     inline constexpr std::array<Profession, 14> DefaultProfessions = { {
-        { 171, "Alchemy",        { 190678, 190444, 187115 }, { 8113, 12177, 23738 } },
+        { 171, "Alchemy",        { 190678, 190444, 190689 }, { 8113, 12177, 23738 } },
         { 164, "Blacksmithing",  { 201893, 189626, 171715 }, { 8094, 12175, 23767 } },
         { 333, "Enchanting",     { 186746, 181361, 184723 }, { 8097, 12176, 23766 } },
         { 202, "Engineering",    { 193585, 193668, 184624 }, { 8116, 12174, 23736 } },
@@ -152,7 +195,7 @@ namespace Bleakhold::CampRules
         { 165, "Leatherworking", { 188221, 176461, 188223 }, { 8100, 12178, 23737 } },
         { 186, "Mining",         { 190386, 180780, 123207 }, { 8100, 12178, 23737 } },
         { 393, "Skinning",       { 19875, 180692, 187983 },  { 8116, 12174, 22817 } },
-        { 197, "Tailoring",      { 181077, 200297, 184803 }, { 8100, 12178, 22818 } },
+        { 197, "Tailoring",      { 181077, 200297, 188216 }, { 8100, 12178, 22818 } },
         { 185, "Cooking",        { 181790, 3769, 186143 },   { 24870, 57288, 57399 } },
         { 129, "FirstAid",       { 181129, 180676, 178226 }, { 8094, 12175, 23769 } },
         { 356, "Fishing",        { 186614, 181143, 190226 }, { 7840, 12177, 22820 } },

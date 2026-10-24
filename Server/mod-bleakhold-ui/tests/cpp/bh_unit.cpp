@@ -720,6 +720,49 @@ TEST("camping: tiers, id lists, XP bonus, repair rules")
     CHECK(SecondsLeft(100, 40) == 60 && SecondsLeft(40, 40) == 0 && SecondsLeft(0, 40) == 0);
 }
 
+TEST("camping: the repair toast shows the money that went")
+{
+    using namespace Bleakhold::CampRules;
+    // Player::DurabilityRepairAll returns 0 when the player pays: the toast uses the money before and after
+    CHECK(MoneySpent(50000, 39797) == 10203 && MoneySpent(10, 10) == 0 && MoneySpent(5, 9) == 0);
+    CHECK(MoneySpent(0xFFFFFFFFu, 0) == 0xFFFFFFFFu);
+    CHECK_EQ(MoneyText(MoneySpent(50000, 39797)), "1g 2s 3c");
+    CHECK_EQ(MoneyText(0), "0c");
+    CHECK_EQ(MoneyText(99), "99c");
+    CHECK_EQ(MoneyText(200), "2s 0c");
+    CHECK_EQ(MoneyText(10000), "1g 0s 0c");
+    CHECK_EQ(MoneyText(0xFFFFFFFFu), "429496g 72s 95c");
+}
+
+TEST("camping: camp rest never takes over rest without a rest bit")
+{
+    using namespace Bleakhold::CampRules;
+    CHECK(MaySetCampRestBit(false, false));    // not resting: the camp's bit makes the rest
+    CHECK(MaySetCampRestBit(true, true));      // an inn or city bit: it keeps the rest when the camp's bit goes
+    CHECK(!MaySetCampRestBit(true, false));    // mod-guildhouse's SetRestState: removing the bit later would end it
+}
+
+TEST("camping: camp objects carry no crafting station tied to a place")
+{
+    using namespace Bleakhold::CampRules;
+    std::vector<uint32_t> const def = ParseIds(DefaultAllowedFocusIds);
+    CHECK(def == std::vector<uint32_t>({ 1, 3, 4 }));   // anvil, forge, cooking fire
+    CHECK(FocusAllowed(0, def) && FocusAllowed(1, def) && FocusAllowed(3, def) && FocusAllowed(4, def));
+    CHECK(!FocusAllowed(2, def));                       // a loom
+    CHECK(!FocusAllowed(663, def));                     // Alchemy Lab
+    CHECK(!FocusAllowed(1426, def));                    // Mana Loom
+    CHECK(FocusAllowed(0, {}) && !FocusAllowed(4, {}));
+    CHECK(FocusAllowed(663, ParseIds("1, 663")));
+    // the defaults: no location-tied station (gameobject_template: focus 663 Alchemy Labs, focus 1426 Mana Looms);
+    // the tier 3 Alchemy and Tailoring objects are inert generic objects with the look of the trade
+    for (Profession const& p : DefaultProfessions)
+        for (uint32_t o : p.objects)
+            for (uint32_t station : { 187115u, 177387u, 180631u, 183848u, 184803u, 185000u })
+                CHECK_MSG(o != station, std::string(p.key) + " has no location-tied crafting station");
+    CHECK(DefaultProfessions[0].skill == 171 && DefaultProfessions[0].objects[2] == 190689);    // Apothecary Table
+    CHECK(DefaultProfessions[10].skill == 197 && DefaultProfessions[10].objects[2] == 188216);  // Armor Stand
+}
+
 TEST("camping: object slots stand apart around the fire")
 {
     using namespace Bleakhold::CampRules;

@@ -224,20 +224,42 @@ local function campTimer(key, ready, waiting)
     end
     return ready
 end
+-- A code with more than one cause: the server's sentence says which one; this one only when it sent none.
+local function serverText(fallback)
+    return function(e)
+        if e and e.text then
+            return nil
+        end
+        return fallback
+    end
+end
+-- repair_skill: what would let the player repair depends on what the realm has on (feature bits 2048 and 512).
+local function repairSkillText()
+    local Comm = ns.Comm
+    local field = Comm and Comm.HasFeature(Comm.FEATURE.FIELD_REPAIR)
+    local camp = Comm and Comm.HasFeature(Comm.FEATURE.CAMP)
+    if field and camp then
+        return "You need more Blacksmithing skill, or an anvil at your campfire, to repair here."
+    elseif field then
+        return "You need more Blacksmithing skill to repair here."
+    elseif camp then
+        return "You can only repair at a campfire with a blacksmith's anvil."
+    end
+end
 Data.errorTexts = {
     camp_off = "Camping is turned off on this realm.",
     camp_indoors = "You can only make camp outdoors.",
     camp_instance = "You cannot make camp in a dungeon, raid, battleground or arena.",
     camp_city = "You cannot make camp in a city or a sanctuary.",
     camp_combat = "You cannot make camp while in combat.",
-    camp_mounted = "Get off your mount or vehicle to make camp.",
+    camp_mounted = serverText("Stand on solid ground to make camp."),
     camp_water = "You cannot make camp in the water.",
     camp_dead = "You cannot make camp while dead.",
     camp_cooldown = function()
         return campTimer("cd", "You cannot make camp again yet.", "You can make camp again in %s.")
     end,
     camp_level = "You are too low level to make camp.",
-    camp_nofire = "You are not at a campfire.",
+    camp_nofire = serverText("You need a campfire for that."),
     camp_full = "This campfire has no room for another camp object.",
     camp_placed = "You already placed a camp object at this fire.",
     camp_skill = "Your skill in that profession is too low.",
@@ -247,7 +269,7 @@ Data.errorTexts = {
         return campTimer("glide", "Glide is not ready yet.", "Glide is not ready yet (%s).")
     end,
     repair_off = "Field repair is turned off on this realm.",
-    repair_skill = "You need more Blacksmithing skill, or an anvil at your campfire, to repair here.",
+    repair_skill = repairSkillText,
     repair_gold = "You do not have enough money to repair.",
 }
 
@@ -260,7 +282,7 @@ Data.campProfessions = {
     [171] = { name = "Alchemy", icon = "Trade_Alchemy", tiers = {
         { name = "Apothecary Vials", buff = "Scroll of Spirit: more spirit." },
         { name = "Alchemist's Table", buff = "Scroll of Spirit: much more spirit." },
-        { name = "Alchemy Lab", buff = "Sayge's fortune: 10% more spirit." } } },
+        { name = "Alchemy Set", buff = "Sayge's fortune: 10% more spirit." } } },
     [164] = { name = "Blacksmithing", icon = "Trade_BlackSmithing", tiers = {
         { name = "Anvil", buff = "Scroll of Protection: more armor." },
         { name = "Forge", buff = "Scroll of Protection: much more armor. Campers can repair here." },
@@ -300,7 +322,7 @@ Data.campProfessions = {
     [197] = { name = "Tailoring", icon = "Trade_Tailoring", tiers = {
         { name = "Rug", buff = "Scroll of Stamina: more stamina." },
         { name = "Clothesline", buff = "Scroll of Stamina: much more stamina." },
-        { name = "Mana Loom", buff = "Mol'dar's Moxie: more stamina." } } },
+        { name = "Dress Form", buff = "Mol'dar's Moxie: more stamina." } } },
     [185] = { name = "Cooking", icon = "INV_Misc_Food_15", tiers = {
         { name = "Cookpot", buff = "Well fed: more stamina and spirit (counts as Well Fed for bonus XP)." },
         { name = "Potbelly Stove", buff = "Well fed: a hearty meal (counts as Well Fed for bonus XP)." },

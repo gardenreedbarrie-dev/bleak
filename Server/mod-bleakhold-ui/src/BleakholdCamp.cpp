@@ -58,24 +58,15 @@ namespace Bleakhold
             return std::to_string(m) + (m == 1 ? " minute" : " minutes");
         }
 
-        std::string Money(uint32_t copper)
-        {
-            std::string out;
-            if (copper >= 10000)
-                out += std::to_string(copper / 10000) + "g ";
-            if (copper >= 100)
-                out += std::to_string(copper / 100 % 100) + "s ";
-            out += std::to_string(copper % 100) + "c";
-            return out;
-        }
-
         char const* const TextDead = "You cannot do that while dead.";
         char const* const TextCombat = "You cannot do that in combat.";
         char const* const TextFailed = "That did not work. Try again in a moment.";
 
         // A camp fire or camp object must be harmless decoration: a generic object or a spell focus, no script, no AI and
-        // no linked trap (but the Basic Campfire's own Cozy Fire trap).
-        bool SafeTemplate(uint32_t entry, std::string& why)
+        // no linked trap (but the Basic Campfire's own Cozy Fire trap), and no crafting station tied to a place (a
+        // focus outside BleakholdUi.Camp.AllowedFocusIds: Spell::CheckSpellFocus accepts any spawned focus object, camp
+        // objects included).
+        bool SafeTemplate(uint32_t entry, std::vector<uint32_t> const& allowedFoci, std::string& why)
         {
             GameObjectTemplate const* t = sObjectMgr->GetGameObjectTemplate(entry);
             if (!t)
@@ -98,7 +89,20 @@ namespace Bleakhold
                 why = "has a linked trap";
                 return false;
             }
+            if (t->type == GAMEOBJECT_TYPE_SPELL_FOCUS && !CampRules::FocusAllowed(t->spellFocus.focusId, allowedFoci))
+            {
+                why = "is a crafting station tied to a place (spell focus " + std::to_string(t->spellFocus.focusId) +
+                    ", not in BleakholdUi.Camp.AllowedFocusIds)";
+                return false;
+            }
             return true;
+        }
+
+        // Any of the core's rest bits (inn, city, faction rest area; the camp uses the last one).
+        bool AnyRestBit(Player* p)
+        {
+            return p->HasRestFlag(REST_FLAG_IN_TAVERN) || p->HasRestFlag(REST_FLAG_IN_CITY) ||
+                p->HasRestFlag(REST_FLAG_IN_FACTION_AREA);
         }
 
         // The repair cost of everything DurabilityRepairAll repairs (equipped, backpack, bags), the same formula as
@@ -193,6 +197,8 @@ namespace Bleakhold
             LOG_ERROR("module", "[Bleakhold] BleakholdUi.Camp.ExtraFireEntries holds more than {} entries; the rest are ignored", MaxHookEntries - 1);
             c.extraFireEntries.resize(MaxHookEntries - 1);
         }
+        c.allowedFocusIds = CampRules::ParseIds(sConfigMgr->GetOption<std::string>("BleakholdUi.Camp.AllowedFocusIds",
+            std::string(CampRules::DefaultAllowedFocusIds)));
         c.radius = std::clamp(sConfigMgr->GetOption<float>("BleakholdUi.Camp.Radius", 10.0f), 2.0f, 30.0f);
         c.settleSec = std::min<uint32_t>(sConfigMgr->GetOption<uint32_t>("BleakholdUi.Camp.SettleTime", 60), 3600);
         c.buffSec = std::clamp<uint32_t>(sConfigMgr->GetOption<uint32_t>("BleakholdUi.Camp.BuffDuration", 3600), 1, 86400);
@@ -259,7 +265,7 @@ namespace Bleakhold
     void Camp::Validate()
     {
         std::string why;
-        if (_cfg.fireEntry != BasicCampfire && !SafeTemplate(_cfg.fireEntry, why))
+        if (_cfg.fireEntry != BasicCampfire && !SafeTemplate(_cfg.fireEntry, _cfg.allowedFocusIds, why))
         {
             LOG_ERROR("module", "[Bleakhold] BleakholdUi.Camp.FireEntry {} {}; camp fires use the Basic Campfire ({}) instead", _cfg.fireEntry, why, BasicCampfire);
             _cfg.fireEntry = BasicCampfire;
@@ -282,7 +288,7 @@ namespace Bleakhold
         {
             for (uint8_t t = 0; t < CampRules::TierCount; ++t)
             {
-                if (p.objects[t] && !SafeTemplate(p.objects[t], why))
+                if (p.objects[t] && !SafeTemplate(p.objects[t], _cfg.allowedFocusIds, why))
                 {
                     LOG_ERROR("module", "[Bleakhold] BleakholdUi.Camp.Profession.{}: tier {} object {} {}; that tier has no camp object", p.key, t + 1, p.objects[t], why);
                     p.objects[t] = 0;
@@ -358,7 +364,9 @@ namespace Bleakhold
         return area && (area->flags & flag);
     }
 
-    // Camp rest ends: only the camp's bit goes; inn and city rest stay (the core keeps RESTING while another bit is set).
+    // Camp rest ends (leaving the fire, combat): only the camp's bit goes; inn and city rest stay (the core keeps
+    // RESTING while another bit is set), and rest without any bit (mod-guildhouse) never got the camp's bit (Update,
+    // step 2).
     void Camp::EndCampRest(Player* player)
     {
         if (player->HasRestFlag(REST_FLAG_IN_FACTION_AREA) && !InFactionRestArea(player))
@@ -380,8 +388,7 @@ namespace Bleakhold
         // combat, inn-rate rest at every later logout). The core has already set the inn, city and faction area bits
         // here (UpdateZone runs before OnPlayerLogin), so RESTING without any of them is that leftover. (mod-guildhouse,
         // which also rests without a bit, registers after this module and sets its rest again in its own login hook.)
-        if (player->HasPlayerFlag(PLAYER_FLAGS_RESTING) && !player->HasRestFlag(REST_FLAG_IN_TAVERN) &&
-            !player->HasRestFlag(REST_FLAG_IN_CITY) && !player->HasRestFlag(REST_FLAG_IN_FACTION_AREA))
+        if (player->HasPlayerFlag(PLAYER_FLAGS_RESTING) && !AnyRestBit(player))
             player->RemoveRestState();
         std::lock_guard<std::recursive_mutex> guard(_lock);
         _campers.erase(Raw(player));
@@ -392,7 +399,8 @@ namespace Bleakhold
         if (!player)
             return;
         // The character was saved already (WorldSession::LogoutPlayer saves before this hook), with the camp rest bit if
-        // the player was at a fire. Fires and objects stay until they go out; the timers stay so a relog resets nothing.
+        // the player was at a fire (never for a player who rested without a bit: they had no camp bit to save). Fires
+        // and objects stay until they go out; the timers stay so a relog resets nothing.
         std::lock_guard<std::recursive_mutex> guard(_lock);
         _campers.erase(Raw(player));
     }
@@ -818,9 +826,13 @@ namespace Bleakhold
             return;
         }
         if (cost > 0xFFFFFFFFull || !player->HasEnoughMoney(static_cast<uint32_t>(cost)))
-            return Ui::Refuse(player, intent, "repair_gold", "You cannot pay for the repair (" + Money(static_cast<uint32_t>(std::min<uint64_t>(cost, 0xFFFFFFFFull))) + ").");
-        uint32_t const paid = player->DurabilityRepairAll(true, costMod, false);
-        Ui::Toast(player, ToastKind::Info, "Repaired", "Everything repaired for " + Money(paid) + ".");
+            return Ui::Refuse(player, intent, "repair_gold", "You cannot pay for the repair (" +
+                CampRules::MoneyText(static_cast<uint32_t>(std::min<uint64_t>(cost, 0xFFFFFFFFull))) + ").");
+        // DurabilityRepairAll returns the cost only when a guild bank pays: the toast shows the money that went
+        uint32_t const before = player->GetMoney();
+        player->DurabilityRepairAll(true, costMod, false);
+        uint32_t const paid = CampRules::MoneySpent(before, player->GetMoney());
+        Ui::Toast(player, ToastKind::Info, "Repaired", "Everything repaired for " + CampRules::MoneyText(paid) + ".");
     }
 
     // =============================================================================================
@@ -1018,8 +1030,10 @@ namespace Bleakhold
                 c.settled = false;
                 c.want = true;
             }
-            // re-asserted every tick: the core clears the bit on an area change
-            if (!p->HasRestFlag(REST_FLAG_IN_FACTION_AREA))
+            // re-asserted every tick: the core clears the bit on an area change. Not while the player rests without any
+            // rest bit (mod-guildhouse's SetRestState): taking the bit off later would end that rest as well.
+            if (!p->HasRestFlag(REST_FLAG_IN_FACTION_AREA) &&
+                CampRules::MaySetCampRestBit(p->HasPlayerFlag(PLAYER_FLAGS_RESTING), AnyRestBit(p)))
                 p->SetRestFlag(REST_FLAG_IN_FACTION_AREA);
             if (!c.settled && nowMs - c.arrivedMs >= uint64_t(_cfg.settleSec) * 1000)
             {
