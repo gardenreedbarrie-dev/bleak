@@ -1,0 +1,876 @@
+-- Copyright (c) 2026 NeticSoul. Licensed under the MIT License; see LICENSE.
+
+-- ============================================================================
+-- AddicatUI - Atlas Definitions (Legacy)
+-- Texture atlas lookup table mapping sprite names to texture coordinates.
+-- ============================================================================
+
+local addon = select(2, ...)
+
+local assets = addon._dir
+local uiactionbar = assets..'ActionBars\\uiactionbar';
+local uiexperiencebar = assets..'XP\\uiexperiencebar';
+local uimicromenu2x = assets..'Micromenu\\Atlas\\uimicromenu2x';
+local professionsmicro = assets..'Professions\\MicroButton';
+local collapse = assets..'Micromenu\\uicollapsebutton';
+local bagmain2x = assets..'Bags\\bagslots2x';
+local uiactionbar2x_ = assets..'ActionBars\\uiactionbar2x_';
+local uiactionbar2x_new = assets..'ActionBars\\uiactionbar2x_new';
+local uiactionbar2x_flying = assets..'ActionBars\\uiactionbar2x_flying';
+local uiactionbar2x_forever = assets..'ActionBars\\uiactionbar2x_forever';
+local uiactionbarvertical = assets..'ActionBars\\uiactionbarvertical';
+local uiactionbarvertical2x = assets..'ActionBars\\uiactionbarvertical2x';
+local uiminimapforever_diel = assets..'Minimap\\forever_diel';
+
+-- These three were byte-identical copies of the aliases above under a second naming scheme.
+local rui_ActionBarHorizontal = uiactionbar2x_new;
+local rui_ActionBarVertical = uiactionbarvertical2x;
+local rui_BagSlots = bagmain2x;
+local rui_BagSlotsKey = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\UI\\BagSlotsKey.blp';
+local rui_Battlefield = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\Micromenu\\uibattlefieldicon.tga';
+local rui_Calendar = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\Calendar.tga';
+local rui_Tracking = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\Tracking.tga';
+local rui_CastingBar = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\UI\\CastingBar.blp';
+local rui_CollapseButton = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\UI\\CollapseButton.blp';
+local rui_ExperienceBar = uiexperiencebar;
+local rui_GuildBanner = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\Minimap\\GuildBanner.BLP';
+local rui_LFGRole = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\UnitFrames\\Player\\LFGRoleIcons.blp';
+local rui_MicroMenu = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\UI\\MicroMenu.blp';
+local rui_Minimap = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\UI\\Minimap.blp';
+local rui_QuestTracker = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\UI\\QuestTracker.BLP';
+local rui_UnitFrame = 'Interface\\AddOns\\AddicatUI_Art\\Textures\\UI\\UnitFrame.blp';
+local rui_MerchantPack = assets..'Merchant\\merchant-pack';
+local rui_FrameMetal = assets..'UI\\uiframemetal2x';
+local rui_FrameInner = assets..'UI\\uiframeinner';
+local rui_Inner = assets..'UI\\uiframe-inner';
+local rui_Collapse = assets..'CharacterPanel\\collapsebuttons';
+local rui_Dropdown = assets..'UI\\dropdownbutton';
+local rui_Checkbox = assets..'UI\\checkbox-minimal';
+local rui_Diamond = assets..'UI\\uiframe-diamondmetal';
+local rui_DiamondEdges = assets..'UI\\uiframe-diamondmetal-edges';
+local rui_InnerV = assets..'UI\\uiframe-inner-vertical';
+local rui_FrameMetalH = assets..'UI\\uiframemetalhorizontal2x';
+local rui_FrameMetalV = assets..'UI\\uiframemetalvertical2x';
+local rui_CharPanelBg = assets..'CharacterPanel\\characterpanelbackground';
+local rui_CharInfoA = assets..'CharacterPanel\\characterinfoclasses-a';
+-- The PvP faction rings that frame the rank insignia, cut out of the retail honor sheet: 50x52 of
+-- art on a 64x64 canvas, which is why the texcoords stop short of 1.
+local rui_RingAlliance = assets..'CharacterPanel\\ring-alliance';
+local rui_RingHorde = assets..'CharacterPanel\\ring-horde';
+local rui_RingNeutral = assets..'CharacterPanel\\ring-neutral';
+local rui_CharInfoB = assets..'CharacterPanel\\characterinfoclasses-b';
+local rui_ScrollArrows = assets..'CharacterPanel\\scrollbararrows';
+local rui_ScrollThumb = assets..'CharacterPanel\\scrollbarthumb';
+local rui_CommonButtons = assets..'CharacterPanel\\commonbuttons';
+local rui_CommonIcons = assets..'CharacterPanel\\commonicons';
+local rui_ListExpand = assets..'CharacterPanel\\listexpand';
+local rui_LootCard = assets..'UI\\looting-itemcard';
+local rui_RedButton = assets..'UI\\redbutton2x';
+local rui_MapNav = assets..'WorldMap\\navbar';
+local rui_MapNavTile = assets..'WorldMap\\navbar-tile';
+local rui_MapSquareButtons = assets..'WorldMap\\squarebuttons';
+local rui_MapQuestLog = assets..'WorldMap\\questlog';
+local rui_MapQuestParchment = assets..'WorldMap\\questbg-parchment';
+local rui_MapQuestLogBg = assets..'WorldMap\\questlog-background';
+local rui_MapQuestTypes = assets..'WorldMap\\questtypeicons';
+local rui_MapFilter = assets..'WorldMap\\mapfilter';
+local rui_MapCollapse = assets..'WorldMap\\questcollapse';
+local rui_MapTrackingBorder = assets..'WorldMap\\trackingborder';
+local rui_MapZoomHighlight = assets..'WorldMap\\zoomhighlight';
+local rui_MapPins = assets..'WorldMap\\mappins';
+local rui_TaxiAssets = assets..'Taxi\\taxiassets';
+local rui_TalentsPack = assets..'Talents\\talents-sheet';
+local rui_TalentsBgWarrior = assets..'Talents\\talents-bg-warrior';
+local rui_TalentsBgWarriorProtection = assets..'Talents\\talents-bg-warrior-protection';
+local rui_TalentsBgPaladin = assets..'Talents\\talents-bg-paladin';
+local rui_TalentsBgPaladinRetribution = assets..'Talents\\talents-bg-paladin-retribution';
+local rui_TalentsBgHunter = assets..'Talents\\talents-bg-hunter';
+local rui_TalentsBgHunterSurvival = assets..'Talents\\talents-bg-hunter-survival';
+local rui_TalentsBgRogue = assets..'Talents\\talents-bg-rogue';
+local rui_TalentsBgRogueSubtlety = assets..'Talents\\talents-bg-rogue-subtlety';
+local rui_TalentsBgPriest = assets..'Talents\\talents-bg-priest';
+local rui_TalentsBgPriestShadow = assets..'Talents\\talents-bg-priest-shadow';
+local rui_TalentsBgShaman = assets..'Talents\\talents-bg-shaman';
+local rui_TalentsBgShamanRestoration = assets..'Talents\\talents-bg-shaman-restoration';
+local rui_TalentsBgMage = assets..'Talents\\talents-bg-mage';
+local rui_TalentsBgMageFrost = assets..'Talents\\talents-bg-mage-frost';
+local rui_TalentsBgWarlock = assets..'Talents\\talents-bg-warlock';
+local rui_TalentsBgWarlockDestruction = assets..'Talents\\talents-bg-warlock-destruction';
+local rui_TalentsBgDruid = assets..'Talents\\talents-bg-druid';
+local rui_TalentsBgDruidRestoration = assets..'Talents\\talents-bg-druid-restoration';
+local rui_TalentsBgDeathKnight = assets..'Talents\\talents-bg-deathknight';
+local rui_TalentsBgDeathKnightUnholy = assets..'Talents\\talents-bg-deathknight-unholy';
+local rui_TalentsWarmodeAtlas = assets..'Talents\\talentframeatlas';
+local rui_TalentsClouds = assets..'Talents\\talents-animations-clouds';
+local rui_TalentsParticles = assets..'Talents\\talents-animations-particles';
+local rui_SpellbookBg = assets..'Spellbook\\spellbook-background';
+local rui_SpellbookElements = assets..'Spellbook\\spellbookelements';
+local rui_SpellbookRibbon = assets..'Spellbook\\spellbook-ribbon';
+
+-- Rows: name, width, height, left/right/top/bottom in sheet pixels, optional tile flags.
+local function sheet(file, pixelsAcross, pixelsDown, rows)
+	return { file = file, across = pixelsAcross, down = pixelsDown, rows = rows }
+end
+
+-- An off-grid texcoord kept as written: no arithmetic, so x87 precision can't round it.
+local function literal(value)
+	return { value }
+end
+
+local retailHudSheets = {
+	sheet(uiactionbar2x_, 512, 2048, {
+		{ "_ui-hud-actionbar-divider-top", 10, 10, 421, 445, 833, 861 },
+		{ "_ui-hud-actionbar-divider-bottom", 10, 10, 395, 419, 833, 863 },
+		{ "_ui-hud-actionbar-divider-center", 8, 20, 0, 32, 179, 207, false, true },
+		{ "ui-hud-actionbar-gryphon-left", 92, 92, 1, 357, 209, 543 },
+		{ "ui-hud-actionbar-gryphon-right", 92, 92, 1, 357, 545, 879 },
+		{ "ui-hud-actionbar-pageuparrow-normal", 14, 12, 359, 393, 833, 861 },
+		{ "ui-hud-actionbar-pageuparrow-pushed", 14, 12, 453, 487, 679, 707 },
+		{ "ui-hud-actionbar-pageuparrow-highlight", 14, 12, 453, 487, 709, 737 },
+		{ "ui-hud-actionbar-pagedownarrow-normal", 14, 12, 463, 497, 605, 633 },
+		{ "ui-hud-actionbar-pagedownarrow-pushed", 14, 12, 463, 497, 545, 573 },
+		{ "ui-hud-actionbar-pagedownarrow-highlight", 14, 12, 463, 497, 575, 603 },
+		-- Native 1x sizes: one shared 20x20 squashed each piece, and so each rail, by a different amount.
+		{ "ui-hud-actionbar-frame-nineslice-cornerbottomleft", 17, 23, 465, 499, 383, 429 },
+		{ "ui-hud-actionbar-frame-nineslice-cornerbottomright", 22, 23, 465, 509, 335, 381 },
+		{ "ui-hud-actionbar-frame-nineslice-cornertopleft", 17, 16, 463, 497, 475, 507 },
+		{ "ui-hud-actionbar-frame-nineslice-cornertopright", 22, 16, 463, 507, 441, 473 },
+		{ "_ui-hud-actionbar-frame-nineslice-edgetop", 506, 16, 0, 32, 145, 177, true, false },
+		{ "_ui-hud-actionbar-frame-nineslice-edgebottom", 506, 23, 0, 32, 97, 143, true, false },
+		-- Deliberately rect-less; the action-bar border's centre piece uses it exactly like this.
+		{ "ui-hud-actionbar-frame-nineslice-center", 0, 0 },
+		{ "ui-hud-actionbar-frame-divider-threeslice-edgebottom", 14, 12, 395, 419, 833, 863 },
+		{ "ui-hud-actionbar-frame-divider-threeslice-edgetop", 14, 12, 421, 445, 833, 861 },
+	}),
+	sheet(uiactionbar2x_flying, 256, 2048, {
+		{ "ui-hud-actionbar-gryphon-flying-left", 80, 103, 1, 158, 149, 342 },
+		{ "ui-hud-actionbar-gryphon-flying-right", 80, 103, 1, 157, 539, 732 },
+	}),
+	sheet(uiactionbar2x_forever, 1024, 1024, {
+		-- Forever's 154x95 (Camelot MainMenuBarEndCaps.xml) at our 36/45 slot size, so the beak clears the bar above.
+		{ "ui-hud-actionbar-gryphon-forever-left", 123.2, 76, 1, 481, 1, 281 },
+		{ "ui-hud-actionbar-gryphon-forever-right", 123.2, 76, 483, 963, 1, 281 },
+		{ "ui-hud-actionbar-wyvern-forever-left", 123.2, 76, 1, 481, 283, 563 },
+		{ "ui-hud-actionbar-wyvern-forever-right", 123.2, 76, 483, 963, 283, 563 },
+	}),
+	sheet(uiactionbar2x_new, 512, 2048, {
+		-- Retail draws these at 104.5x98 (MainActionBar.xml EndCaps), true to the 356x334 cells.
+		{ "ui-hud-actionbar-gryphon-thick-left", 104.5, 98, 1, 357, 209, 543 },
+		{ "ui-hud-actionbar-gryphon-thick-right", 104.5, 98, 1, 357, 545, 879 },
+		{ "ui-hud-actionbar-wyvern-thick-left", 104.5, 98, 1, 357, 881, 1215 },
+		{ "ui-hud-actionbar-wyvern-thick-right", 104.5, 98, 1, 357, 1217, 1551 },
+		{ "ui-hud-actionbar-iconframe", 64, 64, 359, 451, 649, 739 },
+		{ "_ui-hud-actionbar-iconborder-checked", 64, 64, 359, 451, 881, 971 },
+		{ "_ui-hud-actionbar-iconborder-pushed", 64, 64, 359, 451, 881, 971 },
+		{ "_ui-hud-actionbar-iconborder-highlight", 64, 64, 359, 451, 1065, 1155 },
+		{ "ui-hud-actionbar-iconframe-flyoutbordershadow", 52, 52, 359, 463, 335, 439 },
+		{ "ui-hud-actionbar-flyout-2x", 18, 7, 453, 489, 899, 913 },
+		{ "ui-hud-actionbar-flyout-mouseover-2x", 18, 7, 453, 489, 915, 929 },
+		{ "ui-hud-actionbar-flyout-down-2x", 19, 8, 453, 491, 881, 897 },
+		{ "ui-hud-actionbar-iconframe-flyoutbutton-2x", 47, 29, 359, 453, 1157, 1215 },
+		{ "ui-hud-actionbar-iconframe-flyoutbottom-2x", 47, 5, 359, 453, 1217, 1227 },
+		{ "_ui-hud-actionbar-iconframe-flyoutmidleft-2x", 32, 47, 0, 64, 1, 95 },
+		{ "ui-hud-actionbar-iconframe-flash", 64, 64, 359, 451, 973, 1063 },
+		{ "ui-hud-actionbar-iconframe-slot", 64, 64, 359, 487, 209, 333 },
+	}),
+	-- No pixel grid on record for this sheet, so every texcoord is a literal.
+	sheet(assets .. "ActionBars\\mainmenubar", nil, nil, {
+		{ "ui-hud-experiencebar", 537, 14,
+			literal(0.1123046875), literal(0.646484375), literal(0.18798828125), literal(0.24951171875) },
+	}),
+	sheet(uiexperiencebar, 2048, 64, {
+		{ "ui-hud-experiencebar-round", 537, 18, 1, 572, 1, 18 },
+		{ "ui-hud-experiencebar-background", 530, 10, literal(0.00088878125), 570, 20, 29 },
+		{ "ui-hud-experiencebar-frame-pip", 10, 14, 588, 598, 45, 59 },
+		{ "ui-hud-experiencebar-frame-pip-mouseover", 10, 14, 574, 586, 45, 59 },
+		{ "ui-hud-experiencebar-fill", nil, nil, 1, 564, 31, 40 },
+		{ "ui-hud-experiencebar-fill-rested", nil, nil, 574, 1136, 34, 43 },
+		{ "ui-hud-experiencebar-fill-prediction", nil, nil, 574, 1136, 1, 10 },
+		{ "ui-hud-experiencebar-fill-reputation-faction-yellow", nil, nil, 1139, 1700, 23, 32 },
+	}),
+	sheet(uimicromenu2x, 256, 512, {
+		{ "ui-hud-micromenu-achievement-disabled-2x", nil, nil, 201, 239, 109, 161 },
+		{ "ui-hud-micromenu-achievement-down-2x", nil, nil, 161, 199, 55, 107 },
+		{ "ui-hud-micromenu-achievement-mouseover-2x", nil, nil, 201, 239, 55, 107 },
+		{ "ui-hud-micromenu-achievement-up-2x", nil, nil, 161, 199, 109, 161 },
+		{ "ui-hud-micromenu-pvp-disabled-2x", nil, nil, 81, 119, 163, 215 },
+		{ "ui-hud-micromenu-pvp-down-2x", nil, nil, 201, 239, 163, 215 },
+		{ "ui-hud-micromenu-pvp-mouseover-2x", nil, nil, 161, 199, 163, 215 },
+		{ "ui-hud-micromenu-pvp-up-2x", nil, nil, 1, 39, 271, 323 },
+		{ "ui-hud-micromenu-character-disabled-2x", nil, nil, 1, 39, 217, 269 },
+		{ "ui-hud-micromenu-character-down-2x", nil, nil, 121, 159, 163, 215 },
+		{ "ui-hud-micromenu-character-mouseover-2x", nil, nil, 81, 119, 217, 269 },
+		{ "ui-hud-micromenu-character-up-2x", nil, nil, 1, 39, 325, 377 },
+		{ "ui-hud-micromenu-collections-disabled-2x", nil, nil, 121, 159, 1, 53 },
+		{ "ui-hud-micromenu-collections-down-2x", nil, nil, 1, 39, 379, 431 },
+		{ "ui-hud-micromenu-collections-mouseover-2x", nil, nil, 1, 39, 433, 485 },
+		{ "ui-hud-micromenu-collections-up-2x", nil, nil, 41, 79, 163, 215 },
+		{ "ui-hud-micromenu-help-disabled-2x", nil, nil, 41, 79, 217, 269 },
+		{ "ui-hud-micromenu-help-down-2x", nil, nil, 121, 159, 217, 269 },
+		{ "ui-hud-micromenu-help-mouseover-2x", nil, nil, 161, 199, 217, 269 },
+		{ "ui-hud-micromenu-help-up-2x", nil, nil, 201, 239, 217, 269 },
+		{ "ui-hud-micromenu-lfd-disabled-2x", nil, nil, 41, 79, 271, 323 },
+		{ "ui-hud-micromenu-lfd-down-2x", nil, nil, 81, 119, 109, 161 },
+		{ "ui-hud-micromenu-lfd-mouseover-2x", nil, nil, 41, 79, 109, 161 },
+		{ "ui-hud-micromenu-lfd-up-2x", nil, nil, 1, 39, 163, 215 },
+		{ "ui-hud-micromenu-socials-disabled-2x", nil, nil, 201, 239, 1, 53 },
+		{ "ui-hud-micromenu-socials-down-2x", nil, nil, 1, 39, 1, 53 },
+		{ "ui-hud-micromenu-socials-mouseover-2x", nil, nil, 41, 79, 1, 53 },
+		{ "ui-hud-micromenu-socials-up-2x", nil, nil, 41, 79, 55, 107 },
+		{ "ui-hud-micromenu-questlog-disabled-2x", nil, nil, 41, 79, 379, 431 },
+		{ "ui-hud-micromenu-questlog-down-2x", nil, nil, 121, 159, 271, 323 },
+		{ "ui-hud-micromenu-questlog-mouseover-2x", nil, nil, 41, 79, 433, 485 },
+		{ "ui-hud-micromenu-questlog-up-2x", nil, nil, 201, 239, 271, 323 },
+		{ "ui-hud-micromenu-mainmenu-disabled-2x", nil, nil, 41, 79, 325, 377 },
+		{ "ui-hud-micromenu-mainmenu-mouseover-2x", nil, nil, 121, 159, 325, 377 },
+		{ "ui-hud-micromenu-mainmenu-down-2x", nil, nil, 161, 199, 271, 323 },
+		{ "ui-hud-micromenu-mainmenu-up-2x", nil, nil, 1, 39, 109, 161 },
+		{ "ui-hud-micromenu-talent-disabled-2x", nil, nil, 81, 119, 55, 107 },
+		{ "ui-hud-micromenu-talent-down-2x", nil, nil, 81, 119, 271, 323 },
+		{ "ui-hud-micromenu-talent-mouseover-2x", nil, nil, 81, 119, 1, 53 },
+		{ "ui-hud-micromenu-talent-up-2x", nil, nil, 161, 199, 1, 53 },
+		{ "ui-hud-micromenu-spellbook-disabled-2x", nil, nil, 1, 39, 55, 107 },
+		{ "ui-hud-micromenu-spellbook-down-2x", nil, nil, 81, 119, 433, 485 },
+		{ "ui-hud-micromenu-spellbook-mouseover-2x", nil, nil, 189, 227, 433, 485 },
+		{ "ui-hud-micromenu-spellbook-up-2x", nil, nil, 121, 159, 55, 107 },
+	}),
+	-- The professions micro button's gold states, under its colour cells in the same file.
+	sheet(professionsmicro, 256, 256, {
+		{ "ui-hud-micromenu-profession-up-2x", nil, nil, 0, 38, 96, 148 },
+		{ "ui-hud-micromenu-profession-down-2x", nil, nil, 64, 102, 96, 148 },
+		{ "ui-hud-micromenu-profession-mouseover-2x", nil, nil, 128, 166, 96, 148 },
+		{ "ui-hud-micromenu-profession-disabled-2x", nil, nil, 192, 230, 96, 148 },
+	}),
+	sheet(bagmain2x, 512, 128, {
+		{ "bag-main-2x", nil, nil, 1, 97, 1, 97 },
+		{ "bag-main-highlight-2x", nil, nil, 99, 195, 1, 97 },
+		{ "bag-arrow-2x", nil, nil, 484, 504, 1, 33 },
+		{ "bag-border-2x", 34, 34, 295, 356, 1, 62 },
+		{ "bag-border-empty-2x", 34, 34, 295, 356, 64, 125 },
+		{ "bag-border-highlight-2x", 40, 40, 358, 419, 1, 62 },
+		{ "bag-reagent-border-empty-2x", 34, 34, 421, 482, 1, 62 },
+	}),
+	sheet(collapse, 32, 64, {
+		{ "bag-arrow-invert-2x", nil, nil, 8, 28, 32, 62 },
+	}),
+	-- Not rui_BagSlotsKey: that alias points at a different file.
+	sheet(assets .. "Bags\\bagslots2key.tga", 128, 128, {
+		{ "bag-reagent-border-2x", nil, nil, 3, 63, 64, 125 },
+	}),
+	sheet(uiactionbarvertical2x, 256, 64, {
+		{ "!ui-hud-actionbar-frame-nineslice-edgeleft", 17, 16, 143, 177, 0, 32, false, true },
+		{ "!ui-hud-actionbar-frame-nineslice-edgeright", 22, 16, 97, 141, 0, 32, false, true },
+		{ "!ui-hud-actionbar-frame-divider-threeslice-center", 14, 18, 179, 203, 0, 32 },
+	}),
+	sheet(uiactionbar, 256, 1024, {
+		{ "ui-hud-actionbar-frame-background-nineslice-center", 506, 20, 0, 16, 123, 134, true, false },
+		{ "ui-hud-actionbar-frame-background-nineslice-cornerbottomleft", 20, 20, 229, 240, 444, 456 },
+		{ "ui-hud-actionbar-frame-background-nineslice-cornerbottomright", 20, 20, 229, 240, 458, 470 },
+		{ "ui-hud-actionbar-frame-background-nineslice-cornertopleft", 20, 20, 242, 253, 444, 455 },
+		{ "ui-hud-actionbar-frame-background-nineslice-cornertopright", 20, 20, 242, 253, 457, 468 },
+		{ "_ui-hud-actionbar-frame-background-nineslice-edgebottom", 506, 20, 0, 16, 109, 121, true, false },
+		{ "_ui-hud-actionbar-frame-background-nineslice-edgetop", 506, 20, 0, 16, 123, 134, true, false },
+	}),
+	sheet(uiminimapforever_diel, 256, 128, {
+		{ "Minimap-Forever-Frame-Cycle", 42, 42, 1, 85, 1, 85 },
+		{ "Minimap-Forever-DayCycle", 33, 33, 87, 153, 1, 67 },
+		{ "Minimap-Forever-NightCycle", 33, 33, 155, 221, 1, 67 },
+	}),
+	sheet(uiactionbarvertical, 256, 32, {
+		{ "!ui-hud-actionbar-frame-background-nineslice-edgeleft", 20, 20, 107, 118, 0, 16, false, true },
+		{ "!ui-hud-actionbar-frame-background-nineslice-edgeright", 20, 20, 120, 131, 0, 16, false, true },
+	}),
+}
+
+local atlasinfo = {
+	['Minimap-GuildBanner-Normal'] = { rui_GuildBanner, 67, 69, 1/256, 68/256, 76/256, 145/256 },
+	['Minimap-GuildBanner-Heroic'] = { rui_GuildBanner, 66, 69, 75/256, 141/256, 76/256, 145/256 },
+	['QuestTracker-Header'] = { rui_QuestTracker, 560, 70, 11/1024, 571/1024, 247/512, 317/512 },
+	['QuestTracker-Collapse'] = { rui_QuestTracker, 18, 19, 951/1024, 987/1024, 59/512, 97/512 },
+	['QuestTracker-Collapse-Pressed'] = { rui_QuestTracker, 18, 19, 905/1024, 941/1024, 121/512, 159/512 },
+	['QuestTracker-Expand'] = { rui_QuestTracker, 18, 19, 905/1024, 941/1024, 161/512, 199/512 },
+	['QuestTracker-Expand-Pressed'] = { rui_QuestTracker, 18, 19, 905/1024, 941/1024, 201/512, 239/512 },
+	['QuestTracker-Red-Highlight'] = { rui_QuestTracker, 18, 19, 943/1024, 979/1024, 161/512, 199/512 },
+	['LFGRole-Tank'] = { rui_LFGRole, 18, 17, 35/256, 53/256, 0/256, 17/256 },
+	['LFGRole-Healer'] = { rui_LFGRole, 17, 18, 18/256, 35/256, 0/256, 18/256 },
+	['LFGRole-Damage'] = { rui_LFGRole, 17, 17, 0/256, 17/256, 0/256, 17/256 },
+	['TargetFrame-TextureFrame-Normal'] = { rui_UnitFrame, 210, 89, 423/1024, 633/1024, 0/512, 89/512 },
+	['TargetFrame-TextureFrame-Vehicle'] = { rui_UnitFrame, 210, 90, 636/1024, 846/1024, 91/512, 181/512 },
+	['TargetFrame-TextureFrame-Elite'] = { rui_UnitFrame, 210, 89, 211/1024, 421/1024, 0/512, 89/512 },
+	['TargetFrame-TextureFrame-Rare'] = { rui_UnitFrame, 209, 89, 0/1024, 209/1024, 0/512, 89/512 },
+	['TargetFrame-TextureFrame-RareElite'] = { rui_UnitFrame, 222, 90, 0/1024, 222/1024, 91/512, 181/512 },
+	['TargetFrame-StatusBar-Health'] = { rui_UnitFrame, 125, 22, 3/1024, 128/1024, 459/512, 481/512 },
+	['TargetFrame-StatusBar-Mana'] = { rui_UnitFrame, 134, 12, 130/1024, 264/1024, 459/512, 471/512 },
+	['TargetFrame-Status'] = { rui_UnitFrame, 209, 90, 0/1024, 209/1024, 275/512, 365/512 },
+	['TargetFrame-Flash'] = { rui_UnitFrame, 211, 90, 211/1024, 422/1024, 275/512, 365/512 },
+	['TargetFrame-HighLevelIcon'] = { rui_UnitFrame, 10, 13, 252/1024, 262/1024, 490/512, 503/512 },
+	['PlayerFrame-TextureFrame-Normal'] = { rui_UnitFrame, 210, 90, 423/1024, 633/1024, 91/512, 181/512 },
+	['PlayerFrame-TextureFrame-Vehicle'] = { rui_UnitFrame, 209, 89, 636/1024, 845/1024, 0/512, 89/512 },
+	['PlayerFrame-StatusBar-Health'] = { rui_UnitFrame, 125, 22, 3/1024, 128/1024, 483/512, 505/512 },
+	['PlayerFrame-StatusBar-Mana'] = { rui_UnitFrame, 126, 11, 130/1024, 256/1024, 474/512, 485/512 },
+	['PlayerFrame-Flash'] = { rui_UnitFrame, 209, 89, 212/1024, 421/1024, 184/512, 273/512 },
+	['PlayerFrame-Status'] = { rui_UnitFrame, 209, 89, 0/1024, 209/1024, 184/512, 273/512 },
+	['PlayerFrame-GroupIndicator'] = { rui_UnitFrame, 72, 14, 131/1024, 203/1024, 491/512, 505/512 },
+	['PlayerFrame-AttackIcon'] = { rui_UnitFrame, 19, 14, 269/1024, 288/1024, 490/512, 504/512 },
+	['PartyFrame-TextureFrame-Normal'] = { rui_UnitFrame, 120, 47, 848/1024, 968/1024, 0/512, 47/512 },
+	['PartyFrame-StatusBar-Health'] = { rui_UnitFrame, 71, 11, 259/1024, 330/1024, 474/512, 485/512 },
+	['PartyFrame-StatusBar-Mana'] = { rui_UnitFrame, 74, 9, 267/1024, 341/1024, 460/512, 469/512 },
+	['PartyFrame-Flash'] = { rui_UnitFrame, 120, 47, 848/1024, 968/1024, 50/512, 97/512 },
+	['PartyFrame-Status'] = { rui_UnitFrame, 120, -37, 848/1024, 968/1024, 184/512, 147/512 },
+	['CastingBar-Background'] = { rui_CastingBar, 417, 27, 0/512, 417/512, 95/256, 122/256 },
+	['CastingBar-Border'] = { rui_CastingBar, 423, 27, 0/512, 423/512, 63/256, 90/256 },
+	['CastingBar-MainBackground'] = { rui_CastingBar, 419, 56, 0/512, 419/512, 0/256, 56/256 },
+	['CastingBar-StatusBar-Casting'] = { rui_CastingBar, 418, 21, 0/512, 418/512, 149/256, 170/256 },
+	['CastingBar-StatusBar-Channeling'] = { rui_CastingBar, 417, 22, 0/512, 417/512, 124/256, 146/256 },
+	['CastingBar-StatusBar-Failed'] = { rui_CastingBar, 417, 23, 0/512, 417/512, 173/256, 196/256 },
+	['CastingBar-Spark'] = { rui_CastingBar, 7, 53, 423/512, 430/512, 97/256, 150/256 },
+	['CastingBar-BorderShield'] = { rui_CastingBar, 72, 86, 437/512, 509/512, 1/256, 87/256 },
+	['CollapseButton-Left'] = { rui_CollapseButton, 18, 31, 4/64, 22/64, 0/64, 31/64 },
+	['CollapseButton-Right'] = { rui_CollapseButton, 17, 31, 5/64, 22/64, 31/64, 62/64 },
+	['CollapseButton-Up'] = { rui_CollapseButton, 32, 17, 31/64, 63/64, 10/64, 27/64 },
+	['CollapseButton-Down'] = { rui_CollapseButton, 31, 17, 31/64, 62/64, 37/64, 54/64 },
+	['Minimap-Border'] = { rui_Minimap, 438, 446, 0/512, 438/512, 60/1024, 506/1024 },
+	['Minimap-Border-Top'] = { rui_Minimap, 255, 27, 105/512, 360/512, 609/1024, 636/1024 },
+	['Minimap-Mail-Normal'] = { rui_Minimap, 38, 27, 42/512, 80/512, 521/1024, 548/1024 },
+	['Minimap-Mail-Highlight'] = { rui_Minimap, 38, 27, 1/512, 39/512, 521/1024, 548/1024 },
+	['Minimap-Calendar-Normal'] = { rui_Calendar, 21, 19, 9/1024, 93/1024, 13/1024, 89/1024 },
+	['Minimap-Calendar-Highlight'] = { rui_Calendar, 21, 19, 111/1024, 195/1024, 13/1024, 89/1024 },
+	['Minimap-Calendar-Pushed'] = { rui_Calendar, 21, 19, 213/1024, 297/1024, 13/1024, 89/1024 },
+	['Minimap-Tracking-Background'] = { rui_Tracking, 21, 19, 2/256, 86/256, 2/256, 78/256 },
+	['Minimap-Tracking-Normal'] = { rui_Tracking, 20, 18, 90/256, 170/256, 2/256, 74/256 },
+	['Minimap-Tracking-Highlight'] = { rui_Tracking, 20, 18, 174/256, 254/256, 2/256, 74/256 },
+	['Minimap-Tracking-Pushed'] = { rui_Tracking, 20, 18, 2/256, 82/256, 82/256, 154/256 },
+	['Minimap-ZoomIn-Normal'] = { rui_Minimap, 34, 34, 1/512, 35/512, 552/1024, 586/1024 },
+	['Minimap-ZoomIn-Highlight'] = { rui_Minimap, 34, 34, 1/512, 35/512, 624/1024, 658/1024 },
+	['Minimap-ZoomIn-Pushed'] = { rui_Minimap, 34, 34, 1/512, 35/512, 588/1024, 622/1024 },
+	['Minimap-ZoomOut-Normal'] = { rui_Minimap, 34, 18, 181/512, 215/512, 520/1024, 538/1024 },
+	['Minimap-ZoomOut-Highlight'] = { rui_Minimap, 34, 18, 253/512, 287/512, 520/1024, 538/1024 },
+	['Minimap-ZoomOut-Pushed'] = { rui_Minimap, 34, 18, 217/512, 251/512, 520/1024, 538/1024 },
+	['Minimap-Calendar-1-Normal'] = { rui_Calendar, 21, 19, 9/1024, 93/1024, 13/1024, 89/1024 },
+	['Minimap-Calendar-1-Highlight'] = { rui_Calendar, 21, 19, 111/1024, 195/1024, 13/1024, 89/1024 },
+	['Minimap-Calendar-1-Pushed'] = { rui_Calendar, 21, 19, 213/1024, 297/1024, 13/1024, 89/1024 },
+	['Minimap-Calendar-2-Normal'] = { rui_Calendar, 21, 19, 315/1024, 399/1024, 13/1024, 89/1024 },
+	['Minimap-Calendar-2-Highlight'] = { rui_Calendar, 21, 19, 417/1024, 501/1024, 13/1024, 89/1024 },
+	['Minimap-Calendar-2-Pushed'] = { rui_Calendar, 21, 19, 519/1024, 603/1024, 13/1024, 89/1024 },
+	['Minimap-Calendar-3-Normal'] = { rui_Calendar, 21, 19, 621/1024, 705/1024, 13/1024, 89/1024 },
+	['Minimap-Calendar-3-Highlight'] = { rui_Calendar, 21, 19, 723/1024, 807/1024, 13/1024, 89/1024 },
+	['Minimap-Calendar-3-Pushed'] = { rui_Calendar, 21, 19, 825/1024, 909/1024, 13/1024, 89/1024 },
+	['Minimap-Calendar-4-Normal'] = { rui_Calendar, 21, 19, 927/1024, 1011/1024, 13/1024, 89/1024 },
+	['Minimap-Calendar-4-Highlight'] = { rui_Calendar, 21, 19, 9/1024, 93/1024, 115/1024, 191/1024 },
+	['Minimap-Calendar-4-Pushed'] = { rui_Calendar, 21, 19, 111/1024, 195/1024, 115/1024, 191/1024 },
+	['Minimap-Calendar-5-Normal'] = { rui_Calendar, 21, 19, 213/1024, 297/1024, 115/1024, 191/1024 },
+	['Minimap-Calendar-5-Highlight'] = { rui_Calendar, 21, 19, 315/1024, 399/1024, 115/1024, 191/1024 },
+	['Minimap-Calendar-5-Pushed'] = { rui_Calendar, 21, 19, 417/1024, 501/1024, 115/1024, 191/1024 },
+	['Minimap-Calendar-6-Normal'] = { rui_Calendar, 21, 19, 519/1024, 603/1024, 115/1024, 191/1024 },
+	['Minimap-Calendar-6-Highlight'] = { rui_Calendar, 21, 19, 621/1024, 705/1024, 115/1024, 191/1024 },
+	['Minimap-Calendar-6-Pushed'] = { rui_Calendar, 21, 19, 723/1024, 807/1024, 115/1024, 191/1024 },
+	['Minimap-Calendar-7-Normal'] = { rui_Calendar, 21, 19, 825/1024, 909/1024, 115/1024, 191/1024 },
+	['Minimap-Calendar-7-Highlight'] = { rui_Calendar, 21, 19, 927/1024, 1011/1024, 115/1024, 191/1024 },
+	['Minimap-Calendar-7-Pushed'] = { rui_Calendar, 21, 19, 9/1024, 93/1024, 217/1024, 293/1024 },
+	['Minimap-Calendar-8-Normal'] = { rui_Calendar, 21, 19, 111/1024, 195/1024, 217/1024, 293/1024 },
+	['Minimap-Calendar-8-Highlight'] = { rui_Calendar, 21, 19, 213/1024, 297/1024, 217/1024, 293/1024 },
+	['Minimap-Calendar-8-Pushed'] = { rui_Calendar, 21, 19, 315/1024, 399/1024, 217/1024, 293/1024 },
+	['Minimap-Calendar-9-Normal'] = { rui_Calendar, 21, 19, 417/1024, 501/1024, 217/1024, 293/1024 },
+	['Minimap-Calendar-9-Highlight'] = { rui_Calendar, 21, 19, 519/1024, 603/1024, 217/1024, 293/1024 },
+	['Minimap-Calendar-9-Pushed'] = { rui_Calendar, 21, 19, 621/1024, 705/1024, 217/1024, 293/1024 },
+	['Minimap-Calendar-10-Normal'] = { rui_Calendar, 21, 19, 723/1024, 807/1024, 217/1024, 293/1024 },
+	['Minimap-Calendar-10-Highlight'] = { rui_Calendar, 21, 19, 825/1024, 909/1024, 217/1024, 293/1024 },
+	['Minimap-Calendar-10-Pushed'] = { rui_Calendar, 21, 19, 927/1024, 1011/1024, 217/1024, 293/1024 },
+	['Minimap-Calendar-11-Normal'] = { rui_Calendar, 21, 19, 9/1024, 93/1024, 319/1024, 395/1024 },
+	['Minimap-Calendar-11-Highlight'] = { rui_Calendar, 21, 19, 111/1024, 195/1024, 319/1024, 395/1024 },
+	['Minimap-Calendar-11-Pushed'] = { rui_Calendar, 21, 19, 213/1024, 297/1024, 319/1024, 395/1024 },
+	['Minimap-Calendar-12-Normal'] = { rui_Calendar, 21, 19, 315/1024, 399/1024, 319/1024, 395/1024 },
+	['Minimap-Calendar-12-Highlight'] = { rui_Calendar, 21, 19, 417/1024, 501/1024, 319/1024, 395/1024 },
+	['Minimap-Calendar-12-Pushed'] = { rui_Calendar, 21, 19, 519/1024, 603/1024, 319/1024, 395/1024 },
+	['Minimap-Calendar-13-Normal'] = { rui_Calendar, 21, 19, 621/1024, 705/1024, 319/1024, 395/1024 },
+	['Minimap-Calendar-13-Highlight'] = { rui_Calendar, 21, 19, 723/1024, 807/1024, 319/1024, 395/1024 },
+	['Minimap-Calendar-13-Pushed'] = { rui_Calendar, 21, 19, 825/1024, 909/1024, 319/1024, 395/1024 },
+	['Minimap-Calendar-14-Normal'] = { rui_Calendar, 21, 19, 927/1024, 1011/1024, 319/1024, 395/1024 },
+	['Minimap-Calendar-14-Highlight'] = { rui_Calendar, 21, 19, 9/1024, 93/1024, 421/1024, 497/1024 },
+	['Minimap-Calendar-14-Pushed'] = { rui_Calendar, 21, 19, 111/1024, 195/1024, 421/1024, 497/1024 },
+	['Minimap-Calendar-15-Normal'] = { rui_Calendar, 21, 19, 213/1024, 297/1024, 421/1024, 497/1024 },
+	['Minimap-Calendar-15-Highlight'] = { rui_Calendar, 21, 19, 315/1024, 399/1024, 421/1024, 497/1024 },
+	['Minimap-Calendar-15-Pushed'] = { rui_Calendar, 21, 19, 417/1024, 501/1024, 421/1024, 497/1024 },
+	['Minimap-Calendar-16-Normal'] = { rui_Calendar, 21, 19, 519/1024, 603/1024, 421/1024, 497/1024 },
+	['Minimap-Calendar-16-Highlight'] = { rui_Calendar, 21, 19, 621/1024, 705/1024, 421/1024, 497/1024 },
+	['Minimap-Calendar-16-Pushed'] = { rui_Calendar, 21, 19, 723/1024, 807/1024, 421/1024, 497/1024 },
+	['Minimap-Calendar-17-Normal'] = { rui_Calendar, 21, 19, 825/1024, 909/1024, 421/1024, 497/1024 },
+	['Minimap-Calendar-17-Highlight'] = { rui_Calendar, 21, 19, 927/1024, 1011/1024, 421/1024, 497/1024 },
+	['Minimap-Calendar-17-Pushed'] = { rui_Calendar, 21, 19, 9/1024, 93/1024, 523/1024, 599/1024 },
+	['Minimap-Calendar-18-Normal'] = { rui_Calendar, 21, 19, 111/1024, 195/1024, 523/1024, 599/1024 },
+	['Minimap-Calendar-18-Highlight'] = { rui_Calendar, 21, 19, 213/1024, 297/1024, 523/1024, 599/1024 },
+	['Minimap-Calendar-18-Pushed'] = { rui_Calendar, 21, 19, 315/1024, 399/1024, 523/1024, 599/1024 },
+	['Minimap-Calendar-19-Normal'] = { rui_Calendar, 21, 19, 417/1024, 501/1024, 523/1024, 599/1024 },
+	['Minimap-Calendar-19-Highlight'] = { rui_Calendar, 21, 19, 519/1024, 603/1024, 523/1024, 599/1024 },
+	['Minimap-Calendar-19-Pushed'] = { rui_Calendar, 21, 19, 621/1024, 705/1024, 523/1024, 599/1024 },
+	['Minimap-Calendar-20-Normal'] = { rui_Calendar, 21, 19, 723/1024, 807/1024, 523/1024, 599/1024 },
+	['Minimap-Calendar-20-Highlight'] = { rui_Calendar, 21, 19, 825/1024, 909/1024, 523/1024, 599/1024 },
+	['Minimap-Calendar-20-Pushed'] = { rui_Calendar, 21, 19, 927/1024, 1011/1024, 523/1024, 599/1024 },
+	['Minimap-Calendar-21-Normal'] = { rui_Calendar, 21, 19, 9/1024, 93/1024, 625/1024, 701/1024 },
+	['Minimap-Calendar-21-Highlight'] = { rui_Calendar, 21, 19, 111/1024, 195/1024, 625/1024, 701/1024 },
+	['Minimap-Calendar-21-Pushed'] = { rui_Calendar, 21, 19, 213/1024, 297/1024, 625/1024, 701/1024 },
+	['Minimap-Calendar-22-Normal'] = { rui_Calendar, 21, 19, 315/1024, 399/1024, 625/1024, 701/1024 },
+	['Minimap-Calendar-22-Highlight'] = { rui_Calendar, 21, 19, 417/1024, 501/1024, 625/1024, 701/1024 },
+	['Minimap-Calendar-22-Pushed'] = { rui_Calendar, 21, 19, 519/1024, 603/1024, 625/1024, 701/1024 },
+	['Minimap-Calendar-23-Normal'] = { rui_Calendar, 21, 19, 621/1024, 705/1024, 625/1024, 701/1024 },
+	['Minimap-Calendar-23-Highlight'] = { rui_Calendar, 21, 19, 723/1024, 807/1024, 625/1024, 701/1024 },
+	['Minimap-Calendar-23-Pushed'] = { rui_Calendar, 21, 19, 825/1024, 909/1024, 625/1024, 701/1024 },
+	['Minimap-Calendar-24-Normal'] = { rui_Calendar, 21, 19, 927/1024, 1011/1024, 625/1024, 701/1024 },
+	['Minimap-Calendar-24-Highlight'] = { rui_Calendar, 21, 19, 9/1024, 93/1024, 727/1024, 803/1024 },
+	['Minimap-Calendar-24-Pushed'] = { rui_Calendar, 21, 19, 111/1024, 195/1024, 727/1024, 803/1024 },
+	['Minimap-Calendar-25-Normal'] = { rui_Calendar, 21, 19, 213/1024, 297/1024, 727/1024, 803/1024 },
+	['Minimap-Calendar-25-Highlight'] = { rui_Calendar, 21, 19, 315/1024, 399/1024, 727/1024, 803/1024 },
+	['Minimap-Calendar-25-Pushed'] = { rui_Calendar, 21, 19, 417/1024, 501/1024, 727/1024, 803/1024 },
+	['Minimap-Calendar-26-Normal'] = { rui_Calendar, 21, 19, 519/1024, 603/1024, 727/1024, 803/1024 },
+	['Minimap-Calendar-26-Highlight'] = { rui_Calendar, 21, 19, 621/1024, 705/1024, 727/1024, 803/1024 },
+	['Minimap-Calendar-26-Pushed'] = { rui_Calendar, 21, 19, 723/1024, 807/1024, 727/1024, 803/1024 },
+	['Minimap-Calendar-27-Normal'] = { rui_Calendar, 21, 19, 825/1024, 909/1024, 727/1024, 803/1024 },
+	['Minimap-Calendar-27-Highlight'] = { rui_Calendar, 21, 19, 927/1024, 1011/1024, 727/1024, 803/1024 },
+	['Minimap-Calendar-27-Pushed'] = { rui_Calendar, 21, 19, 9/1024, 93/1024, 829/1024, 905/1024 },
+	['Minimap-Calendar-28-Normal'] = { rui_Calendar, 21, 19, 111/1024, 195/1024, 829/1024, 905/1024 },
+	['Minimap-Calendar-28-Highlight'] = { rui_Calendar, 21, 19, 213/1024, 297/1024, 829/1024, 905/1024 },
+	['Minimap-Calendar-28-Pushed'] = { rui_Calendar, 21, 19, 315/1024, 399/1024, 829/1024, 905/1024 },
+	['Minimap-Calendar-29-Normal'] = { rui_Calendar, 21, 19, 417/1024, 501/1024, 829/1024, 905/1024 },
+	['Minimap-Calendar-29-Highlight'] = { rui_Calendar, 21, 19, 519/1024, 603/1024, 829/1024, 905/1024 },
+	['Minimap-Calendar-29-Pushed'] = { rui_Calendar, 21, 19, 621/1024, 705/1024, 829/1024, 905/1024 },
+	['Minimap-Calendar-30-Normal'] = { rui_Calendar, 21, 19, 723/1024, 807/1024, 829/1024, 905/1024 },
+	['Minimap-Calendar-30-Highlight'] = { rui_Calendar, 21, 19, 825/1024, 909/1024, 829/1024, 905/1024 },
+	['Minimap-Calendar-30-Pushed'] = { rui_Calendar, 21, 19, 927/1024, 1011/1024, 829/1024, 905/1024 },
+	['Minimap-Calendar-31-Normal'] = { rui_Calendar, 21, 19, 9/1024, 93/1024, 931/1024, 1007/1024 },
+	['Minimap-Calendar-31-Highlight'] = { rui_Calendar, 21, 19, 111/1024, 195/1024, 931/1024, 1007/1024 },
+	['Minimap-Calendar-31-Pushed'] = { rui_Calendar, 21, 19, 213/1024, 297/1024, 931/1024, 1007/1024 },
+	['ActionBar-LeftCap-Alliance'] = { rui_ActionBarHorizontal, 356, 334, 1/512, 357/512, 209/2048, 543/2048 },
+	['ActionBar-RightCap-Alliance'] = { rui_ActionBarHorizontal, 356, 334, 1/512, 357/512, 545/2048, 879/2048 },
+	['ActionBar-LeftCap-Horde'] = { rui_ActionBarHorizontal, 356, 334, 1/512, 357/512, 881/2048, 1215/2048 },
+	['ActionBar-RightCap-Horde'] = { rui_ActionBarHorizontal, 356, 334, 1/512, 357/512, 1217/2048, 1551/2048 },
+	['ActionBar-ButtonUp-Normal'] = { rui_ActionBarHorizontal, 34, 28, 359/512, 393/512, 833/2048, 861/2048 },
+	['ActionBar-ButtonUp-Highlight'] = { rui_ActionBarHorizontal, 34, 28, 453/512, 487/512, 709/2048, 737/2048 },
+	['ActionBar-ButtonUp-Pushed'] = { rui_ActionBarHorizontal, 34, 28, 453/512, 487/512, 679/2048, 707/2048 },
+	['ActionBar-ButtonDown-Normal'] = { rui_ActionBarHorizontal, 34, 28, 463/512, 497/512, 605/2048, 633/2048 },
+	['ActionBar-ButtonDown-Highlight'] = { rui_ActionBarHorizontal, 34, 28, 463/512, 497/512, 575/2048, 603/2048 },
+	['ActionBar-ButtonDown-Pushed'] = { rui_ActionBarHorizontal, 34, 28, 463/512, 497/512, 545/2048, 573/2048 },
+	['ActionBar-ActionButton-Highlight'] = { rui_ActionBarHorizontal, 92, 90, 359/512, 451/512, 1065/2048, 1155/2048 },
+	['ActionBar-ActionButton-Pushed'] = { rui_ActionBarHorizontal, 92, 90, 359/512, 451/512, 881/2048, 971/2048 },
+	['ActionBar-ActionButton-Flash'] = { rui_ActionBarHorizontal, 92, 90, 359/512, 451/512, 973/2048, 1063/2048 },
+	['ActionBar-ActionButton-Border'] = { rui_ActionBarHorizontal, 92, 90, 359/512, 451/512, 649/2048, 739/2048 },
+	['ActionBar-ActionButton-Background'] = { rui_ActionBarHorizontal, 128, 124, 359/512, 487/512, 209/2048, 333/2048 },
+	['ExperienceBar-Background'] = { rui_ExperienceBar, 569.99911121875, 9, 0.00088878125/2048, 570/2048, 20/64, 29/64 },
+	['ExperienceBar-Border'] = { rui_ExperienceBar, 571, 17, 1/2048, 572/2048, 1/64, 18/64 },
+	['BagsBar-SlotButton-Highlight'] = { rui_BagSlots, 61, 61, 358/512, 419/512, 1/128, 62/128 },
+	['BagsBar-SlotButton-Border'] = { rui_BagSlots, 61, 61, 295/512, 356/512, 1/128, 62/128 },
+	['BagsBar-KeySlot-Normal'] = { rui_BagSlotsKey, 60, 61, 3/128, 63/128, 64/128, 125/128 },
+	['BagsBar-MainSlot-Normal'] = { rui_BagSlots, 96, 96, 1/512, 97/512, 1/128, 97/128 },
+	['BagsBar-MainSlot-Highlight'] = { rui_BagSlots, 96, 96, 99/512, 195/512, 1/128, 97/128 },
+	['MicroMenu-Spellbook-Normal'] = { rui_MicroMenu, 51, 70, 389/512, 440/512, 312/512, 382/512 },
+	['MicroMenu-Spellbook-Highlight'] = { rui_MicroMenu, 51, 70, 334/512, 385/512, 312/512, 382/512 },
+	['MicroMenu-Spellbook-Pushed'] = { rui_MicroMenu, 51, 70, 280/512, 331/512, 312/512, 382/512 },
+	['MicroMenu-Talent-Normal'] = { rui_MicroMenu, 51, 70, 170/512, 221/512, 312/512, 382/512 },
+	['MicroMenu-Talent-Highlight'] = { rui_MicroMenu, 51, 70, 116/512, 167/512, 312/512, 382/512 },
+	['MicroMenu-Talent-Pushed'] = { rui_MicroMenu, 51, 70, 63/512, 114/512, 312/512, 382/512 },
+	['MicroMenu-Talent-Disabled'] = { rui_MicroMenu, 51, 70, 6/512, 57/512, 312/512, 382/512 },
+	['MicroMenu-LFD-Normal'] = { rui_MicroMenu, 51, 71, 387/512, 438/512, 158/512, 229/512 },
+	['MicroMenu-LFD-Highlight'] = { rui_MicroMenu, 51, 71, 331/512, 382/512, 158/512, 229/512 },
+	['MicroMenu-LFD-Pushed'] = { rui_MicroMenu, 51, 71, 277/512, 328/512, 158/512, 229/512 },
+	['MicroMenu-LFD-Disabled'] = { rui_MicroMenu, 51, 71, 222/512, 273/512, 158/512, 229/512 },
+	['MicroMenu-MainMenu-Normal'] = { rui_MicroMenu, 51, 70, 387/512, 438/512, 235/512, 305/512 },
+	['MicroMenu-MainMenu-Highlight'] = { rui_MicroMenu, 51, 70, 278/512, 329/512, 235/512, 305/512 },
+	['MicroMenu-MainMenu-Pushed'] = { rui_MicroMenu, 50, 70, 333/512, 383/512, 235/512, 305/512 },
+	['MicroMenu-Help-Normal'] = { rui_MicroMenu, 50, 70, 169/512, 219/512, 158/512, 228/512 },
+	['MicroMenu-Help-Highlight'] = { rui_MicroMenu, 51, 70, 115/512, 166/512, 158/512, 228/512 },
+	['MicroMenu-Help-Pushed'] = { rui_MicroMenu, 51, 70, 60/512, 111/512, 158/512, 228/512 },
+	['MicroMenu-Socials-Normal'] = { rui_MicroMenu, 51, 70, 169/512, 220/512, 235/512, 305/512 },
+	['MicroMenu-Socials-Highlight'] = { rui_MicroMenu, 51, 70, 115/512, 166/512, 235/512, 305/512 },
+	['MicroMenu-Socials-Pushed'] = { rui_MicroMenu, 51, 70, 61/512, 112/512, 235/512, 305/512 },
+	['MicroMenu-Achievement-Normal'] = { rui_MicroMenu, 50, 70, 383/512, 433/512, 4/512, 74/512 },
+	['MicroMenu-Achievement-Highlight'] = { rui_MicroMenu, 51, 70, 329/512, 380/512, 4/512, 74/512 },
+	['MicroMenu-Achievement-Pushed'] = { rui_MicroMenu, 51, 70, 274/512, 325/512, 4/512, 74/512 },
+	['MicroMenu-Achievement-Disabled'] = { rui_MicroMenu, 51, 70, 220/512, 271/512, 4/512, 74/512 },
+	['MicroMenu-QuestLog-Normal'] = { rui_MicroMenu, 51, 70, 166/512, 217/512, 4/512, 74/512 },
+	['MicroMenu-QuestLog-Highlight'] = { rui_MicroMenu, 52, 70, 112/512, 164/512, 4/512, 74/512 },
+	['MicroMenu-QuestLog-Pushed'] = { rui_MicroMenu, 51, 70, 58/512, 109/512, 4/512, 74/512 },
+	['MicroMenu-QuestLog-Disabled'] = { rui_MicroMenu, 51, 70, 4/512, 55/512, 4/512, 74/512 },
+	['MicroMenu-Empty'] = { rui_MicroMenu, 51, 69, 384/512, 435/512, 82/512, 151/512 },
+	['ActionMainBar-TopLeft'] = { rui_ActionBarHorizontal, 36, 33, 464/512, 500/512, 475/2048, 508/2048 },
+	['ActionMainBar-TopRight'] = { rui_ActionBarHorizontal, 36, 31, 461/512, 497/512, 442/2048, 473/2048 },
+	['ActionMainBar-BottomLeft'] = { rui_ActionBarHorizontal, 36, 32, 466/512, 502/512, 388/2048, 420/2048 },
+	['ActionMainBar-BottomRight'] = { rui_ActionBarHorizontal, 35, 33, 464/512, 499/512, 339/2048, 372/2048 },
+	['ActionMainBar-Top'] = { rui_ActionBarHorizontal, 20, 9, 445/512, 465/512, 145/2048, 154/2048 },
+	['ActionMainBar-Bottom'] = { rui_ActionBarHorizontal, 20, 7, 445/512, 465/512, 145/2048, 152/2048 },
+	['ActionMainBar-Left'] = { rui_ActionBarVertical, 7, 12, 144/256, 151/256, 22/64, 34/64 },
+	['ActionMainBar-Right'] = { rui_ActionBarVertical, 6, 12, 144/256, 150/256, 22/64, 34/64 },
+	['ActionMainBar-GapDown'] = { rui_ActionBarHorizontal, 19, 33, 396/512, 415/512, 831/2048, 864/2048 },
+	['ActionMainBar-GapUp'] = { rui_ActionBarHorizontal, 19, 30, 422/512, 441/512, 831/2048, 861/2048 },
+	['ActionMainBar-GapCenter'] = { rui_ActionBarVertical, 9, 12, 143/256, 152/256, 22/64, 34/64 },
+	['Minimap-PVP-alliance-Normal'] = { rui_Battlefield, 54, 53, 72/256, 126/256, 5/64, 58/64 },
+	['Minimap-PVP-alliance-Pushed'] = { rui_Battlefield, 54, 53, 17/256, 71/256, 5/64, 58/64 },
+	['Minimap-PVP-horde-Normal'] = { rui_Battlefield, 54, 53, 181/256, 235/256, 5/64, 58/64 },
+	['Minimap-PVP-horde-Pushed'] = { rui_Battlefield, 55, 53, 127/256, 182/256, 5/64, 58/64 },
+
+	-- UI-Frame-Metal: retail's PortraitFrameTemplate chrome. Texcoords match bagster's
+	-- in-game-verified values against these same three sheets.
+	['UI-Frame-PortraitMetal-CornerTopLeft'] = { rui_FrameMetal, 75, 75, 0.00195312, 0.294922, 0.298828, 0.591797 },
+	['UI-Frame-Metal-CornerTopRight'] = { rui_FrameMetal, 75, 75, 0.298828, 0.591797, 0.00195312, 0.294922 },
+	-- Same corner without the portrait cutout. Measured off the sheet, its rail sits 12px in from
+	-- the piece's left edge exactly like CornerBottomLeft and EdgeLeft, so it drops into the same
+	-- left column; mirroring CornerTopRight instead would land the rail 10.5px off (right-side
+	-- art carries only 1.5px of padding).
+	['UI-Frame-Metal-CornerTopLeft'] = { rui_FrameMetal, 75, 75, 0.00195312, 0.294922, 0.00195312, 0.294922 },
+	-- The worn streak band retail tiles across the body just under a window's title bar.
+	['_UI-Frame-TopTileStreaks'] = { rui_FrameInner, 256, 43, 0, 1, 0.007812, 0.343750 },
+
+	-- UI-Frame-Inner: retail's InsetFrameTemplate trim, 6px corners over 3px tiles. Rects come from
+	-- UiTextureAtlasMember, so these are the client's own numbers, not a fit to substitute art. The
+	-- horizontal pair rides the sheet the streaks already come from -- same file, atlas 950.
+	['UI-Frame-InnerTopLeft'] = { rui_Inner, 6, 6, 97/128, 103/128, 71/128, 77/128 },
+	['UI-Frame-InnerTopRight'] = { rui_Inner, 6, 6, 105/128, 111/128, 71/128, 77/128 },
+	['UI-Frame-InnerBotLeftCorner'] = { rui_Inner, 6, 6, 81/128, 87/128, 71/128, 77/128 },
+	['UI-Frame-InnerBotRight'] = { rui_Inner, 6, 6, 89/128, 95/128, 71/128, 77/128 },
+	['!UI-Frame-InnerLeftTile'] = { rui_InnerV, 3, 256, 31/64, 34/64, 0, 1, false, true },
+	['!UI-Frame-InnerRightTile'] = { rui_InnerV, 3, 256, 36/64, 39/64, 0, 1, false, true },
+	['_UI-Frame-InnerTopTile'] = { rui_FrameInner, 256, 3, 0, 1, 116/128, 119/128, true, false },
+	['_UI-Frame-InnerBotTile'] = { rui_FrameInner, 256, 3, 0, 1, 111/128, 114/128, true, false },
+
+	-- The collapse box retail's ReputationSubHeaderTemplate wears, cut out of its 2048x1024 sheet:
+	-- four 22px icons are not worth shipping 8MB for.
+	['campaign_headericon_closed'] = { rui_Collapse, 22, 22, 0/128, 22/128, 0/32, 22/32 },
+	['campaign_headericon_closedpressed'] = { rui_Collapse, 22, 22, 32/128, 54/128, 0/32, 22/32 },
+	['campaign_headericon_open'] = { rui_Collapse, 22, 22, 64/128, 86/128, 0/32, 22/32 },
+	['campaign_headericon_openpressed'] = { rui_Collapse, 22, 22, 96/128, 118/128, 0/32, 22/32 },
+
+	-- What WowStyle1FilterDropdownMixin actually asks for. Not the a-button, which is the arrow in
+	-- its own box: this is the whole control, gold chevron already part of the art. Retail swaps the
+	-- WHOLE texture per state rather than washing a highlight over it, so all six ship.
+	['common-dropdown-b-button'] = { rui_Dropdown, 97, 26, 0/128, 97/128, 0/256, 26/256 },
+	['common-dropdown-b-button-hover'] = { rui_Dropdown, 97, 26, 0/128, 97/128, 26/256, 52/256 },
+	['common-dropdown-b-button-pressed'] = { rui_Dropdown, 97, 26, 0/128, 97/128, 52/256, 78/256 },
+	['common-dropdown-b-button-pressedhover'] = { rui_Dropdown, 97, 26, 0/128, 97/128, 78/256, 104/256 },
+	['common-dropdown-b-button-open'] = { rui_Dropdown, 97, 26, 0/128, 97/128, 104/256, 130/256 },
+	['common-dropdown-b-button-disabled'] = { rui_Dropdown, 97, 26, 0/128, 97/128, 130/256, 156/256 },
+
+	-- WowStyle1DropdownTemplate's pair, which is what Reputation and Currency wear -- NOT the
+	-- b-button above, that one is the filter dropdown the mount journal uses.
+	['common-dropdown-textholder'] = { rui_Dropdown, 54, 41, 0/128, 54/128, 160/256, 201/256 },
+	-- Cut in three because the source is a 54x41 rounded rect with a 12px bevel: stretched whole to a
+	-- row it smears the corners sideways and squashes the bevel. Only the flat middle may stretch.
+	['common-dropdown-textholder-left'] = { rui_Dropdown, 18, 41, 0/128, 18/128, 160/256, 201/256 },
+	['common-dropdown-textholder-center'] = { rui_Dropdown, 18, 41, 18/128, 36/128, 160/256, 201/256 },
+	['common-dropdown-textholder-right'] = { rui_Dropdown, 18, 41, 36/128, 54/128, 160/256, 201/256 },
+	-- Six states, because WowStyle1DropdownMixin:GetArrowAtlas swaps the WHOLE arrow per state
+	-- rather than washing a highlight over it.
+	['common-dropdown-a-button'] = { rui_Dropdown, 27, 27, 0/128, 27/128, 202/256, 229/256 },
+	['common-dropdown-a-button-hover'] = { rui_Dropdown, 27, 27, 28/128, 55/128, 202/256, 229/256 },
+	['common-dropdown-a-button-pressed'] = { rui_Dropdown, 27, 27, 56/128, 83/128, 202/256, 229/256 },
+	['common-dropdown-a-button-pressedhover'] = { rui_Dropdown, 27, 27, 84/128, 111/128, 202/256, 229/256 },
+	['common-dropdown-a-button-open'] = { rui_Dropdown, 27, 27, 0/128, 27/128, 229/256, 256/256 },
+	['common-dropdown-a-button-disabled'] = { rui_Dropdown, 27, 27, 28/128, 55/128, 229/256, 256/256 },
+
+	-- Retail's MinimalCheckboxTemplate art. No modern SWORD exists anywhere in the atlas, so the
+	-- at-war box keeps the client's classic UI-CheckBox-SwordCheck over this modern square.
+	['checkbox-minimal'] = { rui_Checkbox, 30, 29, 1/64, 31/64, 1/64, 30/64 },
+	['checkmark-minimal'] = { rui_Checkbox, 30, 29, 1/64, 31/64, 32/64, 61/64 },
+	['checkmark-minimal-disabled'] = { rui_Checkbox, 30, 29, 33/64, 63/64, 1/64, 30/64 },
+
+	-- UI-Frame-DiamondMetal: the dialog nine-slice retail frames its popups with. Rects come from
+	-- UiTextureAtlasMember, which only lists the 2x cut, so the pieces draw at their 64px override.
+	['UI-Frame-DiamondMetal-CornerTopLeft'] = { rui_Diamond, 64, 64, 1/256, 129/256, 521/1024, 649/1024 },
+	['UI-Frame-DiamondMetal-CornerTopRight'] = { rui_Diamond, 64, 64, 1/256, 129/256, 651/1024, 779/1024 },
+	['UI-Frame-DiamondMetal-CornerBottomLeft'] = { rui_Diamond, 64, 64, 1/256, 129/256, 261/1024, 389/1024 },
+	['UI-Frame-DiamondMetal-CornerBottomRight'] = { rui_Diamond, 64, 64, 1/256, 129/256, 391/1024, 519/1024 },
+	['_UI-Frame-DiamondMetal-EdgeTop'] = { rui_Diamond, 64, 64, 0, 128/256, 131/1024, 259/1024, true, false },
+	['_UI-Frame-DiamondMetal-EdgeBottom'] = { rui_Diamond, 64, 64, 0, 128/256, 1/1024, 129/1024, true, false },
+	['!UI-Frame-DiamondMetal-EdgeLeft'] = { rui_DiamondEdges, 64, 64, 1/512, 129/512, 0, 1, false, true },
+	['!UI-Frame-DiamondMetal-EdgeRight'] = { rui_DiamondEdges, 64, 64, 131/512, 259/512, 0, 1, false, true },
+	-- The sheet's top corners are 75px and its bottom pair 32px, so a frame built from both joins two
+	-- widths down each side. These are the bottom corners flipped vertically: a matching 32px set.
+	['UI-Frame-Metal-CornerTopLeft-Thin'] = { rui_FrameMetal, 32, 32, 0.298828, 0.423828, 0.423828, 0.298828 },
+	['UI-Frame-Metal-CornerTopRight-Thin'] = { rui_FrameMetal, 32, 32, 0.427734, 0.552734, 0.423828, 0.298828 },
+	['UI-Frame-Metal-CornerBottomLeft'] = { rui_FrameMetal, 32, 32, 0.298828, 0.423828, 0.298828, 0.423828 },
+	['UI-Frame-Metal-CornerBottomRight'] = { rui_FrameMetal, 32, 32, 0.427734, 0.552734, 0.298828, 0.423828 },
+	['_UI-Frame-Metal-EdgeTop'] = { rui_FrameMetalH, 32, 75, 0, 1, 0.00390625, 0.589844 },
+	['_UI-Frame-Metal-EdgeBottom'] = { rui_FrameMetalH, 16, 32, 0, 0.5, 0.597656, 0.847656 },
+	['!UI-Frame-Metal-EdgeLeft'] = { rui_FrameMetalV, 75, 16, 0.00195312, 0.294922, 0, 1 },
+	['!UI-Frame-Metal-EdgeRight'] = { rui_FrameMetalV, 75, 16, 0.298828, 0.591797, 0, 1 },
+
+	-- Character panel interior. Rects lifted from retail's atlas table for these sheets.
+	['character-panel-background'] = { rui_CharPanelBg, 450, 420, 0.000977, 0.440430, 0.001953, 0.822266 },
+	['UI-Character-Info-Title'] = { rui_CharInfoA, 196, 40, 0.000977, 0.192383, 0.698242, 0.737305 },
+	['UI-Character-Info-Line-Bounce'] = { rui_CharInfoA, 157, 19, 0.000977, 0.154297, 0.769531, 0.788086 },
+
+	-- Per-class stats-pane backdrops. The two sheets split the class roster; Wrath uses 10 of them.
+	['ui-character-info-mage-bg'] = { rui_CharInfoA, 197, 355, 0.000977, 0.193359, 0.000977, 0.347656 },
+	['ui-character-info-paladin-bg'] = { rui_CharInfoA, 197, 355, 0.195312, 0.387695, 0.000977, 0.347656 },
+	['ui-character-info-rogue-bg'] = { rui_CharInfoA, 197, 355, 0.389648, 0.582031, 0.000977, 0.347656 },
+	['ui-character-info-warlock-bg'] = { rui_CharInfoA, 197, 355, 0.583984, 0.776367, 0.000977, 0.347656 },
+	['ui-character-info-warrior-bg'] = { rui_CharInfoA, 197, 355, 0.778320, 0.970703, 0.000977, 0.347656 },
+	['ui-character-info-priest-bg'] = { rui_CharInfoA, 197, 355, 0.195312, 0.387695, 0.349609, 0.696289 },
+	['ui-character-info-shaman-bg'] = { rui_CharInfoA, 197, 355, 0.389648, 0.582031, 0.349609, 0.696289 },
+	['ui-character-info-deathknight-bg'] = { rui_CharInfoB, 197, 355, 0.000977, 0.193359, 0.001953, 0.695312 },
+	['ui-character-info-druid-bg'] = { rui_CharInfoB, 197, 355, 0.389648, 0.582031, 0.001953, 0.695312 },
+	['ui-character-info-hunter-bg'] = { rui_CharInfoB, 197, 355, 0.583984, 0.776367, 0.001953, 0.695312 },
+
+	-- Retail's minimal scrollbar (the "small" family: 8px slider, 8x8 caps, 17x11 arrows).
+	['minimal-scrollbar-track-top'] = { rui_ScrollThumb, 8, 8, 22/32, 30/32, 2/32, 10/32 },
+	['minimal-scrollbar-track-bottom'] = { rui_ScrollThumb, 8, 8, 22/32, 30/32, 14/32, 22/32 },
+	['!minimal-scrollbar-track-middle'] = { rui_ScrollThumb, 8, 1, 12/32, 20/32, 14/32, 22/32 },
+	['minimal-scrollbar-small-thumb-top'] = { rui_ScrollThumb, 8, 8, 2/32, 10/32, 2/32, 10/32 },
+	['minimal-scrollbar-small-thumb-bottom'] = { rui_ScrollThumb, 8, 8, 2/32, 10/32, 14/32, 22/32 },
+	['minimal-scrollbar-small-thumb-middle'] = { rui_ScrollThumb, 8, 8, 12/32, 20/32, 2/32, 10/32 },
+	['minimal-scrollbar-arrow-top'] = { rui_ScrollArrows, 17, 11, 2/64, 19/64, 18/32, 29/32 },
+	['minimal-scrollbar-arrow-bottom'] = { rui_ScrollArrows, 17, 11, 2/64, 19/64, 2/32, 13/32 },
+
+	-- Retail's square button face and its icon glyphs, used by the model rotate controls.
+	['common-button-square-gray-up'] = { rui_CommonButtons, 42, 42, 2/256, 126/256, 2/128, 126/128 },
+	['common-button-square-gray-down'] = { rui_CommonButtons, 42, 42, 130/256, 254/256, 2/128, 126/128 },
+	['common-icon-rotateleft'] = { rui_CommonIcons, 20, 20, 2/256, 66/256, 2/256, 66/256 },
+	['common-icon-rotateright'] = { rui_CommonIcons, 20, 20, 70/256, 134/256, 2/256, 66/256 },
+	['common-icon-zoomin'] = { rui_CommonIcons, 25, 25, 138/256, 202/256, 2/256, 66/256 },
+	['common-icon-zoomout'] = { rui_CommonIcons, 25, 25, 2/256, 66/256, 70/256, 134/256 },
+	['common-icon-undo'] = { rui_CommonIcons, 25, 25, 70/256, 134/256, 70/256, 134/256 },
+	-- Merchant pack (256x256): repair/sell icons + bottom band.
+	['spellicon-256x256-selljunk'] = { rui_MerchantPack, 72, 72, 0.001953, 0.142578, 0.250000, 0.531250 },
+	['spellicon-256x256-repair'] = { rui_MerchantPack, 72, 72, 0.146484, 0.287109, 0.250000, 0.531250 },
+	['spellicon-256x256-repairall'] = { rui_MerchantPack, 72, 72, 0.001953, 0.142578, 0.539062, 0.820312 },
+	['spellicon-256x256-repairallguild'] = { rui_MerchantPack, 72, 72, 0.146484, 0.287109, 0.539062, 0.820312 },
+	['ui-merchant-botframe'] = { rui_MerchantPack, 332, 61, 0.001953, 0.650391, 0.003906, 0.242188 },
+	['honorsystem-portrait-alliance'] = { rui_RingAlliance, 50, 52, 0, 0.78125, 0, 0.8125 },
+	['honorsystem-portrait-horde'] = { rui_RingHorde, 50, 52, 0, 0.78125, 0, 0.8125 },
+	['honorsystem-portrait-neutral'] = { rui_RingNeutral, 50, 52, 0, 0.78125, 0, 0.8125 },
+
+	['common-icon-checkmark'] = { rui_CommonIcons, 25, 25, 138/256, 202/256, 70/256, 134/256 },
+	['common-icon-checkmark-yellow'] = { rui_CommonIcons, 25, 25, 2/256, 66/256, 138/256, 202/256 },
+	['common-icon-delete'] = { rui_CommonIcons, 20, 20, 70/256, 134/256, 138/256, 202/256 },
+
+	-- Collapsible list headers: a 3-piece bar whose right cap doubles as the expand chevron.
+	['options_listexpand_left'] = { rui_ListExpand, 12, 26, 0.007812, 0.101562, 0.656250, 0.859375 },
+	['_options_listexpand_middle'] = { rui_ListExpand, 1, 26, 0.000000, 0.007812, 0.218750, 0.421875 },
+	['options_listexpand_right'] = { rui_ListExpand, 28, 26, 0.007812, 0.226562, 0.437500, 0.640625 },
+	['options_listexpand_right_expanded'] = { rui_ListExpand, 28, 26, 0.242188, 0.460938, 0.437500, 0.640625 },
+
+	-- Retail's loot row art. The strokes are hollow outlines; only the bg is tinted, by quality.
+	['looting_itemcard_bg'] = { rui_LootCard, 298, 76, 0, 0.58203125, 0, 0.296875 },
+	['looting_itemcard_stroke_normal'] = { rui_LootCard, 298, 76, 0, 0.58203125, 0.3046875, 0.6015625 },
+	['looting_itemcard_stroke_clickstate'] = { rui_LootCard, 298, 76, 0, 0.58203125, 0.609375, 0.90625 },
+	['looting_raritytag_frame'] = { rui_LootCard, 208, 15, 0.59375, 1, 0, 0.05859375 },
+	-- Half a texel in: the flipped top samples its opaque end on the edge and bleeds the padding.
+	['_looting_itemcard_shadow-center'] = { rui_LootCard, 8, 150, 0.586914062, 0.600585938, 0.080078125, 0.662109375 },
+
+	-- The metal chrome's wide top-right corner, with room for a maximize button beside the close one.
+	['UI-Frame-Metal-CornerTopRightDouble'] = { rui_FrameMetal, 75, 75, 0.595703, 0.888672, 0.001953, 0.294922 },
+
+	-- RedButton maximize/minimize glyphs, on the sheet the close button is cut from.
+	['redbutton-expand'] = { rui_RedButton, 36, 38, 77/256, 113/256, 1/128, 39/128 },
+	['redbutton-expand-pressed'] = { rui_RedButton, 36, 38, 77/256, 113/256, 81/128, 119/128 },
+	['redbutton-expand-disabled'] = { rui_RedButton, 36, 38, 77/256, 113/256, 41/128, 79/128 },
+	['redbutton-condense'] = { rui_RedButton, 36, 38, 1/256, 37/256, 1/128, 39/128 },
+	['redbutton-condense-pressed'] = { rui_RedButton, 36, 38, 1/256, 37/256, 81/128, 119/128 },
+	['redbutton-condense-disabled'] = { rui_RedButton, 36, 38, 1/256, 37/256, 41/128, 79/128 },
+	['redbutton-highlight'] = { rui_RedButton, 36, 38, 115/256, 151/256, 1/128, 39/128 },
+
+	-- Retail's NavBarTemplate (CS_HelpTextures); Home's banner is cropped at runtime for its notch.
+	['_navbar-button-tile'] = { rui_MapNavTile, 128, 30, 0, 1, 0.06250000, 0.12109375, true, false },
+	['_navbar-barbg-tile'] = { rui_MapNavTile, 128, 34, 0, 1, 0.18750000, 0.25390625, true, false },
+	['_navbar-baroverlay-tile'] = { rui_MapNavTile, 128, 34, 0, 1, 0.25781250, 0.32421875, true, false },
+	['navbar-endcap-up'] = { rui_MapNav, 21, 30, 0.88867188, 0.92968750, 0.29687500, 0.53125000 },
+	['navbar-endcap-down'] = { rui_MapNav, 21, 30, 0.63281250, 0.67382813, 0.75781250, 0.99218750 },
+	['navbar-overflow-up'] = { rui_MapNav, 44, 30, 0.54296875, 0.62890625, 0.75781250, 0.99218750 },
+	['navbar-overflow-down'] = { rui_MapNav, 44, 30, 0.45312500, 0.53906250, 0.75781250, 0.99218750 },
+	['navbar-home-banner'] = { rui_MapNav, 128, 30, 0.45312500, 0.70312500, 0.00781250, 0.24218750 },
+	['navbar-glow-selected'] = { rui_MapNav, 128, 34, 0.00195313, 0.25195313, 0.37500000, 0.64062500 },
+	['navbar-glow-hover'] = { rui_MapNav, 128, 34, 0.00195313, 0.25195313, 0.65625000, 0.92187500 },
+	-- Top and bottom are swapped on purpose: the sheet stores the triangle upward, retail flips it.
+	['navbar-dropdown-arrow'] = { rui_MapSquareButtons, 12, 12, 0.45312500, 0.64062500, 0.20312500, 0.01562500 },
+
+	-- Retail's quest log side panel.
+	['questlog-main-background'] = { rui_MapQuestLogBg, 307, 510, 0, 307/512, 0, 510/512 },
+	['questlog-frame'] = { rui_MapQuestLog, 107, 107, 0.001953, 0.210938, 0.076172, 0.285156 },
+	['questlog-frame-filigree'] = { rui_MapQuestLog, 48, 19, 0.001953, 0.095703, 0.035156, 0.072266 },
+	-- Retail's own rewards stack: carved header, tiling ground, and the band that caps a panel.
+	['questlog-reward-header-top'] = { rui_MapQuestLog, 307, 56, 0.214844, 0.814453, 0.208984, 0.318359 },
+	['questlog-reward-tile-vertical'] = { rui_MapQuestLog, 307, 83, 0.214844, 0.814453, 0.423828, 0.585938 },
+	['questlog-reward-top-frame'] = { rui_MapQuestLog, 307, 52, 0.214844, 0.814453, 0.589844, 0.691406 },
+	['questlog-reward-bottom'] = { rui_MapQuestLog, 307, 88, 0.214844, 0.814453, 0.695312, 0.867188 },
+	-- The page retail writes a quest on, off its own sheet.
+	['questbg-parchment'] = { rui_MapQuestParchment, 299, 407, 0.000977, 0.292969, 0.000977, 0.398438 },
+	['questlog-frame-gradient-bottom'] = { rui_MapQuestLog, 307, 66, 0.214844, 0.814453, 0.076172, 0.205078 },
+	['questlog-tab'] = { rui_MapQuestLog, 64, 22, 0.001953, 0.126953, 0.289062, 0.332031 },
+	['questlog-icon-expand'] = { rui_MapQuestLog, 18, 18, 0.099609, 0.134766, 0.035156, 0.070312 },
+	['questlog-icon-shrink'] = { rui_MapQuestLog, 18, 18, 0.171875, 0.207031, 0.035156, 0.070312 },
+	['questlog-icon-ticksquare'] = { rui_MapQuestLog, 14, 14, 0.224609, 0.251953, 0.001953, 0.029297 },
+	['questlog-icon-checkmark-yellow'] = { rui_MapQuestLog, 17, 14, 0.187500, 0.220703, 0.001953, 0.029297 },
+	['questlog-icon-setting'] = { rui_MapQuestLog, 15, 16, 0.138672, 0.167969, 0.035156, 0.066406 },
+	['questlog-quest-glow-yellow'] = { rui_MapQuestLog, 295, 50, 0.214844, 0.791016, 0.322266, 0.419922 },
+	['questlog-questtypeicon-dungeon'] = { rui_MapQuestTypes, 18, 18, 0.007812, 0.148438, 0.664062, 0.804688 },
+	['questlog-questtypeicon-raid'] = { rui_MapQuestTypes, 18, 18, 0.320312, 0.460938, 0.664062, 0.804688 },
+	['questlog-questtypeicon-group'] = { rui_MapQuestTypes, 18, 18, 0.007812, 0.148438, 0.820312, 0.960938 },
+	['questlog-questtypeicon-pvp'] = { rui_MapQuestTypes, 18, 18, 0.789062, 0.929688, 0.195312, 0.335938 },
+	['questlog-questtypeicon-daily'] = { rui_MapQuestTypes, 18, 18, 0.007812, 0.148438, 0.351562, 0.492188 },
+	['questlog-questtypeicon-heroic'] = { rui_MapQuestTypes, 18, 18, 0.164062, 0.304688, 0.195312, 0.335938 },
+	['questlog-questtypeicon-questfailed'] = { rui_MapQuestTypes, 18, 18, 0.320312, 0.460938, 0.507812, 0.648438 },
+
+	-- The map's overlay controls: filter magnifier, quest log chevrons, corner shadows.
+	['map-filter-button'] = { rui_MapFilter, 48, 48, 0.398438, 0.773438, 0.015625, 0.765625 },
+	['map-filter-button-down'] = { rui_MapFilter, 48, 48, 0.007812, 0.382812, 0.015625, 0.765625 },
+	['map-tracking-border'] = { rui_MapTrackingBorder, 54, 54, 0, 1, 0, 1 },
+	['map-zoom-highlight'] = { rui_MapZoomHighlight, 32, 32, 0, 1, 0, 1 },
+	['map-entrance-dungeon'] = { rui_MapPins, 32, 32, 0/256, 50/256, 0/128, 50/128 },
+	['map-entrance-raid'] = { rui_MapPins, 32, 32, 64/256, 114/256, 0/128, 50/128 },
+	['map-taxinode-neutral'] = { rui_MapPins, 21, 21, 128/256, 160/256, 0/128, 32/128 },
+	['map-taxinode-alliance'] = { rui_MapPins, 21, 21, 160/256, 192/256, 0/128, 32/128 },
+	['map-taxinode-horde'] = { rui_MapPins, 21, 21, 192/256, 224/256, 0/128, 32/128 },
+	['map-taxinode-undiscovered'] = { rui_MapPins, 21, 21, 224/256, 256/256, 0/128, 32/128 },
+	-- Retail's flight pins, shrunk to near their drawn size: 3.3.5a samples UI art without mipmaps.
+	['Taxi_Frame_Green'] = { rui_TaxiAssets, 40, 40, 0/128, 40/128, 0/64, 40/64 },
+	['Taxi_Frame_Gray'] = { rui_TaxiAssets, 32, 32, 50/128, 82/128, 0/64, 32/64 },
+	['Taxi_Frame_Yellow'] = { rui_TaxiAssets, 32, 32, 84/128, 116/128, 0/64, 32/64 },
+	['UI-Taxi-Icon-Nub'] = { rui_TaxiAssets, 16, 16, 50/128, 66/128, 34/64, 50/64 },
+	['map-graveyard'] = { rui_MapPins, 12, 16, 128/256, 140/256, 32/128, 48/128 },
+	['map-innkeeper'] = { rui_MapPins, 22, 22, 160/256, 192/256, 32/128, 64/128 },
+	['questcollapse-show-up'] = { rui_MapCollapse, 32, 32, 0, 32/256, 0, 32/128 },
+	['questcollapse-show-down'] = { rui_MapCollapse, 32, 32, 32/256, 64/256, 0, 32/128 },
+	['questcollapse-hide-up'] = { rui_MapCollapse, 32, 32, 0, 32/256, 32/128, 64/128 },
+	['questcollapse-hide-down'] = { rui_MapCollapse, 32, 32, 32/256, 64/256, 32/128, 64/128 },
+	-- One texel off the button cells: bilinear filtering bled their opaque edge in as a thin line.
+	['mapcornershadow-right'] = { rui_MapCollapse, 45, 53, 65/256, 110/256, 0, 53/128 },
+	['mapcornershadow-left'] = { rui_MapCollapse, 182, 29, 0, 182/256, 65/128, 94/128 },
+
+	-- Talents (Textures/Talents/): node frames, footer and war mode pieces share one sheet (retail 4556093).
+	['talents-background-bottombar-left'] = { rui_TalentsPack, 806, 82, 3/1024, 809/1024, 209/512, 291/512 },
+	['talents-background-bottombar-right'] = { rui_TalentsPack, 806, 82, 6/1024, 812/1024, 297/512, 379/512 },
+	['talents-button-reset'] = { rui_TalentsPack, 20, 20, 357/1024, 397/1024, 385/512, 425/512 },
+	['talents-button-undo'] = { rui_TalentsPack, 21, 20, 309/1024, 351/1024, 385/512, 425/512 },
+	['talents-node-apex-large-glow'] = { rui_TalentsPack, 148, 148, 565/1024, 713/1024, 3/512, 151/512 },
+	['talents-node-apex-large-gray'] = { rui_TalentsPack, 84, 84, 822/1024, 906/1024, 3/512, 87/512 },
+	['talents-node-apex-large-green'] = { rui_TalentsPack, 84, 84, 912/1024, 996/1024, 3/512, 87/512 },
+	['talents-node-apex-large-locked'] = { rui_TalentsPack, 84, 84, 912/1024, 996/1024, 93/512, 177/512 },
+	['talents-node-apex-large-yellow'] = { rui_TalentsPack, 84, 84, 822/1024, 906/1024, 93/512, 177/512 },
+	['talents-node-circle-gray'] = { rui_TalentsPack, 40, 40, 85/1024, 135/1024, 385/512, 435/512 },
+	['talents-node-circle-green'] = { rui_TalentsPack, 40, 40, 141/1024, 191/1024, 385/512, 435/512 },
+	['talents-node-circle-greenglow'] = { rui_TalentsPack, 82, 82, 818/1024, 900/1024, 183/512, 265/512 },
+	['talents-node-circle-locked'] = { rui_TalentsPack, 40, 40, 253/1024, 303/1024, 385/512, 435/512 },
+	['talents-node-circle-shadow'] = { rui_TalentsPack, 76, 76, 3/1024, 79/1024, 385/512, 461/512 },
+	['talents-node-circle-yellow'] = { rui_TalentsPack, 40, 40, 197/1024, 247/1024, 385/512, 435/512 },
+	['talents-node-square-gray'] = { rui_TalentsPack, 40, 40, 906/1024, 986/1024, 183/512, 263/512 },
+	['talents-node-square-green'] = { rui_TalentsPack, 40, 40, 906/1024, 986/1024, 269/512, 349/512 },
+	['talents-node-square-greenglow'] = { rui_TalentsPack, 84, 84, 391/1024, 559/1024, 3/512, 171/512 },
+	['talents-node-square-locked'] = { rui_TalentsPack, 40, 40, 904/1024, 984/1024, 355/512, 435/512 },
+	['talents-node-square-shadow'] = { rui_TalentsPack, 78, 78, 818/1024, 896/1024, 357/512, 435/512 },
+	['talents-node-square-yellow'] = { rui_TalentsPack, 40, 40, 818/1024, 898/1024, 271/512, 351/512 },
+	['talents-warmode-indent'] = { rui_TalentsPack, 97, 87, 719/1024, 816/1024, 3/512, 90/512 },
+	['talents-warmode-ring'] = { rui_TalentsPack, 94, 100, 3/1024, 191/1024, 3/512, 203/512 },
+	['talents-warmode-ring-disabled'] = { rui_TalentsPack, 94, 100, 197/1024, 385/1024, 3/512, 203/512 },
+	['pvptalents-warmode-glow'] = { rui_TalentsWarmodeAtlas, 105, 110, 0.523438, 0.933594, 0.693359, 0.800781 },
+	['pvptalents-warmode-orb'] = { rui_TalentsWarmodeAtlas, 80, 84, 0.324219, 0.636719, 0.371094, 0.453125 },
+	['pvptalents-warmode-swords'] = { rui_TalentsWarmodeAtlas, 46, 43, 0.753906, 0.933594, 0.101563, 0.143555 },
+	['pvptalents-warmode-swords-disabled'] = { rui_TalentsWarmodeAtlas, 46, 43, 0.792969, 0.972656, 0.302734, 0.344727 },
+	['talents-animations-clouds'] = { rui_TalentsClouds, 1612, 774, 0.000488, 0.787598, 0.000488, 0.378418 },
+	['talents-animations-particles'] = { rui_TalentsParticles, 1308, 774, 0.000488, 0.639160, 0.379395, 0.757324 },
+
+	-- Spec backgrounds: two specs per sheet, downscaled to 1024.
+	['talents-background-warrior-arms'] = { rui_TalentsBgWarrior, 1612, 774, 0.000488, 0.787598, 0.000488, 0.378418 },
+	['talents-background-warrior-fury'] = { rui_TalentsBgWarrior, 1612, 774, 0.000488, 0.787598, 0.379395, 0.757324 },
+	['talents-background-warrior-protection'] = { rui_TalentsBgWarriorProtection, 1612, 774, 0.000488, 0.787598, 0.000977, 0.756836 },
+	['talents-background-paladin-holy'] = { rui_TalentsBgPaladin, 1612, 774, 0.000488, 0.787598, 0.000488, 0.378418 },
+	['talents-background-paladin-protection'] = { rui_TalentsBgPaladin, 1612, 774, 0.000488, 0.787598, 0.379395, 0.757324 },
+	['talents-background-paladin-retribution'] = { rui_TalentsBgPaladinRetribution, 1612, 774, 0.000488, 0.787598, 0.000977, 0.756836 },
+	['talents-background-hunter-beastmastery'] = { rui_TalentsBgHunter, 1612, 774, 0.000488, 0.787598, 0.000488, 0.378418 },
+	['talents-background-hunter-marksmanship'] = { rui_TalentsBgHunter, 1612, 774, 0.000488, 0.787598, 0.379395, 0.757324 },
+	['talents-background-hunter-survival'] = { rui_TalentsBgHunterSurvival, 1612, 774, 0.000488, 0.787598, 0.000977, 0.756836 },
+	['talents-background-rogue-assassination'] = { rui_TalentsBgRogue, 1612, 774, 0.000488, 0.787598, 0.000488, 0.378418 },
+	['talents-background-rogue-outlaw'] = { rui_TalentsBgRogue, 1612, 774, 0.000488, 0.787598, 0.379395, 0.757324 },
+	['talents-background-rogue-subtlety'] = { rui_TalentsBgRogueSubtlety, 1612, 774, 0.000488, 0.787598, 0.000977, 0.756836 },
+	['talents-background-priest-discipline'] = { rui_TalentsBgPriest, 1612, 774, 0.000488, 0.787598, 0.000488, 0.378418 },
+	['talents-background-priest-holy'] = { rui_TalentsBgPriest, 1612, 774, 0.000488, 0.787598, 0.379395, 0.757324 },
+	['talents-background-priest-shadow'] = { rui_TalentsBgPriestShadow, 1612, 774, 0.000488, 0.787598, 0.000977, 0.756836 },
+	['talents-background-shaman-elemental'] = { rui_TalentsBgShaman, 1612, 774, 0.000488, 0.787598, 0.000488, 0.378418 },
+	['talents-background-shaman-enhancement'] = { rui_TalentsBgShaman, 1612, 774, 0.000488, 0.787598, 0.379395, 0.757324 },
+	['talents-background-shaman-restoration'] = { rui_TalentsBgShamanRestoration, 1612, 774, 0.000488, 0.787598, 0.000977, 0.756836 },
+	['talents-background-mage-arcane'] = { rui_TalentsBgMage, 1612, 774, 0.000488, 0.787598, 0.000488, 0.378418 },
+	['talents-background-mage-fire'] = { rui_TalentsBgMage, 1612, 774, 0.000488, 0.787598, 0.379395, 0.757324 },
+	['talents-background-mage-frost'] = { rui_TalentsBgMageFrost, 1612, 774, 0.000488, 0.787598, 0.000977, 0.756836 },
+	['talents-background-warlock-affliction'] = { rui_TalentsBgWarlock, 1612, 774, 0.000488, 0.787598, 0.000488, 0.378418 },
+	['talents-background-warlock-demonology'] = { rui_TalentsBgWarlock, 1612, 774, 0.000488, 0.787598, 0.379395, 0.757324 },
+	['talents-background-warlock-destruction'] = { rui_TalentsBgWarlockDestruction, 1612, 774, 0.000488, 0.787598, 0.000977, 0.756836 },
+	['talents-background-druid-balance'] = { rui_TalentsBgDruid, 1612, 774, 0.000488, 0.787598, 0.000488, 0.378418 },
+	['talents-background-druid-feral'] = { rui_TalentsBgDruid, 1612, 774, 0.000488, 0.787598, 0.379395, 0.757324 },
+	['talents-background-druid-restoration'] = { rui_TalentsBgDruidRestoration, 1612, 774, 0.000488, 0.787598, 0.379395, 0.757324 },
+	['talents-background-deathknight-blood'] = { rui_TalentsBgDeathKnight, 1612, 774, 0.000488, 0.787598, 0.000488, 0.378418 },
+	['talents-background-deathknight-frost'] = { rui_TalentsBgDeathKnight, 1612, 774, 0.000488, 0.787598, 0.379395, 0.757324 },
+	['talents-background-deathknight-unholy'] = { rui_TalentsBgDeathKnightUnholy, 1612, 774, 0.000488, 0.787598, 0.000977, 0.756836 },
+
+	-- Spellbook (Textures/Spellbook/): Blizzard's retail spellbook art, cut down to the pieces the book draws.
+	['spellbook-background-evergreen-header'] = { rui_SpellbookBg, 1614, 58, 4/2048, 1618/2048, 4/1024, 62/1024 },
+	['spellbook-header-left-half'] = { rui_SpellbookBg, 807, 58, 4/2048, 811/2048, 4/1024, 62/1024 },
+	['spellbook-background-evergreen-right'] = { rui_SpellbookBg, 807, 805, 4/2048, 811/2048, 68/1024, 873/1024 },
+	-- Uncompressed on its own: block compression smeared the ribbon's gold edges and tail.
+	['spellbook-background-evergreen-ribbon'] = { rui_SpellbookRibbon, 102, 557, 0/128, 102/128, 0/1024, 557/1024 },
+	['spellbook-background-evergreen-left'] = { rui_SpellbookBg, 806, 805, 924/2048, 1730/2048, 68/1024, 873/1024 },
+	['spellbook-divider'] = { rui_SpellbookBg, 657, 11, 8/2048, 665/2048, 880/1024, 891/1024 },
+	['spellbook-list-backplate'] = { rui_SpellbookBg, 316, 106, 672/2048, 988/2048, 880/1024, 986/1024 },
+	['spellbook-item-backplate'] = { rui_SpellbookBg, 256, 64, 992/2048, 1248/2048, 880/1024, 944/1024 },
+	['spellbook-corner-flipbook-evergreen'] = { rui_SpellbookElements, 600, 310, 4/1024, 604/1024, 4/512, 314/512 },
+	['spellbook-item-needtrainer-shadow'] = { rui_SpellbookElements, 270, 270, 608/1024, 878/1024, 4/512, 274/512 },
+	['spellbook-item-iconframe'] = { rui_SpellbookElements, 138, 131, 884/1024, 1022/1024, 4/512, 135/512 },
+	['spellbook-item-needtrainer-iconframe-backplate'] = { rui_SpellbookElements, 137, 131, 4/1024, 141/1024, 320/512, 451/512 },
+	['spellbook-item-iconframe-inactive'] = { rui_SpellbookElements, 136, 127, 148/1024, 284/1024, 320/512, 447/512 },
+	['spellbook-item-iconframe-hover'] = { rui_SpellbookElements, 132, 125, 288/1024, 420/1024, 320/512, 445/512 },
+	['spellbook-item-unassigned-glow'] = { rui_SpellbookElements, 127, 127, 424/1024, 551/1024, 320/512, 447/512 },
+	['spellbook-item-needtrainer-passive-backplate'] = { rui_SpellbookElements, 113, 115, 556/1024, 669/1024, 320/512, 435/512 },
+	['spellbook-item-iconframe-passive-hover'] = { rui_SpellbookElements, 108, 108, 792/1024, 900/1024, 320/512, 428/512 },
+	['spellbook-item-petautocast-corners'] = { rui_SpellbookElements, 90, 90, 904/1024, 994/1024, 320/512, 410/512 },
+}
+
+-- Small integer pixels over power-of-two sizes divide exactly at any FPU precision.
+local function texcoord(cell, size)
+	if type(cell) == "table" then
+		return cell[1]
+	end
+	return cell / size
+end
+
+for _, source in ipairs(retailHudSheets) do
+	local across, down = source.across, source.down
+	for _, row in ipairs(source.rows) do
+		-- Slots are set by index because nil sizes and absent tile flags leave holes in the entry.
+		local entry = { source.file, row[2], row[3] }
+		if row[4] ~= nil then
+			entry[4], entry[5] = texcoord(row[4], across), texcoord(row[5], across)
+			entry[6], entry[7] = texcoord(row[6], down), texcoord(row[7], down)
+			entry[8], entry[9] = row[8], row[9]
+		end
+		atlasinfo[row[1]] = entry
+	end
+end
+
+addon.atlasinfo = atlasinfo
+
+-- Retail's atlas-info field names, listed in entry slot order.
+local INFO_FIELDS = {
+	"filename", "width", "height",
+	"leftTexCoord", "rightTexCoord", "topTexCoord", "bottomTexCoord",
+	"tilesHorizontally", "tilesVertically",
+}
+
+local function describeAtlas(name)
+	local entry = name and atlasinfo[name]
+	if not entry then
+		error(("AddicatUI: no atlas named %s"):format(tostring(name)), 2)
+	end
+	local info = {}
+	for slot, field in ipairs(INFO_FIELDS) do
+		info[field] = entry[slot]
+	end
+	return info
+end
+
+local function resolveKitName(pattern, kits)
+	if type(kits) == "table" then
+		return pattern:format(unpack(kits))
+	end
+	return pattern:format(kits)
+end
+
+-- Private stand-in for retail's C_Texture; a global one may belong to another backport addon.
+addon.AtlasShim = {
+	GetAtlasInfo = describeAtlas,
+	GetFinalNameFromTextureKit = resolveKitName,
+}

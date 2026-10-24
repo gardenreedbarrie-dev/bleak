@@ -18,6 +18,10 @@ class CShaderEffect;
 class CTexture;
 class SFileImpl;
 
+namespace BleakDance {
+struct Rig;
+}
+
 class TextureComboList {
     public:
     /* 0000 */ uint32_t m_count;
@@ -72,6 +76,11 @@ class CM2Shared {
     /* 0198 */ uint16_t m_billboardBoneCount;
     /* 019C */ uint32_t m_lastUsedTime;
     /* 01A0 */ TSLink<CM2Shared> m_updateLink;
+    // BLEAKHOLD(modernassets): M2MODERN_* flags (M2Modern.h), set when the model is parsed.
+    uint32_t m_modernFlags;
+    // BLEAKHOLD(dance): how the Bleakhold dances map onto this model's bones (M2Dance.h), built the first time one of
+    // its models dances; null until then.
+    BleakDance::Rig* m_bleakDanceRig;
 
     static void LoadFailedCallback(void* param);
     static void LoadSucceededCallback(void* param);

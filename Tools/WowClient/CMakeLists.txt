@@ -42,6 +42,7 @@ target_link_libraries(WowClient
     PRIVATE
         BLPFile
         Base
+        BleakFx
         BlizzardCore
         ComSat
         ConsoleBase
@@ -55,6 +56,8 @@ target_link_libraries(WowClient
         Gxu
         Images
         Model2
+        ModernAssets
+        WarcraftXL
         Os
         Scrn
         Services

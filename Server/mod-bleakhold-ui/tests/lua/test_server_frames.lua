@@ -1,0 +1,357 @@
+-- mod-bleakhold-ui: frames built by the C++ module (tests/cpp/bh_gen.cpp: the module's encoders and its
+-- Endpoint for the handshake, revisions, SEQ and chunking) go through the addon's real receive path
+-- (CHAT_MSG_ADDON -> Comm.lua -> State.lua). Every value set in bh_gen.cpp is checked here.
+--
+-- Run by the repository's Tools/UiLint/testrunner.lua (see ../run_tests.sh).
+local BUILD = repo .. "/Server/mod-bleakhold-ui/tests/build/"
+
+local function loadFrames(size)
+    local chunk = assert(host_loadfile(BUILD .. "frames_" .. size .. ".lua"), "run bh_gen first (frames_" .. size .. ".lua)")
+    return chunk()
+end
+
+local function feed(M, data)
+    for _, chat in ipairs(data.frames) do
+        local prefix, body = chat:match("^([^\t]*)\t(.*)$")
+        H.eq(prefix, "BHs", "server prefix")
+        H.ok(#chat <= 1004 and #body <= 1000, "frame body within the client's 1000 bytes")
+        H.deliver(M, body, prefix)
+    end
+end
+
+local function list(t)
+    local out = {}
+    for i, v in ipairs(t or {}) do out[i] = tostring(v) end
+    return table.concat(out, ":")
+end
+
+for _, size in ipairs({ 1000, 251, 64 }) do
+    test("C++ server frames (max body " .. size .. ") reach the addon's state intact", function(M, ns)
+        local data = loadFrames(size)
+        H.eq(data.maxBody, size)
+        local C, S = ns.Comm, ns.S
+        local events = {}
+        for _, e in ipairs({ "HELLO", "TOAST", "ERR", "TASK_DONE", "MPLUS_START", "MPLUS_GO", "MPLUS_END", "RIFT_END", "QUEUE_PROPOSAL" }) do
+            ns.On(e, function(x)
+                events[e] = (events[e] or 0) + 1
+                events[e .. ":arg"] = x
+            end)
+        end
+
+        feed(M, data)
+        M.Advance(1)
+
+        -- transport: every frame accepted, every message complete, revisions continuous
+        local drops = {}
+        for k, v in pairs(C.stats.dropped) do drops[#drops + 1] = k .. "=" .. v end
+        H.eq(#drops, 0, "dropped frames: " .. table.concat(drops, " "))
+        H.eq(C.stats.framesIn, #data.frames, "frames in")
+        H.eq(C.stats.gaps, 0, "revision gaps")
+        H.eq(C.stats.unknown, 0, "unknown ops")
+        H.eq(C.stats.dups, 0, "duplicates")
+        H.eq(C.PendingChunks(), 0, "unfinished chunk buffers")
+        if size < 1000 then
+            H.ok(#data.frames > data.messages, "small frames: messages were chunked")
+        end
+        for topic, rev in pairs(data.revs) do
+            if rev > 0 then
+                H.eq(C.topicRev[topic], rev, "revision of " .. topic)
+            end
+        end
+
+        -- HELLO
+        H.eq(events.HELLO, 1)
+        H.ok(C.ready, "connected")
+        local sv = C.server
+        H.eq(sv.proto, 1); H.eq(sv.minProto, 1); H.eq(sv.serverEpoch, 1792648725); H.eq(sv.utcOffsetMin, -300)
+        H.eq(sv.dataVer, 4242); H.eq(sv.seasonId, 1); H.eq(sv.dailyReset, 1792674645); H.eq(sv.weeklyReset, 1792907925)
+        H.eq(sv.realm, "Bleak;hold|Realm"); H.eq(sv.site, "bleakhold.com/a,b")
+        H.ok(C.HasFeature(C.FEATURE.DBM_BY_SERVER) and C.HasFeature(C.FEATURE.SEASON) and C.HasFeature(C.FEATURE.LEADERBOARDS))
+        H.ok(not C.HasFeature(C.FEATURE.RIFT_SCORE), "rift scoring off")
+
+        -- DEF (complete set: Z stores the version)
+        H.eq(ns.db.defsVer, 4242, "DEF Z stored the data version")
+        H.eq(ns.DefName("A", 4), "Volcanic; 100% |cffff0000red|r")
+        H.eq(ns.Def("A", 4).text, "Plumes: of flame~erupt, under %s players.")
+        H.eq(ns.Def("A", 3).text, "When a non-boss enemy dies, its allies nearby grow stronger.")
+        H.eq(ns.Def("A", 9).name, "Br\195\187lant")
+        H.eq(ns.Def("A", 9).text, "UTF-8 \226\130\172 text and a bad byte ? here.", "invalid UTF-8 replaced by the server")
+        H.eq(ns.Def("E", 7).tier, 7)
+        H.eq(ns.Def("T", 2).text, "Defeat 20 enemies, inside a key.")
+        H.eq(ns.Def("B", 1).title, "First Raid Lord Echo")
+        H.eq(ns.Def("C", 5).name, "Chapter V - Northrend")
+        H.eq(list(ns.Def("D", 1000).bosses), "Boss: one:Boss~two:Boss;three:Boss %four")
+        H.eq(ns.Def("D", 1024).name, "Dungeon 24, the long name")
+        H.eq(ns.Def("D", 1024).lvlMin, 34)
+        H.eq(list(ns.Def("D", 602).bosses), "General Bjarngrim:Volkhan:Ionar:Loken")
+        H.eq(ns.Def("D", 602).timeLimitSec, 1800)
+        H.eq(list(ns.Def("L", 1).sources), "229:329:289:429:543")
+        H.eq(ns.Def("L", 1).raids, "Molten Core, Zul'Gurub")
+        H.eq(ns.Def("L", 1).total, 8)
+        H.eq(ns.Def("S", 1).state, 1)
+        H.eq(ns.Def("S", 2).state, 2)
+        H.eq(ns.Def("K", 2).name, "Sergeant of the Wall")
+        H.eq(ns.Def("W", 1).need, "\"of the Bleak Dawn\" at 500 points")
+        H.eq(ns.Def("M", 0).text, "Where every keystone begins.")
+        H.eq(ns.Def("M", 15).text, "The highest keystone level.")
+        H.eq(ns.Def("X", 12).color, "7FBF7F")
+        H.eq(ns.Def("X", 12).short, "GRV")
+        H.eq(ns.ClassInfo(12).name, "Gravewarden")
+        H.eq(ns.Def("R", 3).name, "Echo of Nefarian")
+
+        -- WEEK (the second snapshot replaced the first)
+        local w = S.week
+        H.eq(w.keysTimed, 4); H.eq(w.echoes, 1); H.eq(w.riftBestFloor, 18); H.eq(w.coins, 2140); H.eq(w.coinsCap, 5500); H.eq(w.shards, 1260)
+
+        -- ERA
+        H.eq(S.era.eraId, 7); H.eq(S.era.nextEraId, 3); H.eq(list(S.era.affixes), "1:3:4"); H.eq(S.era.bonusId, 1); H.eq(S.era.bonusDone, true)
+
+        -- TASKS + TASK delta
+        local t = S.tasks
+        H.eq(t.freeRerolls, 1); H.eq(t.rerollCost, 500000); H.eq(t.rerollCurrency, "C")
+        H.eq(#t.daily, 3); H.eq(#t.weekly, 2)
+        H.eq(t.byUid[102].have, 20, "TASK delta applied"); H.eq(t.byUid[102].state, 1)
+        H.eq(events.TASK_DONE, 1, "task done toast event")
+        H.eq(t.byUid[102].rewardKind, "I"); H.eq(t.byUid[102].rewardItemId, 40752); H.eq(t.byUid[102].rewardText, "1 Emblem of Heroism")
+        H.eq(t.byUid[103].rewardKind, "S"); H.eq(t.byUid[103].state, 1)
+        H.eq(t.byUid[201].kind, "W"); H.eq(t.byUid[201].title, "Echoes; of, the: era~"); H.eq(t.byUid[201].text, "Clear 3 keys | 100% in time")
+        H.eq(t.byUid[201].rewardKind, "G"); H.eq(t.byUid[201].rewardAmount, 1234567); H.eq(t.byUid[201].rewardText, "Legacy Cache (Tier 6)")
+        H.eq(t.byUid[202].state, 2)
+        H.eq(t.byUid[101].title, nil, "empty override -> template text"); H.eq(ns.TaskTitle(t.byUid[101]), "Heroic hero")
+
+        -- KEY
+        local k = S.key
+        H.eq(k.dungeonId, 602); H.ok(k.hasKey); H.eq(k.level, 8); H.eq(list(k.affixes), "1:3:4"); H.eq(k.mode, 2)
+        H.eq(k.weeklyBest, 9); H.eq(k.weeklyBestDungeon, 599); H.eq(k.cachesReady, 1); H.eq(k.cachesBanked, 2)
+        H.eq(k.itemId, 900001); H.eq(k.maxLevel, 20); H.eq(k.eraId, 7); H.eq(k.depleted, true)
+
+        -- BOARD (100 dungeons: several chunks for the small frame sizes)
+        local b = S.board
+        H.eq(#b.dungeons, 100); H.eq(b.shards, 1260); H.eq(b.bountyId, 55); H.eq(b.bountyDungeon, 189); H.eq(b.bountyState, 2)
+        H.eq(b.bountyReward, "50 Shards, doubled"); H.eq(b.firstRunBonus, true)
+        H.eq(b.byId[2001].recordName, "Br\195\169nna%"); H.eq(b.byId[2002].recordName, "Aldric")
+        H.eq(b.byId[2000].bestScore, nil, "missing field"); H.eq(b.byId[2001].bestScore, 10); H.eq(b.byId[2002].bestTier, 2)
+        H.eq(b.byId[2007].locked, true); H.eq(b.byId[2008].locked, false); H.eq(b.byId[2099].recordScore, 9099)
+
+        -- QUEUE (proposal)
+        local q = S.queue
+        H.eq(q.state, 2); H.eq(q.kind, "R"); H.eq(q.activityId, 0); H.eq(q.size, 5); H.eq(q.proposalId, 77); H.eq(q.timeoutSec, 40)
+        H.eq(q.bandMin, 23); H.eq(q.bandMax, 28); H.eq(q.estWaitSec, nil)
+        H.eq(#q.members, 3); H.eq(q.members[2].name, "Br\195\169nna"); H.eq(q.members[2].accepted, 2); H.eq(q.members[2].role, 2)
+        H.eq(q.members[3].classId, 12); H.eq(q.members[3].accepted, 0); H.eq(q.members[3].level, 24)
+        H.eq(events.QUEUE_PROPOSAL, 1)
+
+        -- MPS, MP, MP, MPE
+        local m = S.mplus
+        H.eq(events.MPLUS_START, 1); H.eq(events.MPLUS_GO, 1); H.eq(events.MPLUS_END, 1)
+        H.eq(m.runId, 7001); H.eq(m.dungeonId, 602); H.eq(m.level, 8); H.eq(list(m.affixes), "1:3:4"); H.eq(m.eraId, 7)
+        H.eq(m.countdownMs, 10000); H.eq(m.timeLimitSec, 1800); H.eq(m.elapsedMs, 1122000); H.eq(m.deaths, 2); H.eq(m.deathPenaltySec, 10)
+        H.eq(m.forcesCur, 64); H.eq(m.forcesMax, 100); H.eq(m.bossBits, 5); H.eq(list(m.bossKillSec), "300:0:900"); H.eq(list(m.chestSec), "1260:1440")
+        H.eq(m.state, 2, "finished in time")
+        H.eq(m.result.result, 1); H.eq(m.result.timeMs, 1453000); H.eq(m.result.keyDelta, -2); H.eq(m.result.newDungeonId, 599)
+        H.eq(m.result.newLevel, 6); H.eq(m.result.score, 1840)
+        H.eq(m.result.rewards[1], "Spoils chest, in your bags"); H.eq(m.result.rewards[2], "150 Mythic Coins"); H.eq(m.result.rewards[3], "2x item #40752")
+
+        -- RIFT, RIFTE
+        local r = S.rift
+        H.eq(r.runId, 8001); H.eq(r.floor, 7); H.eq(r.bossId, 3); H.eq(r.bossName, "Echo of Nefarian"); H.eq(r.groupSize, 5); H.eq(r.deaths, 1)
+        H.eq(r.state, 2, "over after RIFTE"); H.eq(events.RIFT_END, 1)
+        H.eq(r.summary.floor, 21); H.eq(r.summary.score, 777); H.eq(r.summary.newBest, true); H.eq(r.summary.rank, 3)
+        H.eq(r.summary.rewards[1], "20 Mythic Coins"); H.eq(r.bestFloor, 21, "new best floor")
+
+        -- COLL
+        local c = S.coll
+        H.eq(c.transmogOwned, 412); H.eq(c.transmogTotal, nil); H.eq(c.laterOwned, 0); H.eq(c.laterTotal, 3771); H.eq(c.setsOwned, 3)
+        H.eq(c.setsTotal, 48); H.eq(list(c.tierHave), "3:0:0:0:0:0:0"); H.eq(list(c.tierTotal), "8:8:5:9:5:5:8")
+
+        -- SET
+        local set = S.sets[ns.SetKey(1, 1)]
+        H.eq(set.setId, 201); H.eq(set.name, "Battlegear of Might"); H.eq(set.collectedBits, 56); H.eq(set.outfitUnlocked, false)
+        H.eq(list(set.items), "16866:16868:16865:16861:16863:16864:16867:16862"); H.eq(list(set.sources), "229:329:289:429:543")
+        H.eq(set.lvlMin, 58); H.eq(set.lvlMax, 61); H.eq(set.echoBoss, "Ragnaros"); H.eq(set.note, "Drops in keys: and the Rift.")
+
+        -- LIDX (1500 items given, 499 sent: the client splits at most 500 records per message) + LCOL delta
+        local n = 0
+        for _ in pairs(S.lidx) do n = n + 1 end
+        H.eq(n, 499)
+        H.eq(S.lidx[30000].collected, true); H.eq(S.lidx[30001].collected, true, "LCOL applied"); H.eq(S.lidx[30003].collected, false)
+        H.eq(S.lidx[30006].tier, 7); H.eq(S.lidx[30008].setId, 201); H.eq(S.lidx[30498].setId, 200 + math.floor(498 / 8))
+        H.eq(S.lidx[30499], nil, "the 500th item is not sent")
+
+        -- SEASON
+        local s = S.season
+        H.eq(s.seasonId, 1); H.eq(s.wePermille, 620); H.eq(s.contributors, 1284); H.eq(s.points, 1240); H.eq(s.rankId, 2)
+        H.eq(s.nextRankId, 3); H.eq(s.nextRankPoints, 260); H.eq(s.title, "Breach the Greymane Wall")
+        H.eq(s.text, "Fill the bar together; 100% opens it."); H.eq(s.tokens, 3)
+        H.eq(#s.parts, 3); H.eq(s.parts[2].name, "Bosses, Echoes"); H.eq(s.parts[2].permille, 550)
+        H.eq(#s.rewards, 2); H.eq(s.rewards[1].earned, true); H.eq(s.rewards[2].stateText, "7 / 20")
+
+        -- LB / LBME / FIRSTS
+        local lk = S.lb.K
+        H.eq(lk.page, 2); H.eq(lk.pages, 7); H.eq(lk.seasonId, 1); H.eq(#lk.rows, 10); H.eq(lk.rows[1].rank, 11)
+        H.eq(#lk.rows[1].members, 5); H.eq(lk.rows[1].members[1].name, "Br\195\169nna"); H.eq(lk.rows[1].members[2].classId, 2)
+        H.eq(#lk.rows[2].members, 1); H.eq(lk.rows[1].dungeonId, 602); H.eq(lk.rows[1].value, 15); H.eq(lk.rows[10].timeSec, -240)
+        H.eq(lk.rows[1].date, 1792645125)
+        H.eq(S.lb.R.rows[1].value, 30); H.eq(S.lb.R.rows[1].timeSec, 1500); H.eq(S.lb.R.rows[1].dungeonId, nil)
+        H.eq(S.lb.E.rows[3].label, "Echo of Ragnaros"); H.eq(S.lb.E.rows[3].value, nil); H.eq(S.lb.E.rows[3].timeSec, 158)
+        H.eq(S.lbme.K.rank, 42); H.eq(S.lbme.K.topPercent, 12); H.eq(S.lbme.K.value, 9); H.eq(S.lbme.K.dungeonId, 602)
+        H.eq(S.lbme.K.timeSec, -154); H.eq(S.lbme.K.barPermille, 580); H.eq(S.lbme.E.label, "Echo of Ragnaros"); H.eq(S.lbme.E.value, nil)
+        H.eq(#S.firsts, 2); H.eq(S.firsts[1].kind, "echo"); H.eq(S.firsts[1].who, "Ironvow (Aldric, Br\195\169nna)")
+        H.eq(S.firsts[1].date, 1792562325); H.eq(S.firsts[2].text, "First timed +15")
+
+        -- TOAST, ERR
+        local toast = events["TOAST:arg"]
+        H.eq(events.TOAST, 1); H.eq(toast.kind, "R"); H.eq(toast.title, "New record"); H.eq(toast.sub, "Halls of Lightning +8 in 24:13")
+        H.eq(toast.target, "leaderboards")
+        H.eq(S.err.op, "TCLAIM"); H.eq(S.err.seq, "1a"); H.eq(S.err.code, "not_claimable"); H.eq(S.err.text, "That task cannot be claimed yet, sorry.")
+        H.eq(events.ERR, 1)
+    end)
+end
+
+------------------------------------------------------------------------------------------------------
+-- CAMPST (section 16) through the same receive path: every state, full and empty lists, empty fields, at the
+-- server's frame sizes (Comm.BuildFrames cuts like the module's framer) and in raw cuts that split tuples,
+-- delivered in order and out of order. The values follow docs/BleakholdProtocol.md section 16.
+------------------------------------------------------------------------------------------------------
+local CAMP_BITS = { [6] = 512 + 1024 + 2048 }
+
+local campSeq = 500
+local function campFrames(C, payload, size)
+    campSeq = campSeq + 1
+    return assert(C.BuildFrames("CAMPST", campSeq, payload, size))
+end
+
+local function deliverAll(M, frames, reverse)
+    local from, to, step = 1, #frames, 1
+    if reverse then from, to, step = #frames, 1, -1 end
+    for i = from, to, step do
+        H.deliver(M, frames[i])
+    end
+end
+
+local function noDrops(C, what)
+    local drops = {}
+    for k, v in pairs(C.stats.dropped) do drops[#drops + 1] = k .. "=" .. v end
+    H.eq(#drops, 0, what .. ": dropped frames: " .. table.concat(drops, " "))
+    H.eq(C.stats.unknown, 0, what .. ": unknown ops")
+    H.eq(C.PendingChunks(), 0, what .. ": unfinished chunk buffers")
+end
+
+local CAMP_RESTING = { "R", 45, 870, 1, 880, 0, 0, { { 164, 2, 1 }, { 171, 1, 0 } }, { { 185, 1 }, { 356, 3 }, { 773, 2 } }, "", 0, 0 }
+local CAMP_SETTLED = { "C", 30, 600, 0, 0, 1500, 15, { { 164, 3, 0 }, { 197, 2, 1 }, { 999, 1, 0 } }, {}, 120, 1, 1 }
+local CAMP_LONG = { "C", 0, 600, 1, 0, 1500, 25, {}, {}, 0, 0, 1 }
+for i = 1, 8 do CAMP_LONG[8][i] = { 100 + i, (i - 1) % 3 + 1, i % 2 } end
+for i = 1, 16 do CAMP_LONG[9][i] = { 200 + i, (i - 1) % 3 + 1 } end
+
+for _, size in ipairs({ 1000, 251, 64 }) do
+    test("CAMPST frames (max body " .. size .. "): every state reaches the addon's state and the camp UI", function(M, ns)
+        local C, S = ns.Comm, ns.S
+        H.hello(M, CAMP_BITS)
+        M.Advance(0.3)
+        local settled = 0
+        ns.On("CAMP_SETTLED", function() settled = settled + 1 end)
+        local f, ind = M.env.BleakholdCampFrame, M.env.BleakholdCampStatus
+
+        -- R: resting at the own fire, objects and places, no glide (empty field)
+        local frames = campFrames(C, H.payload({ CAMP_RESTING }), size)
+        for _, body in ipairs(frames) do H.ok(#body <= size, "frame within " .. size .. " bytes") end
+        deliverAll(M, frames)
+        M.Advance(0.3)
+        noDrops(C, "resting")
+        local c = S.camp
+        H.eq(c.state, "R"); H.eq(c.settle, 45); H.eq(c.fire, 870); H.eq(c.mine, true); H.eq(c.cd, 880)
+        H.eq(c.warmth, 0); H.eq(c.xp, 0); H.eq(c.glide, nil, "empty glide: cannot glide"); H.eq(c.repair, false); H.eq(c.fed, false)
+        H.eq(#c.objs, 2); H.eq(c.objs[1].skill, 164); H.eq(c.objs[1].tier, 2); H.eq(c.objs[1].mine, true); H.eq(c.objs[2].mine, false)
+        H.eq(#c.place, 3); H.eq(c.place[2].skill, 356); H.eq(c.place[2].tier, 3); H.eq(c.place[3].skill, 773)
+        H.ok(f:IsShown(), "camp frame at the fire"); H.eq(f.state:GetText(), "Resting")
+        H.eq(f.place[1].label:GetText(), "Place Cookpot"); H.eq(f.place[2].label:GetText(), "Place Rowboat")
+        H.eq(f.place[3].label:GetText(), "Place Open Tome"); H.ok(not f.place[4]:IsShown())
+        H.ok(f.packBtn:IsShown() and not f.repairBtn:IsShown(), "own fire, no anvil")
+        H.ok(not ind:IsShown(), "no indicator at a fire")
+        H.eq(settled, 0)
+
+        -- C: settled at someone else's fire (settle ignored outside R), an unknown profession, glide, repair, fed
+        deliverAll(M, campFrames(C, H.payload({ CAMP_SETTLED }), size), true)
+        M.Advance(0.3)
+        noDrops(C, "settled")
+        c = S.camp
+        H.eq(c.state, "C"); H.eq(c.settle, 0, "settle only with R"); H.eq(c.mine, false); H.eq(c.warmth, 1500); H.eq(c.xp, 15)
+        H.eq(c.glide, 120); H.eq(c.repair, true); H.eq(c.fed, true); H.eq(#c.place, 0); H.eq(c.objs[3].skill, 999)
+        H.eq(settled, 1, "settled once")
+        H.eq(f.state:GetText(), "Camping"); H.ok(f.repairBtn:IsShown() and not f.packBtn:IsShown())
+        H.ok(not f.place[1]:IsShown(), "nothing to place"); H.ok(f.objs[3]:IsShown(), "unknown profession still drawn")
+        H.contains(f.warmth:GetText(), "+15% XP")
+
+        -- the longest lists the server sends (8 objects, 16 places): chunked at the small sizes
+        local longPayload = H.payload({ CAMP_LONG })
+        local long = campFrames(C, longPayload, size)
+        if #longPayload > size - 20 then H.ok(#long > 1, "the long state is chunked at " .. size) end
+        deliverAll(M, long)
+        M.Advance(0.3)
+        noDrops(C, "long")
+        H.eq(#S.camp.objs, 8); H.eq(#S.camp.place, 16); H.eq(S.camp.place[16].skill, 216); H.eq(S.camp.xp, 25)
+        H.ok(f.objs[8]:IsShown(), "eight icons"); H.ok(f.place[6]:IsShown(), "six place buttons drawn")
+        H.eq(settled, 1, "still settled: no second toast")
+
+        -- N with only warmth and xp, every other field empty: the indicator replaces the frame
+        deliverAll(M, campFrames(C, "N,,,,,600,10,,,,,", size))
+        M.Advance(0.6)
+        noDrops(C, "away")
+        c = S.camp
+        H.eq(c.state, "N"); H.eq(c.fire, 0); H.eq(c.mine, false); H.eq(c.cd, 0); H.eq(c.warmth, 600); H.eq(c.glide, nil)
+        H.eq(#c.objs, 0); H.eq(#c.place, 0)
+        H.ok(not f:IsShown(), "frame hidden away from the fire"); H.ok(ind:IsShown(), "warmth indicator")
+        H.contains(ind.text:GetText(), "+10% XP")
+        M.Advance(30)
+        H.contains(ind.text:GetText(), "09:", "warmth counts down locally")
+
+        -- N with nothing: everything hides
+        deliverAll(M, campFrames(C, "N", size))
+        M.Advance(0.6)
+        H.ok(not f:IsShown() and not ind:IsShown(), "nothing shown")
+    end)
+end
+
+test("CAMPST in raw cuts (inside tuples and lists), duplicated and out of order", function(M, ns)
+    local C, S = ns.Comm, ns.S
+    H.hello(M, CAMP_BITS)
+    M.Advance(0.3)
+    local payload = H.payload({ CAMP_RESTING })
+    for _, chunk in ipairs({ 1, 3, 7 }) do
+        local frames = H.frames("CAMPST", payload, chunk)
+        H.ok(#frames > 5, "cut into many parts")
+        -- every second part first, then all of them (duplicates are ignored)
+        for i = 2, #frames, 2 do H.deliver(M, frames[i]) end
+        for i = #frames, 1, -1 do H.deliver(M, frames[i]) end
+        M.Advance(0.2)
+        noDrops(C, "chunk " .. chunk)
+        H.eq(S.camp.state, "R"); H.eq(#S.camp.objs, 2); H.eq(#S.camp.place, 3); H.eq(S.camp.place[3].tier, 2)
+        S.camp = nil
+    end
+    H.ok(C.stats.dups > 0, "duplicate parts counted")
+end)
+
+test("CAMPST frames produced by the C++ module (bh_gen) parse into a camp state", function(M, ns)
+    local data = loadFrames(1000)
+    local any = false
+    for _, chat in ipairs(data.frames) do
+        if chat:find("^BHs\t1 CAMPST ") then any = true end
+    end
+    if not any then
+        print("  (bh_gen.cpp sends no CAMPST yet: nothing to check here)")
+        return
+    end
+    for _, chat in ipairs(data.frames) do
+        local prefix, body = chat:match("^([^\t]*)\t(.*)$")
+        H.deliver(M, body, prefix)
+    end
+    M.Advance(0.5)
+    noDrops(ns.Comm, "bh_gen")
+    local c = ns.S.camp
+    H.ok(c and (c.state == "N" or c.state == "R" or c.state == "C"), "a camp state from the C++ encoder")
+    -- the last CAMPST of bh_gen.cpp: settled (settle is sent as 0 outside R), three objects, nothing to place
+    H.eq(c.state, "C"); H.eq(c.settle, 0); H.eq(c.fire, 700); H.eq(c.mine, true); H.eq(c.cd, 880); H.eq(c.warmth, 1800)
+    H.eq(c.xp, 15); H.eq(#c.objs, 3); H.eq(#c.place, 0); H.eq(c.glide, 95); H.eq(c.repair, true); H.eq(c.fed, true)
+    H.eq(c.objs[1].skill, 164); H.eq(c.objs[1].tier, 2); H.eq(c.objs[1].mine, true)
+    H.eq(c.objs[3].skill, 197); H.eq(c.objs[3].tier, 3); H.eq(c.objs[3].mine, false)
+end)

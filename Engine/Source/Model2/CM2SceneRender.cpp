@@ -7,6 +7,7 @@
 #include "Engine/Source/Model2/M2Cache.h"
 #include "Engine/Source/Model2/M2Light.h"
 #include "Engine/Source/Model2/M2Model.h"
+#include "Engine/Source/Model2/M2Modern.h"
 #include "Engine/Source/Model2/M2Scene.h"
 #include "Engine/Source/Model2/M2Shared.h"
 #include "Engine/Source/Services/ParticleSystem2.h"
@@ -297,7 +298,9 @@ void CM2SceneRender::SetupMaterial() {
         if (!this->m_curMaterial->m_blendMode) {
             alphaRef = 0.0f;
         } else if (this->m_curMaterial->m_blendMode == 1) {
-            alphaRef = this->m_curElement->m_alpha * 0.87843138f;
+            // BLEAKHOLD(modernassets): modern foliage and leaves author their coverage around the midpoint, so
+            // converted models cut at 0.5 (WarcraftXL's alpha-key fix) instead of the native 0.878.
+            alphaRef = this->m_curElement->m_alpha * (this->m_curShared->m_modernFlags ? 0.5f : 0.87843138f);
         } else {
             alphaRef = 0.0039215689f;
         }
@@ -463,7 +466,7 @@ void CM2SceneRender::DrawBatch() {
 
     CGxBatch batch;
     batch.m_primType = GxPrim_Triangles;
-    batch.m_start = this->m_curSkinSection->m_indexStart;
+    batch.m_start = M2BuiltSectionIndexStart(*this->m_curSkinSection); // BLEAKHOLD(modernassets)
     batch.m_count = this->m_curSkinSection->m_indexCount;
 
     if (CShaderEffect::s_enableShaders) {
@@ -609,7 +612,7 @@ void CM2SceneRender::DrawBatchDoodad(M2Element* elements, uint32_t* indices) {
 
     CGxBatch batch;
     batch.m_primType = GxPrim_Triangles;
-    batch.m_start = this->m_curSkinSection->m_indexStart;
+    batch.m_start = M2BuiltSectionIndexStart(*this->m_curSkinSection); // BLEAKHOLD(modernassets)
     batch.m_count = 0;
     batch.m_minIndex = 0;
     batch.m_maxIndex = 0;

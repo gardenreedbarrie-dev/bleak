@@ -1757,9 +1757,9 @@ bool InitializeGlobal() {
 
     g_startup_StringsDB.Load(__FILE__, __LINE__);
 
-    Startup_StringsRec* title = g_startup_StringsDB.GetRecord(1);
+    // BLEAKHOLD(branding): fixed window title instead of Startup_Strings record 1.
     char windowTitle[260];
-    SStrCopy(windowTitle, title ? title->m_message : "World of Warcraft", STORM_MAX_STR);
+    SStrCopy(windowTitle, "Bleakhold", STORM_MAX_STR);
     ConsoleDeviceInitialize(windowTitle, 1, 1);
 
     OsIMEInitialize();
@@ -1791,9 +1791,8 @@ void BeginCloseGame() {
     StopStreaming();
 
     if (s_closeErrorStringId) {
-        Startup_StringsRec* title = g_startup_StringsDB.GetRecord(1);
         Startup_StringsRec* message = g_startup_StringsDB.GetRecord(s_closeErrorStringId);
-        OsGuiMessageBox(nullptr, 0, message ? message->m_message : "Unknown Error", title ? title->m_message : "World of Warcraft");
+        OsGuiMessageBox(nullptr, 0, message ? message->m_message : "Unknown Error", "Bleakhold"); // BLEAKHOLD(branding)
     }
 }
 
@@ -1819,7 +1818,7 @@ int32_t CommonMain() {
         SRegSaveValue("World of Warcraft\\Client", "SendErrorLogs", 0, 1);
     }
 
-    SErrSetLogTitleString("World of WarCraft (build 12340)");
+    SErrSetLogTitleString("Bleakhold (build 12340)"); // BLEAKHOLD(branding)
     SErrSetLogCallback(WowLogHeader);
 
     if (sendErrorLogs) {

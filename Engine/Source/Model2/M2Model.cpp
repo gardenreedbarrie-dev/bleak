@@ -21,7 +21,9 @@
 #include "Engine/Source/Gx/CGxPool.h"
 #include "Engine/Source/Gx/Gx.h"
 #include "Engine/Source/Model2/M2Cache.h"
+#include "Engine/Source/Model2/M2Dance.h"
 #include "Engine/Source/Model2/M2ModelLight.h"
+#include "Engine/Source/Model2/M2Modern.h"
 #include "Engine/Source/Model2/M2Scene.h"
 #include "Engine/Source/Services/AsyncFile.h"
 #include "Engine/Source/Services/Camera.h"
@@ -2656,7 +2658,7 @@ int32_t CM2Model::SetIndices() {
         }
 
         for (uint32_t i = 0; i < this->m_optGeo->m_skinSectionCount; i++) {
-            M2BatchRange* range = &this->m_optGeo->m_batchRanges[this->m_optGeo->m_skinSections[i].m_skinSectionId];
+            M2BatchRange* range = &this->m_optGeo->m_batchRanges[M2BuiltSectionId(this->m_optGeo->m_skinSections[i])]; // BLEAKHOLD(modernassets)
             uint16_t vertexBase = 0;
 
             for (uint32_t b = range->m_first; b <= range->m_last; b++) {
@@ -2667,12 +2669,13 @@ int32_t CM2Model::SetIndices() {
                 }
 
                 M2SkinSection* section = &skin->m_skinSections[sectionIndex];
+                uint32_t indexStart = M2SkinSectionIndexStart(*section, skin->m_indices.m_count); // BLEAKHOLD(modernassets)
 
                 if (copyIndices || singleBone) {
-                    memcpy(indices, &skin->m_indices[section->m_indexStart], section->m_indexCount * sizeof(uint16_t));
+                    memcpy(indices, &skin->m_indices[indexStart], section->m_indexCount * sizeof(uint16_t));
                 } else {
                     for (uint32_t j = 0; j < section->m_indexCount; j++) {
-                        indices[j] = vertexBase + skin->m_indices[j + section->m_indexStart] - section->m_vertexStart;
+                        indices[j] = vertexBase + skin->m_indices[j + indexStart] - section->m_vertexStart;
                     }
                 }
 
@@ -2702,7 +2705,7 @@ int32_t CM2Model::SetVertices(int32_t optimized, M2SkinSection* section, int32_t
 
     if (optimized) {
         M2SkinProfile* skin = this->m_shared->m_skinData;
-        M2BatchRange* range = &this->m_optGeo->m_batchRanges[section->m_skinSectionId];
+        M2BatchRange* range = &this->m_optGeo->m_batchRanges[M2BuiltSectionId(*section)]; // BLEAKHOLD(modernassets)
 
         for (uint32_t b = range->m_first; b <= range->m_last; b++) {
             uint16_t sectionIndex = skin->m_batches[b].m_skinSectionIndex;
@@ -2888,7 +2891,7 @@ void CM2Model::RenderModelBatchesForProjectedTexture() {
 
             CGxBatch gxBatch;
             gxBatch.m_primType = GxPrim_Triangles;
-            gxBatch.m_start = section->m_indexStart;
+            gxBatch.m_start = M2BuiltSectionIndexStart(*section); // BLEAKHOLD(modernassets)
             gxBatch.m_count = section->m_indexCount;
             gxBatch.m_minIndex = 0;
             gxBatch.m_maxIndex = this->m_shared->m_skinData->m_vertices.m_count - 1;
@@ -2937,7 +2940,7 @@ void CM2Model::RenderBatchShadowMap(int32_t untextured, M2Batch* batch, const CM
 
     CGxBatch gxBatch;
     gxBatch.m_primType = GxPrim_Triangles;
-    gxBatch.m_start = section->m_indexStart;
+    gxBatch.m_start = M2BuiltSectionIndexStart(*section); // BLEAKHOLD(modernassets)
     gxBatch.m_count = 0;
     gxBatch.m_minIndex = 0;
     gxBatch.m_maxIndex = 0;
@@ -3727,6 +3730,7 @@ M2BatchRange::M2BatchRange() {
 // VERIFY: 2ddf06e6 manual
 // OFFSET: 0x0082BE60
 CM2Model::CM2Model() {
+    this->m_bleakDance = nullptr;
     this->m_scaleSq = 0.0f;
     this->m_refCount = 1;
     this->m_fFlags = (this->m_fFlags & 0xFF800000) | 0x340;
@@ -4032,7 +4036,7 @@ void CM2Model::SetGeometryVisible(uint32_t first, uint32_t last, int32_t visible
         int32_t changed = 0;
 
         for (uint32_t i = 0; i < skin->m_skinSections.m_count; i++) {
-            uint32_t id = skin->m_skinSections[i].m_skinSectionId;
+            uint32_t id = M2SkinSectionGeosetId(skin->m_skinSections[i], skin->m_indices.m_count); // BLEAKHOLD(modernassets)
 
             if (first <= id && id <= last) {
                 uint32_t* section = &this->m_skinSections[i];
@@ -4242,11 +4246,11 @@ void CM2Model::OptimizeVisibleGeometry() {
             int32_t indexStart = indexStarts[batch->m_skinSectionIndex];
 
             if (indexStart < 0) {
-                indexStart = static_cast<uint16_t>(indexCount);
+                indexStart = static_cast<int32_t>(indexCount); // BLEAKHOLD(modernassets): was truncated to 16 bits
                 indexStarts[batch->m_skinSectionIndex] = indexCount;
             }
 
-            target->m_indexStart = indexStart;
+            M2SetBuiltSectionIndexStart(*target, static_cast<uint32_t>(indexStart)); // BLEAKHOLD(modernassets)
 
             if (!keepVertices) {
                 target->m_vertexStart = 0;
@@ -4507,7 +4511,7 @@ int32_t CM2Model::SetVerticesMultiSample(int32_t optimized, M2SkinSection* secti
 
     if (optimized) {
         M2SkinProfile* skin = this->m_shared->m_skinData;
-        M2BatchRange* range = &this->m_optGeo->m_batchRanges[section->m_skinSectionId];
+        M2BatchRange* range = &this->m_optGeo->m_batchRanges[M2BuiltSectionId(*section)]; // BLEAKHOLD(modernassets)
 
         for (uint32_t b = range->m_first; b <= range->m_last; b++) {
             uint16_t sectionIndex = skin->m_batches[b].m_skinSectionIndex;
@@ -5114,6 +5118,10 @@ void CM2Model::AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C
         this->m_lastAnimTime = time;
     }
 
+    // BLEAKHOLD(dance): a Bleakhold dance replaces the mapped bones' local transforms below (M2Dance.h).
+    M2DanceFrame dance;
+    bool dancing = this->m_bleakDance && M2DanceBeginFrame(this, dance);
+
     for (uint32_t i = 0; i < data->m_bones.m_count; i++) {
         M2ModelBone* bone = &this->m_bones[i];
         M2CompBone* boneData = &data->m_bones[i];
@@ -5416,8 +5424,17 @@ void CM2Model::AnimateMT(const C44Matrix* view, const C3Vector& diffuse, const C
             local.d1 = offset.y + local.d1;
             local.d2 = offset.z + local.d2;
             local.Translate(C3Vector(-boneData->m_pivot.x, -boneData->m_pivot.y, -boneData->m_pivot.z));
+
+            if (dancing) {
+                M2DanceBone(dance, i, boneData, bone, boneFlags, local);
+            }
+
             boneMatrix = local * *parentMatrix;
         } else {
+            if (dancing) {
+                M2DanceStillBone(dance, i, parentIndex);
+            }
+
             boneMatrix = *parentMatrix;
         }
 
@@ -6571,6 +6588,11 @@ void CM2Model::ProcessCallbacksRecursive() {
 // VERIFY: d96ccadd manual
 // OFFSET: 0x00832640
 CM2Model::~CM2Model() {
+    // BLEAKHOLD(dance)
+    if (this->m_bleakDance) {
+        M2DanceRelease(this);
+    }
+
     CM2Model* model30 = this->m_model30;
 
     if (model30 && model30->m_refCount-- == 1) {

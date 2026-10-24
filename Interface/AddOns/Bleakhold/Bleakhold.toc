@@ -1,0 +1,36 @@
+## Interface: 30300
+## Title: Bleakhold
+## Notes: Bleakhold server interface: activities, dungeon board, keys, Eclipse Rift, collections, season and leaderboards.
+## Author: Bleakhold
+## Version: 1.0.0
+## OptionalDeps: AddicatUI, DragonUI, DBM-Core
+## SavedVariables: BleakholdDB
+## SavedVariablesPerCharacter: BleakholdCharDB
+
+Core.lua
+Data.lua
+EmojiData.lua
+DanceData.lua
+Comm.lua
+State.lua
+Widgets.lua
+Chat.lua
+Toast.lua
+Tooltip.lua
+MinimapOrbs.lua
+Activities.lua
+Dungeons.lua
+Keys.lua
+Rift.lua
+KeyTracker.lua
+Countdown.lua
+Collections.lua
+Animations.lua
+Transmog.lua
+Cases.lua
+Camp.lua
+Season.lua
+Leaderboards.lua
+Graphics.lua
+Demo.lua
+Integration.lua

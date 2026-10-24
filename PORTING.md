@@ -9,7 +9,7 @@ Status: [ ] todo  [x] done  [-] not needed
 | Patch | Why |
 |---|---|
 | [-] laa (4GB) | x64 has no 4GB limit |
-| [-] glue (custom GlueXML) | covered by `WOWDECOMP_DISABLE_SIGNATURE_CHECKS` (`FrameXML_CheckSignature`, LoadXML.cpp) |
+| [-] glue (custom GlueXML) | covered by `WOWDECOMP_DISABLE_SIGNATURE_CHECKS` (`FrameXML_CheckSignature`, LoadXML.cpp), which only matters for modified copies of GlueXML.toc; Bleakhold's own glue (CUSTOM loginui) needs neither |
 | [-] awesome (AwesomeWotlkLib.dll) | already reverted in current Wow.exe; 32-bit DLL can't load in x64 anyway |
 
 ## 1. Graphics / HD look — port first
@@ -22,16 +22,32 @@ Status: [ ] todo  [x] done  [-] not needed
 | [x] sliders | higher graphics slider max | GlueScriptEvents_Scripts.cpp + GameUI_Scripts.cpp — `Script_GetCVarMax` |
 | [x] goscale | GameObject cat 0/4 view dist scales w/ envDetail | WorldScene.cpp — `CWorldScene::ScaleFadeDist` |
 | [x] hdportraits | portraits 256px instead of 64 (render-target path; CPU fallback stays 64) | PortraitButton.cpp (`RTAlphaSupported` area) |
-| [ ] iconsnap | sharp inline icons | GxuFontUtil.cpp — `ParseEmbeddedTexture` |
-| [ ] glyphfix | garbled font glyphs | GxuFontMiscClasses.cpp — `RenderBatch`, `TEXTURECACHEROW::CreateNewDesc` |
+| [x] iconsnap | sharp inline icons (size and offset snapped to whole pixels) | GxuFontUtil.cpp — `ParseEmbeddedTexture` |
+| [x] glyphfix | garbled font glyphs | GxuFontMiscClasses.cpp — `RenderBatch`, `TEXTURECACHEROW::CreateNewDesc`; GxuFontString.cpp — `ClearInstanceData`, `CheckGeometry`; GxuFontTextureCache.cpp — `TextureCallback` |
 | [x] occluder | Stormwind occluder fix | occluder table (World/Map code) |
 | [x] bluemoon | blue moon in sky | data table @ 0x9D07C0 |
 | [x] notransparency | no char fade on zoom-in | Unit_C.cpp — `CGUnit_C::SetMaxAlpha` |
-| [ ] **CUSTOM lght** (side table of 4 extra point lights per M2 + 5 lights for map chunks, uploaded to VS constants c236+; only works with matching custom shaders) | more dynamic lights (new `.lght` section, light arrays enlarged) | CGxDevice.cpp (`InitLights`, `Light`, `LightEnable`, `LightSet`), CGxDeviceD3d/D3d9Ex/OpenGl `IStateSyncLights`, GxuLight.cpp, MapObj.cpp (`SetRenderModeLight`, `SetupLighting`), MapRenderChunk.cpp `SetVertexShader`, M2Scene.cpp `SelectLights`, M2Light.cpp (`AddLight`, `CameraSpace`, `SetupGxLights`), ShaderEffect.cpp `SetLocalLighting` |
+| [x] lights, part A | fixed-function lighting takes the nearest three point lights (stock dropped the nearest of four) | M2Light.cpp — `SetupGxLights` |
+| [-] **CUSTOM lght** (side table of 4 extra point lights per M2 + 5 lights for map chunks, uploaded to VS constants c236+; only works with matching custom shaders) | more dynamic lights (new `.lght` section, light arrays enlarged). Not ported: nothing shows without the WoW-lights-patch-shader MPQ, which Bleakhold does not ship, and its VS constants c236–c250 are taken by grass wind (c240–c248) and BleakFx (c250) | CGxDevice.cpp (`InitLights`, `Light`, `LightEnable`, `LightSet`), CGxDeviceD3d/D3d9Ex/OpenGl `IStateSyncLights`, GxuLight.cpp, MapObj.cpp (`SetRenderModeLight`, `SetupLighting`), MapRenderChunk.cpp `SetVertexShader`, M2Scene.cpp `SelectLights`, M2Light.cpp (`AddLight`, `CameraSpace`, `SetupGxLights`), ShaderEffect.cpp `SetLocalLighting` |
 
 ## 2. Custom (not from St0ny)
 | Patch | What | Source |
 |---|---|---|
+| [x] **CUSTOM modernassets** | Legion+ models, skins, animations, WMOs, split ADTs and BLPs converted as they are opened (WarcraftXL, GPL-3.0-or-later); bone-budget split, skin material rebuild, index starts past 65535, alpha-key cutoff for converted models, crash on modern shader ids | ThirdParty/WarcraftXL, Engine/Source/ModernAssets, SFile2-Core.cpp `SFile::OpenEx`, M2Modern.cpp, M2Shared.cpp, M2Model.cpp, CM2SceneRender.cpp, M2Scene.cpp |
+| [x] **CUSTOM terraintiling** | modern tiles' per-texture tiling (MTXP), read from the tile's own trailing ATSC table and applied per layer (WarcraftXL wxl-modern-adt feature, GPL-3.0-or-later); stock tiles unchanged | ModernAssets.cpp `ModernAssetsForEachTileTiling`, MapTerrainTiling.cpp, MapRenderChunk.cpp (`SetVertexShader`, `RenderMultiPassVertexPixelShader[BigAlpha]`), MapArea.cpp (`Purge`, `~CMapArea`, `LoadTerrainTexture` for FileDataID `_s.blp` names) |
+| [x] **CUSTOM procwater** | CVar `proceduralWater`: terrain and map object water and ocean draw with the procedural water material (LiquidType 100) when the game data has it | LiquidMaterialBank.cpp `Liquid::GetRenderLiquidType`, MapChunkLiquid.cpp, World.cpp, WorldParam_CVar.cpp |
+| [x] **CUSTOM hdtextures** | textures over 4 MB never loaded (async budget); mip scratch overrun by chains over 1024; 2048 scratch and 32 MB budget on x64 | Texture.cpp — `AsyncTextureHandler`, `CreateBlpAsync`, `TextureInitialize`, `TextureLoadBlpMips` |
+| [x] **CUSTOM races** | race ids up to 31 (High Elf 22, Eredar 23): race-indexed arrays sized to 32, unknown races allowed in IsRaceClassRestricted, Lua stack checked before the race and class lists, CharSections and facial hair rows for unknown races skipped, Bleakhold races borrow Blood Elf and Draenei scenes, emote voices, Death Knight filters and portraits when the data has none of their own | WoW/Common/BleakholdRaces.h, CharacterCreation.cpp (`Initialize`, `Shutdown`), CharacterCreation_Scripts.cpp, CharacterSelection_Scripts.cpp, SoundInterface2Emotes.cpp, SoundInterface2.cpp `DK_GetPlayerFilterName`, ComponentUtils.cpp, PortraitButton.cpp `SetPortraitTexture` |
+| [x] **CUSTOM fix** | addon chat prefix and message copied with no bound into 3000-byte stack buffers; emote sound lookups kept pointers into an array that could move | ChatFrame.cpp (addon message receive), SoundInterface2Emotes.cpp `InitEmoteSounds` |
+| [x] **CUSTOM loginui** | Bleakhold glue TOC loaded after GlueXML.toc (optional; no Blizzard files replaced): Bleakhold login screen, restyled dialog with a connecting progress bar, 12-race character creation | CGlueMgr.cpp — `CGlueMgr::Resume`; Interface/Bleakhold/Glue; Tools/BlpConvert |
+| [x] **CUSTOM racedata** | High Elf and Eredar rows for ChrRaces and every table keyed by race, race-mask bits (faction-wide masks follow the race's faction), AzerothCore world SQL; built offline from the user's own DBCs and packed into `Data\patch-R.MPQ` | Tools/RaceForge, Tools/MpqPack |
+| [x] **CUSTOM ui** | Bleakhold UI addon (Lua only) and its server protocol; addon messages no longer go into the whisper reply history | Interface/AddOns/Bleakhold, docs/BleakholdProtocol.md, Tools/UiLint (lint + tests), ChatFrame.cpp (whisper source recording) |
+| [x] **CUSTOM uiserver** | server side of the Bleakhold UI protocol (AzerothCore module; no core change) | Server/mod-bleakhold-ui |
+| [x] **CUSTOM dance** | Bleakhold dances: a clip of a canonical 22-joint skeleton (Interface\Bleakhold\Dances\Dances.bdc) mapped at run time onto any character model's bones (key bones, finger key bones, bind pose, legs by geometry) and written into the mapped bones' local transforms in the bone loop, with fades and crossfades; SMSG_PLAY_SPELL_VISUAL kits 910000-911023 start dance N on a unit while its emote state is EMOTE_STATE_DANCE, loop kits keep late viewers in step; positional per-dance music; CVars bleakDances, bleakDanceMusic, bleakDanceMusicVolume; Lua BleakholdDance_*, model:SetBleakholdDance | Engine/Source/Model2/BleakDance.cpp, M2Dance.cpp, M2Model.cpp (`CM2Model::AnimateMT`, ctor, dtor), M2Shared.cpp (ctor, dtor), CSimpleModel_Scripts.cpp, WoW/Common/BleakholdDance.h, WoW/Source/Ui/BleakholdDance.cpp, Spell_C.cpp `Packet_SMSG_PLAY_SPELL_VISUAL`, WorldFrame.cpp (`OnLayerUpdate`), GameUI.cpp (`InitializeGame`, `ShutdownGame`, `Shutdown`, `LeaveWorld`), GameUI_Scripts.cpp |
+| [x] **CUSTOM emoji** | emoji bubbles: SMSG_PLAY_SPELL_VISUAL kits 900000-900255 show emoji N (Interface\Bleakhold\Emoji\EmojiNNN.blp) over the unit's head for 3.25 s, drawn like chat bubbles; CVars emojiBubbles, emojiBubbleScale | WoW/Common/BleakholdEmoji.h, EmojiBubbleFrame.cpp, Spell_C.cpp `Packet_SMSG_PLAY_SPELL_VISUAL`, WorldFrame.cpp (`OnWorldRender`, `OnLayerUpdate`), GameUI.cpp (`InitializeGame`, `ShutdownGame`, `Shutdown`, `LeaveWorld`) |
+| [x] **CUSTOM grasswind** | wind and parting in the grass, ported from WarcraftXL's wxl-grasswind (GPL-3.0-or-later): WarcraftXL's motion block written into the stock DetailDoodad vs_3_0 bytecode after `add r0, r0, c3` (own token encoder, vertex constants c240-c248, stock bytecode kept in a comment and restored when the device refuses the patched shader); bleakFxGrassWind, bleakFxGrassParting | Engine/Source/Gx/BleakGrassWind.cpp, DetailDoodad.cpp (`CDetailDoodad::Initialize`, `CDetailDoodad::InitializeRenderState`), CGxDeviceD3d/D3d9Ex (`IShaderCreateVertex`), Engine/Source/BleakFx |
+| [x] **CUSTOM bleakfx** | post-processing of the world after it is drawn (ambient occlusion, contact shadows, light shafts, bloom, clarity, grading, vignette, FXAA or SMAA, CAS) with its own ps_3_0/vs_3_0 shaders built by fxc and created from memory (pixel constants c180-c223, vertex c250); an INTZ depth texture as the back buffer's depth buffer when multisampling is off; the bloom sets the stock glow amount to 0; water shaders in place of the stock ones in `CMaterialWater` (screen-space reflections and refraction from a copy of the frame and its depth before the transparent liquids, colour by depth, foam, sun glints, a generated ripple normal map); CVars bleakFx* | Engine/Source/BleakFx, Engine/Source/Gx/BleakDepth.cpp, CGxDeviceD3d/D3d9Ex (`ISetTexture`, `IReleaseD3dResources`), WorldFrame.cpp (`CGWorldFrame`, `~CGWorldFrame`, `UpdateScreenEffectParams`, `OnWorldRender`), World.cpp (`CWorldScene::RenderLiquidPass`), MaterialWater.cpp (`CMaterialWater::Render`, `CMaterialWaterNoSpec::Render`), DayNight.cpp (`BleakSunDrawn`), Interface/AddOns/Bleakhold/Graphics.lua |
+| [x] **CUSTOM branding** | "Bleakhold" window title, popup captions and error log title; CI builds the player exe as `Bleakhold.exe` | Client.cpp, ConsoleDetect.cpp, ConsoleDevice.cpp, WoW/Source/CMakeLists.txt (`WOW_OUTPUT_OVERRIDE`) |
 | [x] **CUSTOM names** | client name check always OK (returns 87) | ClientServices.cpp — `CharacterValidateName` |
 | [-] **CUSTOM Lexara.dll loader** (file missing, loader was a no-op) | loads `Lexara.dll` at startup | WinMain.cpp `start`, StormRtl.cpp `StormRtlInitialize` — needs x64 Lexara.dll or port into source |
 
@@ -47,7 +63,7 @@ Status: [ ] todo  [x] done  [-] not needed
 |---|---|---|
 | [x] itemcache | refresh item cache immediately | DanceCache.cpp area (0x6695FD) |
 | [x] timer | always precise timer | Win64/TimeManager.cpp — `Calibrate` |
-| [x] mirrorfix | Mirror Image leak/crash | Unit_C.cpp — `OnReceiveMirrorImageDataFromServer` |
+| [x] mirrorfix | Mirror Image leak/crash (both component allocations) | Unit_C.cpp — `OnReceiveMirrorImageDataFromServer` |
 | [x] wmocube | missing WMO → error cube, not #134 | Map.cpp — `CMap::SafeOpen` |
 | [x] areatrigger | 50 ms area trigger check | Player_C.cpp — `AreaTriggerCheck` |
 | [x] swing (already in decomp) | no swing on right-click | Player_C.cpp — `MeleeModeEnter` |
@@ -68,7 +84,7 @@ Status: [ ] todo  [x] done  [-] not needed
 | [x] bubblerange | chat bubble range 50 yd | ChatBubbleFrame.cpp `Update`, Unit_C.cpp `ChatBubbleShow` |
 | [x] window / maximize | windowed + maximized default | ConsoleDevice_CVar.cpp — `RegisterGxCVars` |
 | [x] windowfix (already in decomp) | no black screen to windowed | Client_CVar.cpp — `DesktopGammaCallback` |
-| [ ] mouse | mouse flicker / camera jump | Win64/Input.cpp — `DispatchMouseButtonChanges`, `CenterMouse`, `OsWindowProc` |
+| [x] mouse (upstream, 5b41f72) | mouse flicker / camera jump | Win32/Win64 Input.cpp — cursor anchor for relative mouse mode |
 | [x] sound | optimized sound settings | SoundInterface2.cpp `Init`, SoundInterface2_CVar.cpp |
 
 ## 6. Security / login
@@ -81,8 +97,8 @@ Status: [ ] todo  [x] done  [-] not needed
 | [x] nohttp | no HTTP to Battle.net | Win64/OsURLDownload.cpp — `DownloadString` |
 
 ## Still open
-- mouse (CenterMouse rewrite + OsWindowProc cursor tracking)
-- glyphfix, iconsnap (font cache hooks)
-- CUSTOM lght (needs the custom shader MPQ it was built for)
+- connect the server's own Mythic+, Dungeon Journey, Eclipse Rift and task systems to Server/mod-bleakhold-ui (src/BleakholdUi.h)
+- server code for the new races: taxi nodes, race/faction change, costume auras, racial riding trainers (an AzerothCore module)
+- HD High Elf and Eredar models (palettized skins, geoset remap, 512 composite)
 
 All Bleakhold changes are marked `BLEAKHOLD(<patch>)` in the source: `grep -rn BLEAKHOLD` lists them.

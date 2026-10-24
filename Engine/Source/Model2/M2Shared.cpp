@@ -15,7 +15,9 @@
 #include "Engine/Source/Gx/CGxTexFlags.h"
 #include "Engine/Source/Gx/Gx.h"
 #include "Engine/Source/Model2/M2Cache.h"
+#include "Engine/Source/Model2/M2Dance.h"
 #include "Engine/Source/Model2/M2Model.h"
+#include "Engine/Source/Model2/M2Modern.h"
 #include "Engine/Source/Os/TimeManager.h"
 #include "Engine/Source/Services/AsyncFile.h"
 #include "Engine/Source/Services/Texture.h"
@@ -357,7 +359,7 @@ int32_t CM2Shared::SetIndices() {
 
         for (uint32_t i = 0; i < this->m_skinData->m_skinSections.m_count; i++) {
             M2SkinSection* section = &this->m_skinSections[i];
-            uint32_t start = this->m_skinData->m_skinSections[i].m_indexStart;
+            uint32_t start = M2SkinSectionIndexStart(this->m_skinData->m_skinSections[i], this->m_skinData->m_indices.m_count); // BLEAKHOLD(modernassets)
             uint16_t offset = sharedVertices ? 0 : static_cast<uint16_t>(-section->m_vertexStart);
 
             for (uint32_t instance = 0; instance < this->m_instances; instance++) {
@@ -369,7 +371,7 @@ int32_t CM2Shared::SetIndices() {
                 offset += sharedVertices ? static_cast<uint16_t>(this->m_skinData->m_vertices.m_count) : section->m_vertexCount;
             }
 
-            section->m_indexStart = static_cast<uint16_t>(indexStart);
+            M2SetBuiltSectionIndexStart(*section, indexStart); // BLEAKHOLD(modernassets): starts past 65535
             indexStart += this->m_instances * section->m_indexCount;
         }
 
@@ -741,7 +743,9 @@ CShaderEffect* CM2Shared::GetEffect(M2Batch* batch) {
                 alphaOp = static_cast<EGxTexOp>(3);
                 break;
             default:
-                break;
+                // BLEAKHOLD(modernassets): modern skins carry effect indices past 3; with no shader pair the
+                // name below would be built from null pointers. Such a batch is not drawn.
+                return nullptr;
         }
 
         char effectName[256];
@@ -1315,6 +1319,8 @@ int32_t CM2Shared::FinishLoadingSkinProfile(uint32_t size) {
         return 0;
     }
 
+    M2ModernFinalizeSkin(this, size); // BLEAKHOLD(modernassets)
+
     if (!this->InitializeSkinProfile()) {
         DebugLog("Failed to initialize model skin profile: %s", this->m_fileName);
         return 0;
@@ -1527,6 +1533,8 @@ CM2Shared::CM2Shared(CM2Cache* cache) {
     this->m_billboardBoneCount = 0;
     this->m_lastUsedTime = 0;
     this->m_fileName[0] = '\0';
+    this->m_modernFlags = 0;
+    this->m_bleakDanceRig = nullptr;
 }
 
 // INLINED
@@ -1731,6 +1739,8 @@ int32_t CM2Shared::FinishLoading() {
         return 1;
     }
 
+    M2ModernPrepareModel(this); // BLEAKHOLD(modernassets)
+
     if (!M2Init(reinterpret_cast<uint8_t*>(this->m_data), this->m_fileSize, *this->m_data)) {
         DebugLog("Corrupt model data: %s", this->m_fileName);
         return 0;
@@ -1848,6 +1858,10 @@ void CM2Shared::CancelAllDeferredSequences() {
 // OFFSET: 0x0083D5B0
 CM2Shared::~CM2Shared() {
     this->CancelAllDeferredSequences();
+
+    // BLEAKHOLD(dance)
+    M2DanceReleaseRig(this->m_bleakDanceRig);
+    this->m_bleakDanceRig = nullptr;
 
     int32_t pending = 0;
 

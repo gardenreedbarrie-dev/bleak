@@ -1,6 +1,7 @@
 #ifndef WOW_SOURCE_GLUE_CHARACTERCREATION_H
 #define WOW_SOURCE_GLUE_CHARACTERCREATION_H
 
+#include "WoW/Common/BleakholdRaces.h"
 #include <cstdint>
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/Game/NameGen.h"
@@ -14,7 +15,7 @@ struct CharacterPreferences;
 
 class CCharacterCreation {
     public:
-    static CharacterPreferences* m_charPreferences[22][2];
+    static CharacterPreferences* m_charPreferences[BLEAKHOLD_RACE_CAPACITY][2]; // BLEAKHOLD(races): was [22]
     static CCharacterComponent* m_character;
     static CNameGen m_nameGen;
     static CSimpleModelFFX* m_charCustomizeFrame;

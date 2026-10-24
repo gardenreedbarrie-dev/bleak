@@ -3,6 +3,8 @@
 #include <cstring>
 #include <malloc.h>
 #include "Engine/Source/Gx/CGxDeviceD3d/CGxDeviceD3d.h"
+#include "Engine/Source/Gx/BleakDepthD3d9.h"
+#include "Engine/Source/Gx/BleakGrassWind.h"
 #include "Engine/Source/Gx/Blit.h"
 #include "Engine/Source/Gx/CGxBuf.h"
 #include "Engine/Source/Gx/CGxPool.h"
@@ -838,6 +840,10 @@ void CGxDeviceD3d::IShaderCreateVertex(CGxShader* shader) {
     if (shader->m_code.Count() && this->m_d3dDevice->CreateVertexShader(reinterpret_cast<const DWORD*>(shader->m_code.m_data), &vertexShader) == D3D_OK) {
         shader->m_apiSpecific = vertexShader;
         shader->m_valid = 1;
+    } else if (BleakGrassWindRestore(shader->m_code) && this->m_d3dDevice->CreateVertexShader(reinterpret_cast<const DWORD*>(shader->m_code.m_data), &vertexShader) == D3D_OK) {
+        // BLEAKHOLD(grasswind): a grass shader with the wind that the device refuses draws as the stock one.
+        shader->m_apiSpecific = vertexShader;
+        shader->m_valid = 1;
     }
 }
 
@@ -1528,6 +1534,11 @@ void CGxDeviceD3d::IStateSyncXforms() {
 // OFFSET: 0x006A4900
 void CGxDeviceD3d::ISetTexture(uint32_t tmu, CGxTex* texId) {
     if (tmu >= 16) {
+        return;
+    }
+
+    // BLEAKHOLD(bleakfx): the readable depth buffer (BleakDepth.h) has no texture of its own to create or upload.
+    if (BleakDepthBindTexture(this, tmu, texId)) {
         return;
     }
 
@@ -2655,6 +2666,9 @@ int32_t CGxDeviceD3d::ICreateD3dDevice(const CGxFormat& format) {
 // VERIFY: 7e7b165d manual
 // OFFSET: 0x00690150
 void CGxDeviceD3d::IReleaseD3dResources(int32_t freeTextures) {
+    // BLEAKHOLD(bleakfx): the automatic depth buffer back in m_defDepthSurface, the INTZ texture freed before Reset.
+    BleakDepthDetach(this);
+
     this->ITexForceRecreation(freeTextures);
     this->IReleaseD3dShaders(freeTextures);
     this->IReleaseD3dPools(freeTextures);

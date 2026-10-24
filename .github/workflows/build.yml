@@ -2,8 +2,13 @@ name: Build Bleakhold Client
 
 on:
   workflow_dispatch:
+    inputs:
+      addicatui_art:
+        description: "Also build the AddicatUI art package (DragonUI's World of Warcraft artwork, fetched from upstream)"
+        type: boolean
+        default: false
   push:
-    branches: [main]
+    branches: [main, claude/new-session-4tx7g2]
     paths-ignore:
       - '**.md'
 
@@ -17,18 +22,104 @@ jobs:
           lfs: true
 
       - name: Configure (x64)
-        run: cmake -S . -B build/x64 -G "Visual Studio 17 2022" -A x64 -DWOWDECOMP_DISABLE_SIGNATURE_CHECKS=ON "-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/INCREMENTAL:NO /MAP"
+        run: cmake -S . -B build/x64 -G "Visual Studio 17 2022" -A x64 -DWOWDECOMP_DISABLE_SIGNATURE_CHECKS=ON -DBLEAKFX_REQUIRE_SHADERS=ON -DWOW_OUTPUT_OVERRIDE=Bleakhold "-DCMAKE_EXE_LINKER_FLAGS_RELEASE=/INCREMENTAL:NO /MAP"
 
       - name: Build
         run: cmake --build build/x64 --config Release --target WowClient Wow --parallel
 
-      - name: Upload zip
+      # The repo rule is: no DLLs shipped, and no Visual C++ Redistributable needed. Every import of the game must be
+      # a Windows API set or a DLL that ships with Windows (System32); the C/C++ runtime is linked in (/MT).
+      - name: Check client DLLs
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vc = "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+          $vs = & $vswhere -latest -products * -requires $vc -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe |
+            Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
+          if (-not $dumpbin) { throw "dumpbin not found" }
+          foreach ($exe in "bin/Win/Bleakhold.exe", "bin/Win/WowClient64.exe") {
+            if (-not (Test-Path $exe)) { throw "$exe was not built" }
+            $deps = & $dumpbin.FullName /nologo /dependents $exe | ForEach-Object { $_.Trim() } |
+              Where-Object { $_ -match '\.dll$' }
+            Write-Host "$exe imports: $($deps -join ', ')"
+            if (-not $deps) { throw "dumpbin listed no imports for $exe" }
+            $bad = @()
+            foreach ($d in $deps) {
+              $n = $d.ToLowerInvariant()
+              if ($n -match '^(vcruntime|msvcp|vccorlib|concrt|ucrtbase|api-ms-win-crt-)') { $bad += $d; continue }
+              if ($n -match '^(api|ext)-ms-win-') { continue }
+              if (-not (Test-Path (Join-Path $env:SystemRoot "System32\$d"))) { $bad += $d }
+            }
+            if ($bad) { throw "$exe needs DLLs that are not part of Windows: $($bad -join ', ')" }
+          }
+          if (Get-ChildItem bin/Win -Filter *.dll) { throw "DLLs next to the client" }
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build RaceForge
+        run: |
+          python -m pip install pyinstaller==6.11.1
+          python -m PyInstaller --onefile --name BleakholdRaceForge --add-data "Tools/RaceForge/races.json;." --add-data "Tools/RaceForge/taken_patches.json;." --paths Tools/RaceForge --paths Tools/MpqPack --hidden-import mpqpack --distpath build/raceforge/dist --workpath build/raceforge/work Tools/RaceForge/raceforge.py
+
+      # One folder the player copies over a 3.3.5a client: the executables, the glue screens, the emoji art
+      # (loose BLPs in Data\Interface\Bleakhold\Emoji, like the glue files), the dance pack (built here by
+      # DanceForge from the choreography), the UI addon and RaceForge. No game data.
+      - name: Package
+        shell: pwsh
+        run: |
+          $p = "package/Bleakhold"
+          New-Item -ItemType Directory -Force "$p/Data/Interface/Bleakhold", "$p/Interface/AddOns", "$p/Tools" | Out-Null
+          Copy-Item bin/Win/*.exe $p
+          Copy-Item -Recurse Interface/Bleakhold/Glue "$p/Data/Interface/Bleakhold/Glue"
+          Copy-Item -Recurse Interface/Bleakhold/Emoji "$p/Data/Interface/Bleakhold/Emoji"
+          python Tools/DanceForge/danceforge.py pack --out "$p/Data/Interface/Bleakhold/Dances/Dances.bdc"
+          if ($LASTEXITCODE -ne 0) { throw "DanceForge could not build the dance pack" }
+          Copy-Item -Recurse Interface/Bleakhold/Dances/Music "$p/Data/Interface/Bleakhold/Dances/Music"
+          Copy-Item -Recurse Interface/AddOns/Bleakhold "$p/Interface/AddOns/Bleakhold"
+          # AddicatUI's code; its art (AddicatUI_Art) is not game-data free and comes separately (Tools/AddicatUI)
+          Copy-Item -Recurse Interface/AddOns/AddicatUI "$p/Interface/AddOns/AddicatUI"
+          Copy-Item -Recurse Interface/AddOns/AddicatUI_Options "$p/Interface/AddOns/AddicatUI_Options"
+          Copy-Item build/raceforge/dist/BleakholdRaceForge.exe "$p/Tools"
+          Copy-Item Tools/Package/INSTALL.txt $p
+          if (-not (Test-Path "$p/Bleakhold.exe")) { throw "Bleakhold.exe missing from the package" }
+          if (Get-ChildItem -Recurse $p -Filter *.dll) { throw "the package must not contain DLLs" }
+          if (-not (Test-Path "$p/Data/Interface/Bleakhold/Emoji/Emoji000.blp")) { throw "emoji art missing from the package" }
+          if (-not (Test-Path "$p/Data/Interface/Bleakhold/Dances/Dances.bdc")) { throw "dance pack missing from the package" }
+
+      # DragonUI's artwork for AddicatUI (World of Warcraft art): only when asked for, as an artifact of its own.
+      - name: AddicatUI art
+        if: ${{ inputs.addicatui_art }}
+        shell: pwsh
+        run: |
+          $up = (Get-Content Tools/AddicatUI/UPSTREAM).Split(" ")
+          git clone --filter=blob:none $up[0] build/dragonui
+          if ($LASTEXITCODE -ne 0) { throw "could not fetch DragonUI" }
+          git -C build/dragonui checkout --quiet $up[1]
+          if ($LASTEXITCODE -ne 0) { throw "DragonUI has no commit $($up[1])" }
+          $a = "package-art/Bleakhold-AddicatUI-Art/Interface/AddOns"
+          New-Item -ItemType Directory -Force $a | Out-Null
+          python Tools/AddicatUI/sync_dragonui.py art build/dragonui $a
+          if ($LASTEXITCODE -ne 0) { throw "sync_dragonui.py art failed" }
+          if (-not (Test-Path "$a/AddicatUI_Art/AddicatUI_Art.toc")) { throw "AddicatUI_Art missing" }
+
+      - name: Upload AddicatUI art
+        if: ${{ inputs.addicatui_art }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: addicatui-art
+          path: package-art/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload package
         uses: actions/upload-artifact@v4
         with:
           name: bleakhold-client-x64
-          path: |
-            bin/Win/*.exe
-            bin/Win/*.dll
+          path: package/
           if-no-files-found: error
           retention-days: 30
 
@@ -41,3 +132,180 @@ jobs:
             build/x64/**/*.map
           if-no-files-found: warn
           retention-days: 30
+
+  # The Bleakhold Launcher (Tools/Launcher): its engine's tests on Windows, then BleakholdLauncher.exe, a single
+  # portable exe that may need nothing but Windows' own DLLs and the WebView2 runtime.
+  launcher:
+    runs-on: windows-2022
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Rust toolchain
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustc --version
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            Tools/Launcher/core/target/
+            Tools/Launcher/app/target/
+          key: launcher-${{ runner.os }}-${{ hashFiles('Tools/Launcher/*/Cargo.lock') }}
+          restore-keys: launcher-${{ runner.os }}-
+
+      - name: Launcher engine tests
+        working-directory: Tools/Launcher/core
+        run: cargo test --locked
+
+      - name: Build launcher
+        working-directory: Tools/Launcher/app
+        run: cargo build --release --locked
+
+      # The repo rule is: no DLLs shipped. Every import must be a Windows API set or a DLL that ships with
+      # Windows (System32), and none of the Visual C++ runtime or the WebView2 loader (both are linked in).
+      - name: Check launcher DLLs
+        shell: pwsh
+        run: |
+          $exe = "Tools/Launcher/app/target/release/BleakholdLauncher.exe"
+          if (-not (Test-Path $exe)) { throw "BleakholdLauncher.exe was not built" }
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vc = "Microsoft.VisualStudio.Component.VC.Tools.x86.x64"
+          $vs = & $vswhere -latest -products * -requires $vc -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC" -Recurse -Filter dumpbin.exe |
+            Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
+          if (-not $dumpbin) { throw "dumpbin not found" }
+          $deps = & $dumpbin.FullName /nologo /dependents $exe | ForEach-Object { $_.Trim() } |
+            Where-Object { $_ -match '\.dll$' }
+          Write-Host "BleakholdLauncher.exe imports: $($deps -join ', ')"
+          if (-not $deps) { throw "dumpbin listed no imports" }
+          $bad = @()
+          foreach ($d in $deps) {
+            $n = $d.ToLowerInvariant()
+            if ($n -match '^(api|ext)-ms-win-') { continue }
+            if ($n -match '^(vcruntime|msvcp|vccorlib|concrt|ucrtbased|webview2loader)') { $bad += $d; continue }
+            if (-not (Test-Path (Join-Path $env:SystemRoot "System32\$d"))) { $bad += $d }
+          }
+          if ($bad) { throw "the launcher needs DLLs that are not part of Windows: $($bad -join ', ')" }
+          if (Get-ChildItem Tools/Launcher/app/target/release -Filter *.dll) { throw "DLLs next to the launcher" }
+
+      - name: Package launcher
+        shell: pwsh
+        run: |
+          $meta = cargo metadata --manifest-path Tools/Launcher/app/Cargo.toml --no-deps --format-version 1 |
+            ConvertFrom-Json
+          $v = ($meta.packages | Where-Object { $_.name -eq "bleakhold-launcher" }).version
+          $conf = (Get-Content Tools/Launcher/app/tauri.conf.json -Raw | ConvertFrom-Json).version
+          if ($v -ne $conf) { throw "Cargo.toml says $v, tauri.conf.json says $conf" }
+          New-Item -ItemType Directory -Force build/launcher | Out-Null
+          Copy-Item Tools/Launcher/app/target/release/BleakholdLauncher.exe build/launcher/
+          [IO.File]::WriteAllText("$PWD/build/launcher/BleakholdLauncher.version", "$v`n")
+          Get-ChildItem build/launcher | Format-Table Name, Length
+
+      - name: Upload launcher
+        uses: actions/upload-artifact@v4
+        with:
+          name: bleakhold-launcher
+          path: build/launcher/
+          if-no-files-found: error
+          retention-days: 30
+
+  # The rolling prerelease client-latest (Tools/Launcher/DESIGN.md "Publishing"), which the realm's server fetches:
+  # the player package, the commit it was built from, the launcher and its version, in that order.
+  release:
+    needs: [build, launcher]
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/claude/new-session-4tx7g2')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: client-latest-release
+      cancel-in-progress: false
+    steps:
+      - name: Download client package
+        uses: actions/download-artifact@v4
+        with:
+          name: bleakhold-client-x64
+          path: dist/package
+
+      - name: Download launcher
+        uses: actions/download-artifact@v4
+        with:
+          name: bleakhold-launcher
+          path: dist/launcher
+
+      # Players get the game files only: the owner's tools (RaceForge) and the manual install notes stay in the
+      # CI artifact.
+      - name: Assemble release assets
+        run: |
+          set -euo pipefail
+          test -f dist/package/Bleakhold/Bleakhold.exe
+          rm -rf dist/package/Bleakhold/Tools dist/package/Bleakhold/INSTALL.txt
+          mkdir -p dist/release
+          (cd dist/package && zip -q -r -X ../release/bleakhold-client-x64.zip Bleakhold)
+          echo "$GITHUB_SHA" > dist/release/bleakhold-client.commit
+          cp dist/launcher/BleakholdLauncher.exe dist/launcher/BleakholdLauncher.version dist/release/
+          grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+' dist/release/BleakholdLauncher.version
+          ls -l dist/release
+
+      - name: Publish client-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          tag=client-latest
+          title="Bleakhold client (latest)"
+          notes="Rolling build of ${GITHUB_REF_NAME} at ${GITHUB_SHA}, fetched by the realm's server for the launcher."
+          if gh release view "$tag" > /dev/null 2>&1; then
+            gh api -X PATCH "repos/${GH_REPO}/git/refs/tags/${tag}" -f sha="$GITHUB_SHA" -F force=true > /dev/null
+            gh release edit "$tag" --prerelease --title "$title" --notes "$notes"
+          else
+            gh release create "$tag" --prerelease --target "$GITHUB_SHA" --title "$title" --notes "$notes"
+          fi
+          cd dist/release
+          # One at a time and in this order: the launcher before its version file.
+          for f in bleakhold-client-x64.zip bleakhold-client.commit BleakholdLauncher.exe BleakholdLauncher.version; do
+            gh release upload "$tag" "$f" --clobber
+          done
+
+  # Checks that run on Linux: the Bleakhold Lua (lint against the 3.3.5a API, unit tests) and the Python tools.
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: sudo apt-get update && sudo apt-get install -y libxml2-utils python3-pil python3-numpy
+
+      - name: Lua lint and tests
+        run: bash Tools/UiLint/check.sh
+
+      - name: Python tool tests
+        run: |
+          python3 -I Tools/MpqPack/tests/run_tests.py
+          python3 -I Tools/RaceForge/tests/run_tests.py
+          python3 -I Tools/EmojiForge/tests/run_tests.py
+          python3 -I Tools/DanceForge/tests/run_tests.py
+          python3 -I Tools/DanceForge/danceforge.py check
+
+      - name: Grass wind shader patch tests
+        run: bash Tools/GrassWind/tests/run_tests.sh
+
+      - name: Server module tests
+        run: bash Server/mod-bleakhold-ui/tests/run_tests.sh --fuzz-iterations 100000 --fuzz-seconds 20
+
+      - name: Launcher engine tests
+        working-directory: Tools/Launcher/core
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          cargo test --locked

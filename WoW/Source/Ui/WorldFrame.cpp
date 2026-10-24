@@ -4,6 +4,7 @@
 #include <typeinfo>
 #include "Engine/Source/Base/Coordinate.h"
 #include "Engine/Source/Base/Status.h"
+#include "Engine/Source/BleakFx/BleakFx.h"
 #include "Engine/Source/ConsoleBase/ConsoleVar.h"
 #include "Engine/Source/Event/CKeyEvent.h"
 #include "Engine/Source/Event/CMouseEvent.h"
@@ -69,6 +70,8 @@
 #include "WoW/Source/Ui/ChatBubbleFrame.h"
 #include "WoW/Source/Ui/CommentatorFrame.h"
 #include "WoW/Source/Ui/DressUpModelFrame.h"
+#include "WoW/Source/Ui/BleakholdDance.h"
+#include "WoW/Source/Ui/EmojiBubbleFrame.h"
 #include "WoW/Source/Ui/GameUI.h"
 #include "WoW/Source/Ui/MailInfo.h"
 #include "WoW/Source/Ui/MinimapFrame.h"
@@ -930,6 +933,12 @@ void CGWorldFrame::UpdateScreenEffectParams() {
 
     float glow = DayNight::GetInfo()->m_bands.m_glow * 255.0f + 512.0f;
     uint8_t glowLevel = *reinterpret_cast<uint32_t*>(&glow) >> 14;
+
+    // BLEAKHOLD(bleakfx): BleakFx's bloom replaces the glow; the underwater and drunk blur stay.
+    if (BleakFx::ReplacesStockGlow()) {
+        glowLevel = 0;
+    }
+
     int32_t underwater = 0;
     uint8_t minimum = 0;
     uint8_t level = minimum;
@@ -1253,6 +1262,8 @@ CGWorldFrame::CGWorldFrame(CSimpleFrame* parent) : CSimpleFrame(parent) {
 
     EventRegisterEx(EVENT_ID_IDLE, CGWorldFrame::Update, this, -1000.0f);
     FFX::Init();
+    // BLEAKHOLD(bleakfx): the bleakFx* settings.
+    BleakFx::Init();
 
     CGWorldFrame::ffxEffectGlow = new (__FILE__, __LINE__) EffectGlow();
     CGWorldFrame::ffxEffectDeath = new (__FILE__, __LINE__) EffectDeath();
@@ -1673,6 +1684,21 @@ void CGWorldFrame::OnWorldRender() {
     CGWorldFrame::UpdateScreenEffectParams();
     FFX::Start();
 
+    // BLEAKHOLD(bleakfx): the readable depth buffer before the world clears and draws into it, and this frame's
+    // light (OnWorldUpdate has set the camera and DayNight) for the water and the post-processing.
+    DayNight::DNInfo* dayNight = DayNight::GetInfo();
+    BleakFx::WorldLight light;
+    light.zoneGlow = dayNight->m_bands.m_glow;
+    light.sunDirection = DayNight::g_planets.m_sun.m_position - dayNight->m_cameraPos;
+    light.sunDirection.NormalizeSafe();
+    light.sunColor = dayNight->m_bands.m_sunCloudColors[0];
+    light.ambient = dayNight->m_bands.m_ambient;
+    light.diffuse = dayNight->m_bands.m_diffuse;
+    light.fogEnd = dayNight->m_fog.m_end;
+    light.skyZenith = dayNight->m_bands.m_skyColors[0];
+    light.skyHorizon = dayNight->m_bands.m_skyColors[5];
+    BleakFx::BeginWorld(light);
+
     CRect fullViewport = { 0.0f, 0.0f, 1.0f, 1.0f };
 
     if (this->m_viewportNDC != fullViewport) {
@@ -1786,8 +1812,14 @@ void CGWorldFrame::OnWorldRender() {
     }
 
     g_theGxDevicePtr->RsPop();
+
+    // BLEAKHOLD(bleakfx): post-processing of the world, before the chat and emoji bubbles and the interface.
+    BleakFx::RenderWorld(DayNight::BleakSunDrawn(), DayNight::GetInfo()->m_showSky != 0);
+
     SmartScreenRectClearGrid(1);
     CGChatBubbleFrame::OnWorldRender(this);
+    // BLEAKHOLD(emoji): after the chat bubbles, whose rects the emoji bubbles stack above.
+    CGEmojiBubbleFrame::OnWorldRender(this);
     GxXformSetViewport(minX, maxX, minY, maxY, minZ, maxZ);
     FFX::Finish();
     CVehiclePassenger_C::PostRenderUpdateAll();
@@ -1838,6 +1870,10 @@ int32_t CGWorldFrame::ObjectEnumProc(void* param, uint32_t flags, uint64_t guid,
 void CGWorldFrame::OnLayerUpdate(float elapsedSec) {
     this->CSimpleFrame::OnLayerUpdate(elapsedSec);
     CGChatBubbleFrame::OnWorldLayerUpdate();
+    // BLEAKHOLD(emoji): age the emoji bubbles and find their head points.
+    CGEmojiBubbleFrame::OnWorldLayerUpdate();
+    // BLEAKHOLD(dance)
+    CGBleakholdDance::OnWorldLayerUpdate();
 
     CSimpleTop* top = this->m_simpleTop;
     HITTESTRESULT hit;
@@ -2529,4 +2565,6 @@ CGWorldFrame::~CGWorldFrame() {
     }
 
     FFX::Destroy();
+    // BLEAKHOLD(bleakfx): its textures and shaders, and the automatic depth buffer back.
+    BleakFx::Destroy();
 }

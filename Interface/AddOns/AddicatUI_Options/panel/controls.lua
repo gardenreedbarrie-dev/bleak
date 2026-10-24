@@ -1,0 +1,1855 @@
+-- Copyright (c) 2026 NeticSoul. Licensed under the MIT License; see LICENSE.
+-- Portions adapted from NotPlater (MIT, (c) 2023 RichSteini); see THIRD_PARTY_NOTICES.
+
+--[[
+================================================================================
+AddicatUI Options Panel - Controls Library
+================================================================================
+Reusable control builders with auto-binding to addon.db.profile.
+Post-skins AceGUI widgets with the Forever control art (addon.ForeverUI).
+================================================================================
+]]
+
+local addon = AddicatUI
+if not addon then return end
+
+local LO = addon.LO
+
+local AceGUI = LibStub("AceGUI-3.0")
+
+local FUI = addon.ForeverUI
+local FONTS = FUI.Fonts
+
+-- ============================================================================
+-- MODULE
+-- ============================================================================
+
+local Controls = {}
+addon.PanelControls = Controls
+
+-- ============================================================================
+-- SEARCH INDEX STUBS
+-- ============================================================================
+
+local STUB_NOOP = function() end
+local STUB_MT   = { __index = function() return STUB_NOOP end }
+
+-- Keep frame/content nil on stubs; __index would return a truthy noop.
+local STUB_NIL_FIELDS = { content = true, frame = true, titletext = true, label = true }
+
+local function MakeStub(extra)
+    local t = extra or {}
+    for field in pairs(STUB_NIL_FIELDS) do
+        if rawget(t, field) == nil then
+            t[field] = nil
+        end
+    end
+    return setmetatable(t, STUB_MT)
+end
+Controls.MakeStub = MakeStub
+
+local function safestr(v)
+    if type(v) == "string" then return v end
+    if v == nil then return "" end
+    return tostring(v)
+end
+
+local function RecordSearchEntry(opts)
+    local Panel = addon.OptionsPanel
+    if not Panel or not Panel.searchIndex then return end
+    local label    = safestr(opts.label)
+    local desc     = safestr(opts.desc ~= nil and opts.desc or opts.tooltip)
+    local dbPath   = safestr(opts.dbPath)
+    local subTab   = safestr(Panel._currentSubTabLabel)
+    local subTabKey = safestr(Panel._currentSubTabKey)
+    local section  = safestr(Panel._currentSection)
+    local tabText  = safestr(Panel._currentTabText)
+    if label == "" and dbPath == "" then return end
+
+    -- Fallback to sub-tab label when the control has no section.
+    local displaySection
+    if section ~= "" then
+        displaySection = section
+    elseif subTab ~= "" then
+        displaySection = subTab
+    end
+
+    -- Include subTab in haystack for controls without a section.
+    local haystack = string.lower(
+        strjoin(" ", tabText, subTab, section, label, desc, dbPath)
+    )
+    Panel.searchIndex[#Panel.searchIndex + 1] = {
+        tab      = Panel._currentIndexTab,
+        tabText  = tabText,
+        section  = displaySection,
+        subTab   = (subTabKey ~= "" and subTabKey) or nil,
+        label    = label,
+        desc     = (desc ~= "" and desc) or nil,
+        dbPath   = (dbPath ~= "" and dbPath) or nil,
+        haystack = haystack,
+    }
+end
+
+-- Stable widget id for search navigation (dbPath or label).
+local function TagSearchId(widget, opts)
+    if not widget or not opts then return end
+    local id = opts.dbPath
+    if not id or id == "" then id = opts.label end
+    widget._dragonId = id
+end
+
+-- ============================================================================
+-- THEME
+-- ============================================================================
+
+Controls.Theme = {
+    accent      = { 1.0, 0.82, 0.0, 1 },
+    accentHex   = "ffd100",
+    sectionBg   = { 0.05, 0.04, 0.03, 0.55 },
+    sectionBgDim = { 0.03, 0.025, 0.02, 0.4 },
+    textNormal  = { 1.0, 1.0, 1.0, 1 },
+    textDim     = { 0.72, 0.72, 0.72, 1 },
+    textGold    = { 1.0, 0.82, 0.0, 1 },
+    warning     = { 1.0, 0.4, 0.0, 1 },
+    success     = { 0.0, 1.0, 0.0, 1 },
+    danger      = { 1.0, 0.2, 0.2, 1 },
+    font        = (FONTS.Highlight:GetFont()),
+    fontSize    = 12,
+}
+
+-- Inset 1 so the square fill never pokes past the rounded corners of the section rail.
+local BD_FILL = {
+    bgFile = "Interface\\ChatFrame\\ChatFrameBackground",
+    tile = false,
+    insets = { left = 1, right = 1, top = 1, bottom = 1 },
+}
+
+-- Ensure widgets always receive a valid font even when a custom/system font path is unavailable.
+local function SafeSetFont(fs, size, flags, preferredFont)
+    if not fs then return end
+
+    local tryFonts = {
+        preferredFont,
+        Controls.Theme.font,
+        addon.Fonts and addon.Fonts.PRIMARY,
+        STANDARD_TEXT_FONT,
+        "Fonts\\FRIZQT__.TTF",
+    }
+
+    for _, fontPath in ipairs(tryFonts) do
+        if fontPath and fs.SetFont and fs:SetFont(fontPath, size or 12, flags or "") then
+            return
+        end
+    end
+
+    if fs.SetFontObject then
+        fs:SetFontObject(GameFontNormal)
+    end
+end
+
+-- ============================================================================
+-- LOCALIZED TEXT FITTING
+-- ============================================================================
+
+-- Widget widths are tuned against English; every other language runs wider, so grow the
+-- widget to its own text rather than letting the overflow land on top of its neighbour.
+local function FitWidth(fontString, baseWidth, padding, maxWidth)
+    baseWidth = baseWidth or 0
+    if not fontString or not fontString.GetStringWidth then return baseWidth end
+    local needed = fontString:GetStringWidth()
+    if not needed or needed <= 0 then return baseWidth end
+    needed = math.ceil(needed) + (padding or 0)
+    if maxWidth and needed > maxWidth then needed = maxWidth end
+    if needed < baseWidth then return baseWidth end
+    return needed
+end
+
+-- 3.3.5a has no FontString:SetWordWrap, so a width-clamped string wraps out of its own row
+-- instead of truncating; cut it here, on UTF-8 boundaries so Cyrillic never splits mid-glyph.
+local function ClampText(fontString, maxWidth)
+    if not fontString or not fontString.GetStringWidth then return end
+    if not maxWidth or maxWidth <= 0 then return end
+    local text = fontString:GetText()
+    if not text or text == "" then return end
+    if fontString:GetStringWidth() <= maxWidth then return end
+
+    local cut = #text
+    while cut > 1 do
+        cut = cut - 1
+        local b = string.byte(text, cut + 1)
+        while cut > 1 and b and b >= 128 and b < 192 do
+            cut = cut - 1
+            b = string.byte(text, cut + 1)
+        end
+        fontString:SetText(string.sub(text, 1, cut) .. "\226\128\166")
+        if fontString:GetStringWidth() <= maxWidth then return end
+    end
+end
+
+Controls.FitWidth  = FitWidth
+Controls.ClampText = ClampText
+
+-- Beyond this a grown widget starts crowding the panel; the leftover is truncated instead.
+local MAX_AUTO_WIDTH = 420
+
+-- AceGUI's own defaults, plus the horizontal insets its templates put around the text.
+local BUTTON_BASE_WIDTH   = 200
+local BUTTON_TEXT_INSET   = 34
+local DROPDOWN_BASE_WIDTH = 200
+local DROPDOWN_LABEL_INSET = 6
+
+local function NormalizeText(value, fallback)
+    if type(value) == "string" and value ~= "" then
+        return value
+    end
+    if value == nil then
+        return fallback
+    end
+    local converted = tostring(value)
+    if converted == "" then
+        return fallback
+    end
+    return converted
+end
+
+local function NormalizeDescription(value)
+    if type(value) == "string" and value ~= "" then
+        return value
+    end
+    return nil
+end
+
+local function NormalizeDropdownValues(values)
+    if type(values) ~= "table" then
+        return {}
+    end
+    local normalized = {}
+    for key, label in pairs(values) do
+        normalized[key] = NormalizeText(label, NormalizeText(key, ""))
+    end
+    return normalized
+end
+
+-- ============================================================================
+-- DB PATH HELPERS
+-- ============================================================================
+
+function Controls:GetDBValue(dbPath)
+    if not dbPath or not addon.db or not addon.db.profile then return nil end
+    local path = { strsplit(".", dbPath) }
+    local value = addon.db.profile
+    for _, key in ipairs(path) do
+        if type(value) ~= "table" then return nil end
+        value = value[key]
+    end
+    return value
+end
+
+function Controls:SetDBValue(dbPath, val)
+    if not dbPath or not addon.db or not addon.db.profile then return end
+    local path = { strsplit(".", dbPath) }
+    local target = addon.db.profile
+    for i = 1, #path - 1 do
+        if not target[path[i]] then target[path[i]] = {} end
+        target = target[path[i]]
+    end
+    target[path[#path]] = val
+end
+
+function Controls:EnsureModuleTable(moduleName)
+    if not addon.db or not addon.db.profile then
+        return {}
+    end
+
+    if not addon.db.profile.modules then
+        addon.db.profile.modules = {}
+    end
+
+    if not addon.db.profile.modules[moduleName] then
+        addon.db.profile.modules[moduleName] = {}
+    end
+
+    return addon.db.profile.modules[moduleName]
+end
+
+-- ============================================================================
+-- WIDGET SKINNING
+-- ============================================================================
+
+-- The Forever box is 29 tall, so the 24-high AceGUI row would leave the boxes touching.
+local CHECK_ROW_HEIGHT = 28
+local EDIT_INSET = 4
+local EDIT_BUTTON_W, EDIT_BUTTON_H = 48, 18
+
+local function SkinCheckBox(widget)
+    if not (widget.checkbg and widget.check) then return end
+    local indent = widget._dragonCheckIndent or 0
+    FUI.SkinCheckButton(widget, { indent = indent })
+    widget.checkbg:ClearAllPoints()
+    widget.checkbg:SetPoint("TOPLEFT", indent - 3, 1)
+    if widget.desc and widget.desc:IsShown() then
+        widget.desc:ClearAllPoints()
+        widget.desc:SetPoint("TOPLEFT", widget.checkbg, "TOPRIGHT", 3, -21)
+    else
+        widget:SetHeight(CHECK_ROW_HEIGHT)
+    end
+end
+
+local function SyncSliderState(widget)
+    local slider = widget.slider
+    if not slider then return end
+    local enabled = not widget.disabled
+    slider:SetAlpha(enabled and 1 or 0.55)
+    if slider._fuBack then
+        slider._fuBack:EnableMouse(enabled)
+        slider._fuForward:EnableMouse(enabled)
+    end
+end
+
+local function SkinSlider(widget)
+    if not widget.slider then return end
+    FUI.SkinSlider(widget, { steppers = true })
+    if not widget._dragonSliderWrapped then
+        widget._dragonSliderWrapped = true
+        local original = widget.SetDisabled
+        widget.SetDisabled = function(self, disabled)
+            original(self, disabled)
+            SyncSliderState(self)
+        end
+    end
+    -- The skin resets the value box font, which also resets the colour AceGUI gave it.
+    widget:SetDisabled(widget.disabled)
+end
+
+-- Separate FontString so GetText and the stored value stay exactly what the caller set.
+local function SyncPlaceholder(widget)
+    local text = widget.text
+    if not text then return end
+    local holder = widget._dragonPlaceholder
+    local current = text:GetText()
+    if current and current ~= "" then
+        if holder then holder:Hide() end
+        return
+    end
+    if not holder then
+        holder = text:GetParent():CreateFontString(nil, "OVERLAY")
+        holder:SetFontObject(FONTS.Normal)
+        holder:SetJustifyH("CENTER")
+        holder:SetPoint("LEFT", text, "LEFT", 0, 0)
+        holder:SetPoint("RIGHT", text, "RIGHT", 0, 0)
+        widget._dragonPlaceholder = holder
+    end
+    holder:SetText(LO["Click to select"])
+    ClampText(holder, math.max(40, (widget.frame:GetWidth() or 200) - 34))
+    -- Same gold as a real value: grey made the empty dropdown look disabled.
+    if widget.disabled then
+        holder:SetTextColor(0.5, 0.5, 0.5)
+    else
+        holder:SetTextColor(1, 0.82, 0)
+    end
+    holder:Show()
+end
+
+-- AceGUI paints the closed dropdown text white on every enable; the Forever dropdown is gold.
+local function SyncDropdown(widget)
+    local tint = widget.disabled and 0.5 or nil
+    if widget.text then
+        if tint then
+            widget.text:SetTextColor(tint, tint, tint)
+        else
+            widget.text:SetTextColor(1, 0.82, 0)
+        end
+    end
+    if widget.label then
+        if tint then
+            widget.label:SetTextColor(tint, tint, tint)
+        else
+            widget.label:SetTextColor(1, 0.82, 0)
+        end
+    end
+    SyncPlaceholder(widget)
+end
+
+-- Pullouts hang from UIParent, so the window's layering pass never reaches them: lift on every open.
+local function LiftPullout(po)
+    local frame = po.frame
+    frame:SetFrameStrata("TOOLTIP")
+    frame:Raise()
+    FUI.EnforceLayering(frame)
+end
+
+local function SkinPullout(widget)
+    local po = widget.pullout
+    local frame = po and po.frame
+    if not frame then return end
+    if not po._dragonOpenWrapped then
+        po._dragonOpenWrapped = true
+        local original = po.Open
+        po.Open = function(self, point, relFrame, ...)
+            -- Hanging from UIParent, it would miss the options window's scale; match the dropdown instead.
+            self.frame:SetScale(relFrame and relFrame:GetEffectiveScale() / UIParent:GetEffectiveScale() or 1)
+            original(self, point, relFrame, ...)
+            LiftPullout(self)
+        end
+    end
+    if frame._dragonSkinned then return end
+    frame._dragonSkinned = true
+    FUI.SkinMenuBackground(frame, "bg")
+    if po.slider then
+        po.slider:SetBackdrop(nil)
+        FUI.SkinScrollBar(po.slider)
+        -- Items end 12 short of the edge, under the bar's art, and would take its clicks.
+        if po.scrollFrame then
+            po.slider:SetFrameLevel(po.scrollFrame:GetFrameLevel() + 10)
+        end
+    end
+end
+
+local function SkinDropdown(widget)
+    if not (widget.dropdown and widget.button) then return end
+    FUI.SkinDropdownButton(widget, { style = "wow2" })
+    if widget.label then
+        SafeSetFont(widget.label, 12, "")
+    end
+    if not widget._dragonDropdownWrapped then
+        widget._dragonDropdownWrapped = true
+        local original = widget.SetDisabled
+        widget.SetDisabled = function(self, disabled)
+            original(self, disabled)
+            SyncDropdown(self)
+        end
+        for _, name in ipairs({ "SetText", "SetValue", "SetList", "SetMultiselect" }) do
+            local setter = widget[name]
+            widget[name] = function(self, ...)
+                setter(self, ...)
+                SyncPlaceholder(self)
+            end
+        end
+        widget.button:HookScript("OnClick", function()
+            SkinPullout(widget)
+        end)
+    end
+    SyncDropdown(widget)
+    SkinPullout(widget)
+end
+
+local function SkinEditBoxWidget(widget)
+    local box = widget.editbox
+    if not box then return end
+    FUI.SkinEditBox(widget)
+    if widget.label then
+        SafeSetFont(widget.label, 12, "")
+    end
+    if widget.button then
+        FUI.SkinButton(widget.button)
+        widget.button:SetSize(EDIT_BUTTON_W, EDIT_BUTTON_H)
+    end
+    if not widget._dragonEditWrapped then
+        widget._dragonEditWrapped = true
+        -- AceGUI rewrites the text insets on every SetText and keystroke.
+        local original = widget.SetText
+        widget.SetText = function(self, ...)
+            original(self, ...)
+            self.editbox:SetTextInsets(EDIT_INSET, EDIT_INSET, 0, 0)
+        end
+        box:HookScript("OnTextChanged", function(self)
+            local reserve = widget.button and widget.button:IsShown() and (EDIT_BUTTON_W + 6) or EDIT_INSET
+            self:SetTextInsets(EDIT_INSET, reserve, 0, 0)
+        end)
+    end
+    box:SetTextInsets(EDIT_INSET, EDIT_INSET, 0, 0)
+    widget:SetDisabled(widget.disabled)
+end
+
+-- Also takes { frame = button } so the Keybinding widget's inner button can reuse it.
+local function SkinButton(widget)
+    local f = widget.frame
+    if f then
+        FUI.SkinButton(f)
+    end
+end
+
+local function SkinLabel(widget)
+    if widget.label then
+        SafeSetFont(widget.label, 11, "")
+    end
+end
+
+local function SkinHeading(widget)
+    if widget.label then
+        widget.label:SetFontObject(FONTS.HighlightMedium)
+        widget.label:SetTextColor(unpack(Controls.Theme.accent))
+    end
+    for _, line in ipairs({ widget.left or false, widget.right or false }) do
+        if line then
+            FUI.SetAtlas(line, "options_horizontaldivider")
+            line:SetHeight(1)
+        end
+    end
+end
+
+local function SkinInlineGroup(widget)
+    local theme = Controls.Theme
+    local border = widget.content and widget.content:GetParent()
+    if border and border.SetBackdrop then
+        if not border._dragonSkinned then
+            border._dragonSkinned = true
+            border:SetBackdrop(BD_FILL)
+            FUI.AttachBoxBorder(border)
+        end
+        local fill = widget._dragonSectionDim and theme.sectionBgDim or theme.sectionBg
+        border:SetBackdropColor(fill[1], fill[2], fill[3], fill[4])
+    end
+    if widget.titletext then
+        widget.titletext:SetFontObject(FONTS.HighlightMedium)
+        widget.titletext:SetTextColor(unpack(widget._dragonSectionDim and theme.textDim or theme.textGold))
+    end
+end
+
+-- Dims a section whose feature is off; the flag survives the deferred re-skin pass.
+function Controls.SetSectionState(section, enabled)
+    if not section then return end
+    section._dragonSectionDim = not enabled or nil
+    SkinInlineGroup(section)
+end
+
+Controls.SkinEditBox = SkinEditBoxWidget
+
+-- Dialogs parented to UIParent share FULLSCREEN_DIALOG with the AceGUI frames, so win on level every time.
+function Controls.LiftOnShow(frame)
+    frame:HookScript("OnShow", function(self)
+        self:Raise()
+        FUI.EnforceLayering(self)
+    end)
+end
+
+-- ============================================================================
+-- DEFERRED RE-SKIN (fixes vanilla texture bleed-through after reload)
+-- ============================================================================
+
+function Controls:ClearSearchFontTags(container)
+    if not container or not container.children then return end
+    for _, child in ipairs(container.children) do
+        child._dragonSearchFont = nil
+        if child.children then
+            self:ClearSearchFontTags(child)
+        end
+    end
+end
+
+local function ReskinWidget(widget)
+    if not widget or not widget.type then return end
+    local t = widget.type
+    if t == "CheckBox" then
+        SkinCheckBox(widget)
+    elseif t == "Slider" then
+        SkinSlider(widget)
+    elseif t == "Dropdown" then
+        SkinDropdown(widget)
+    elseif t == "EditBox" then
+        SkinEditBoxWidget(widget)
+    elseif t == "Button" then
+        SkinButton(widget)
+    elseif t == "Label" then
+        if widget._dragonSearchFont and widget.label then
+            SafeSetFont(widget.label, widget._dragonSearchFont[2], widget._dragonSearchFont[3], widget._dragonSearchFont[1])
+        else
+            SkinLabel(widget)
+        end
+    elseif t == "InteractiveLabel" then
+        if widget._dragonSearchFont and widget.label then
+            SafeSetFont(widget.label, widget._dragonSearchFont[2], widget._dragonSearchFont[3], widget._dragonSearchFont[1])
+        end
+    elseif t == "Heading" then
+        SkinHeading(widget)
+    elseif t == "InlineGroup" then
+        SkinInlineGroup(widget)
+    end
+end
+
+local function ReskinContainer(container)
+    if not container or not container.children then return end
+    for _, child in ipairs(container.children) do
+        ReskinWidget(child)
+        -- Recurse into containers (InlineGroup, SimpleGroup, ScrollFrame)
+        if child.children then
+            ReskinContainer(child)
+        end
+    end
+end
+
+function Controls:ReskinAll(scrollWidget)
+    if scrollWidget then
+        ReskinContainer(scrollWidget)
+    end
+end
+
+-- ============================================================================
+-- HEADING / SECTION SEPARATOR
+-- ============================================================================
+
+function Controls:AddHeading(parent, text)
+    local _P = addon.OptionsPanel
+    if _P and _P.indexing then return MakeStub() end
+    local heading = AceGUI:Create("Heading")
+    heading:SetText(text)
+    heading:SetFullWidth(true)
+    SkinHeading(heading)
+    parent:AddChild(heading)
+    return heading
+end
+
+-- ============================================================================
+-- DESCRIPTION / LABEL
+-- ============================================================================
+
+function Controls:AddLabel(parent, text, opts)
+    local _P = addon.OptionsPanel
+    if _P and _P.indexing then return MakeStub() end
+    opts = opts or {}
+    local label = AceGUI:Create("Label")
+    label:SetText(text)
+    label:SetFullWidth(true)
+    if opts.color then
+        label:SetColor(unpack(opts.color))
+    end
+    SkinLabel(label)
+    parent:AddChild(label)
+    return label
+end
+
+function Controls:AddDescription(parent, text)
+    return self:AddLabel(parent, text, { color = self.Theme.textDim })
+end
+
+function Controls:AddCopyableText(parent, text)
+    local _P = addon.OptionsPanel
+    if _P and _P.indexing then return MakeStub() end
+    local editBox = AceGUI:Create("EditBox")
+    editBox:SetText(text)
+    editBox:SetFullWidth(true)
+    editBox:DisableButton(true)
+    editBox:SetCallback("OnEnterPressed", function(w)
+        if w and w.ClearFocus then
+            w:ClearFocus()
+            return
+        end
+        if w and w.editbox and w.editbox.ClearFocus then
+            w.editbox:ClearFocus()
+        end
+    end)
+    editBox:SetCallback("OnTextChanged", function(w) w:SetText(text) end)
+    SkinEditBoxWidget(editBox)
+    parent:AddChild(editBox)
+    return editBox
+end
+
+-- ============================================================================
+-- SPACER
+-- ============================================================================
+
+function Controls:AddSpacer(parent)
+    local _P = addon.OptionsPanel
+    if _P and _P.indexing then return MakeStub() end
+    local spacer = AceGUI:Create("Label")
+    spacer:SetText(" ")
+    spacer:SetFullWidth(true)
+    parent:AddChild(spacer)
+    return spacer
+end
+
+-- ============================================================================
+-- TOGGLE (CheckBox)
+-- ============================================================================
+
+function Controls:AddToggle(parent, opts)
+    local _P = addon.OptionsPanel
+    if _P and _P.indexing then
+        RecordSearchEntry(opts)
+        return MakeStub()
+    end
+    local cb = AceGUI:Create("CheckBox")
+    local label = NormalizeText(opts.label, "Toggle")
+    local desc = NormalizeDescription(opts.desc)
+    cb:SetLabel(label)
+    if desc then cb:SetDescription(desc) end
+    -- relWidth packs toggles into columns inside a Flow container (e.g. 0.33 = 3 per row)
+    if opts.relWidth then
+        cb:SetRelativeWidth(opts.relWidth)
+    elseif opts.width then
+        cb:SetWidth(opts.width)
+    else
+        cb:SetFullWidth(true)
+    end
+
+    -- `tooltip` shows the text on hover instead of as an always-visible description
+    local tooltip = NormalizeDescription(opts.tooltip)
+    if tooltip then
+        -- ANCHOR_CURSOR: the AceGUI row spans the full panel width, so frame anchors land far away
+        cb.frame:HookScript("OnEnter", function(self)
+            GameTooltip:SetOwner(self, "ANCHOR_CURSOR")
+            GameTooltip:SetText(label, 1, 1, 1)
+            GameTooltip:AddLine(tooltip, nil, nil, nil, true)
+            GameTooltip:Show()
+        end)
+        cb.frame:HookScript("OnLeave", function()
+            GameTooltip:Hide()
+        end)
+    end
+
+    if opts.getFunc then
+        cb:SetValue(opts.getFunc() and true or false)
+    elseif opts.dbPath then
+        cb:SetValue(self:GetDBValue(opts.dbPath) and true or false)
+    end
+
+    if opts.disabled then
+        if type(opts.disabled) == "function" then
+            cb:SetDisabled(opts.disabled())
+        else
+            cb:SetDisabled(opts.disabled)
+        end
+    end
+
+    -- Must assign every time: AceGUI recycles CheckBoxes and a prior indent would leak.
+    cb._dragonCheckIndent = opts.indent
+
+    cb:SetCallback("OnValueChanged", function(_, _, value)
+        if opts.setFunc then
+            opts.setFunc(value)
+        elseif opts.dbPath then
+            self:SetDBValue(opts.dbPath, value)
+        end
+        if opts.callback then opts.callback(value) end
+        if opts.requiresReload then StaticPopup_Show("ADDICATUI_RELOAD_UI") end
+    end)
+
+    SkinCheckBox(cb)
+    TagSearchId(cb, opts)
+    parent:AddChild(cb)
+    return cb
+end
+
+-- ============================================================================
+-- SLIDER
+-- ============================================================================
+
+function Controls:AddSlider(parent, opts)
+    local _P = addon.OptionsPanel
+    if _P and _P.indexing then
+        RecordSearchEntry(opts)
+        return MakeStub()
+    end
+    local slider = AceGUI:Create("Slider")
+    local label = NormalizeText(opts.label, "Slider")
+    local desc = NormalizeDescription(opts.desc)
+    slider:SetLabel(label)
+    slider:SetSliderValues(opts.min or 0, opts.max or 1, opts.step or 0.01)
+    if opts.isPercent then slider:SetIsPercent(true) end
+    if opts.width then slider:SetWidth(opts.width) end
+
+    local val
+    if opts.getFunc then
+        val = opts.getFunc()
+    elseif opts.dbPath then
+        val = self:GetDBValue(opts.dbPath)
+    end
+    slider:SetValue(val or opts.default or opts.min or 0)
+
+    if opts.disabled then
+        if type(opts.disabled) == "function" then
+            slider:SetDisabled(opts.disabled())
+        else
+            slider:SetDisabled(opts.disabled)
+        end
+    end
+
+    slider:SetCallback("OnValueChanged", function(_, _, value)
+        if opts.setFunc then
+            opts.setFunc(value)
+        elseif opts.dbPath then
+            self:SetDBValue(opts.dbPath, value)
+        end
+        if opts.callback then opts.callback(value) end
+    end)
+
+    if desc then
+        slider:SetCallback("OnEnter", function(w)
+            GameTooltip:SetOwner(w.frame, "ANCHOR_TOPRIGHT")
+            GameTooltip:SetText(label, 1, 1, 1)
+            GameTooltip:AddLine(desc, nil, nil, nil, true)
+            GameTooltip:Show()
+        end)
+        slider:SetCallback("OnLeave", function() GameTooltip:Hide() end)
+    end
+
+    SkinSlider(slider)
+    TagSearchId(slider, opts)
+    parent:AddChild(slider)
+    return slider
+end
+
+-- ============================================================================
+-- EDITBOX
+-- ============================================================================
+
+function Controls:AddEditBox(parent, opts)
+    local _P = addon.OptionsPanel
+    if _P and _P.indexing then
+        RecordSearchEntry(opts)
+        return MakeStub()
+    end
+    local box = AceGUI:Create("EditBox")
+    local label = NormalizeText(opts.label, "")
+    local desc = NormalizeDescription(opts.desc)
+    box:SetLabel(label)
+    if opts.width then box:SetWidth(opts.width) else box:SetFullWidth(true) end
+
+    local val
+    if opts.getFunc then
+        val = opts.getFunc()
+    elseif opts.dbPath then
+        val = self:GetDBValue(opts.dbPath)
+    end
+    box:SetText(val or opts.default or "")
+
+    if opts.disabled then
+        if type(opts.disabled) == "function" then
+            box:SetDisabled(opts.disabled())
+        else
+            box:SetDisabled(opts.disabled)
+        end
+    end
+
+    box:SetCallback("OnEnterPressed", function(w, _, value)
+        if opts.setFunc then
+            opts.setFunc(value)
+        elseif opts.dbPath then
+            self:SetDBValue(opts.dbPath, value)
+        end
+        if w and w.ClearFocus then w:ClearFocus() end
+        if opts.callback then opts.callback(value) end
+    end)
+
+    if desc then
+        box:SetCallback("OnEnter", function(w)
+            GameTooltip:SetOwner(w.frame, "ANCHOR_TOPRIGHT")
+            GameTooltip:SetText(label, 1, 1, 1)
+            GameTooltip:AddLine(desc, nil, nil, nil, true)
+            GameTooltip:Show()
+        end)
+        box:SetCallback("OnLeave", function() GameTooltip:Hide() end)
+    end
+
+    SkinEditBoxWidget(box)
+    TagSearchId(box, opts)
+    parent:AddChild(box)
+    return box
+end
+
+-- ============================================================================
+-- DROPDOWN
+-- ============================================================================
+
+function Controls:AddDropdown(parent, opts)
+    local _P = addon.OptionsPanel
+    if _P and _P.indexing then
+        RecordSearchEntry(opts)
+        return MakeStub()
+    end
+    local dd = AceGUI:Create("Dropdown")
+    dd:SetLabel(NormalizeText(opts.label, "Select"))
+    dd:SetList(NormalizeDropdownValues(opts.values))
+    if opts.width then dd:SetWidth(opts.width) end
+
+    local val
+    if opts.getFunc then
+        val = opts.getFunc()
+    elseif opts.dbPath then
+        val = self:GetDBValue(opts.dbPath)
+    end
+    if val then dd:SetValue(val) end
+
+    if opts.disabled then
+        if type(opts.disabled) == "function" then
+            dd:SetDisabled(opts.disabled())
+        else
+            dd:SetDisabled(opts.disabled)
+        end
+    end
+
+    dd:SetCallback("OnValueChanged", function(_, _, value)
+        if opts.setFunc then
+            opts.setFunc(value)
+        elseif opts.dbPath then
+            self:SetDBValue(opts.dbPath, value)
+        end
+        if opts.callback then opts.callback(value) end
+    end)
+
+    SkinDropdown(dd)
+
+    -- AceGUI resets the width on every acquire, so re-fit the label after skinning set its font.
+    if dd.label and dd.label:IsShown() then
+        local width = FitWidth(dd.label, opts.width or DROPDOWN_BASE_WIDTH, DROPDOWN_LABEL_INSET + 2, MAX_AUTO_WIDTH)
+        dd:SetWidth(width)
+        ClampText(dd.label, width - DROPDOWN_LABEL_INSET)
+    end
+
+    TagSearchId(dd, opts)
+    parent:AddChild(dd)
+    return dd
+end
+
+-- ============================================================================
+-- VISIBILITY FADE TOGGLES (Show on Hover / Show in Combat / AND-OR logic)
+-- ============================================================================
+-- dbPrefix must resolve to a profile subtable used by addon.VisibilityFade (core/visibility_fade.lua).
+
+function Controls:AddVisibilityFadeToggles(parent, opts)
+    local dbPrefix = opts.dbPrefix
+    local callback = opts.callback
+
+    self:AddToggle(parent, {
+        label = LO["Show on Hover Only"],
+        desc = opts.hoverDesc,
+        dbPath = dbPrefix .. ".show_on_hover",
+        callback = callback,
+    })
+
+    if opts.hideInCombat then
+        -- Show in Combat / Hide in Combat are mutually exclusive — enabling one clears the other.
+        self:AddToggle(parent, {
+            label = LO["Show in Combat Only"],
+            desc = opts.combatDesc,
+            dbPath = dbPrefix .. ".show_in_combat",
+            callback = function()
+                local conflicted = self:GetDBValue(dbPrefix .. ".show_in_combat")
+                    and self:GetDBValue(dbPrefix .. ".hide_in_combat")
+                if conflicted then self:SetDBValue(dbPrefix .. ".hide_in_combat", false) end
+                if callback then callback() end
+                local _P = addon.OptionsPanel
+                if conflicted and _P and _P.currentTab then _P:SelectTab(_P.currentTab) end
+            end,
+        })
+
+        self:AddToggle(parent, {
+            label = LO["Hide in Combat"],
+            desc = opts.hideInCombatDesc,
+            dbPath = dbPrefix .. ".hide_in_combat",
+            callback = function()
+                local conflicted = self:GetDBValue(dbPrefix .. ".hide_in_combat")
+                    and self:GetDBValue(dbPrefix .. ".show_in_combat")
+                if conflicted then self:SetDBValue(dbPrefix .. ".show_in_combat", false) end
+                if callback then callback() end
+                local _P = addon.OptionsPanel
+                if conflicted and _P and _P.currentTab then _P:SelectTab(_P.currentTab) end
+            end,
+        })
+    else
+        self:AddToggle(parent, {
+            label = LO["Show in Combat Only"],
+            desc = opts.combatDesc,
+            dbPath = dbPrefix .. ".show_in_combat",
+            callback = callback,
+        })
+    end
+
+    self:AddDropdown(parent, {
+        label = LO["Hover/Combat Logic"],
+        desc = LO["When both hover and combat are enabled, choose whether both are required (AND) or either condition is enough (OR)."],
+        dbPath = dbPrefix .. ".visibility_logic",
+        values = {
+            ["and"] = LO["AND (both required)"],
+            ["or"] = LO["OR (either condition)"],
+        },
+        callback = callback,
+    })
+end
+
+-- ============================================================================
+-- COLOR PICKER
+-- ============================================================================
+
+function Controls:AddColorPicker(parent, opts)
+    local _P = addon.OptionsPanel
+    if _P and _P.indexing then
+        RecordSearchEntry(opts)
+        return MakeStub()
+    end
+    local cp = AceGUI:Create("ColorPicker")
+    cp:SetLabel(opts.label or "Color")
+    cp:SetHasAlpha(opts.hasAlpha or false)
+
+    if opts.disabled then
+        if type(opts.disabled) == "function" then
+            cp:SetDisabled(opts.disabled())
+        else
+            cp:SetDisabled(opts.disabled)
+        end
+    end
+
+    local color
+    if opts.getFunc then
+        color = { opts.getFunc() }
+    elseif opts.dbPath then
+        color = self:GetDBValue(opts.dbPath)
+    end
+    if color and type(color) == "table" then
+        cp:SetColor(color.r or color[1] or 1, color.g or color[2] or 1, color.b or color[3] or 1, color.a or color[4] or 1)
+    end
+
+    cp:SetCallback("OnValueConfirmed", function(_, _, r, g, b, a)
+        if opts.setFunc then
+            opts.setFunc(r, g, b, a)
+        elseif opts.dbPath then
+            self:SetDBValue(opts.dbPath, { r = r, g = g, b = b, a = a or 1 })
+        end
+        if opts.callback then opts.callback(r, g, b, a) end
+    end)
+
+    -- AceGUI only raises the picker's strata; sit above whatever the panel has at that strata.
+    if not cp.frame._dragonPickerHook then
+        cp.frame._dragonPickerHook = true
+        cp.frame:HookScript("OnClick", function()
+            ColorPickerFrame:SetFrameStrata("FULLSCREEN_DIALOG")
+            ColorPickerFrame:Raise()
+        end)
+    end
+
+    TagSearchId(cp, opts)
+    parent:AddChild(cp)
+    return cp
+end
+
+-- ============================================================================
+-- BUTTON
+-- ============================================================================
+
+function Controls:AddButton(parent, opts)
+    local _P = addon.OptionsPanel
+    if _P and _P.indexing then
+        RecordSearchEntry(opts)
+        return MakeStub()
+    end
+    local btn = AceGUI:Create("Button")
+    local label = NormalizeText(opts.label, "Button")
+    local desc = NormalizeDescription(opts.desc)
+    btn:SetText(label)
+    if opts.width then btn:SetWidth(opts.width) end
+    if opts.disabled then
+        if type(opts.disabled) == "function" then
+            btn:SetDisabled(opts.disabled())
+        else
+            btn:SetDisabled(opts.disabled)
+        end
+    end
+    btn:SetCallback("OnClick", function()
+        GameTooltip:Hide()
+        if opts.callback then opts.callback() end
+    end)
+    if desc then
+        btn:SetCallback("OnEnter", function(w)
+            GameTooltip:SetOwner(w.frame, "ANCHOR_TOPRIGHT")
+            GameTooltip:SetText(label, 1, 1, 1)
+            GameTooltip:AddLine(desc, nil, nil, nil, true)
+            GameTooltip:Show()
+        end)
+        btn:SetCallback("OnLeave", function() GameTooltip:Hide() end)
+    end
+    SkinButton(btn)
+    btn:SetWidth(FitWidth(btn.text, opts.width or BUTTON_BASE_WIDTH, BUTTON_TEXT_INSET, MAX_AUTO_WIDTH))
+    TagSearchId(btn, opts)
+    parent:AddChild(btn)
+    return btn
+end
+
+-- ============================================================================
+-- KEYBINDING
+-- ============================================================================
+
+-- Binds `opts.action`, a Bindings.xml command name, straight through the client's own binding set
+-- rather than a database field, so the Key Bindings window and this control cannot disagree.
+function Controls:AddKeybinding(parent, opts)
+    local _P = addon.OptionsPanel
+    if _P and _P.indexing then
+        RecordSearchEntry(opts)
+        return MakeStub()
+    end
+    local kb = AceGUI:Create("Keybinding")
+    local label = NormalizeText(opts.label, "Keybinding")
+    local desc = NormalizeDescription(opts.desc)
+
+    kb:SetLabel(label)
+    kb:SetWidth(opts.width or 240)
+    kb:SetKey(GetBindingKey(opts.action) or "")
+
+    kb:SetCallback("OnKeyChanged", function(widget, _, key)
+        -- SetBinding is protected in combat, and the widget has already painted the new key.
+        if InCombatLockdown() then
+            widget:SetKey(GetBindingKey(opts.action) or "")
+            addon:Print(LO["Key bindings cannot be changed in combat."])
+            return
+        end
+        for _, bound in ipairs({ GetBindingKey(opts.action) }) do
+            SetBinding(bound, nil)
+        end
+        if key and key ~= "" then SetBinding(key, opts.action) end
+        SaveBindings(GetCurrentBindingSet())
+        if opts.callback then opts.callback(key) end
+    end)
+
+    if desc then
+        kb:SetCallback("OnEnter", function(w)
+            GameTooltip:SetOwner(w.frame, "ANCHOR_TOPRIGHT")
+            GameTooltip:SetText(label, 1, 1, 1)
+            GameTooltip:AddLine(desc, nil, nil, nil, true)
+            GameTooltip:Show()
+        end)
+        kb:SetCallback("OnLeave", function() GameTooltip:Hide() end)
+    end
+
+    -- The widget's `frame` is a container; the clickable part is `button`, so that is what is skinned.
+    SkinButton({ frame = kb.button })
+    TagSearchId(kb, opts)
+    parent:AddChild(kb)
+    return kb
+end
+
+-- ============================================================================
+-- SECTION (InlineGroup)
+-- ============================================================================
+
+function Controls:AddSection(parent, title)
+    local _P = addon.OptionsPanel
+    if _P and _P.indexing then
+        local prefix = _P._currentSubTabLabel
+        _P._currentSection = prefix and (prefix .. " / " .. (title or "")) or title
+        return MakeStub()
+    end
+    local group = AceGUI:Create("InlineGroup")
+    group:SetTitle(title or "")
+    group:SetFullWidth(true)
+    group:SetLayout("Flow")
+    SkinInlineGroup(group)
+    parent:AddChild(group)
+    return group
+end
+
+-- ============================================================================
+-- ROW (SimpleGroup)
+-- ============================================================================
+
+function Controls:AddRow(parent, opts)
+    local _P = addon.OptionsPanel
+    if _P and _P.indexing then return MakeStub() end
+    opts = opts or {}
+    local group = AceGUI:Create("SimpleGroup")
+    group:SetFullWidth(true)
+    group:SetLayout(opts.layout or "Flow")
+    parent:AddChild(group)
+    return group
+end
+
+-- ============================================================================
+-- TEXTURE PREVIEW (for Gryphons etc.)
+-- ============================================================================
+
+function Controls:AddTexturePreview(parent, opts)
+    local _P = addon.OptionsPanel
+    if _P and _P.indexing then return MakeStub() end
+    -- opts: { label, texture, texCoord, width, height }
+    -- Uses AceGUI Icon widget
+    local icon = AceGUI:Create("Icon")
+    icon:SetImage(opts.texture, unpack(opts.texCoord or { 0, 1, 0, 1 }))
+    icon:SetImageSize(opts.width or 64, opts.height or 64)
+    icon:SetLabel(opts.label or "")
+    if opts.fullWidth then
+        icon:SetFullWidth(true)
+    else
+        icon:SetWidth((opts.width or 64) + 16)
+    end
+    -- Disable click behavior and remove hover highlight
+    icon:SetCallback("OnClick", function() end)
+    icon:SetCallback("OnEnter", function() end)
+    icon:SetCallback("OnLeave", function() end)
+    if icon.highlight then
+        icon.highlight:SetTexture(nil)
+    end
+    if icon.frame then
+        icon.frame:EnableMouse(false)
+    end
+    parent:AddChild(icon)
+    return icon
+end
+
+-- ============================================================================
+-- SUB-TAB BAR (horizontal navigation within a tab)
+-- ============================================================================
+
+-- Own widget type so sub-tab pills never inherit pooled Label state (justify, fonts, highlight).
+do
+    local TAB_TYPE, TAB_VERSION = "AddicatUITab", 1
+    local TAB_GAP = 5
+
+    local tabMethods = {
+        OnAcquire = function(self)
+            self.tab._fuOver = nil
+            self.tab:SetSelected(false)
+            self:SetText("")
+        end,
+        SetText = function(self, text)
+            self.tab:SetTabText(text)
+            self.frame:SetWidth(self.tab:GetWidth() + TAB_GAP)
+        end,
+        SetSelected = function(self, selected)
+            self.tab:SetSelected(selected)
+        end,
+    }
+
+    local function TabConstructor()
+        local frame = CreateFrame("Frame", nil, UIParent)
+        frame:Hide()
+        local tab = FUI.CreateTab(frame)
+        tab:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 0, 0)
+        frame:SetHeight(tab:GetHeight())
+
+        local widget = { frame = frame, tab = tab, type = TAB_TYPE }
+        for method, func in pairs(tabMethods) do
+            widget[method] = func
+        end
+        tab:SetScript("OnClick", function()
+            PlaySound("igCharacterInfoTab")
+            widget:Fire("OnClick")
+        end)
+        return AceGUI:RegisterAsWidget(widget)
+    end
+
+    AceGUI:RegisterWidgetType(TAB_TYPE, TabConstructor, TAB_VERSION)
+end
+
+function Controls:AddSubTabs(parent, tabs, activeKey, onSelect, builders)
+    local _P = addon.OptionsPanel
+    if _P and _P.indexing then
+        -- Harvest all sub-tabs during index build.
+        if builders then
+            local savedSection   = _P._currentSection
+            local savedSubTab    = _P._currentSubTabLabel
+            local savedSubTabKey = _P._currentSubTabKey
+            for _, tab in ipairs(tabs) do
+                local builder = builders[tab.key]
+                if builder then
+                    _P._currentSubTabLabel = tab.label
+                    _P._currentSubTabKey   = tab.key
+                    _P._currentSection     = nil
+                    local ok, err = pcall(builder, Controls.MakeStub())
+                    if not ok and addon.Debug then
+                        addon:Debug("search sub-tab harvest: " .. tostring(tab.key) .. ": " .. tostring(err))
+                    end
+                end
+            end
+            _P._currentSubTabLabel = savedSubTab
+            _P._currentSubTabKey   = savedSubTabKey
+            _P._currentSection     = savedSection
+        end
+        return MakeStub()
+    end
+    -- tabs = { { key="player", label="Player" }, ... }
+    -- activeKey = currently selected sub-tab key
+    -- onSelect(key) = callback when a sub-tab is clicked
+    local row = AceGUI:Create("SimpleGroup")
+    row:SetFullWidth(true)
+    row:SetLayout("Flow")
+    parent:AddChild(row)
+
+    for _, tab in ipairs(tabs) do
+        local btn = AceGUI:Create("AddicatUITab")
+        btn:SetText(tab.label)
+        btn:SetSelected(tab.key == activeKey)
+        btn:SetCallback("OnClick", function()
+            if onSelect then onSelect(tab.key) end
+        end)
+        row:AddChild(btn)
+    end
+
+    -- Separator line under the sub-tab bar
+    local sep = AceGUI:Create("Heading")
+    sep:SetText("")
+    sep:SetFullWidth(true)
+    SkinHeading(sep)
+    parent:AddChild(sep)
+
+    return row
+end
+
+-- ============================================================================
+-- SPELL FILTER LIST (NotPlater-style debuff whitelist/blacklist picker)
+-- Options-only: reads/writes a comma-separated spell ID string in the DB.
+-- GetSpellInfo runs only when the panel is used — not on nameplate ticks.
+-- ============================================================================
+
+local spellFilterPopupContext = nil
+-- Selected entry per list, so the choice survives the panel rebuilding after an add.
+local spellFilterSelection = {}
+local spellFilterExportDialog = nil
+local spellFilterNameCache = nil
+
+local function EnsureSpellFilterNameCache()
+    if spellFilterNameCache then
+        return spellFilterNameCache
+    end
+    -- Reuse the nameplate runtime's shared name->id index when available so the
+    -- ~70k GetSpellInfo scan runs at most once per session across both panels.
+    local NP = _G.AddicatUI and _G.AddicatUI.Nameplates
+    if NP and NP.auras and NP.auras.GetSpellNameIndex then
+        spellFilterNameCache = NP.auras.GetSpellNameIndex()
+        return spellFilterNameCache
+    end
+    -- AddicatUI_Options declares AddicatUI as a required dependency, so this is
+    -- only a defensive fallback for a partially loaded/broken installation.
+    -- Never reintroduce a synchronous full spell-table scan here.
+    spellFilterNameCache = {}
+    return spellFilterNameCache
+end
+
+local function SpellFilterPrint(msg)
+    addon:Print(msg)
+end
+
+local function ParseSpellFilterIDs(raw)
+    local ids = {}
+    local seen = {}
+    for token in string.gmatch(raw or "", "[^,%s]+") do
+        local id = tonumber(token)
+        if id and id > 0 and not seen[id] then
+            seen[id] = true
+            ids[#ids + 1] = id
+        end
+    end
+    return ids
+end
+
+local function SpellFilterIDsToCSV(ids)
+    if not ids or #ids == 0 then
+        return ""
+    end
+    local parts = {}
+    for i = 1, #ids do
+        parts[i] = tostring(ids[i])
+    end
+    return table.concat(parts, ", ")
+end
+
+local function ResolveSpellFilterToken(token)
+    if not token or token == "" then
+        return
+    end
+    token = string.gsub(token, "^%s+", "")
+    token = string.gsub(token, "%s+$", "")
+
+    local numericID = tonumber(token)
+    if numericID and numericID > 0 then
+        local name, _, icon = GetSpellInfo(numericID)
+        if not name then
+            return
+        end
+        return numericID, name, icon or "Interface\\Icons\\INV_Misc_QuestionMark"
+    end
+
+    local lower = string.lower(token)
+    local cache = EnsureSpellFilterNameCache()
+    local spellID = cache[lower]
+    if spellID then
+        local name, _, icon = GetSpellInfo(spellID)
+        if name then
+            return spellID, name, icon or "Interface\\Icons\\INV_Misc_QuestionMark"
+        end
+    end
+end
+
+local function EnsureSpellFilterPopup()
+    if Controls._spellFilterPopupRegistered then
+        return
+    end
+    Controls._spellFilterPopupRegistered = true
+
+    StaticPopupDialogs["ADDICATUI_SPELL_FILTER_PROMPT"] = {
+        button1 = ACCEPT,
+        button2 = CANCEL,
+        hasEditBox = true,
+        timeout = 0,
+        whileDead = true,
+        hideOnEscape = true,
+        OnShow = function(self)
+            self:SetFrameStrata("FULLSCREEN_DIALOG")
+            self:Raise()
+        end,
+        OnAccept = function(self)
+            local text = self.editBox and self.editBox:GetText() or ""
+            local ctx = spellFilterPopupContext
+            if ctx and ctx.onAccept then
+                ctx.onAccept(text)
+            end
+            if self.editBox then
+                self.editBox:SetText("")
+            end
+        end,
+        OnHide = function(self)
+            if self.editBox then
+                self.editBox:SetText("")
+            end
+            spellFilterPopupContext = nil
+        end,
+        EditBoxOnEnterPressed = function(editBox)
+            local parent = editBox:GetParent()
+            if parent and parent.button1 and parent.button1.Click then
+                parent.button1:Click()
+            end
+        end,
+        EditBoxOnEscapePressed = function(editBox)
+            local parent = editBox:GetParent()
+            if parent then
+                parent:Hide()
+            end
+        end,
+        text = "",
+    }
+end
+
+local function ShowSpellFilterPrompt(inputType, onAccept)
+    EnsureSpellFilterPopup()
+    spellFilterPopupContext = { onAccept = onAccept }
+    local dialog = StaticPopup_Show("ADDICATUI_SPELL_FILTER_PROMPT")
+    if not dialog then
+        return
+    end
+    local prompt = (inputType == "ID") and LO["Enter a spell ID"] or LO["Enter a spell name"]
+    if dialog.text then
+        dialog.text:SetText(prompt)
+    end
+    if dialog.editBox then
+        dialog.editBox:SetNumeric(inputType == "ID")
+        dialog.editBox:SetAutoFocus(true)
+        dialog.editBox:SetText("")
+        dialog.editBox:SetFocus()
+    end
+end
+
+local function EnsureSpellFilterExportDialog()
+    if spellFilterExportDialog then
+        return spellFilterExportDialog
+    end
+
+    local frame = FUI.CreateDialog("AddicatUISpellFilterExportDialog", UIParent, {
+        width = 420,
+        height = 320,
+        title = LO["Export/Import Spell IDs"],
+        strata = "FULLSCREEN_DIALOG",
+        closable = true,
+        solid = true,
+    })
+    frame:SetFrameLevel(100)
+    frame:SetPoint("CENTER")
+    Controls.LiftOnShow(frame)
+
+    local content = frame.Content
+
+    local hint = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    hint:SetPoint("TOP", content, "TOP", 0, 0)
+    hint:SetText(LO["Paste spell IDs separated by commas."])
+
+    -- UIPanelScrollFrameTemplate builds a $parentScrollBar child whose OnLoad
+    -- concatenates the parent's name; a nil name crashes it, so name it.
+    local scrollFrame = CreateFrame("ScrollFrame", "AddicatUISpellFilterExportScrollFrame", content, "UIPanelScrollFrameTemplate")
+    scrollFrame:SetPoint("TOPLEFT", content, "TOPLEFT", 8, -24)
+    scrollFrame:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -30, 40)
+
+    local well = content:CreateTexture(nil, "BACKGROUND")
+    well:SetTexture(0, 0, 0, 0.45)
+    well:SetPoint("TOPLEFT", scrollFrame, "TOPLEFT", -6, 6)
+    well:SetPoint("BOTTOMRIGHT", scrollFrame, "BOTTOMRIGHT", 26, -6)
+
+    local editBox = CreateFrame("EditBox", nil, scrollFrame)
+    editBox:SetMultiLine(true)
+    editBox:SetAutoFocus(false)
+    editBox:SetFontObject("GameFontHighlightSmall")
+    editBox:SetWidth(330)
+    editBox:SetHeight(140)
+    editBox:SetScript("OnEscapePressed", function(self)
+        self:ClearFocus()
+        frame:Hide()
+    end)
+    editBox:SetScript("OnEnterPressed", function(self)
+        self:Insert("\n")
+    end)
+    scrollFrame:SetScrollChild(editBox)
+    FUI.SkinScrollBar(scrollFrame)
+
+    local okButton = FUI.CreateButton(content, ACCEPT, 110, 22)
+    okButton:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", 0, 0)
+    okButton:SetScript("OnClick", function()
+        if frame.onImport then
+            frame.onImport(editBox:GetText())
+        end
+        frame:Hide()
+    end)
+
+    local cancelButton = FUI.CreateButton(content, CANCEL, 110, 22)
+    cancelButton:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", 0, 0)
+    cancelButton:SetScript("OnClick", function()
+        frame:Hide()
+    end)
+
+    frame.editBox = editBox
+    spellFilterExportDialog = frame
+    return frame
+end
+
+local function BuildSpellFilterExportText(raw)
+    local ids = ParseSpellFilterIDs(raw)
+    if #ids == 0 then
+        return ""
+    end
+    local lines = {}
+    for i = 1, #ids do
+        lines[i] = tostring(ids[i]) .. ","
+    end
+    return table.concat(lines, "\n")
+end
+
+local function ImportSpellFilterText(raw, setFunc)
+    local ids = ParseSpellFilterIDs(raw)
+    if #ids == 0 and raw and raw:match("%d") then
+        SpellFilterPrint(LO["Invalid spell name or ID"])
+    end
+    setFunc(SpellFilterIDsToCSV(ids))
+end
+
+function Controls:AddSpellFilterList(parent, opts)
+    local _P = addon.OptionsPanel
+    if _P and _P.indexing then return MakeStub() end
+    opts = opts or {}
+    local dbPath = opts.dbPath
+    local disabledFunc = opts.disabled
+    local registerDynamic = opts.registerDynamic
+    -- Rules ride along with the list; when editable a click selects the entry and the rule lives below.
+    local rules = opts.rules
+    local editRules = rules and rules.editable
+
+    local function IsDisabled()
+        if type(disabledFunc) == "function" then
+            return disabledFunc()
+        end
+        return disabledFunc == true
+    end
+
+    local function GetListRaw()
+        return self:GetDBValue(dbPath) or ""
+    end
+
+    local function GetRules()
+        local tbl = rules and self:GetDBValue(rules.dbPath)
+        return type(tbl) == "table" and tbl or nil
+    end
+
+    local function SetListRaw(value)
+        self:SetDBValue(dbPath, value or "")
+        -- A rule left behind would come back the day its spell is listed again.
+        local ruleTable = GetRules()
+        if ruleTable then
+            local keep = {}
+            for _, id in ipairs(ParseSpellFilterIDs(value)) do
+                keep[id] = true
+            end
+            for id in pairs(ruleTable) do
+                if not keep[id] then
+                    ruleTable[id] = nil
+                end
+            end
+        end
+        if opts.callback then
+            opts.callback(value)
+        end
+        if opts.rebuildUI then
+            opts.rebuildUI()
+        end
+    end
+
+    local function AddSpellToken(token)
+        local spellID = ResolveSpellFilterToken(token)
+        if not spellID then
+            SpellFilterPrint(LO["Invalid spell name or ID"])
+            return
+        end
+        if editRules then
+            spellFilterSelection[dbPath] = spellID
+        end
+        local ids = ParseSpellFilterIDs(GetListRaw())
+        for i = 1, #ids do
+            if ids[i] == spellID then
+                SetListRaw(SpellFilterIDsToCSV(ids))
+                return
+            end
+        end
+        ids[#ids + 1] = spellID
+        table.sort(ids)
+        SetListRaw(SpellFilterIDsToCSV(ids))
+    end
+
+    local function RemoveSpell(spellID)
+        local ids = ParseSpellFilterIDs(GetListRaw())
+        for i = 1, #ids do
+            if ids[i] == spellID then
+                table.remove(ids, i)
+                if spellFilterSelection[dbPath] == spellID then
+                    spellFilterSelection[dbPath] = nil
+                end
+                SetListRaw(SpellFilterIDsToCSV(ids))
+                return
+            end
+        end
+    end
+
+    local function RegisterWidget(widget, widgetDisabledFunc)
+        widgetDisabledFunc = widgetDisabledFunc or disabledFunc
+        if registerDynamic and widget then
+            return registerDynamic(widget, widgetDisabledFunc)
+        end
+        if widget and widget.SetDisabled then
+            if type(widgetDisabledFunc) == "function" then
+                widget:SetDisabled(widgetDisabledFunc())
+            else
+                widget:SetDisabled(widgetDisabledFunc == true)
+            end
+        end
+        return widget
+    end
+
+    local btnRow = self:AddRow(parent, { layout = "Flow" })
+    RegisterWidget(self:AddButton(btnRow, {
+        label = LO["Add Debuff by Name"],
+        width = 160,
+        disabled = disabledFunc,
+        callback = function()
+            -- Populate the shared name index while the user types instead of
+            -- blocking the Accept click with a full spell-table scan.
+            EnsureSpellFilterNameCache()
+            ShowSpellFilterPrompt("NAME", AddSpellToken)
+        end,
+    }))
+    RegisterWidget(self:AddButton(btnRow, {
+        label = LO["Add Debuff by ID"],
+        width = 150,
+        disabled = disabledFunc,
+        callback = function()
+            ShowSpellFilterPrompt("ID", AddSpellToken)
+        end,
+    }))
+    RegisterWidget(self:AddButton(btnRow, {
+        label = LO["Export/Import Spell IDs"],
+        width = 170,
+        disabled = disabledFunc,
+        callback = function()
+            local dialog = EnsureSpellFilterExportDialog()
+            dialog.onImport = function(text)
+                ImportSpellFilterText(text, SetListRaw)
+            end
+            dialog.editBox:SetText(BuildSpellFilterExportText(GetListRaw()))
+            dialog.editBox:HighlightText()
+            dialog:Show()
+            dialog.editBox:SetFocus()
+        end,
+    }))
+
+    local ids = ParseSpellFilterIDs(GetListRaw())
+    if #ids == 0 then
+        local empty = AceGUI:Create("Label")
+        empty:SetFullWidth(true)
+        empty:SetText("|cff888888" .. LO["Spell filter list is empty."] .. "|r")
+        parent:AddChild(empty)
+        if IsDisabled() and empty.SetDisabled then
+            empty:SetDisabled(true)
+        end
+        return empty
+    end
+
+    local listed = {}
+    for i = 1, #ids do
+        listed[ids[i]] = true
+    end
+    local function GetSelected()
+        local spellID = editRules and spellFilterSelection[dbPath]
+        return spellID and listed[spellID] and spellID or nil
+    end
+
+    local function IconMarkup(icon)
+        return string.format("|T%s:16:16:0:0:64:64:4:60:4:60|t",
+            icon or "Interface\\Icons\\INV_Misc_QuestionMark")
+    end
+
+    local clickHint = editRules and LO["Click to select."] or LO["Click to remove."]
+    local function FillSpellTooltip(spellID)
+        GameTooltip:SetText(GetSpellInfo(spellID) or LO["Unknown"], 1, 1, 1)
+        GameTooltip:AddLine(string.format(LO["Spell ID: %d"], spellID), nil, nil, nil, true)
+        GameTooltip:AddLine(clickHint, 0.7, 0.7, 0.7, true)
+    end
+
+    local function FormatRow(spellID)
+        local name, _, icon = GetSpellInfo(spellID)
+        local text = string.format("%s (%d)", name or LO["Unknown"], spellID)
+        if GetSelected() == spellID then
+            text = "|cffffd100" .. text .. "|r"
+        end
+        local ruleTable = editRules and GetRules()
+        local ruleText = ruleTable and ruleTable[spellID] and rules.values[ruleTable[spellID]]
+        if ruleText then
+            text = text .. "  |cff999999" .. ruleText .. "|r"
+        end
+        return IconMarkup(icon) .. " " .. text
+    end
+
+    local refreshRows, refreshDetail
+    local function OnEntryClick(spellID)
+        if IsDisabled() then
+            return
+        end
+        if not editRules then
+            RemoveSpell(spellID)
+            return
+        end
+        spellFilterSelection[dbPath] = spellID
+        refreshRows()
+        refreshDetail()
+    end
+
+    local listLabel = AceGUI:Create("Label")
+    listLabel:SetFullWidth(true)
+    listLabel:SetText(editRules and LO["Click an entry to select it."] or LO["Click an entry to remove it."])
+    parent:AddChild(listLabel)
+
+    -- Long lists get a fixed-row scroll box; a curated list of 20+ would otherwise own the panel.
+    if #ids > (opts.maxRows or 6) then
+        local list = AceGUI:Create("AddicatUIRowList")
+        list:SetFullWidth(true)
+        list:SetHeight(opts.listHeight or 150)
+        list:SetRowFont(self.Theme.font, 12, "")
+        list:SetList(ids, {
+            format = FormatRow,
+            tooltip = FillSpellTooltip,
+            click = function(_, spellID)
+                OnEntryClick(spellID)
+            end,
+        })
+        list:SetDisabled(IsDisabled())
+        parent:AddChild(list)
+        RegisterWidget(list)
+        refreshRows = function()
+            list:RefreshLabels()
+        end
+    else
+        local rows = {}
+        for index, spellID in ipairs(ids) do
+            local row = AceGUI:Create("InteractiveLabel")
+            row:SetFullWidth(true)
+            row:SetText(FormatRow(spellID))
+            if row.label then
+                SafeSetFont(row.label, 12, "", self.Theme.font)
+            end
+            row:SetCallback("OnClick", function()
+                OnEntryClick(spellID)
+            end)
+            row:SetCallback("OnEnter", function(w)
+                GameTooltip:SetOwner(w.frame, "ANCHOR_RIGHT")
+                FillSpellTooltip(spellID)
+                GameTooltip:Show()
+            end)
+            row:SetCallback("OnLeave", function()
+                GameTooltip:Hide()
+            end)
+            if IsDisabled() and row.SetDisabled then
+                row:SetDisabled(true)
+            end
+            RegisterWidget(row)
+            parent:AddChild(row)
+            rows[index] = row
+        end
+        refreshRows = function()
+            for index, spellID in ipairs(ids) do
+                rows[index]:SetText(FormatRow(spellID))
+            end
+        end
+    end
+
+    if not editRules then
+        return listLabel
+    end
+
+    local function IsDetailDisabled()
+        return IsDisabled() or GetSelected() == nil
+    end
+    local function GetSelectedRule()
+        local spellID = GetSelected()
+        if not spellID then
+            return nil
+        end
+        local ruleTable = GetRules()
+        return ruleTable and ruleTable[spellID] or "default"
+    end
+
+    local selectedLabel = AceGUI:Create("Label")
+    selectedLabel:SetFullWidth(true)
+    if selectedLabel.label then
+        SafeSetFont(selectedLabel.label, 12, "", self.Theme.font)
+    end
+    parent:AddChild(selectedLabel)
+
+    local detailRow = self:AddRow(parent, { layout = "Flow" })
+    local ruleDropdown = RegisterWidget(self:AddDropdown(detailRow, {
+        label = rules.label,
+        values = rules.values,
+        width = 240,
+        getFunc = GetSelectedRule,
+        setFunc = function(value)
+            local spellID = GetSelected()
+            if not spellID then
+                return
+            end
+            local ruleTable = GetRules()
+            if not ruleTable then
+                ruleTable = {}
+                self:SetDBValue(rules.dbPath, ruleTable)
+            end
+            ruleTable[spellID] = value ~= "default" and value or nil
+            if opts.callback then
+                opts.callback()
+            end
+            refreshRows()
+        end,
+    }), IsDetailDisabled)
+    local removeButton = RegisterWidget(self:AddButton(detailRow, {
+        label = LO["Remove Spell"],
+        width = 130,
+        callback = function()
+            local spellID = GetSelected()
+            if spellID and not IsDisabled() then
+                RemoveSpell(spellID)
+            end
+        end,
+    }), IsDetailDisabled)
+
+    refreshDetail = function()
+        local spellID = GetSelected()
+        if spellID then
+            local name, _, icon = GetSpellInfo(spellID)
+            selectedLabel:SetText(IconMarkup(icon) .. " |cffffd100" .. (name or LO["Unknown"]) .. "|r")
+        else
+            selectedLabel:SetText("|cff888888" .. LO["Select a spell above to choose whose casts it shows."] .. "|r")
+        end
+        ruleDropdown:SetValue(GetSelectedRule())
+        ruleDropdown:SetDisabled(IsDetailDisabled())
+        removeButton:SetDisabled(IsDetailDisabled())
+    end
+    refreshDetail()
+
+    return listLabel
+end

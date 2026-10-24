@@ -91,6 +91,8 @@
 #include "WoW/Source/Ui/DanceStudio.h"
 #include "WoW/Source/Ui/DressUpModelFrame.h"
 #include "WoW/Source/Ui/DuelInfo.h"
+#include "WoW/Source/Ui/BleakholdDance.h"
+#include "WoW/Source/Ui/EmojiBubbleFrame.h"
 #include "WoW/Source/Ui/EquipmentManager.h"
 #include "WoW/Source/Ui/GameUI.h"
 #include "WoW/Source/Ui/GlyphInfo.h"
@@ -1908,6 +1910,10 @@ void CGGameUI::InitializeGame() {
     CGStableInfo::InitializeGame();
     CGRaidInfo::InitializeGame();
     CGChatBubbleFrame::InitializeGame();
+    // BLEAKHOLD(emoji): the emojiBubbles and emojiBubbleScale CVars, before FrameXML so addons can read them.
+    CGEmojiBubbleFrame::InitializeGame();
+    // BLEAKHOLD(dance): the bleakDances and bleakDanceMusic CVars, also before FrameXML.
+    CGBleakholdDance::InitializeGame();
     CGCharacterInfo::InitializeGame();
     CGWorldStateInfo::InitializeGame();
     CGMinigameInfo::InitializeGame();
@@ -7170,6 +7176,10 @@ void CGGameUI::ShutdownGame() {
     CGStableInfo::ShutdownGame();
     CGRaidInfo::ShutdownGame();
     CGChatBubbleFrame::ShutdownGame();
+    // BLEAKHOLD(emoji): the frames went with the world frame in Shutdown; this resets what they left.
+    CGEmojiBubbleFrame::ShutdownGame();
+    // BLEAKHOLD(dance)
+    CGBleakholdDance::ShutdownGame();
     CGCharacterInfo::ShutdownGame();
     CGWorldStateInfo::ShutdownGame();
     CGMinigameInfo::ShutdownGame();
@@ -7511,6 +7521,9 @@ void CGGameUI::Shutdown() {
     CSimpleScriptManager::Destroy();
     CGUnit_C::NamePlateClearAll();
     CGChatBubbleFrame::ClearAll();
+    // BLEAKHOLD(emoji): before the world frame (and the emoji bubbles under it) is deleted below.
+    CGEmojiBubbleFrame::ClearAll();
+    CGBleakholdDance::ClearAll();
     CGWorldMap::ClearArrowFrames();
     CGChat::SaveChatSettings();
     CGUIMacros::SaveMacros();
@@ -8182,6 +8195,10 @@ void CGGameUI::LeaveWorld() {
     CGGMTicketInfo::LeaveWorld();
     CGGMSurveyInfo::ShutdownGame();
     CGInstanceEncounter_C::LeaveWorld();
+    // BLEAKHOLD(emoji): no emoji bubbles carry over a logout or a far teleport.
+    CGEmojiBubbleFrame::ClearAll();
+    // BLEAKHOLD(dance): nor dances.
+    CGBleakholdDance::ClearAll();
 
     if (!CGWorldFrame::s_currentWorldFrame) {
         SErrDisplayAppFatalMessage("", "", 0);

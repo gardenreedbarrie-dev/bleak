@@ -280,6 +280,8 @@ namespace DayNight {
     void AddLightOverride(int32_t lightId, int32_t overrideId, uint32_t duration);
     void RemoveLightOverride(int32_t lightId, uint32_t duration);
     void RenderSky(CPortalView* view);
+    // BLEAKHOLD(bleakfx): whether RenderSky draws the sun (the sky is shown and no zone skybox covers it).
+    bool BleakSunDrawn();
 }
 
 struct SMOFog {

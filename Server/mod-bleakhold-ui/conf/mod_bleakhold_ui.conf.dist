@@ -1,0 +1,447 @@
+#
+# mod-bleakhold-ui: server side of the Bleakhold UI (docs/BleakholdProtocol.md in the Bleakhold repository).
+# Copy this file to mod_bleakhold_ui.conf next to worldserver.conf (the build installs it into the
+# modules config folder) and change what you need. ".bleakhold reload" in game re-reads it.
+#
+
+[worldserver]
+
+###################################################################################################
+# GENERAL
+###################################################################################################
+#
+#    BleakholdUi.Enable
+#        Description: Answer the Bleakhold UI. When disabled the module ignores client messages (it
+#                     still blocks the BHs prefix from clients) and sends nothing.
+#        Default:     1 - Enabled
+#                     0 - Disabled
+
+BleakholdUi.Enable = 1
+
+#
+#    BleakholdUi.Debug
+#        Description: Log every accepted intent and every dropped message (with the reason) to the
+#                     "module" logger. Also: .bleakhold debug on|off
+#        Default:     0 - Disabled
+
+BleakholdUi.Debug = 0
+
+#
+#    BleakholdUi.RealmName
+#        Description: Realm name shown by the UI. Empty = the realm name from the realmlist table.
+#        Default:     ""
+
+BleakholdUi.RealmName = ""
+
+#
+#    BleakholdUi.SiteUrl
+#        Description: Web address shown under the leaderboards (players can copy it).
+#        Default:     ""
+
+BleakholdUi.SiteUrl = ""
+
+#
+#    BleakholdUi.UtcOffsetMinutes
+#        Description: Realm time zone in minutes from UTC (for showing the weekly reset as realm time).
+#                     Any value outside -1440..1440 means: use the server computer's time zone.
+#        Example:     60 (Central Europe in winter), -300 (US East in winter)
+#        Default:     -10000 - automatic
+
+BleakholdUi.UtcOffsetMinutes = -10000
+
+#
+#    BleakholdUi.MinProtocol
+#        Description: Oldest Bleakhold UI protocol this server still talks to. Older clients show
+#                     "out of date" and stop sending. Leave at 1.
+#        Default:     1
+
+BleakholdUi.MinProtocol = 1
+
+#
+#    BleakholdUi.DataVersion
+#        Description: Version of the definitions (names and texts from the bleakhold_* world tables).
+#                     0 = computed from the content: clients download the definitions again whenever
+#                     a row changes (after .bleakhold reload or a restart).
+#        Default:     0 - automatic
+
+BleakholdUi.DataVersion = 0
+
+#
+#    BleakholdUi.Season.Id
+#        Description: Current season id. 0 = the bleakhold_season row with state 1 (the highest id if several
+#                     rows have state 1).
+#        Default:     0
+
+BleakholdUi.Season.Id = 0
+
+###################################################################################################
+# FEATURES (sent to the client in HELLO; the UI hides what is not live yet)
+###################################################################################################
+#
+#    BleakholdUi.Feature.RiftScoring    1 when your Eclipse Rift sends scores          Default: 0
+#    BleakholdUi.Feature.Shards         1 when your Dungeon Journey pays Shards        Default: 0
+#    BleakholdUi.Feature.Season         1 to show the season and war effort            Default: 1
+#    BleakholdUi.Feature.Leaderboards   1 to show the leaderboards                     Default: 1
+#    BleakholdUi.Feature.Collections    1 when your collection system sends COLL/SET   Default: 0
+
+BleakholdUi.Feature.RiftScoring = 0
+BleakholdUi.Feature.Shards = 0
+BleakholdUi.Feature.Season = 1
+BleakholdUi.Feature.Leaderboards = 1
+BleakholdUi.Feature.Collections = 0
+
+###################################################################################################
+# FRAMES
+###################################################################################################
+#
+#    BleakholdUi.Frame.MaxBody
+#        Description: Largest frame body sent to the client, in bytes (64..1000). Longer messages are
+#                     split into numbered parts. 1000 is the protocol's limit; 251 makes every chat
+#                     packet 255 bytes or less (more packets).
+#        Default:     1000
+
+BleakholdUi.Frame.MaxBody = 1000
+
+###################################################################################################
+# RATE LIMITS (per player; the core does not throttle addon messages)
+###################################################################################################
+#
+#    BleakholdUi.RateLimit.Burst / PerSecond
+#        Description: Every Bleakhold message from a client takes a token from a bucket of Burst tokens,
+#                     refilled at PerSecond. Messages without a token are dropped silently.
+#        Default:     10 / 5
+#
+#    BleakholdUi.RateLimit.FloodDrops / FloodWindowSec / FloodMuteSec
+#        Description: After FloodDrops dropped messages within FloodWindowSec seconds the player's
+#                     Bleakhold messages are ignored for FloodMuteSec seconds (and it is logged).
+#        Default:     200 / 60 / 60
+#
+#    BleakholdUi.RateLimit.HelloIntervalMs       HELLO at most once per this many ms        Default: 5000
+#    BleakholdUi.RateLimit.GetTopicIntervalMs    each GET topic at most once per this many ms Default: 1000
+#    BleakholdUi.RateLimit.HeavyTopicIntervalMs  GET DEF, LIDX, BOARD (large answers) at most once per this
+#                                              many ms; a new HELLO (login, /reload) resets it  Default: 5000
+#    BleakholdUi.RateLimit.LeaderboardPerSecond  LBQ per second                              Default: 2
+#    BleakholdUi.RateLimit.QueueIntervalMs       QJOIN, QLEAVE, QREPLY: one each per ms      Default: 1000
+#    BleakholdUi.RateLimit.KeyIntervalMs         KSTART, KCANCEL, KMODE: one each per ms     Default: 2000
+#    BleakholdUi.RateLimit.ClaimPerSecond        TCLAIM, TREROLL, BCLAIM, OUTFIT, WEHANDIN together per second
+#                                                                                         Default: 2
+#    BleakholdUi.RateLimit.DuplicateWindowMs     the same action again within this many ms is ignored
+#                                              (0 = off). Your handlers must still be idempotent.
+#                                                                                         Default: 1000
+#    BleakholdUi.RateLimit.CampIntervalMs        CAMP (make camp, place an object, pack up: together) one per
+#                                              this many ms                               Default: 1000
+#    BleakholdUi.RateLimit.GlideIntervalMs       GLIDE one per this many ms                 Default: 1000
+#    BleakholdUi.RateLimit.RepairIntervalMs      REPAIR one per this many ms                Default: 2000
+
+BleakholdUi.RateLimit.Burst = 10
+BleakholdUi.RateLimit.PerSecond = 5
+BleakholdUi.RateLimit.FloodDrops = 200
+BleakholdUi.RateLimit.FloodWindowSec = 60
+BleakholdUi.RateLimit.FloodMuteSec = 60
+BleakholdUi.RateLimit.HelloIntervalMs = 5000
+BleakholdUi.RateLimit.GetTopicIntervalMs = 1000
+BleakholdUi.RateLimit.HeavyTopicIntervalMs = 5000
+BleakholdUi.RateLimit.LeaderboardPerSecond = 2
+BleakholdUi.RateLimit.QueueIntervalMs = 1000
+BleakholdUi.RateLimit.KeyIntervalMs = 2000
+BleakholdUi.RateLimit.ClaimPerSecond = 2
+BleakholdUi.RateLimit.DuplicateWindowMs = 1000
+BleakholdUi.RateLimit.CampIntervalMs = 1000
+BleakholdUi.RateLimit.GlideIntervalMs = 1000
+BleakholdUi.RateLimit.RepairIntervalMs = 2000
+
+###################################################################################################
+# EMOJI BUBBLES (EMOJI: an emoji over the player's head for everyone nearby; needs the Bleakhold client)
+###################################################################################################
+#
+#    BleakholdUi.Emoji.Enable
+#        Description: Let players show emoji bubbles (feature bit 64). The emoji list is built into
+#                     the module (src/BleakholdEmoji.h, made by Tools/EmojiForge).
+#        Default:     1 - Enabled
+#                     0 - Disabled
+#
+#    BleakholdUi.Emoji.CooldownMs
+#        Description: Time a player must wait between two emojis, in ms (0 = no limit). The addon
+#                     waits 3.25 s itself; above 3250 some presses are answered "busy".
+#        Default:     2500
+
+BleakholdUi.Emoji.Enable = 1
+BleakholdUi.Emoji.CooldownMs = 2500
+
+###################################################################################################
+# DANCES (DANCE: a Bleakhold dance until the player moves; the Bleakhold client shows it, stock
+# clients see the stock dance)
+###################################################################################################
+#
+#    BleakholdUi.Dance.Enable
+#        Description: Let players dance the Bleakhold dances (feature bit 128). The dance list is built
+#                     into the module (src/BleakholdDance.h, made by Tools/DanceForge); a dance needs no
+#                     DBC or model change on the server.
+#        Default:     1 - Enabled
+#                     0 - Disabled
+#
+#    BleakholdUi.Dance.CooldownMs
+#        Description: Time a player must wait between two dances, in ms (0 = no limit). The addon
+#                     waits 1.25 s itself; above 1250 some presses are answered "busy".
+#        Default:     1000
+
+BleakholdUi.Dance.Enable = 1
+BleakholdUi.Dance.CooldownMs = 1000
+
+###################################################################################################
+# CASES (CASEOPEN: open a case item for one of its rewards; the cases are the world tables
+# bleakhold_case and bleakhold_case_reward, data/sql/db-world/02_bleakhold_case_tables.sql)
+###################################################################################################
+#
+#    BleakholdUi.Case.Enable
+#        Description: Let players open cases (feature bit 256 when at least one case is set up).
+#        Default:     1 - Enabled
+#                     0 - Disabled
+#
+#    BleakholdUi.Case.CooldownMs
+#        Description: Time a player must wait between two cases, in ms (0 = no limit). The addon waits
+#                     for each answer, and its reel takes about 6 s unless the player skips it.
+#        Default:     1000
+
+BleakholdUi.Case.Enable = 1
+BleakholdUi.Case.CooldownMs = 1000
+
+###################################################################################################
+# CAMPING (protocol section 16: CAMP, GLIDE, REPAIR, CAMPST)
+#
+# A player makes camp (a campfire for Camp.FireDuration), rests at any lit fire within Camp.Radius (rested XP
+# accrues like at an inn, and a logout there is an inn logout), settles after Camp.SettleTime and then gets the
+# buff of every camp object at that fire and Campfire Warmth (+Camp.WarmthXpPct % kill and quest XP for
+# Camp.WarmthDuration). Players with a profession place one camp object at a fire (three per fire); Well Fed
+# food gives +Camp.FoodXpPct % XP anywhere. Times are in seconds. The spell ids below come from camping-assets
+# research without the client's Spell.dbc: check the buffs in game and change them here if needed.
+###################################################################################################
+#
+#    BleakholdUi.Camp.Enable
+#        Description: Camping: CAMP, camp rest, warmth, the food XP bonus and repair at a camp anvil (feature
+#                     bit 512). With 0, fires stop counting, CAMP answers camp_off and the XP bonus is off.
+#        Default:     1 - Enabled
+#                     0 - Disabled
+#
+#    BleakholdUi.Camp.MinLevel
+#        Description: The level a player needs to make camp.
+#        Default:     5
+#
+#    BleakholdUi.Camp.Cooldown
+#        Description: Seconds between two CAMP M of one player (a relog does not reset it).
+#        Default:     900
+#
+#    BleakholdUi.Camp.FireDuration
+#        Description: Seconds a camp fire burns (10..86400). Camp objects last as long as their fire.
+#        Default:     900
+#
+#    BleakholdUi.Camp.FireEntry
+#        Description: gameobject_template entry of the camp fire: a generic object or a spell focus with no
+#                     script, no linked trap and a focus in BleakholdUi.Camp.AllowedFocusIds (else the Basic
+#                     Campfire, 29784, is used). 194300 "Toasty Fire" is a WotLK bonfire that also works as a
+#                     cooking fire (focus 4).
+#        Default:     194300
+#
+#    BleakholdUi.Camp.ExtraFireEntries
+#        Description: More gameobject entries that count as campfires (at most 15, any separator), world
+#                     spawns included. Basic Campfires (29784) players light always count; its world spawns
+#                     do not. Fires only count on the continents.
+#        Example:     "3797 3798 3799" (Cozy Fire in towns)
+#        Default:     ""
+#
+#    BleakholdUi.Camp.Radius
+#        Description: Yards from a fire within which a player rests there (2..30).
+#        Default:     10
+#
+#    BleakholdUi.Camp.SettleTime
+#        Description: Seconds at a fire (out of combat) before the player settles: camp object buffs and
+#                     Campfire Warmth. Combat or leaving starts it over.
+#        Default:     60
+#
+#    BleakholdUi.Camp.BuffDuration
+#        Description: Seconds a camp object buff lasts (passive or permanent auras keep their own).
+#        Default:     3600
+#
+#    BleakholdUi.Camp.WarmthDuration
+#        Description: Seconds of Campfire Warmth after settling (settling again starts it over, never adds up).
+#        Default:     1800
+#
+#    BleakholdUi.Camp.WarmthXpPct
+#        Description: Extra kill and quest XP in percent while Campfire Warmth lasts.
+#        Default:     10
+#
+#    BleakholdUi.Camp.WarmthSpell
+#        Description: An aura the player also gets for the warmth, only to show it (the XP bonus is the
+#                     module's own). Never use an aura with an XP effect (Ribbon Dance, 29175): the core would
+#                     add its bonus on top. 7353 (Cozy Fire) is the Basic Campfire's own small buff.
+#        Default:     0 - none
+#
+#    BleakholdUi.Camp.FoodXpPct
+#        Description: Extra kill and quest XP in percent while the player has a Well Fed buff (spell group
+#                     1001), anywhere.
+#        Default:     5
+#
+#    BleakholdUi.Camp.MaxXpPct
+#        Description: The warmth and food bonus together never exceed this (applied once, after other modules'
+#                     XP multipliers; nothing at the level cap).
+#        Default:     25
+#
+#    BleakholdUi.Camp.TierSkill
+#        Description: Profession skill for camp object tiers 1, 2 and 3 (three increasing values). A player
+#                     places the highest tier they reach.
+#        Default:     "75,225,375"
+#
+#    BleakholdUi.Camp.Profession.<Name>
+#        Description: The camp objects of a profession: six ids, the gameobject entries of tiers 1, 2 and 3,
+#                     then the buff spell of tiers 1, 2 and 3 (0 = none). "0" alone: no camp objects for that
+#                     profession. Objects must be generic objects or spell foci with no script and no trap
+#                     (a spell focus only with a focus of BleakholdUi.Camp.AllowedFocusIds); buffs should be
+#                     self auras (a party aura would reach players who never settled). Ids that do not exist
+#                     or break these rules are logged at startup and left out. A Blacksmithing object of tier
+#                     2 or 3 is a camp anvil (REPAIR).
+#
+#    BleakholdUi.Camp.AllowedFocusIds
+#        Description: The spell foci (SpellFocusObject.dbc ids, any separator) a camp object or the camp fire
+#                     may be, so recipes that need that station work at a camp: the common ones found in
+#                     every town or lit by anyone. A game object with any other focus is a crafting station
+#                     tied to a place (Alchemy Lab 663, Mana Loom 1426, moonwells, the Death Knight runeforge)
+#                     and is refused at startup. Keep 4 for a camp fire that is a cooking fire.
+#        Default:     "1,3,4" - anvil, forge, cooking fire
+#
+#    BleakholdUi.Repair.Enable
+#        Description: Blacksmiths repair anywhere with REPAIR (feature bit 2048). REPAIR at a camp anvil only
+#                     needs BleakholdUi.Camp.Enable.
+#        Default:     1 - Enabled
+#                     0 - Disabled
+#
+#    BleakholdUi.Repair.MinSkill
+#        Description: Blacksmithing skill a player needs to repair anywhere.
+#        Default:     75
+#
+#    BleakholdUi.Repair.BlacksmithDiscountPct
+#        Description: Blacksmiths pay this much less for any REPAIR (the normal repair cost otherwise, with
+#                     Rate.RepairCost; never part of a repair: all or nothing).
+#        Default:     10
+#
+#    BleakholdUi.Glide.Enable
+#        Description: GLIDE, a slow fall for the races in BleakholdUi.Glide.Races (feature bit 1024).
+#        Default:     1 - Enabled
+#                     0 - Disabled
+#
+#    BleakholdUi.Glide.Races
+#        Description: Race ids that can glide (any separator; 22 = High Elf, Tools/RaceForge/races.json).
+#        Default:     "22"
+#
+#    BleakholdUi.Glide.Cooldown
+#        Description: Seconds between two glides of one player.
+#        Default:     120
+#
+#    BleakholdUi.Glide.Duration
+#        Description: Seconds the glide aura lasts (1..600).
+#        Default:     10
+#
+#    BleakholdUi.Glide.Spell
+#        Description: The slow fall aura of the glide, cast triggered (no reagent, no cooldown). 130 is Slow
+#                     Fall; 44795 (the parachute) shows a parachute but may end at the first landing.
+#        Default:     130
+
+BleakholdUi.Camp.Enable = 1
+BleakholdUi.Camp.MinLevel = 5
+BleakholdUi.Camp.Cooldown = 900
+BleakholdUi.Camp.FireDuration = 900
+BleakholdUi.Camp.FireEntry = 194300
+BleakholdUi.Camp.ExtraFireEntries = ""
+BleakholdUi.Camp.Radius = 10
+BleakholdUi.Camp.SettleTime = 60
+BleakholdUi.Camp.BuffDuration = 3600
+BleakholdUi.Camp.WarmthDuration = 1800
+BleakholdUi.Camp.WarmthXpPct = 10
+BleakholdUi.Camp.WarmthSpell = 0
+BleakholdUi.Camp.FoodXpPct = 5
+BleakholdUi.Camp.MaxXpPct = 25
+BleakholdUi.Camp.TierSkill = "75,225,375"
+BleakholdUi.Camp.AllowedFocusIds = "1,3,4"
+BleakholdUi.Camp.Profession.Alchemy = "190678,190444,190689,8113,12177,23738"
+BleakholdUi.Camp.Profession.Blacksmithing = "201893,189626,171715,8094,12175,23767"
+BleakholdUi.Camp.Profession.Enchanting = "186746,181361,184723,8097,12176,23766"
+BleakholdUi.Camp.Profession.Engineering = "193585,193668,184624,8116,12174,23736"
+BleakholdUi.Camp.Profession.Herbalism = "195194,180801,180805,8113,12177,15366"
+BleakholdUi.Camp.Profession.Inscription = "187254,191140,190693,8097,12176,23768"
+BleakholdUi.Camp.Profession.Jewelcrafting = "188190,184909,188048,8119,12179,23735"
+BleakholdUi.Camp.Profession.Leatherworking = "188221,176461,188223,8100,12178,23737"
+BleakholdUi.Camp.Profession.Mining = "190386,180780,123207,8100,12178,23737"
+BleakholdUi.Camp.Profession.Skinning = "19875,180692,187983,8116,12174,22817"
+BleakholdUi.Camp.Profession.Tailoring = "181077,200297,188216,8100,12178,22818"
+BleakholdUi.Camp.Profession.Cooking = "181790,3769,186143,24870,57288,57399"
+BleakholdUi.Camp.Profession.FirstAid = "181129,180676,178226,8094,12175,23769"
+BleakholdUi.Camp.Profession.Fishing = "186614,181143,190226,7840,12177,22820"
+BleakholdUi.Repair.Enable = 1
+BleakholdUi.Repair.MinSkill = 75
+BleakholdUi.Repair.BlacksmithDiscountPct = 10
+BleakholdUi.Glide.Enable = 1
+BleakholdUi.Glide.Races = "22"
+BleakholdUi.Glide.Cooldown = 120
+BleakholdUi.Glide.Duration = 10
+BleakholdUi.Glide.Spell = 130
+
+###################################################################################################
+# KEYSTONE RUNS
+###################################################################################################
+#
+#    BleakholdUi.KeyRun.HeartbeatSec
+#        Description: The run tracker re-sends the run state this often while a key runs.
+#        Default:     15
+#
+#    BleakholdUi.KeyRun.ServerPullTimer
+#        Description: 1 = the server sends the DBM "Pull in" timer to the group when a key starts
+#                     (from the group leader); the clients then send none themselves.
+#        Default:     0 - the group leader's client sends it
+
+BleakholdUi.KeyRun.HeartbeatSec = 15
+BleakholdUi.KeyRun.ServerPullTimer = 0
+
+###################################################################################################
+# CHAT ANNOUNCEMENTS ([Raid Legacy], [Server First], [Season], [Queue], [Record], [Case])
+###################################################################################################
+#
+#    BleakholdUi.Announce.ColorTagsWithoutAddon
+#        Description: Players without the Bleakhold UI get the tag coloured by the server (the UI colours
+#                     it itself, so its players always get the plain tag).
+#        Default:     1
+#
+#    BleakholdUi.Announce.Color.<Tag>
+#        Description: Tag colour as RRGGBB hex for players without the UI.
+
+BleakholdUi.Announce.ColorTagsWithoutAddon = 1
+BleakholdUi.Announce.Color.RaidLegacy = "E5C07B"
+BleakholdUi.Announce.Color.ServerFirst = "FF9D3B"
+BleakholdUi.Announce.Color.Season = "6CC6D9"
+BleakholdUi.Announce.Color.Queue = "9FD8E5"
+BleakholdUi.Announce.Color.Record = "F1D9A0"
+BleakholdUi.Announce.Color.Case = "C9A2F5"
+
+###################################################################################################
+# WAR EFFORT TOKEN HAND-IN (the "Hand in" button of the Season window)
+###################################################################################################
+#
+#    BleakholdUi.WarEffort.TokenItemId
+#        Description: Item the button hands in (all of them in the bags). 0 = the button answers
+#                     "not available" unless your own code handles WEHANDIN.
+#    BleakholdUi.WarEffort.PointsPerToken
+#        Description: War effort points per token (0 = disabled).
+#    BleakholdUi.WarEffort.TokenPart
+#        Description: bleakhold_war_effort_part.part_id the points go to.
+
+BleakholdUi.WarEffort.TokenItemId = 0
+BleakholdUi.WarEffort.PointsPerToken = 0
+BleakholdUi.WarEffort.TokenPart = 1
+
+###################################################################################################
+# LEADERBOARDS
+###################################################################################################
+#
+#    BleakholdUi.Leaderboard.PageSize   rows per page, 3..50 (page 1 holds the podium) Default: 10
+#    BleakholdUi.Leaderboard.MaxRows    rows kept per board, season and dungeon     Default: 1000
+
+BleakholdUi.Leaderboard.PageSize = 10
+BleakholdUi.Leaderboard.MaxRows = 1000

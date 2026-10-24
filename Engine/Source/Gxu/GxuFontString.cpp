@@ -189,6 +189,10 @@ void CGxString::AddEmbeddedTextureParseInfo(GXUEMBEDDEDTEXTUREINFO info) {
 // VERIFY: 40444632 manual
 // OFFSET: 0x006C6B90
 void CGxString::ClearInstanceData() {
+    // BLEAKHOLD(glyphfix): the rebuilt string records its pages again; an old eviction no longer applies.
+    this->m_texturePagesUsed = 0;
+    this->m_textureEvicted = 0;
+
     this->m_hyperlinkInfo.SetCount(0);
     this->m_embeddedTextureInfo.SetCount(0);
     this->m_gradientInfo.SetCount(0);
@@ -570,15 +574,15 @@ void CGxString::AddShadow(const C2Vector& offset, const CImVector& color) {
 // VERIFY: 926a0475 auto
 // OFFSET: 0x006C7480
 int32_t CGxString::CheckGeometry() {
+    // BLEAKHOLD(glyphfix): a string on an evicted page is always rebuilt. Stock kept it when its glyphs were still
+    // cached, but a glyph cached again lands somewhere else on the page, so the old texture coordinates showed
+    // wrong or clipped characters.
     if (this->m_textureEvicted) {
-        if (!this->m_currentFace->CheckStringGlyphs(this->m_text)) {
-            this->ClearInstanceData();
-        }
-
-        this->m_textureEvicted = 0;
+        this->ClearInstanceData();
     }
 
     this->CreateGeometry();
+    this->m_textureEvicted = 0;
     this->m_idleTicks = 0;
 
     return this->m_numLines != 0;

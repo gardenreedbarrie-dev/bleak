@@ -35,7 +35,7 @@ int32_t CCharacterCreation::m_selectedClassID = 1;
 int32_t CCharacterCreation::m_existingCharacterIndex = -1;
 
 // STATIC: 0x00B6B0D0
-CharacterPreferences* CCharacterCreation::m_charPreferences[22][2];
+CharacterPreferences* CCharacterCreation::m_charPreferences[BLEAKHOLD_RACE_CAPACITY][2]; // BLEAKHOLD(races): was [22]
 
 // STATIC: 0x00B6B180
 uint32_t CCharacterCreation::m_raceIndex;
@@ -90,6 +90,11 @@ void CCharacterCreation::Initialize() {
                 continue;
             }
 
+            // BLEAKHOLD(races): the creation screen keeps per-race state in arrays of BLEAKHOLD_RACE_CAPACITY
+            if (!race || race->m_id <= 0 || static_cast<uint32_t>(race->m_id) >= BLEAKHOLD_RACE_CAPACITY) {
+                continue;
+            }
+
             FactionTemplateRec* factionTemplate = g_factionTemplateDB.GetRecord(race->m_factionID);
 
             if (!factionTemplate) {
@@ -122,7 +127,7 @@ void CCharacterCreation::Shutdown() {
     CCharacterCreation::m_nameGen.m_names.Clear();
     CCharacterCreation::m_nameGen.m_dictionary.Clear();
 
-    for (uint32_t i = 0; i < 22; i++) {
+    for (uint32_t i = 0; i < BLEAKHOLD_RACE_CAPACITY; i++) { // BLEAKHOLD(races): was 22
         for (uint32_t j = 0; j < 2; j++) {
             delete CCharacterCreation::m_charPreferences[i][j];
             CCharacterCreation::m_charPreferences[i][j] = nullptr;

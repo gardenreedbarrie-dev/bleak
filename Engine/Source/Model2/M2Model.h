@@ -34,6 +34,7 @@ class M2Batch;
 class M2SkinSection;
 class M2VertexPNT2;
 class CM2ModelCall;
+struct M2DanceState;
 class CM2Scene;
 class CM2Shared;
 class CTexture;
@@ -221,6 +222,8 @@ class CM2Model {
     /* 02E4 */ uint32_t m_hitTestGroup;
     /* 02E8 */ uint32_t m_handle;
     /* 02EC */ uint32_t unused_02EC;
+    // BLEAKHOLD(dance): the Bleakhold dance playing on this model (M2Dance.h), or null.
+    M2DanceState* m_bleakDance;
 
     static void (*s_transformVertices[5])(CM2Model*, M2SkinSection*, uint8_t*, int32_t);
     static TSGrowableArray<M2ModelCallback> s_sequenceCallbacks;

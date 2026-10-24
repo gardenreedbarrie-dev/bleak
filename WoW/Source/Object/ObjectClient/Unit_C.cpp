@@ -23787,6 +23787,12 @@ void CGUnit_C::OnReceiveMirrorImageDataFromServer(CDataStore* msg) {
             }
         }
     } else if (this->m_displayInfoExtra) {
+        // BLEAKHOLD(mirrorfix): the same free as the race-data branch above.
+        if (this->m_characterComponent) {
+            CCharacterComponent::FreeComponent(this->m_characterComponent);
+            this->m_characterComponent = nullptr;
+        }
+
         this->m_characterComponent = CCharacterComponent::AllocComponent();
         const char* bakeName = this->GetDisplayBakeName();
 

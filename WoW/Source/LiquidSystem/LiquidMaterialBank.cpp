@@ -1,5 +1,6 @@
 #include "Liquid.h"
 #include "Engine/Source/Gx/CGxDevice/CGxDevice.h"
+#include "Engine/Source/Gx/CGxDevice/CGxShader.h"
 #include "Engine/Source/Services/SysMessage.h"
 #include "WoW/Source/DB/WowClientDB.h"
 #include "WoW/Source/DB/Rec/LiquidTypeRec.h"
@@ -29,6 +30,61 @@ void Liquid::ClearMaterials() {
     Liquid::s_waterFFPAllocator.Clear(".?AVCMaterialWaterFFP@Liquid@@", SLOG_OBJECT, 1);
     Liquid::s_magmaAllocator.Clear(".?AVCMaterialMagma@Liquid@@", SLOG_OBJECT, 1);
     Liquid::s_magmaFFPAllocator.Clear(".?AVCMaterialMagmaFFP@Liquid@@", SLOG_OBJECT, 1);
+}
+
+// BLEAKHOLD(procwater): the liquid type whose material and settings draw `liquidType`. With the proceduralWater
+// CVar on, ordinary water and ocean (terrain 1, 2, 5, 6, 9, 10; map object water 13 and ocean 14, the types
+// CMapObjGroup::GetLiquidType maps those to) draw with the procedural water the client ships for
+// testing (liquid type 100: depth-tinted, refracting), the same rows modders copy type 100 over in
+// LiquidType.dbc. Only the look changes: the liquid keeps its own type for sound, particles and swimming.
+// The swap is skipped unless type 100 is that procedural material and its shaders load, so the setting can
+// never leave water undrawn.
+uint32_t Liquid::GetRenderLiquidType(uint32_t liquidType) {
+    static const uint32_t s_proceduralWaterType = 100;
+
+    if (!Liquid::s_proceduralWater) {
+        return liquidType;
+    }
+
+    switch (liquidType) {
+        case 1:
+        case 2:
+        case 5:
+        case 6:
+        case 9:
+        case 10:
+        case 13:
+        case 14:
+            break;
+        default:
+            return liquidType;
+    }
+
+    LiquidTypeRec* typeRec = Liquid::s_liquidTypeDB ? Liquid::s_liquidTypeDB->GetRecord(s_proceduralWaterType) : nullptr;
+
+    if (!typeRec || typeRec->m_materialID != 3) {
+        return liquidType;
+    }
+
+    if (!Liquid::CMaterialBank::GetMaterial(s_proceduralWaterType)) {
+        return liquidType;
+    }
+
+    CGxShader* pixelShader = Liquid::CMaterialProcWater::s_pixelShader;
+
+    if (!pixelShader || !pixelShader->Valid()) {
+        return liquidType;
+    }
+
+    for (uint32_t i = 0; i < 4; i++) {
+        CGxShader* vertexShader = Liquid::CMaterialProcWater::s_vertexShaders[i];
+
+        if (!vertexShader || !vertexShader->Valid()) {
+            return liquidType;
+        }
+    }
+
+    return s_proceduralWaterType;
 }
 
 // VERIFY: 85245160 auto

@@ -1099,12 +1099,19 @@ void CGChat::AddChatMessage(const char* text, int32_t type, const char* senderNa
         memset(message, 0, sizeof(message));
 
         char* dest = buffer;
+        // BLEAKHOLD(fix): the prefix and the message were copied with no bound into their 3000-byte stack buffers,
+        // so a long addon message from the server overran them. Text past either buffer is now dropped; the first
+        // tab still splits prefix from message.
+        char* destEnd = buffer + sizeof(buffer) - 1;
+        bool inMessage = false;
 
         for (const char* source = text; *source; source++) {
-            if (*source == '\t' && dest >= buffer && dest < buffer + sizeof(buffer)) {
+            if (*source == '\t' && !inMessage) {
                 *dest = 0;
                 dest = message;
-            } else {
+                destEnd = message + sizeof(message) - 1;
+                inMessage = true;
+            } else if (dest < destEnd) {
                 *dest++ = *source;
             }
         }
@@ -1612,7 +1619,11 @@ int32_t CGChat::ChatMessageReceived(CDataStore* msg, bool isGM) {
                 flags = "AFK";
             }
 
-            if (type == CHAT_MSG_WHISPER || type == CHAT_MSG_BATTLENET) {
+            // BLEAKHOLD(fix): addon messages (language 0xFFFFFFFF) are not conversation. The Bleakhold UI whispers
+            // itself for every server message, which made the player their own reply target.
+            if (language == 0xFFFFFFFF) {
+                // not recorded
+            } else if (type == CHAT_MSG_WHISPER || type == CHAT_MSG_BATTLENET) {
                 CGChat::RecordWhisperSource(senderGuid);
             } else if (type == CHAT_MSG_WHISPER_INFORM) {
                 CGChat::RecordWhisperDest(senderGuid);
