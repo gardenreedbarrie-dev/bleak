@@ -6,6 +6,9 @@
 // tests/lua/test_server_frames.lua feeds the frames through Comm.lua/State.lua and checks every
 // value below. Keep the two files in step.
 //
+// A second session, `royale`, holds a Bleakhold Royale match (section 17: QUEUE kind B, ROYS ROYM ROYO ROYK ROYV
+// ROYE) from its own Endpoint, so the main frames stay what the existing checks expect.
+//
 // SPDX-License-Identifier: GPL-2.0-or-later
 
 #include "BleakholdCodec.h"
@@ -25,6 +28,27 @@ namespace
     std::size_t g_maxBody = 1000;
     Endpoint g_ep;
     std::vector<std::string> g_frames;
+    Endpoint g_royaleEp;
+    std::vector<std::string> g_royaleFrames;
+
+    void SendOn(Endpoint& ep, std::vector<std::string>& out, char const* op, std::string const& payload)
+    {
+        std::vector<std::string> f = ep.Frame(op, payload, g_maxBody);
+        if (f.empty())
+        {
+            std::fprintf(stderr, "bh_gen: %s could not be framed (%zu bytes)\n", op, payload.size());
+            std::exit(1);
+        }
+        for (std::string& s : f)
+        {
+            if (s.size() > 4 + MaxServerBody)
+            {
+                std::fprintf(stderr, "bh_gen: frame over the limit\n");
+                std::exit(1);
+            }
+            out.push_back(std::move(s));
+        }
+    }
 
     void Send(char const* op, std::string const& payload)
     {
@@ -118,6 +142,149 @@ namespace
         d.extraClasses = { { 12, "Gravewarden", "GRAVEWARDEN", "7FBF7F", "GRV" } };
         d.riftBosses = { { 3, "Echo of Nefarian" } };
         return d;
+    }
+
+    // Bleakhold Royale (section 17): a whole match as one player sees it
+    void RoyaleSession()
+    {
+        Intent hello;
+        if (g_royaleEp.Receive("BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUS", 1000, hello).verdict != Verdict::Accepted)
+        {
+            std::fprintf(stderr, "bh_gen: royale HELLO not accepted\n");
+            std::exit(1);
+        }
+        auto send = [](char const* op, std::string const& payload) { SendOn(g_royaleEp, g_royaleFrames, op, payload); };
+        auto queue = [&](QueueState const& q) { send("QUEUE", EncodeQueue(g_royaleEp.NextRev(Topic::Queue), q)); };
+
+        HelloReply h;
+        h.proto = 1; h.minProto = 1; h.serverEpoch = 1792648725; h.dataVer = 4242;
+        h.featureBits = FeatureSeason | FeatureRoyale; h.realmName = "Bleakhold";
+        send("HELLO", EncodeHello(h));
+
+        QueueState q;
+        q.state = QueueStateId::Queued; q.kind = QueueKind::Royale; q.activityId = 901; q.tier = 0; q.size = 1;
+        q.queuedSec = 12; q.bandMin = 80; q.bandMax = 80; q.queued = 13; q.minPlayers = 20; q.maxPlayers = 40;
+        q.matchesRunning = 1;
+        queue(q);
+        q.state = QueueStateId::Proposal; q.queuedSec = 95; q.proposalId = 412; q.timeoutSec = 15; q.queued = 24;
+        q.accepted = 3; q.proposalSize = 24;
+        queue(q);
+        QueueState in;
+        in.state = QueueStateId::InRun; in.kind = QueueKind::Royale; in.activityId = 901; in.tier = 0; in.size = 1;
+        in.bandMin = 80; in.bandMax = 80; in.minPlayers = 20; in.maxPlayers = 40; in.matchesRunning = 2;
+        queue(in);
+
+        RoyaleMap mp;
+        mp.mapId = 901; mp.minX = -1066; mp.maxX = 533; mp.minY = -1066; mp.maxY = 533;
+        mp.lobbyX = 455; mp.lobbyY = 455; mp.lobbyR = 32; mp.boundHalf = 750; mp.centerX = -267; mp.centerY = -267;
+        auto poi = [](uint32_t id, RoyalePoiKind k, int32_t x, int32_t y, uint32_t r, char const* name) {
+            RoyalePoi p;
+            p.id = id; p.kind = k; p.x = x; p.y = y; p.r = r; p.name = name;
+            return p;
+        };
+        RoyalePoiKind const L = RoyalePoiKind::Landmark;
+        RoyalePoiKind const C = RoyalePoiKind::Crossing;
+        mp.pois = {
+            poi(1, L, -266, -266, 88, "The Bleak Hold"), poi(2, L, 120, 80, 62, "Harrow Farm"),
+            poi(3, L, 180, -760, 54, "Blackvein Pit"), poi(4, L, -620, -600, 40, "Gloomtimber Mill"),
+            poi(5, L, -700, 60, 26, "The Pale Shrine"), poi(6, L, 220, -250, 60, "Broken Siege"),
+            poi(7, L, 60, -420, 60, "Crow's Rise"), poi(8, L, -80, -120, 60, "Wrecked Caravan"),
+            poi(9, L, -520, -260, 70, "Mirefen Hollow"), poi(10, L, -480, 170, 60, "Forgotten Graves"),
+            poi(11, C, -80, -710, 16, "Old Ford"), poi(12, C, -560, -700, 18, "Covered Bridge"),
+            poi(13, C, 150, -665, 0, "Pit Bridge; the third, crossing: east~west|%"),
+            poi(14, RoyalePoiKind::Lobby, 455, 455, 32, "The Overlook"),
+        };
+        send("ROYM", EncodeRoyaleMap(mp));
+
+        RoyaleState st;
+        st.matchId = 7001; st.phase = RoyalePhase::Arriving; st.phaseMsLeft = 60000; st.alive = 24; st.total = 24;
+        st.curX = -267; st.curY = -267; st.curR = 1080; st.myX = 450; st.myY = 452;
+        send("ROYS", EncodeRoyaleState(st));
+        st.phase = RoyalePhase::Countdown; st.phaseMsLeft = 41000; st.pinX = 104; st.pinY = 96;
+        send("ROYS", EncodeRoyaleState(st));
+        RoyaleEvent ev;
+        ev.kind = RoyaleEventKind::Revealed; ev.value = 1; ev.x = -150; ev.y = -310;
+        send("ROYV", EncodeRoyaleEvent(ev));
+        st.phase = RoyalePhase::Fight; st.phaseMsLeft = 0; st.me = RoyaleMe::Alive; st.stage = 1;
+        st.nextX = -150; st.nextY = -310; st.nextR = 520; st.shrinkStartMs = 0u; st.shrinkEndMs = 170000u;
+        st.dmgPermille = 10; st.myX = 104; st.myY = 96;
+        send("ROYS", EncodeRoyaleState(st));
+
+        auto obj = [](uint32_t id, RoyaleObjectKind k, uint32_t sub, int32_t x, int32_t y, RoyaleObjectState state,
+                       Opt<uint32_t> ms) {
+            RoyaleObject o;
+            o.objId = id; o.kind = k; o.subtype = sub; o.x = x; o.y = y; o.state = state; o.msLeft = ms;
+            return o;
+        };
+        RoyaleObjects ob;
+        ob.matchId = 7001; ob.full = true;
+        ob.objects = { obj(1, RoyaleObjectKind::ShadowSight, 0, -266, -266, RoyaleObjectState::Taken, 61000u),
+            obj(2, RoyaleObjectKind::ShadowSight, 0, -712, 48, RoyaleObjectState::Ready, std::nullopt) };
+        for (uint32_t i = 0; i < 8; ++i)
+        {
+            int32_t const k = static_cast<int32_t>(i);
+            ob.objects.push_back(obj(3 + i, RoyaleObjectKind::Buff, 1 + i % 3, -500 + k * 90, 300 - k * 80,
+                RoyaleObjectState::Ready, std::nullopt));
+        }
+        ob.objects.push_back(obj(20, RoyaleObjectKind::Supply, 0, -950, -250, RoyaleObjectState::Incoming, 20000u));
+        send("ROYO", EncodeRoyaleObjects(ob));
+        RoyaleObjects delta;
+        delta.matchId = 7001; delta.full = false;
+        delta.objects = { obj(20, RoyaleObjectKind::Supply, 0, -950, -250, RoyaleObjectState::Opened, std::nullopt) };
+        send("ROYO", EncodeRoyaleObjects(delta));
+
+        for (RoyaleEventKind k : { RoyaleEventKind::StormMoving, RoyaleEventKind::SupplyIncoming,
+                 RoyaleEventKind::SupplyLanded, RoyaleEventKind::SupplyOpened, RoyaleEventKind::PlayersLeft })
+        {
+            RoyaleEvent e;
+            e.kind = k;
+            e.value = k == RoyaleEventKind::PlayersLeft ? 10 : 2;
+            if (k != RoyaleEventKind::StormMoving && k != RoyaleEventKind::PlayersLeft)
+            {
+                e.x = -950; e.y = -250;
+            }
+            if (k == RoyaleEventKind::SupplyIncoming)
+                e.msLeft = 20000u;
+            if (k == RoyaleEventKind::SupplyOpened)
+                e.name = "Br\xC3\xA9nna";
+            send("ROYV", EncodeRoyaleEvent(e));
+        }
+
+        RoyaleKill k;
+        k.killerName = "Aldric Stormwind"; k.killerClassId = 1; k.victimName = "Br\xC3\xA9nna"; k.victimClassId = 8;
+        k.cause = RoyaleCause::Player; k.aliveAfter = 23; k.killerKills = 3; k.announce = RoyaleAnnounce::TripleKill;
+        send("ROYK", EncodeRoyaleKill(k));
+        RoyaleKill storm;
+        storm.victimName = "Corwin"; storm.victimClassId = 12; storm.cause = RoyaleCause::Storm; storm.aliveAfter = 22;
+        send("ROYK", EncodeRoyaleKill(storm));
+
+        RoyaleResult r;
+        r.matchId = 7001; r.placement = 12; r.total = 24; r.kills = 1; r.damage = 18400; r.healing = 2100;
+        r.survivedSec = 214; r.rewarded = true;
+        Reward place; place.kind = RewardKind::Honor; place.amount = 70; place.text = "Placement";
+        Reward kill; kill.kind = RewardKind::Honor; kill.amount = 25; kill.text = "1 elimination";
+        Reward shards; shards.kind = RewardKind::Shards; shards.amount = 5;
+        r.rewards = { place, kill, shards };
+        send("ROYE", EncodeRoyaleResult(r));
+        st.me = RoyaleMe::Spectating; st.placement = 12; st.alive = 11; st.watchName = "Aldric Stormwind";
+        st.myX.reset(); st.myY.reset();
+        send("ROYS", EncodeRoyaleState(st));
+
+        RoyaleEvent w;
+        w.kind = RoyaleEventKind::Winner; w.value = 7; w.name = "Dalia";
+        send("ROYV", EncodeRoyaleEvent(w));
+        st.phase = RoyalePhase::Victory; st.phaseMsLeft = 12000; st.alive = 1;
+        send("ROYS", EncodeRoyaleState(st));
+        r.winnerName = "Dalia"; r.winnerClassId = 11; r.winnerKills = 7;
+        send("ROYE", EncodeRoyaleResult(r));
+
+        ErrorReply g;
+        g.op = IntentType::Glide; g.seq = 12; g.code = RoyaleErr::GlideHere.code; g.text = RoyaleErr::GlideHere.text;
+        send("ERR", EncodeError(g));
+        send("TOAST", EncodeToast({ ToastKind::Queue, "Bleakhold Royale", "24 players are ready", "royale" }));
+        QueueState none;
+        none.kind = QueueKind::Royale;
+        queue(none);
     }
 }
 
@@ -337,6 +504,8 @@ int main(int argc, char** argv)
         Send("CAMPST", EncodeCampState(c));
     }
 
+    RoyaleSession();
+
     std::ofstream out(argv[2], std::ios::binary);
     out << "-- generated by Server/mod-bleakhold-ui/tests/cpp/bh_gen.cpp (maxBody " << g_maxBody << "). Do not edit.\n";
     out << "return {\n  maxBody = " << g_maxBody << ",\n  revs = { WEEK = " << g_ep.Rev(Topic::Week) << ", ERA = " << g_ep.Rev(Topic::Era)
@@ -345,8 +514,13 @@ int main(int argc, char** argv)
         << ", SEASON = " << g_ep.Rev(Topic::Season) << " },\n  messages = " << g_ep.Stats().messagesOut << ",\n  frames = {\n";
     for (std::string const& f : g_frames)
         out << "    " << LuaString(f) << ",\n";
-    out << "  },\n}\n";
-    std::printf("bh_gen: %zu frames for %llu messages (max body %zu) -> %s\n", g_frames.size(),
-        static_cast<unsigned long long>(g_ep.Stats().messagesOut), g_maxBody, argv[2]);
+    out << "  },\n  royale = {\n    revs = { QUEUE = " << g_royaleEp.Rev(Topic::Queue) << " },\n    messages = "
+        << g_royaleEp.Stats().messagesOut << ",\n    frames = {\n";
+    for (std::string const& f : g_royaleFrames)
+        out << "      " << LuaString(f) << ",\n";
+    out << "    },\n  },\n}\n";
+    std::printf("bh_gen: %zu frames for %llu messages (max body %zu), Royale %zu frames for %llu messages -> %s\n",
+        g_frames.size(), static_cast<unsigned long long>(g_ep.Stats().messagesOut), g_maxBody, g_royaleFrames.size(),
+        static_cast<unsigned long long>(g_royaleEp.Stats().messagesOut), argv[2]);
     return 0;
 }

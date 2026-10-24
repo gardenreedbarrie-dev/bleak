@@ -70,7 +70,7 @@ ns.AddCommand("chat", "chat tags: /bh chat [tag on|off [window]]", function(args
     end
     local def = byKey[key:lower()]
     if not def or (state ~= "on" and state ~= "off") then
-        ns.Print("usage: /bh chat <legacy|first|season|queue|record> <on|off> [chat window number]")
+        ns.Print("usage: /bh chat <legacy|first|season|queue|record|case|royale> <on|off> [chat window number]")
         return
     end
     local n = tonumber(win) or 1

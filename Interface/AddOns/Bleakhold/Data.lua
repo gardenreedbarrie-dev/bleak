@@ -213,6 +213,7 @@ Data.chatTags = {
     { tag = "Queue", color = "9FD8E5", key = "queue" },
     { tag = "Record", color = "F1D9A0", key = "record" },
     { tag = "Case", color = "C9A2F5", key = "case" },
+    { tag = "Royale", color = "B98CFF", key = "royale" },
 }
 
 -- The addon's sentence for a server refusal (ERR code), shown instead of the server's text (ns.ErrorText); a
@@ -271,6 +272,20 @@ Data.errorTexts = {
     repair_off = "Field repair is turned off on this realm.",
     repair_skill = repairSkillText,
     repair_gold = "You do not have enough money to repair.",
+    -- Bleakhold Royale (section 17); royale_lockout and royale_busy keep the server's sentence (the seconds left,
+    -- the reason)
+    royale_off = "Bleakhold Royale is not open right now.",
+    royale_level = "You must be level 80 to join Bleakhold Royale.",
+    royale_grouped = "Bleakhold Royale is solo: leave your group first.",
+    royale_busy = serverText("You cannot join Bleakhold Royale from where you are now."),
+    royale_deserter = "You cannot join while you are a deserter.",
+    royale_bags = "Make room in your bags first: you need 6 free bag slots.",
+    royale_ip = "Too many players from your connection are in Bleakhold Royale.",
+    royale_lockout = serverText("You declined a match: you can queue again soon."),
+    royale_phase = serverText("You cannot do that now."),
+    royale_nobody = "There is nobody left to watch.",
+    no_proposal = "There is no match waiting for your answer.",
+    glide_here = "You cannot glide here.",
 }
 
 -- Camp objects (CAMPST objs and place): by profession skill line (SkillLine.dbc), its stock 3.3.5a icon

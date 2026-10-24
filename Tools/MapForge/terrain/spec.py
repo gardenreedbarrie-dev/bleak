@@ -159,7 +159,10 @@ class Spec:
         self.wmos: list[Placement] = []
         self.water = []  # [dict]
         self.uid_base = 1
-        self.pois = []  # [dict(name, kind, x, y, z, z_offset, radius, flatten)]
+        # [dict(name, kind, id, title, x, y, z, z_offset, z_from, radius, flatten, weight, param, facing)]
+        self.pois = []
+        self.roads = []  # [dict(name, shape (Polyline), texture, width, fade, strength)]
+        self.scatter = []  # [dict] (checked scatter groups, see _parse_scatter)
         self.preview = True
         self.warnings: list[str] = []
 
@@ -205,7 +208,7 @@ def _parse_feature(obj, where: str) -> dict:
         return {"type": "hill", "center": _vec(obj["center"], 2, f"{where}.center"),
                 "radius": _num(obj, "radius", where, lo=1.0), "height": _num(obj, "height", where), "shape": shape}
     if kind in ("flatten", "plateau"):
-        _check_keys(obj, {"type", "shape", "height", "falloff", "mode"}, {"shape"}, where)
+        _check_keys(obj, {"type", "shape", "height", "offset", "falloff", "mode"}, {"shape"}, where)
         mode = obj.get("mode", "set")
         if mode not in ("set", "raise", "lower"):
             raise SpecError(f"{where}.mode: 'set', 'raise' or 'lower'")
@@ -214,6 +217,7 @@ def _parse_feature(obj, where: str) -> dict:
             raise SpecError(f"{where}.height: a number, or null for the terrain height at the shape's centre")
         return {"type": "flatten", "shape": parse_shape(obj["shape"], f"{where}.shape"),
                 "height": None if height is None else float(height),
+                "offset": _num(obj, "offset", where, default=0.0, lo=-coords.HEIGHT_LIMIT, hi=coords.HEIGHT_LIMIT),
                 "falloff": _num(obj, "falloff", where, default=0.0, lo=0.0), "mode": mode}
     if kind == "river":
         _check_keys(obj, {"type", "path", "width", "bank", "bed"}, {"path", "width", "bed"}, where)
@@ -336,10 +340,222 @@ def _parse_placement(obj, kind: str, where: str) -> Placement:
                      flags, bounds, doodad_set, name_set, label)
 
 
+# POI kinds with fixed meanings (the Royale server's bh_royale_poi rows): the allowed `param` values and whether a
+# `weight` above 0 is required. Other kinds are free-form (any integer param, any weight >= 0).
+POI_KINDS = {
+    "lobby": ((0,), False),
+    "landmark": ((0,), False),
+    "crate": ((1, 2), False),  # 1 common crate, 2 strongbox
+    "orb_shadow": ((0,), False),
+    "orb_buff": ((1, 2, 3), False),  # 1 speed, 2 restoration, 3 berserk
+    "supply_site": ((0,), False),
+    "final_site": ((0,), True),  # weight: how often the storm ends here
+    "crossing": ((0,), False),
+}
+_POI_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+_POI_TITLE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 '.-]{0,63}$")
+MAX_POI_ID = 0x7FFFFFFF
+
+
+def _parse_poi(mk, where: str, spec: Spec, names: set, ids: set) -> dict:
+    _check_keys(mk, {"name", "kind", "position", "z_offset", "radius", "flatten", "id", "title", "facing", "weight",
+                     "param", "z_from"}, {"name", "position"}, where)
+    name = mk["name"]
+    if not isinstance(name, str) or not _POI_NAME_RE.match(name) or name in names:
+        raise SpecError(f"{where}.name: a unique name of letters, digits, '_', '-', '.' (the server's spawn "
+                        "tables key on it)")
+    names.add(name)
+    kind = mk.get("kind", "poi")
+    if not isinstance(kind, str) or not kind:
+        raise SpecError(f"{where}.kind: a non-empty string (e.g. landmark, crate, orb_buff, final_site)")
+    poi_id = None
+    if "id" in mk:
+        poi_id = _int(mk, "id", where, lo=1, hi=MAX_POI_ID)
+        if poi_id in ids:
+            raise SpecError(f"{where}.id: {poi_id} is already used by another POI")
+        ids.add(poi_id)
+    title = mk.get("title", "")
+    if not isinstance(title, str) or (title and not _POI_TITLE_RE.match(title)):
+        raise SpecError(f"{where}.title: up to 64 letters, digits, spaces, apostrophes, dots and hyphens, starting "
+                        "with a letter or digit (the name players see)")
+    x, y, z = _vec(mk["position"], 3, f"{where}.position", allow_none_last=True)
+    radius = _num(mk, "radius", where, default=0.0, lo=0.0)
+    weight = _int(mk, "weight", where, default=0, lo=0, hi=1000000)
+    param = _int(mk, "param", where, default=0, lo=-0x80000000, hi=0x7FFFFFFF)
+    facing = _num(mk, "facing", where, default=0.0, lo=-360.0, hi=360.0)
+    rule = POI_KINDS.get(kind)
+    if rule is not None:
+        params, needs_weight = rule
+        if param not in params:
+            raise SpecError(f"{where}.param: a '{kind}' POI takes param {' or '.join(map(str, params))}")
+        if needs_weight and weight <= 0:
+            raise SpecError(f"{where}.weight: a '{kind}' POI needs a weight above 0")
+        if not needs_weight and weight != 0:
+            raise SpecError(f"{where}.weight: only final_site POIs carry a weight")
+    z_from = mk.get("z_from")
+    if z_from is not None:
+        if not isinstance(z_from, str) or not z_from:
+            raise SpecError(f"{where}.z_from: the label of a WMO or doodad placement")
+        if z is not None:
+            raise SpecError(f"{where}: give a z in 'position' or 'z_from', not both")
+    flatten = mk.get("flatten", False)
+    falloff = None
+    if flatten is True:
+        falloff = max(4.0, radius * 0.75)
+    elif isinstance(flatten, dict):
+        _check_keys(flatten, {"falloff"}, set(), f"{where}.flatten")
+        falloff = _num(flatten, "falloff", f"{where}.flatten", default=max(4.0, radius * 0.75), lo=0.0)
+    elif flatten is not False:
+        raise SpecError(f"{where}.flatten: true, false or {{\"falloff\": yards}}")
+    if falloff is not None and radius <= 0.0:
+        raise SpecError(f"{where}: a flattened point needs a radius")
+    if falloff is not None and z_from is not None:
+        raise SpecError(f"{where}: a point standing on a placement (z_from) cannot flatten the terrain")
+    if falloff is not None:
+        # Flatten after every heightmap feature, to the terrain height at the centre (or the given z). The circle is
+        # one quad (UNIT_SIZE) wider than the radius: a point's triangle uses vertices up to one quad away, so this
+        # keeps the ground flat across the whole stated radius.
+        spec.features.append({"type": "flatten",
+                              "shape": parse_shape({"circle": {"center": [x, y], "radius": radius + coords.UNIT_SIZE}},
+                                                   f"{where}.flatten"),
+                              "height": z, "offset": 0.0, "falloff": falloff, "mode": "set"})
+    return {"name": name, "kind": kind, "id": poi_id, "title": title, "x": x, "y": y, "z": z,
+            "z_offset": _num(mk, "z_offset", where, default=0.0), "z_from": z_from, "radius": radius,
+            "flatten": falloff, "weight": weight, "param": param, "facing": facing % 360.0}
+
+
+def _assign_poi_ids(pois: list) -> None:
+    """POIs without an id get the next free one from 1 up, in spec order."""
+    used = {p["id"] for p in pois if p["id"] is not None}
+    next_id = 1
+    for p in pois:
+        if p["id"] is None:
+            while next_id in used:
+                next_id += 1
+            p["id"] = next_id
+            used.add(next_id)
+
+
+def _points(value, where: str, minimum: int = 2) -> list[tuple[float, float]]:
+    if not isinstance(value, list) or len(value) < minimum:
+        raise SpecError(f"{where}: at least {minimum} [x, y] points")
+    return [tuple(_vec(p, 2, f"{where}[{i}]")) for i, p in enumerate(value)]
+
+
+def _parse_road(obj, spec: Spec, names: set, where: str) -> dict:
+    """A road: a texture painted along a polyline (and a mask the scatter groups keep clear of)."""
+    _check_keys(obj, {"name", "points", "width", "fade", "texture", "strength"}, {"name", "points", "texture"}, where)
+    name = obj["name"]
+    if not isinstance(name, str) or not _POI_NAME_RE.match(name) or name in names:
+        raise SpecError(f"{where}.name: a unique name of letters, digits, '_', '-', '.'")
+    names.add(name)
+    width = _num(obj, "width", where, default=7.0, lo=1.0, hi=60.0)
+    points = _points(obj["points"], f"{where}.points")
+    return {"name": name, "points": points, "shape": parse_shape({"polyline": {"points": [list(p) for p in points],
+                                                                                "width": width}}, where),
+            "texture": spec.texture_index(obj["texture"], f"{where}.texture"), "width": width,
+            "fade": _num(obj, "fade", where, default=4.0, lo=0.0, hi=100.0),
+            "strength": _num(obj, "strength", where, default=1.0, lo=0.0, hi=1.0)}
+
+
+def _road_rule(road: dict) -> dict:
+    return {"texture": road["texture"], "strength": road["strength"], "shape": road["shape"], "fade": road["fade"],
+            "slope": None, "height": None, "noise": None}
+
+
+# Scatter: deterministic cover. Each group throws one candidate into every cell of a jittered grid (cell size
+# sqrt(10000 / density) yards), keeps those that pass its masks and its spacing, and turns them into doodads.
+SCATTER_CLEARANCES = ("roads", "river", "pois", "placements")
+MAX_SCATTER_CANDIDATES = 200000
+
+
+def _parse_scatter(obj, where: str, names: set, spec: Spec) -> dict:
+    _check_keys(obj, {"name", "seed", "models", "density", "count", "min_spacing", "shape", "exclude", "slope",
+                      "height", "clearance", "poi_kinds", "noise", "facing", "dry"},
+                {"name", "models", "density"}, where)
+    name = obj["name"]
+    if not isinstance(name, str) or not _POI_NAME_RE.match(name) or name in names:
+        raise SpecError(f"{where}.name: a unique name of letters, digits, '_', '-', '.' (it labels the placements)")
+    names.add(name)
+    models = obj["models"]
+    if not isinstance(models, list) or not models:
+        raise SpecError(f"{where}.models: at least one {{model, weight}}")
+    out_models = []
+    for i, m in enumerate(models):
+        mw = f"{where}.models[{i}]"
+        _check_keys(m, {"model", "weight", "radius", "body", "scale", "z_offset"}, {"model"}, mw)
+        model = normalize_path(m["model"], f"{mw}.model", (".m2", ".mdx"))
+        if is_placeholder(model):
+            spec.warnings.append(f"{mw}.model {model!r} is a TODO placeholder")
+        radius = _num(m, "radius", mw, default=4.0, lo=0.1, hi=200.0)
+        scale = m.get("scale", [1.0, 1.0])
+        if isinstance(scale, (int, float)) and not isinstance(scale, bool):
+            scale = [scale, scale]
+        lo, hi = _vec(scale, 2, f"{mw}.scale")
+        if not (1.0 / 1024.0 <= lo <= hi <= 63.0):
+            raise SpecError(f"{mw}.scale: [min, max] with 1/1024 <= min <= max <= 63")
+        out_models.append({"model": model, "weight": _num(m, "weight", mw, default=1.0, lo=0.0, hi=1000.0),
+                           "radius": radius, "body": _num(m, "body", mw, default=radius * 0.5, lo=0.0, hi=200.0),
+                           "scale": (lo, hi), "z_offset": _num(m, "z_offset", mw, default=0.0, lo=-50.0, hi=50.0)})
+    if sum(m["weight"] for m in out_models) <= 0.0:
+        raise SpecError(f"{where}.models: the weights add up to 0")
+    if not isinstance(obj.get("dry", True), bool):
+        raise SpecError(f"{where}.dry: true (keep out of water, the default) or false")
+    if not isinstance(obj.get("exclude", []), list):
+        raise SpecError(f"{where}.exclude: a list of shapes")
+    group = {"name": name, "seed": _int(obj, "seed", where, default=0, lo=0, hi=0xFFFFFFFF), "models": out_models,
+             "density": _num(obj, "density", where, lo=0.001, hi=10000.0),
+             "count": _int(obj, "count", where, lo=1, hi=100000) if "count" in obj else None,
+             "min_spacing": _num(obj, "min_spacing", where, default=0.0, lo=0.0, hi=1000.0),
+             "shape": parse_shape(obj["shape"], f"{where}.shape") if "shape" in obj else None,
+             "exclude": [], "slope": None, "height": None, "noise": None, "poi_kinds": None,
+             "facing": None, "dry": obj.get("dry", True)}
+    for i, shape in enumerate(obj.get("exclude", [])):
+        group["exclude"].append(parse_shape(shape, f"{where}.exclude[{i}]"))
+    if "slope" in obj:
+        s = _check_keys(obj["slope"], {"max"}, {"max"}, f"{where}.slope")
+        group["slope"] = coords.dcos(_num(s, "max", f"{where}.slope", lo=0.0, hi=90.0))  # as a normal.z floor
+    if "height" in obj:
+        h = _check_keys(obj["height"], {"min", "max"}, set(), f"{where}.height")
+        lo = _num(h, "min", f"{where}.height", default=-coords.HEIGHT_LIMIT)
+        hi = _num(h, "max", f"{where}.height", default=coords.HEIGHT_LIMIT)
+        if lo > hi:
+            raise SpecError(f"{where}.height: min > max")
+        group["height"] = (lo, hi)
+    clear = _check_keys(obj.get("clearance", {}), set(SCATTER_CLEARANCES), set(), f"{where}.clearance")
+    # None = that mask is off; the clearance from the spec's own placements is always on (1 yard by default).
+    group["clearance"] = {k: (_num(clear, k, f"{where}.clearance", lo=0.0, hi=1000.0) if k in clear else None)
+                          for k in SCATTER_CLEARANCES}
+    if group["clearance"]["placements"] is None:
+        group["clearance"]["placements"] = 1.0
+    if "poi_kinds" in obj:
+        kinds = obj["poi_kinds"]
+        if not isinstance(kinds, list) or not all(isinstance(k, str) and k for k in kinds):
+            raise SpecError(f"{where}.poi_kinds: a list of POI kinds the 'pois' clearance applies to")
+        group["poi_kinds"] = set(kinds)
+    if "noise" in obj:
+        n = _check_keys(obj["noise"], {"scale", "threshold", "fade", "seed", "octaves"}, {"scale"}, f"{where}.noise")
+        group["noise"] = {"scale": _num(n, "scale", f"{where}.noise", lo=1.0),
+                          "threshold": _num(n, "threshold", f"{where}.noise", default=0.0, lo=-1.0, hi=1.0),
+                          "fade": _num(n, "fade", f"{where}.noise", default=0.2, lo=0.001),
+                          "seed": _int(n, "seed", f"{where}.noise", default=0),
+                          "octaves": _int(n, "octaves", f"{where}.noise", default=2, lo=1, hi=6)}
+    if "facing" in obj:
+        group["facing"] = _num(obj, "facing", where, lo=-360.0, hi=360.0)
+    x0, x1, y0, y1 = group["shape"].bbox() if group["shape"] is not None else spec.world_bounds()
+    cell = (10000.0 / group["density"]) ** 0.5
+    candidates = (int((x1 - x0) / cell) + 1) * (int((y1 - y0) / cell) + 1)
+    if candidates > MAX_SCATTER_CANDIDATES:
+        raise SpecError(f"{where}.density: {candidates} candidate cells (at most {MAX_SCATTER_CANDIDATES}); lower "
+                        "the density or give a smaller shape")
+    group["cell"] = cell
+    return group
+
+
 def parse_spec(data: dict) -> Spec:
     spec = Spec()
     top = {"format", "map", "seed", "area_id", "areas", "heightmap", "textures", "texture_rules", "holes", "doodads",
-           "wmos", "water", "uid_base", "pois", "preview"}
+           "wmos", "water", "uid_base", "pois", "preview", "roads", "scatter"}
     _check_keys(data, top, {"map", "heightmap", "textures"}, "spec")
     fmt = data.get("format", FORMAT)
     if fmt != FORMAT:
@@ -400,8 +616,27 @@ def parse_spec(data: dict) -> Spec:
         color = _color(tex.get("color", "#808080"), f"{w}.color")
         spec.textures.append(Texture(name, path, color, _int(tex, "effect_id", w, default=0, lo=0, hi=0xFFFFFFFF),
                                      _int(tex, "mtxf_flags", w, default=0, lo=0, hi=0xFFFFFFFF)))
-    spec.texture_rules = [_parse_rule(r, spec, f"texture_rules[{i}]")
-                          for i, r in enumerate(data.get("texture_rules", []))]
+    road_names = set()
+    spec.roads = [_parse_road(r, spec, road_names, f"roads[{i}]") for i, r in enumerate(data.get("roads", []))]
+    # Roads paint where the rule list holds {"roads": true}, or before every rule when it holds none (so later rules,
+    # a paved courtyard or rock on cliffs, paint over them).
+    rules = data.get("texture_rules", [])
+    if not isinstance(rules, list):
+        raise SpecError("texture_rules: expected a list")
+    markers = [i for i, r in enumerate(rules) if isinstance(r, dict) and "roads" in r]
+    if len(markers) > 1:
+        raise SpecError("texture_rules: at most one {\"roads\": true} entry")
+    road_rules = [_road_rule(r) for r in spec.roads]
+    if not markers:
+        spec.texture_rules = list(road_rules)
+    for i, r in enumerate(rules):
+        if i in markers:
+            _check_keys(r, {"roads"}, {"roads"}, f"texture_rules[{i}]")
+            if r["roads"] is not True:
+                raise SpecError(f"texture_rules[{i}].roads: true (the roads paint here)")
+            spec.texture_rules += road_rules
+            continue
+        spec.texture_rules.append(_parse_rule(r, spec, f"texture_rules[{i}]"))
 
     for i, h in enumerate(data.get("holes", [])):
         _check_keys(h, {"shape"}, {"shape"}, f"holes[{i}]")
@@ -421,42 +656,10 @@ def parse_spec(data: dict) -> Spec:
         spec.wmos.append(p)
 
     poi_names = set()
+    poi_ids = set()
     for i, mk in enumerate(data.get("pois", [])):
-        where = f"pois[{i}]"
-        _check_keys(mk, {"name", "kind", "position", "z_offset", "radius", "flatten"}, {"name", "position"}, where)
-        name = mk["name"]
-        if not isinstance(name, str) or not re.match(r"^[A-Za-z0-9_.-]{1,64}$", name) or name in poi_names:
-            raise SpecError(f"{where}.name: a unique name of letters, digits, '_', '-', '.' (the server's spawn "
-                            "tables key on it)")
-        poi_names.add(name)
-        kind = mk.get("kind", "poi")
-        if not isinstance(kind, str) or not kind:
-            raise SpecError(f"{where}.kind: a non-empty string (e.g. landmark, orb_shrine, crate_drop, storm_center)")
-        x, y, z = _vec(mk["position"], 3, f"{where}.position", allow_none_last=True)
-        radius = _num(mk, "radius", where, default=0.0, lo=0.0)
-        flatten = mk.get("flatten", False)
-        falloff = None
-        if flatten is True:
-            falloff = max(4.0, radius * 0.75)
-        elif isinstance(flatten, dict):
-            _check_keys(flatten, {"falloff"}, set(), f"{where}.flatten")
-            falloff = _num(flatten, "falloff", f"{where}.flatten", default=max(4.0, radius * 0.75), lo=0.0)
-        elif flatten is not False:
-            raise SpecError(f"{where}.flatten: true, false or {{\"falloff\": yards}}")
-        if falloff is not None and radius <= 0.0:
-            raise SpecError(f"{where}: a flattened point needs a radius")
-        spec.pois.append({"name": name, "kind": kind, "x": x, "y": y, "z": z,
-                          "z_offset": _num(mk, "z_offset", where, default=0.0), "radius": radius,
-                          "flatten": falloff})
-        if falloff is not None:
-            # Flatten after every heightmap feature, to the terrain height at the centre (or the given z). The
-            # circle is one quad (UNIT_SIZE) wider than the radius: a point's triangle uses vertices up to one quad
-            # away, so this keeps the ground flat across the whole stated radius.
-            spec.features.append({"type": "flatten",
-                                  "shape": parse_shape({"circle": {"center": [x, y],
-                                                                   "radius": radius + coords.UNIT_SIZE}},
-                                                       f"{where}.flatten"),
-                                  "height": z, "falloff": falloff, "mode": "set"})
+        spec.pois.append(_parse_poi(mk, f"pois[{i}]", spec, poi_names, poi_ids))
+    _assign_poi_ids(spec.pois)
 
     for i, w in enumerate(data.get("water", [])):
         where = f"water[{i}]"
@@ -465,6 +668,12 @@ def parse_spec(data: dict) -> Spec:
         spec.water.append({"liquid_type": liquid_type, "height": _num(w, "height", where),
                            "shape": parse_shape(w["shape"], f"{where}.shape"),
                            "min_depth": _num(w, "min_depth", where, default=0.0, lo=0.0)})
+
+    scatter_names = set()
+    groups = data.get("scatter", [])
+    if not isinstance(groups, list):
+        raise SpecError("scatter: expected a list of groups")
+    spec.scatter = [_parse_scatter(g, f"scatter[{i}]", scatter_names, spec) for i, g in enumerate(groups)]
     return spec
 
 

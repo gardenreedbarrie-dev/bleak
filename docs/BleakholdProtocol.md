@@ -160,7 +160,8 @@ These topics are revisioned. The first field of the first record of every messag
   ignored as a duplicate. A gap, or a delta before any snapshot, makes the client send `GET <topic>`;
   answer with a snapshot.
 - Unrevisioned ops (`MPS`, `MP`, `MPE`, `RIFT`, `RIFTE`, `SET`, `LB`, `LBME`, `FIRSTS`, `DEF`, `TOAST`,
-  `ERR`, `HELLO`, `PONG`, `CASES`, `CASE`, `UNBOX`, `CAMPST`) are full states or events; each one stands alone.
+  `ERR`, `HELLO`, `PONG`, `CASES`, `CASE`, `UNBOX`, `CAMPST`, `ROYS`, `ROYM`, `ROYO`, `ROYK`, `ROYV`, `ROYE`) are
+  full states or events; each one stands alone.
 
 Push a new snapshot or delta whenever something changes (task progress, queue state, keystone, run
 events). The client also asks with `GET` when a window opens; answer every `GET` with the current
@@ -177,9 +178,9 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `GET` | records of `topic[,arg...]`, 1 to 8 records | send the current state of these topics |
 | `TCLAIM` | `uid` | claim the reward of task `uid` |
 | `TREROLL` | `uid` | replace task `uid` (a daily task that is still open); the server decides if it is free or what it costs |
-| `QJOIN` | `kind, activityId, tier, roles, size` | join the queue. `kind`: `D` dungeon board, `R` Eclipse Rift. `activityId`: dungeon id (0 for the Rift). `tier`: 0 Normal, 1 Veteran, 2 Elite, 3 Nightmare. `roles`: bit mask 1 tank, 2 healer, 4 damage. `size`: wanted group size 1..5 (1 = enter alone, no matchmaking) |
-| `QLEAVE` | | leave the queue |
-| `QREPLY` | `proposalId, accept` | answer a group proposal (1 accept, 0 decline) |
+| `QJOIN` | `kind, activityId, tier, roles, size` | join the queue. `kind`: `D` dungeon board, `R` Eclipse Rift, `B` Bleakhold Royale (section 17). `activityId`: dungeon id (0 for the Rift, the mode id, above 0, for Royale). `tier`: 0 Normal, 1 Veteran, 2 Elite, 3 Nightmare (always 0 for Royale). `roles`: bit mask 1 tank, 2 healer, 4 damage (ignored for Royale). `size`: wanted group size 1..5 (1 = enter alone, no matchmaking; always 1 for Royale) |
+| `QLEAVE` | | leave the queue (the Royale queue when the player is in it) |
+| `QREPLY` | `proposalId, accept` | answer a group proposal or a Royale ready check (1 accept, 0 decline) |
 | `KMODE` | `mode` | set the dungeon mode for the next instance: 0 Normal, 1 Heroic, 2 Mythic (replaces the Mythic choice in the portrait Dungeon Difficulty menu, which the addon leaves alone) |
 | `KSTART` | | start the keystone (group leader, inside the dungeon) |
 | `KCANCEL` | | cancel the start countdown (group leader) |
@@ -194,6 +195,9 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `CAMP` | `act[, skill]` | camping (section 16). `act`: `M` make camp here, `O` place a camp object at the fire the player is at, `P` pack up the player's fire. `skill` (1..2147483647, a SkillLine id from `CAMPST` `place`) is sent with `O` and only with `O`: `CAMP M`, `CAMP O,164`, `CAMP P` |
 | `GLIDE` | | start the glide, a short slow fall (High Elves; section 16) |
 | `REPAIR` | | repair everything the player wears and carries in the bags, for the normal cost (section 16) |
+| `RDROP` | `x, y` | Bleakhold Royale: set the landing pin (section 17). Integer world yards, -17067..17067 each (they may be negative) |
+| `RDEPLOY` | | Bleakhold Royale: open the parachute now (section 17) |
+| `RSPEC` | `dir` | Bleakhold Royale spectators: watch another player (section 17). `dir`: 0 the killer (or the first player alive), 1 the next, 2 the previous |
 
 `GET` topics and what to send back:
 
@@ -207,6 +211,8 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `CASES` | | `CASES` (section 15) |
 | `CASE` | `caseItemId` | `CASE` for that case; nothing when it is not one (section 15) |
 | `CAMPST` | | `CAMPST` (section 16) |
+| `ROYS` | | `ROYS` then a full `ROYO` while the player is in a Bleakhold Royale match; nothing otherwise (section 17) |
+| `ROYM` | | `ROYM` while the player is in a Bleakhold Royale match; nothing otherwise (section 17) |
 
 Examples:
 
@@ -238,6 +244,11 @@ C> 1 CAMP o 1/1 O,164
 C> 1 CAMP p 1/1 P
 C> 1 GLIDE q 1/1
 C> 1 REPAIR r 1/1
+C> 1 GET s 1/1 ROYS;ROYM
+C> 1 QJOIN t 1/1 B,901,0,4,1
+C> 1 RDROP u 1/1 -412,96
+C> 1 RDEPLOY v 1/1
+C> 1 RSPEC w 1/1 2
 ```
 
 ## 7. Server to client
@@ -260,7 +271,9 @@ may define more with `DEF X`), item ids are item template entries.
   (section 9), 8 season live, 16 leaderboards live, 32 collections live, 64 emoji bubbles live (section 13),
   128 dances live (section 14), 256 cases live (section 15), 512 camping live (campfires, camp objects, warmth,
   the food XP bonus, repair at a camp anvil; section 16), 1024 the High Elf glide live, 2048 blacksmiths repair
-  anywhere (section 16).
+  anywhere (section 16), 4096 Bleakhold Royale live (section 17).
+- The server may send `HELLO` again at any time, without a client `HELLO`, when its feature bits change (Bleakhold
+  Royale turns 4096 on or off at runtime). The client reads it like an answer to its own.
 - `dailyResetEpoch`/`weeklyResetEpoch`: the next resets (Unix time).
 - `siteUrl`: shown for copying under the leaderboards (there is no web browser in game).
 
@@ -280,7 +293,8 @@ S> 1 PONG 2 1/1 12345,1792648730
 
 `op, seq, code, text` - the refused op, the client `SEQ` of that message, a machine code, a sentence for
 the player (shown in the window and in the error frame). `busy` (over an op's rate limit, section 8) can answer
-any action intent; the other codes are listed with each feature (sections 13 to 16).
+any action intent except `RDEPLOY`, which is never answered; the other codes are listed with each feature (sections
+13 to 17).
 
 ```
 S> 1 ERR 3 1/1 TCLAIM,4,not_claimable,That task cannot be claimed yet.
@@ -356,7 +370,7 @@ S> 1 TASK a 1/1 2,102,20,1
 
 `kind, title, subtitle, openTarget` - `kind`: `T` task, `Q` queue, `K` keystone, `R` record, `S` season,
 `I` info. `openTarget` (window opened on click): `tasks`, `dungeons`, `keys`, `rift`, `collections`,
-`season`, `leaderboards`, or empty.
+`season`, `leaderboards`, `royale` (the Bleakhold Royale card, section 17), or empty.
 
 ```
 S> 1 TOAST b 1/1 R,New record,Halls of Lightning +8 in 24%3A13,leaderboards
@@ -396,6 +410,8 @@ First record: `rev, state, kind, activityId, tier, size, queuedSec, estWaitSec, 
 - `state`: 0 not queued, 1 queued, 2 proposal (a group was found), 3 in the run.
 - `bandMin`/`bandMax`: the level band the server matches within (shown as "Matching levels 23-28").
 - `queuedSec` and `timeoutSec` count on locally from the moment the message arrives.
+- Kind `B` (Bleakhold Royale) appends `queued, minPlayers, maxPlayers, accepted, proposalSize, matchesRunning` after
+  `bandMax` and never has member records (section 17).
 
 Then, for proposals, one record per member: `name, classId, role (1, 2 or 4), accepted (0 pending, 1 yes, 2 no), level`
 
@@ -532,6 +548,11 @@ does not throttle addon messages for you (AzerothCore's addon flood check is not
 | `CAMP` | 1 per `BleakholdUi.RateLimit.CampIntervalMs` (1 s), every `act` together |
 | `GLIDE` | 1 per `BleakholdUi.RateLimit.GlideIntervalMs` (1 s); the glide itself has a 120 s cooldown (`ERR glide_cooldown`) |
 | `REPAIR` | 1 per `BleakholdUi.RateLimit.RepairIntervalMs` (2 s) |
+| `RDROP`, `RSPEC` | 1 each per `BleakholdUi.RateLimit.RoyaleIntervalMs` (0.5 s, so 2 per second); the addon waits 0.5 s itself |
+| `RDEPLOY` | 1 per `BleakholdUi.RateLimit.RoyaleDeployIntervalMs` (1 s); over it, dropped silently (no `busy`) |
+
+The server drops an action intent that repeats the player's last accepted one of the same op (same fields) within
+`BleakholdUi.RateLimit.DuplicateWindowMs` (1 s), except `RSPEC`: "next" twice is two steps.
 
 Also bound the work a single message can cause (for example a `GET LIDX` answer is cached per player
 rather than rebuilt on every request).
@@ -563,6 +584,7 @@ lets each chat window hide a tag (`/bh chat`):
 | `[Queue] ` | a group search started (sent to the whole server) |
 | `[Record] ` | a new run record |
 | `[Case] ` | a rare reward from a case (section 15) |
+| `[Royale] ` | Bleakhold Royale: the queue filling up, a winner (section 17) |
 
 Without the addon the lines are still readable as plain text.
 
@@ -583,6 +605,9 @@ run (exit portal back to the board) `QUEUE state 0` and a new `BOARD`.
 `MPS` (countdown) and `MP state 0` to everyone (and the DBM message if feature bit 4) -> `MP state 1`
 when the timer starts, then `MP` on every change -> end: `MP state 2/3`, `MPE`, new `KEY` and `WEEK`.
 `KCANCEL` during the countdown -> `MP state 4`.
+
+**Bleakhold Royale.** `QJOIN B` -> `QUEUE` state 1 -> ready check (`QUEUE` state 2, `QREPLY`) -> the match: `ROYM`,
+`ROYS`, `ROYO`, `ROYK`, `ROYV` -> `ROYE` -> `QUEUE` state 0. The whole flow is in section 17 ("A match").
 
 ## 12. Versioning
 
@@ -799,7 +824,8 @@ pays nothing. The result is a `TOAST` (kind `I`).
 
 **Glide.** `GLIDE` gives a player of a race in `BleakholdUi.Glide.Races` (22, the High Elf) a slow fall for
 `BleakholdUi.Glide.Duration` (10 s), every `BleakholdUi.Glide.Cooldown` (120 s), standing or falling. It is a triggered
-cast of `BleakholdUi.Glide.Spell` (Slow Fall): no reagent and no spell cooldown on the client.
+cast of `BleakholdUi.Glide.Spell` (Slow Fall): no reagent and no spell cooldown on the client. There is no glide in a
+battleground or an arena, the Bleakhold Royale map included (section 17).
 
 ### CAMPST (the player's camping state)
 
@@ -883,6 +909,7 @@ Then `CAMP M`, in this order:
 | gliding is off on the realm (`BleakholdUi.Glide.Enable = 0`, no feature bit 1024) | `ERR` `glide_off` |
 | the player is not in the world | dropped silently |
 | the player's race (the real one, also in a battleground) is not in `BleakholdUi.Glide.Races` | `ERR` `glide_race` |
+| the player is in a battleground or an arena, or on a battleground map (Bleakhold Royale's included) | `ERR` `glide_here` |
 | the player is dead | `ERR` `dead` |
 | the player glided less than `BleakholdUi.Glide.Cooldown` (120 s) ago | `ERR` `glide_cooldown` |
 | the aura did not land (logged) | `ERR` `failed` |
@@ -927,6 +954,7 @@ Error codes of this section:
 | `camp_skill` | not a profession with camp objects, or the skill is too low |
 | `glide_off` | gliding is off on the realm |
 | `glide_race` | the player's race cannot glide |
+| `glide_here` | in a battleground or an arena (Bleakhold Royale's map included) |
 | `glide_cooldown` | glided not long ago |
 | `repair_off` | field repair (and camping) is off on the realm |
 | `repair_skill` | neither a blacksmith with enough skill nor at a camp anvil |
@@ -946,4 +974,252 @@ C> 1 GLIDE q 1/1
 S> 1 ERR s 1/1 GLIDE,q,glide_cooldown,You can glide again in 95 s.
 C> 1 REPAIR r 1/1
 S> 1 ERR t 1/1 REPAIR,r,repair_gold,You cannot pay for the repair (2g 10s 0c).
+```
+
+## 17. Bleakhold Royale
+
+Bleakhold Royale is a solo free-for-all battle royale: 20 to 40 players at level 80 on their own battleground map,
+one life each, and the last player standing wins. The server decides everything: who may queue, the ready check,
+where a landing pin really lands, the storm, the loot, every elimination and every reward. The client shows the state
+it gets and sends only the player's wishes: join or leave the queue (`QJOIN B`, `QLEAVE`), answer the ready check
+(`QREPLY`), set a landing pin (`RDROP`), open the parachute (`RDEPLOY`) and switch the spectator camera (`RSPEC`).
+
+`HELLO` feature bit 4096 is on while the mode is live. The server turns it on at runtime once its own data checks
+pass, and off again when the mode is switched off; clients already connected get a new `HELLO` (section 7). While the
+bit is off the server answers `QJOIN B`, `RDROP` and `RSPEC` with `ERR` `royale_off` and drops `RDEPLOY`.
+
+**The match.** `phase` (in `ROYS`):
+
+| `phase` | |
+|---|---|
+| 0 arriving | players arrive in the lobby, The Overlook, a mesa in a corner of the map. A warm-up brawl: damage is on, nobody dies. Landing pins can be set. |
+| 1 countdown | the big countdown; the first storm circle is shown 15 s before the drop, and the pins lock 3 s before it |
+| 2 drop | everyone falls from high above their pin and opens a parachute (by itself, or at once with `RDEPLOY`) |
+| 3 fight | the storm circle closes in six stages; outside it the storm hurts more with every stage |
+| 4 overtime | the circle is gone and the storm keeps getting stronger |
+| 5 victory | one player is left: the winner |
+| 6 ended | the scoreboard; the players leave or are sent back |
+| 7 cancelled | too few players arrived: everyone goes back to the front of the queue |
+
+A player who would die is eliminated instead and becomes an invisible spectator on the same map: they can watch the
+players still alive (`RSPEC`), queue again (`QJOIN B`) or leave. Logging out or leaving the battleground while alive
+forfeits the match.
+
+**Positions** are integer world yards of the Royale map (X points north, Y west, as `.gps` shows them). The client
+draws its island map from `ROYM`'s frame: `u = (maxY - y) / (maxY - minY)`, `v = (maxX - x) / (maxX - minX)` (north
+up, west left). **Times** in `ROYS`, `ROYO` and `ROYV` count from the moment the message arrives, like `QUEUE`
+`timeoutSec`; the client counts them down itself. **Names** of characters are at most 48 bytes (two-word names fit),
+names of places at most 40.
+
+### The queue
+
+`QJOIN B,activityId,0,roles,1`: `activityId` is the mode id (the server's `Bleakhold.Royale.ActivityId`, 901),
+`tier` 0 and `size` 1; `roles` (1..7) is ignored. A repeated `QJOIN B` only sends `QUEUE` again. `QLEAVE` leaves the
+Royale queue (outside it, it does what it does for the other queues). `QREPLY proposalId,accept` answers the ready
+check when `proposalId` is the player's open Royale proposal; no answer before `timeoutSec` runs out is a decline, and
+a player who declines cannot queue for 120 s. When enough players accept (`minPlayers`, 20), the match starts and
+everyone who accepted is taken there.
+
+`QUEUE` for kind `B` has the fields of section 7, then `queued, minPlayers, maxPlayers, accepted, proposalSize,
+matchesRunning`:
+
+- `state`: 0 not queued, 1 queued, 2 ready check (with `proposalId` and `timeoutSec`), 3 in a match.
+- `activityId`: the mode id; `tier` 0; `size` 1; `bandMin`/`bandMax`: the level band (80, 80).
+- `queued`: players in the Royale queue now. `minPlayers`/`maxPlayers`: how many a match needs and how many it takes
+  (20 and 40).
+- `accepted`, `proposalSize`: during a ready check, how many accepted so far and how many it went to.
+- `matchesRunning`: matches being played now.
+- No member records.
+
+`QJOIN B`, in this order:
+
+| Check | Answer |
+|---|---|
+| malformed (for `B`: `activityId` 0, `tier` not 0 or `size` not 1) | dropped silently (section 1) |
+| the player's `QJOIN` rate (section 8) | `ERR` `busy` |
+| Bleakhold Royale is off (no feature bit 4096), or `activityId` is not the mode id | `ERR` `royale_off` |
+| the player is not level 80 | `ERR` `royale_level` |
+| the player is in a group | `ERR` `royale_grouped` |
+| the player is in an instance, a battleground (a Royale spectator excepted), an arena, another queue, the Dungeon Journey lobby or a Rift run, on a transport, or in GM mode | `ERR` `royale_busy` |
+| the player has Deserter | `ERR` `royale_deserter` |
+| the player is dead | `ERR` `dead` |
+| fewer than 6 free bag slots | `ERR` `royale_bags` |
+| too many players from the player's IP address are queued or playing | `ERR` `royale_ip` |
+| the player declined a ready check less than 120 s ago | `ERR` `royale_lockout` (the text gives the seconds left) |
+
+A spectator's `QJOIN B` leaves the match and queues again. `QREPLY` without an open proposal of that id: `ERR`
+`no_proposal`.
+
+### Intents of the match
+
+`RDROP x,y` sets the player's landing pin. `x` and `y` are integer world yards, -17067..17067 each, and may be
+negative. The server snaps the pin to a valid point (inside the playable square, away from the lobby, not in water,
+not on a cliff; a random landmark when nothing near fits) and sends `ROYS` with the snapped `pinX, pinY`. A player
+without a pin drops at a random landmark.
+
+| Check | Answer |
+|---|---|
+| malformed (not two integers in -17067..17067) | dropped silently (section 1) |
+| the same `x,y` as the player's last accepted `RDROP`, within 1 s | dropped silently |
+| the player's `RDROP` rate (section 8) | `ERR` `busy` |
+| Bleakhold Royale is off | `ERR` `royale_off` |
+| the player is not in the lobby of a match (phase 0 or 1), or the pins are locked (the last 3 s) | `ERR` `royale_phase` |
+
+`RDEPLOY` opens the parachute at once. It is never answered, not even over its rate limit (section 8): it is dropped
+silently unless the player is falling from the drop, has not opened the parachute yet and fell for at least 0.5 s.
+Without it the parachute opens by itself (2.5 s into the fall, or 70 yd above the ground).
+
+`RSPEC dir` moves a spectator's camera: `dir` 0 to the player who eliminated them (or the first player alive), 1 to
+the next player alive, 2 to the previous one. The server sends `ROYS` with the new `watchName`.
+
+| Check | Answer |
+|---|---|
+| malformed (`dir` not 0, 1 or 2) | dropped silently (section 1) |
+| the player's `RSPEC` rate (section 8; the same `dir` again is not a duplicate) | `ERR` `busy` |
+| Bleakhold Royale is off | `ERR` `royale_off` |
+| the player is not a spectator in a match | `ERR` `royale_phase` |
+| nobody is alive to watch | `ERR` `royale_nobody` |
+
+`GET ROYS` is answered with `ROYS` then a full `ROYO`, `GET ROYM` with `ROYM`; nothing is sent to a player who is not
+in a match. After a `/reload` in a match the client sends `GET ROYS;ROYM` once `HELLO` is answered.
+
+### ROYS (the match as the player sees it)
+
+`matchId, phase, phaseMsLeft, alive, total, me, kills, placement, pinX, pinY, stage, curX, curY, curR, nextX, nextY, nextR, shrinkStartMs, shrinkEndMs, dmgPermille, watchName, myX, myY`
+
+- `matchId`: the match; another id is another match.
+- `phase`: the table above. `phaseMsLeft`: until the next phase (the countdown in phase 1).
+- `alive`: players still in the fight; `total`: players in the match (who dropped, or are in the lobby before it).
+- `me`: 0 in the lobby, 1 dropping, 2 alive, 3 spectating, 4 left, 5 the winner.
+- `kills`: the player's eliminations. `placement`: empty while the player is in the fight.
+- `pinX`, `pinY`: the player's snapped landing pin; empty when none is set.
+- `stage`: the storm stage, 1 to 6 (0 before the first circle is shown).
+- `curX`, `curY`, `curR`: the storm circle when the message was sent.
+- `nextX`, `nextY`, `nextR`: the next circle; empty until it is shown.
+- `shrinkStartMs`, `shrinkEndMs`: until the next shrink starts and ends. `shrinkStartMs` 0 and `shrinkEndMs` above 0:
+  the circle is shrinking now, `cur` moves linearly to `next` over `shrinkEndMs`. Both empty: no shrink is planned.
+- `dmgPermille`: the storm damage outside the circle now, in permille of maximum health per second.
+- `watchName`: for a spectator, the player they watch; empty otherwise.
+- `myX`, `myY`: the player's position (the map arrow when the client cannot place the player itself).
+
+The server sends `ROYS` when the player arrives, on every change of `phase`, `stage` or `me`, after `RDROP` and
+`RSPEC`, every 5 s, and for `GET ROYS`.
+
+### ROYM (the island map)
+
+First record: `mapId, minX, maxX, minY, maxY, lobbyX, lobbyY, lobbyR, boundHalf, centerX, centerY`. Then one record
+per place (at most 64): `id, kind, x, y, r, name`.
+
+- `minX`..`maxY`: the frame of the map picture. `lobbyX`, `lobbyY`, `lobbyR`: the lobby, which players in the fight may
+  not enter. `boundHalf`: half the side of the playable square around `centerX`, `centerY`.
+- `kind`: `L` landmark, `C` crossing (a bridge or a ford), `Y` the lobby. `r`: the radius of the place in yards.
+- Crate spots and the sites where the last circle may end are never sent.
+
+Sent when the player arrives and for `GET ROYM`.
+
+### ROYO (orbs and supply drops)
+
+First record: `matchId, full`. Then one record per object (at most 64): `objId, kind, subtype, x, y, state, msLeft`.
+
+- `full`: 1 replaces every object the client knows; 0 updates only the objects listed.
+- `kind`: `S` Shadow Sight orb (stealth is no cover for a while), `B` buff orb, `D` supply drop. `subtype`: for `B`
+  1 speed, 2 restoration, 3 berserk; 0 otherwise.
+- `state`: 0 hidden (appears in `msLeft`, when given), 1 ready, 2 taken (back in `msLeft`), 3 incoming (lands in
+  `msLeft`), 4 opened.
+
+Sent full for `GET ROYS`, and with the objects that changed whenever one does.
+
+### ROYK (the kill feed)
+
+`killerName, killerClassId, victimName, victimClassId, cause, aliveAfter, killerKills, announce`
+
+- `cause`: `P` a player, `S` the storm (the killer is filled in when someone gets the credit), `F` a fall or the
+  world, `L` left the match, `A` eliminated for being away.
+- `killerName` and `killerClassId` are empty when nobody gets the credit. `killerKills`: the killer's eliminations
+  in this match, this one included. `aliveAfter`: players left in the fight.
+- `announce`: the kill announcer line every client of the match plays, decided by the server. `F` first blood: the
+  first credited kill of the match, whatever the cause (a storm or fall elimination with a credited killer counts);
+  it takes priority. Otherwise by `killerKills`: `D` double kill (2), `T` triple kill (3), `M` monster kill (4), `R`
+  rampage (5), `G` godlike (6 and every further kill). Empty for no announcement: nobody gets the credit, a forfeit
+  (`L`) or an AFK elimination (`A`) (these never take first blood either), or the killer's first kill after first
+  blood. Knockdowns in the lobby brawl are not eliminations: they send no `ROYK` and never count.
+
+Sent to every player of the match, spectators included.
+
+### ROYV (match events)
+
+`kind, value, x, y, msLeft, name`
+
+| `kind` | Meaning |
+|---|---|
+| `R` | the next circle is shown; `value` = its stage |
+| `S` | the storm moves; `value` = the stage |
+| `D` | a supply drop is coming down at `x`, `y`; it lands in `msLeft` |
+| `L` | the supply drop at `x`, `y` landed |
+| `O` | the supply drop at `x`, `y` was opened |
+| `N` | `value` players are left (10, 5, 2) |
+| `W` | the match has a winner: `name`, with `value` eliminations |
+
+Sent to every player of the match.
+
+### ROYE (the player's result)
+
+First record: `matchId, placement, total, kills, damage, healing, survivedSec, winnerName, winnerClassId, winnerKills, rewarded`.
+Then one record per reward: `kind, amount, itemId, text`, with the kinds of `MPE` (section 7) and `H` honor.
+
+- `placement` of `total`; `damage` and `healing` the player did to and for players; `survivedSec` from the landing.
+- `winnerName`, `winnerClassId`, `winnerKills`: empty while the match goes on.
+- `rewarded`: 1 when the player earned the rewards (they did not quit and took part), else 0 and no reward records.
+
+Sent when the player is eliminated or wins. The server may send it again when the match ends, with the winner filled
+in; the last one counts.
+
+### A match
+
+`QJOIN B` -> `QUEUE` state 1 -> 20 players or more: `QUEUE` state 2 with `proposalId` and `timeoutSec` 15 ->
+`QREPLY` -> `QUEUE` state 3 and the teleport -> `ROYM` and `ROYS` (phase 0) -> `RDROP` (answered by `ROYS`) ->
+`ROYS` phase 1 and `ROYV R` (the first circle) -> phase 2: the drop, `RDEPLOY` -> phase 3: `ROYV S` as the storm
+moves, `ROYV D`, `L`, `O` for supply drops, `ROYO` for orbs, `ROYK` for every elimination, `ROYV N` -> eliminated:
+`ROYE`, then `ROYS` with `me` 3 and `RSPEC` -> one player left: `ROYV W`, `ROYS` phase 5 and the winner's `ROYE` ->
+phase 6 -> back in the world: `QUEUE` state 0. A cancelled match: `ROYS` phase 7 and `QUEUE` state 1 again.
+
+The realm hears about the mode on `[Royale]` lines (section 10): when the queue fills up, and for every winner.
+
+### Error codes
+
+| Code | Meaning |
+|---|---|
+| `royale_off` | Bleakhold Royale is off, or not set up correctly (no feature bit 4096), or `activityId` is not the mode id |
+| `royale_level` | not level 80 |
+| `royale_grouped` | in a group |
+| `royale_busy` | in an instance, a battleground, an arena, another queue, the Dungeon Journey lobby or a Rift run; on a transport; in GM mode |
+| `royale_deserter` | the player has Deserter |
+| `royale_bags` | fewer than 6 free bag slots |
+| `royale_ip` | too many players from the player's IP address |
+| `royale_lockout` | declined a ready check not long ago (the text gives the seconds left) |
+| `dead`, `in_combat` | the generic codes (`QJOIN B` while dead; any Royale intent the server refuses in combat) |
+| `no_proposal` | `QREPLY` with no open proposal of that id |
+| `royale_phase` | `RDROP` outside the lobby or after the pins locked; `RSPEC` from a player who is not a spectator |
+| `royale_nobody` | `RSPEC` with nobody alive to watch |
+| `glide_here` | `GLIDE` in a battleground, an arena or on the Royale map (section 16) |
+
+```
+C> 1 QJOIN 7 1/1 B,901,0,4,1
+S> 1 QUEUE f 1/1 4,1,B,901,0,1,12,,,,80,80,13,20,40,,,1
+S> 1 QUEUE g 1/1 5,2,B,901,0,1,95,,412,15,80,80,24,20,40,0,24,1
+C> 1 QREPLY 8 1/1 412,1
+S> 1 QUEUE h 1/1 6,3,B,901,0,1,,,,,80,80,,20,40,,,2
+S> 1 ROYM i 1/1 901,-1066,533,-1066,533,455,455,32,750,-267,-267;1,L,-266,-266,88,The Bleak Hold;2,L,120,80,62,Harrow Farm
+S> 1 ROYS j 1/1 7001,1,45000,24,24,0,0,,,,0,-267,-267,1080,,,,,,0,,450,452
+C> 1 RDROP 9 1/1 104,96
+S> 1 ROYS k 1/1 7001,1,41000,24,24,0,0,,104,96,0,-267,-267,1080,,,,,,0,,450,452
+C> 1 RDEPLOY a 1/1
+S> 1 ROYO l 1/1 7001,1;1,S,0,-266,-266,0,90000;2,S,0,-712,48,0,90000;3,B,1,120,80,1
+S> 1 ROYV m 1/1 D,0,-80,-180,20000
+S> 1 ROYK n 1/1 Aldric,1,Brenna,8,P,23,1,F
+S> 1 ROYE o 1/1 7001,12,24,1,18400,0,214,,,,1;H,70,,Placement;H,25,,1 elimination;S,5,,Placement
+C> 1 RSPEC b 1/1 1
+S> 1 ROYV p 1/1 W,7,,,,Dalia
+C> 1 GLIDE c 1/1
+S> 1 ERR q 1/1 GLIDE,c,glide_here,You cannot glide here.
 ```

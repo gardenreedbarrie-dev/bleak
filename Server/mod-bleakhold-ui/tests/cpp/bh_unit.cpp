@@ -270,6 +270,27 @@ TEST("every C> example of the document is accepted and re-encodes byte for byte"
     CHECK(Parse("1 CAMP p 1/1 O,2147483647", &in) == DropReason::None && in.campSkill == 2147483647u);
     CHECK(Parse("1 GLIDE q 1/1", &in) == DropReason::None && in.type == IntentType::Glide && in.seq == 26);
     CHECK(Parse("1 REPAIR r 1/1", &in) == DropReason::None && in.type == IntentType::Repair && in.seq == 27);
+    // Bleakhold Royale (section 17)
+    CHECK(Parse("1 GET s 1/1 ROYS;ROYM", &in) == DropReason::None);
+    CHECK(in.topics.size() == 2 && in.topics[0].topic == Topic::RoyaleState && in.topics[1].topic == Topic::RoyaleMap);
+    CHECK(Parse("1 QJOIN t 1/1 B,901,0,4,1", &in) == DropReason::None);
+    CHECK(in.type == IntentType::QueueJoin && in.queueKind == QueueKind::Royale && in.activityId == 901 &&
+        in.tier == 0 && in.roles == RoleDamage && in.groupSize == 1 && in.seq == 29);
+    CHECK(Parse("1 RDROP u 1/1 -412,96", &in) == DropReason::None);
+    CHECK(in.type == IntentType::RoyaleDrop && in.dropX == -412 && in.dropY == 96 && in.seq == 30);
+    CHECK(Parse("1 RDROP u 1/1 -17067,17067", &in) == DropReason::None && in.dropX == -17067 && in.dropY == 17067);
+    CHECK(Parse("1 RDROP u 1/1 0,-0", &in) == DropReason::None && in.dropX == 0 && in.dropY == 0);
+    CHECK_EQ(EncodeIntentBody(in), "1 RDROP u 1/1 0,0");
+    CHECK(Parse("1 RDEPLOY v 1/1", &in) == DropReason::None && in.type == IntentType::RoyaleDeploy && in.seq == 31);
+    CHECK(Parse("1 RSPEC w 1/1 2", &in) == DropReason::None);
+    CHECK(in.type == IntentType::RoyaleSpectate && in.spectateDir == SpectateDir::Previous && in.seq == 32);
+    CHECK(Parse("1 RSPEC w 1/1 0", &in) == DropReason::None && in.spectateDir == SpectateDir::Killer);
+    CHECK(Parse("1 RSPEC w 1/1 1", &in) == DropReason::None && in.spectateDir == SpectateDir::Next);
+    CHECK_EQ(IntentOpName(IntentType::RoyaleDeploy), "RDEPLOY");
+    CHECK_EQ(TopicName(Topic::RoyaleMap), "ROYM");
+    CHECK(!IsRevisioned(Topic::RoyaleState) && !IsRevisioned(Topic::RoyaleMap));
+    CHECK(IsActionIntent(IntentType::RoyaleDrop) && IsActionIntent(IntentType::RoyaleDeploy) &&
+        IsActionIntent(IntentType::RoyaleSpectate));
 }
 
 TEST("cases: chances add up to 10000 and the roll follows the weights")
@@ -470,6 +491,40 @@ TEST("malformed client messages are dropped with the right reason")
         { "BHc\t1 GET 1 1/1 SET,1,x", DropReason::BadField },
         { "BHc\t1 GET 1 1/1 DEF", DropReason::BadTopic },
         { "BHc\t1 GET 1 1/1 DEF,1", DropReason::OutOfRange },
+        // Bleakhold Royale (section 17)
+        { "BHc\t1 QJOIN 1 1/1 B,0,0,4,1", DropReason::OutOfRange },        // the mode id is never 0
+        { "BHc\t1 QJOIN 1 1/1 B,901,1,4,1", DropReason::OutOfRange },      // no tiers
+        { "BHc\t1 QJOIN 1 1/1 B,901,0,4,2", DropReason::OutOfRange },      // solo
+        { "BHc\t1 QJOIN 1 1/1 B,901,0,0,1", DropReason::OutOfRange },
+        { "BHc\t1 QJOIN 1 1/1 B,901,0,4", DropReason::FieldCount },
+        { "BHc\t1 QJOIN 1 1/1 b,901,0,4,1", DropReason::BadField },
+        { "BHc\t1 QJOIN 1 1/1 BR,901,0,4,1", DropReason::BadField },
+        { "BHc\t1 RDROP 1 1/1", DropReason::FieldCount },
+        { "BHc\t1 RDROP 1 1/1 104", DropReason::FieldCount },
+        { "BHc\t1 RDROP 1 1/1 104,96,1", DropReason::FieldCount },
+        { "BHc\t1 RDROP 1 1/1 104;96", DropReason::FieldCount },
+        { "BHc\t1 RDROP 1 1/1 104,", DropReason::BadField },
+        { "BHc\t1 RDROP 1 1/1 ,96", DropReason::BadField },
+        { "BHc\t1 RDROP 1 1/1 104.5,96", DropReason::BadField },
+        { "BHc\t1 RDROP 1 1/1 +104,96", DropReason::BadField },
+        { "BHc\t1 RDROP 1 1/1 --104,96", DropReason::BadField },
+        { "BHc\t1 RDROP 1 1/1 -,96", DropReason::BadField },
+        { "BHc\t1 RDROP 1 1/1 17068,96", DropReason::OutOfRange },
+        { "BHc\t1 RDROP 1 1/1 104,-17068", DropReason::OutOfRange },
+        { "BHc\t1 RDROP 1 1/1 -2147483649,0", DropReason::OutOfRange },
+        { "BHc\t1 RDROP 1 1/1 -9999999999999999,0", DropReason::BadField },
+        { "BHc\t1 RDEPLOY 1 1/1 1", DropReason::FieldCount },
+        { "BHc\t1 RDEPLOY 1 1/1 ,", DropReason::FieldCount },
+        { "BHc\t1 RDEPLOYS 1 1/1", DropReason::UnknownOp },
+        { "BHc\t1 RSPEC 1 1/1", DropReason::FieldCount },
+        { "BHc\t1 RSPEC 1 1/1 1,2", DropReason::FieldCount },
+        { "BHc\t1 RSPEC 1 1/1 3", DropReason::OutOfRange },
+        { "BHc\t1 RSPEC 1 1/1 -1", DropReason::OutOfRange },
+        { "BHc\t1 RSPEC 1 1/1 N", DropReason::BadField },
+        { "BHc\t1 GET 1 1/1 ROYS,1", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 ROYM,0", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 ROYO", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 ROYE", DropReason::BadTopic },
     };
     for (Bad const& b : bad)
     {
@@ -626,6 +681,42 @@ TEST("endpoint: per-op limits of section 8")
     ReceiveResult rp = Feed(ep, "1 REPAIR 15 1/1", 61500, &in);
     CHECK(rp.verdict == Verdict::Refused && in.type == IntentType::Repair);
     CHECK(Feed(ep, "1 REPAIR 16 1/1", 62100).verdict == Verdict::Accepted);
+    // RDROP and RSPEC: 1 per 0.5 s each (2 per second); RDEPLOY: 1 per second (section 17)
+    CHECK(Feed(ep, "1 RDROP 17 1/1 104,96", 70000).verdict == Verdict::Accepted);
+    ReceiveResult rd = Feed(ep, "1 RDROP 18 1/1 -50,-60", 70300, &in);
+    CHECK(rd.verdict == Verdict::Refused && in.type == IntentType::RoyaleDrop && in.dropX == -50 && in.dropY == -60);
+    CHECK(Feed(ep, "1 RDROP 19 1/1 -50,-60", 70550).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RSPEC 1a 1/1 1", 70560).verdict == Verdict::Accepted);   // its own bucket
+    CHECK(Feed(ep, "1 RSPEC 1b 1/1 2", 70900).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 RSPEC 1c 1/1 2", 71100).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RDEPLOY 1d 1/1", 71110).verdict == Verdict::Accepted);
+    ReceiveResult dp = Feed(ep, "1 RDEPLOY 1e 1/1", 71800, &in);
+    CHECK(dp.verdict == Verdict::Refused && in.type == IntentType::RoyaleDeploy);
+    CHECK(Feed(ep, "1 RDEPLOY 1f 1/1", 72200).verdict == Verdict::Accepted);
+    // QJOIN B shares the QJOIN bucket
+    CHECK(Feed(ep, "1 QJOIN 1g 1/1 B,901,0,4,1", 80000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 QJOIN 1h 1/1 D,389,1,4,3", 80500).verdict == Verdict::Refused);
+    // GET ROYS and ROYM: each topic once per second
+    CHECK(Feed(ep, "1 GET 1i 1/1 ROYS;ROYM", 81000, &in).verdict == Verdict::Accepted && in.topics.size() == 2);
+    CHECK(Feed(ep, "1 GET 1j 1/1 ROYS", 81500).reason == DropReason::Throttled);
+    CHECK(Feed(ep, "1 GET 1k 1/1 ROYS", 82000).verdict == Verdict::Accepted);
+}
+
+TEST("endpoint: the Bleakhold Royale limits come from Limits")
+{
+    Limits l;
+    l.duplicateWindowMs = 0;
+    l.royaleIntervalMs = 2000;
+    l.royaleDeployIntervalMs = 0;   // 0: no limit of its own
+    Endpoint ep(l);
+    Feed(ep, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    CHECK(Feed(ep, "1 RDROP 2 1/1 1,1", 1000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RDROP 3 1/1 2,2", 2500).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 RDROP 4 1/1 2,2", 3100).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RSPEC 5 1/1 1", 3200).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RSPEC 6 1/1 1", 4000).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 RDEPLOY 7 1/1", 5000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RDEPLOY 8 1/1", 5001).verdict == Verdict::Accepted);
 }
 
 TEST("endpoint: the camping limits come from Limits")
@@ -681,6 +772,17 @@ TEST("endpoint: the same action twice within the window is ignored")
     CHECK(Feed(ep, "1 GLIDE o 1/1", 50900).reason == DropReason::Duplicate);
     CHECK(Feed(ep, "1 REPAIR p 1/1", 50950).verdict == Verdict::Accepted);
     CHECK(Feed(ep, "1 REPAIR q 1/1", 51000).reason == DropReason::Duplicate);
+    // RDROP: the same pin again at once is dropped, another pin meets the rate limit (section 17)
+    CHECK(Feed(ep, "1 RDROP r 1/1 104,96", 60000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RDROP s 1/1 104,96", 60800).reason == DropReason::Duplicate);
+    CHECK(Feed(ep, "1 RDROP t 1/1 104,97", 61300).verdict == Verdict::Accepted);
+    // RDEPLOY has no fields: a repeat within the window is a duplicate
+    CHECK(Feed(ep, "1 RDEPLOY u 1/1", 62000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RDEPLOY v 1/1", 62900).reason == DropReason::Duplicate);
+    // RSPEC "next" twice is two steps: never a duplicate, only its rate limit holds
+    CHECK(Feed(ep, "1 RSPEC w 1/1 1", 70000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RSPEC x 1/1 1", 70600).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RSPEC y 1/1 1", 70700).verdict == Verdict::Refused);
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -866,6 +968,173 @@ TEST("camping: the CAMPST encoder keeps to the document")
     std::vector<std::string> f = SplitStr(big, ',');
     CHECK(f.size() == 12);
     CHECK(SplitStr(f[7], ':').size() == MaxCampObjects && SplitStr(f[8], ':').size() == MaxCampPlaces);
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Bleakhold Royale (section 17): QUEUE kind B and the ROYS ROYM ROYO ROYK ROYV ROYE encoders
+// ---------------------------------------------------------------------------------------------------
+TEST("royale: QUEUE kind B appends its counts and never sends members; D and R never send the counts")
+{
+    QueueState q;
+    q.state = QueueStateId::Queued; q.kind = QueueKind::Royale; q.activityId = 901; q.tier = 0; q.size = 1;
+    q.queuedSec = 12; q.bandMin = 80; q.bandMax = 80; q.queued = 13; q.minPlayers = 20; q.maxPlayers = 40;
+    q.matchesRunning = 0;
+    QueueMember m; m.name = "Tester"; m.classId = 1;
+    q.members = { m };   // ignored for Royale
+    CHECK_EQ(EncodeQueue(4, q), "4,1,B,901,0,1,12,,,,80,80,13,20,40,,,0");
+    q.matchesRunning.reset();
+    q.queued.reset();
+    CHECK_EQ(EncodeQueue(4, q), "4,1,B,901,0,1,12,,,,80,80,,20,40");
+    q.state = QueueStateId::NotQueued;
+    q.activityId.reset(); q.tier.reset(); q.size.reset(); q.queuedSec.reset(); q.bandMin.reset(); q.bandMax.reset();
+    q.minPlayers.reset(); q.maxPlayers.reset();
+    CHECK_EQ(EncodeQueue(9, q), "9,0,B");
+    QueueState d;
+    d.state = QueueStateId::Proposal; d.kind = QueueKind::Dungeon; d.activityId = 389; d.bandMax = 18;
+    d.queued = 13; d.minPlayers = 20; d.accepted = 3;   // not part of kind D
+    d.members = { m };
+    CHECK_EQ(EncodeQueue(2, d), "2,2,D,389,,,,,,,,18;Tester,1,,0");
+}
+
+TEST("royale: the encoders keep to the document")
+{
+    RoyaleState st;
+    CHECK_EQ(EncodeRoyaleState(st), "0,0,0,0,0,0,0,,,,0,0,0,0,,,,,,0");   // empty fields in the middle stay
+    st.matchId = 7001; st.phase = RoyalePhase::Overtime; st.phaseMsLeft = 4294967295u; st.alive = 2; st.total = 40;
+    st.me = RoyaleMe::Spectating; st.kills = 3; st.placement = 7; st.pinX = -17067; st.pinY = 17067; st.stage = 6;
+    st.curX = -300; st.curY = -1; st.curR = 0; st.nextX = -301; st.nextY = 0; st.nextR = 0; st.shrinkStartMs = 0u;
+    st.shrinkEndMs = 45000u; st.dmgPermille = 160; st.watchName = "Br\xC3\xA9nna, the; long|name";
+    st.myX = 455; st.myY = -455;
+    CHECK_EQ(EncodeRoyaleState(st), "7001,4,4294967295,2,40,3,3,7,-17067,17067,6,-300,-1,0,-301,0,0,0,45000,160,"
+        "Br\xC3\xA9nna%2C the%3B long%7Cname,455,-455");
+    st.watchName = std::string(60, 'x');
+    CHECK(SplitStr(EncodeRoyaleState(st), ',')[20].size() == RoyaleNameBytes);   // names cut at 48 bytes
+
+    RoyaleMap mp;
+    mp.mapId = 566; mp.minX = 1500; mp.maxX = 2800; mp.minY = 900; mp.maxY = 2200; mp.lobbyX = 2166; mp.lobbyY = 1564;
+    mp.lobbyR = 20; mp.boundHalf = 400; mp.centerX = 2166; mp.centerY = 1564;
+    mp.pois = { { 1, RoyalePoiKind::Lobby, 2166, 1564, 20, "The Overlook" },
+        { 2, RoyalePoiKind::Crossing, -5, -6, 0, "Ford: east, west" } };
+    CHECK_EQ(EncodeRoyaleMap(mp), "566,1500,2800,900,2200,2166,1564,20,400,2166,1564;1,Y,2166,1564,20,The Overlook;"
+        "2,C,-5,-6,0,Ford%3A east%2C west");
+    mp.pois.clear();
+    for (uint32_t i = 0; i < 100; ++i)
+        mp.pois.push_back({ i + 1, RoyalePoiKind::Landmark, int32_t(i), -int32_t(i), 10, std::string(70, 'n') });
+    std::vector<std::string> recs = SplitStr(EncodeRoyaleMap(mp), ';');
+    CHECK_EQN(recs.size(), MaxRoyalePois + 1);
+    CHECK(SplitStr(recs[1], ',')[5].size() == 40);
+
+    RoyaleObjects ob;
+    ob.matchId = 7001; ob.full = false;
+    CHECK_EQ(EncodeRoyaleObjects(ob), "7001,0");
+    RoyaleObject supply; supply.objId = 9; supply.kind = RoyaleObjectKind::Supply; supply.x = -950; supply.y = -250;
+    supply.state = RoyaleObjectState::Incoming; supply.msLeft = 20000u;
+    RoyaleObject buff;
+    buff.objId = 4; buff.kind = RoyaleObjectKind::Buff; buff.subtype = static_cast<uint32_t>(RoyaleBuff::Berserk);
+    buff.x = 220; buff.y = -250; buff.state = RoyaleObjectState::Opened;
+    ob.objects = { supply, buff };
+    CHECK_EQ(EncodeRoyaleObjects(ob), "7001,0;9,D,0,-950,-250,3,20000;4,B,3,220,-250,4");
+    ob.objects.assign(80, buff);
+    CHECK_EQN(SplitStr(EncodeRoyaleObjects(ob), ';').size(), MaxRoyaleObjects + 1);
+
+    RoyaleKill k;
+    k.victimName = "Brenna"; k.victimClassId = 8; k.cause = RoyaleCause::Storm; k.aliveAfter = 22;
+    CHECK_EQ(EncodeRoyaleKill(k), ",,Brenna,8,S,22");   // nobody got the credit
+    k.killerName = "Aldric"; k.killerClassId = 1; k.killerKills = 5; k.cause = RoyaleCause::Afk;
+    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,A,22,5");
+
+    RoyaleEvent ev;
+    ev.kind = RoyaleEventKind::PlayersLeft; ev.value = 5;
+    CHECK_EQ(EncodeRoyaleEvent(ev), "N,5");
+    ev.kind = RoyaleEventKind::SupplyOpened; ev.value = 0; ev.x = -850; ev.y = -820; ev.name = "Aldric";
+    CHECK_EQ(EncodeRoyaleEvent(ev), "O,0,-850,-820,,Aldric");
+
+    RoyaleResult r;
+    r.matchId = 7001; r.placement = 1; r.total = 32; r.kills = 12; r.damage = 4000000000u; r.healing = 5;
+    r.survivedSec = 715; r.winnerName = "Dalia"; r.winnerClassId = 11; r.winnerKills = 12; r.rewarded = true;
+    Reward h; h.kind = RewardKind::Honor; h.amount = 400; h.text = "Victory";
+    Reward sh; sh.kind = RewardKind::Shards; sh.amount = 50;
+    r.rewards = { h, sh };
+    CHECK_EQ(EncodeRoyaleResult(r), "7001,1,32,12,4000000000,5,715,Dalia,11,12,1;H,400,,Victory;S,50");
+    r.rewarded = false; r.rewards.clear(); r.winnerName.clear(); r.winnerClassId.reset(); r.winnerKills.reset();
+    CHECK_EQ(EncodeRoyaleResult(r), "7001,1,32,12,4000000000,5,715,,,,0");
+    CHECK(static_cast<char>(RewardKind::Honor) == 'H');
+    CHECK(FeatureRoyale == 4096u && (FeatureRoyale & (FeatureFieldRepair * 2 - 1)) == 0);
+}
+
+TEST("royale: ROYK announce is the last field: F D T M R G for a credited kill, else empty")
+{
+    RoyaleKill k;
+    k.killerName = "Aldric"; k.killerClassId = 1; k.victimName = "Brenna"; k.victimClassId = 8;
+    k.cause = RoyaleCause::Player; k.aliveAfter = 23; k.killerKills = 1; k.announce = RoyaleAnnounce::FirstBlood;
+    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,P,23,1,F");
+    struct Code
+    {
+        RoyaleAnnounce announce;
+        uint32_t kills;
+        char const* frame;
+    };
+    for (Code const& c : { Code{ RoyaleAnnounce::DoubleKill, 2, "Aldric,1,Brenna,8,P,23,2,D" },
+             Code{ RoyaleAnnounce::TripleKill, 3, "Aldric,1,Brenna,8,P,23,3,T" },
+             Code{ RoyaleAnnounce::MonsterKill, 4, "Aldric,1,Brenna,8,P,23,4,M" },
+             Code{ RoyaleAnnounce::Rampage, 5, "Aldric,1,Brenna,8,P,23,5,R" },
+             Code{ RoyaleAnnounce::Godlike, 6, "Aldric,1,Brenna,8,P,23,6,G" },
+             Code{ RoyaleAnnounce::Godlike, 17, "Aldric,1,Brenna,8,P,23,17,G" } })
+    {
+        k.killerKills = c.kills; k.announce = c.announce;
+        CHECK_EQ(EncodeRoyaleKill(k), c.frame);
+    }
+    // a storm or fall elimination with a credited killer is announced too
+    k.killerKills = 2; k.announce = RoyaleAnnounce::DoubleKill; k.cause = RoyaleCause::Storm;
+    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,S,23,2,D");
+    k.cause = RoyaleCause::Fall;
+    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,F,23,2,D");
+    // the empty fields before it stay
+    k.killerKills.reset();
+    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,F,23,,D");
+    k.killerKills = 2;
+    // never for a forfeit or AFK, never without a credited killer (a name that cleans to nothing included)
+    k.cause = RoyaleCause::Left;
+    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,L,23,2");
+    k.cause = RoyaleCause::Afk;
+    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,A,23,2");
+    k.cause = RoyaleCause::Storm;
+    k.killerName = std::string(3, '\0');
+    CHECK_EQ(EncodeRoyaleKill(k), ",1,Brenna,8,S,23,2");
+    k.killerName.clear(); k.killerClassId.reset(); k.killerKills.reset();
+    CHECK_EQ(EncodeRoyaleKill(k), ",,Brenna,8,S,23");
+    // only the six codes: None and every other value are an empty field
+    k.killerName = "Aldric"; k.killerClassId = 1; k.killerKills = 3; k.cause = RoyaleCause::Player;
+    k.announce = RoyaleAnnounce::None;
+    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,P,23,3");
+    int written = 0;
+    for (int v = 0; v < 256; ++v)
+    {
+        k.announce = static_cast<RoyaleAnnounce>(static_cast<char>(v));
+        std::string const frame = EncodeRoyaleKill(k);
+        bool const code = v != 0 && std::string("FDTMRG").find(static_cast<char>(v)) != std::string::npos;
+        written += code;
+        CHECK_EQ(frame, code ? "Aldric,1,Brenna,8,P,23,3," + std::string(1, static_cast<char>(v))
+                             : std::string("Aldric,1,Brenna,8,P,23,3"));
+    }
+    CHECK_EQN(written, 6);
+}
+
+TEST("royale: the ERR codes of section 17 are short machine codes and documented")
+{
+    std::string const doc = bhtest::ReadFile(g_repo + "/docs/BleakholdProtocol.md");
+    for (Refusal const& r : { RoyaleErr::Off, RoyaleErr::Level, RoyaleErr::Grouped, RoyaleErr::Busy,
+             RoyaleErr::Deserter, RoyaleErr::Bags, RoyaleErr::Ip, RoyaleErr::Lockout, RoyaleErr::NoProposal,
+             RoyaleErr::Phase, RoyaleErr::Nobody, RoyaleErr::GlideHere })
+    {
+        std::string const code = r.code;
+        bool ok = !code.empty() && code.size() <= 24;
+        for (char c : code)
+            ok = ok && ((c >= 'a' && c <= 'z') || c == '_');
+        CHECK_MSG(ok, "code [" + code + "]");
+        CHECK_MSG(doc.find("| `" + code + "` |") != std::string::npos, code + " is in an error table of the document");
+        CHECK_MSG(std::string(r.text).size() <= 160 && !std::string(r.text).empty(), code + " has a sentence");
+    }
 }
 
 TEST("endpoint: SEQ per message, revisions per topic, snapshots reset by HELLO")
@@ -1098,6 +1367,66 @@ static std::map<std::string, std::string> BuiltExamples()
         ErrorReply rp;
         rp.op = IntentType::Repair; rp.seq = 27; rp.code = "repair_gold"; rp.text = "You cannot pay for the repair (2g 10s 0c).";
         m["ERR t"] = EncodeError(rp);
+    }
+    {
+        // Bleakhold Royale (section 17)
+        QueueState q;
+        q.state = QueueStateId::Queued; q.kind = QueueKind::Royale; q.activityId = 901; q.tier = 0; q.size = 1;
+        q.queuedSec = 12; q.bandMin = 80; q.bandMax = 80; q.queued = 13; q.minPlayers = 20; q.maxPlayers = 40;
+        q.matchesRunning = 1;
+        m["QUEUE f"] = EncodeQueue(4, q);
+        q.state = QueueStateId::Proposal; q.queuedSec = 95; q.proposalId = 412; q.timeoutSec = 15; q.queued = 24;
+        q.accepted = 0; q.proposalSize = 24;
+        m["QUEUE g"] = EncodeQueue(5, q);
+        QueueState in;
+        in.state = QueueStateId::InRun; in.kind = QueueKind::Royale; in.activityId = 901; in.tier = 0; in.size = 1;
+        in.bandMin = 80; in.bandMax = 80; in.minPlayers = 20; in.maxPlayers = 40; in.matchesRunning = 2;
+        m["QUEUE h"] = EncodeQueue(6, in);
+        RoyaleMap mp;
+        mp.mapId = 901; mp.minX = -1066; mp.maxX = 533; mp.minY = -1066; mp.maxY = 533;
+        mp.lobbyX = 455; mp.lobbyY = 455; mp.lobbyR = 32; mp.boundHalf = 750; mp.centerX = -267; mp.centerY = -267;
+        mp.pois = { { 1, RoyalePoiKind::Landmark, -266, -266, 88, "The Bleak Hold" },
+            { 2, RoyalePoiKind::Landmark, 120, 80, 62, "Harrow Farm" } };
+        m["ROYM i"] = EncodeRoyaleMap(mp);
+        RoyaleState st;
+        st.matchId = 7001; st.phase = RoyalePhase::Countdown; st.phaseMsLeft = 45000; st.alive = 24; st.total = 24;
+        st.me = RoyaleMe::Lobby; st.kills = 0; st.stage = 0; st.curX = -267; st.curY = -267; st.curR = 1080;
+        st.dmgPermille = 0; st.myX = 450; st.myY = 452;
+        m["ROYS j"] = EncodeRoyaleState(st);
+        st.phaseMsLeft = 41000; st.pinX = 104; st.pinY = 96;
+        m["ROYS k"] = EncodeRoyaleState(st);
+        RoyaleObjects ob;
+        ob.matchId = 7001; ob.full = true;
+        RoyaleObject s1;
+        s1.objId = 1; s1.kind = RoyaleObjectKind::ShadowSight; s1.x = -266; s1.y = -266; s1.msLeft = 90000u;
+        RoyaleObject s2;
+        s2.objId = 2; s2.kind = RoyaleObjectKind::ShadowSight; s2.x = -712; s2.y = 48; s2.msLeft = 90000u;
+        RoyaleObject b3;
+        b3.objId = 3; b3.kind = RoyaleObjectKind::Buff; b3.subtype = static_cast<uint32_t>(RoyaleBuff::Speed);
+        b3.x = 120; b3.y = 80; b3.state = RoyaleObjectState::Ready;
+        ob.objects = { s1, s2, b3 };
+        m["ROYO l"] = EncodeRoyaleObjects(ob);
+        RoyaleEvent d;
+        d.kind = RoyaleEventKind::SupplyIncoming; d.value = 0; d.x = -80; d.y = -180; d.msLeft = 20000u;
+        m["ROYV m"] = EncodeRoyaleEvent(d);
+        RoyaleKill k;
+        k.killerName = "Aldric"; k.killerClassId = 1; k.victimName = "Brenna"; k.victimClassId = 8;
+        k.cause = RoyaleCause::Player; k.aliveAfter = 23; k.killerKills = 1; k.announce = RoyaleAnnounce::FirstBlood;
+        m["ROYK n"] = EncodeRoyaleKill(k);
+        RoyaleResult r;
+        r.matchId = 7001; r.placement = 12; r.total = 24; r.kills = 1; r.damage = 18400; r.healing = 0;
+        r.survivedSec = 214; r.rewarded = true;
+        Reward place; place.kind = RewardKind::Honor; place.amount = 70; place.text = "Placement";
+        Reward kill; kill.kind = RewardKind::Honor; kill.amount = 25; kill.text = "1 elimination";
+        Reward shards; shards.kind = RewardKind::Shards; shards.amount = 5; shards.text = "Placement";
+        r.rewards = { place, kill, shards };
+        m["ROYE o"] = EncodeRoyaleResult(r);
+        RoyaleEvent w;
+        w.kind = RoyaleEventKind::Winner; w.value = 7; w.name = "Dalia";
+        m["ROYV p"] = EncodeRoyaleEvent(w);
+        ErrorReply g;
+        g.op = IntentType::Glide; g.seq = 12; g.code = RoyaleErr::GlideHere.code; g.text = RoyaleErr::GlideHere.text;
+        m["ERR q"] = EncodeError(g);
     }
     return m;
 }

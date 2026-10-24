@@ -184,7 +184,7 @@ See `Tools/RaceForge/README.md` for the race settings (`races.json`) and what th
 ## Bleakhold UI
 
 The in-game Bleakhold interface is a built-in addon in `Interface/AddOns/Bleakhold`:
-- Activities: daily and weekly tasks, the Dungeon Journey board and queue, keystones, Eclipse Rift.
+- Activities: daily and weekly tasks, the Dungeon Journey board and queue, keystones, Eclipse Rift, Bleakhold Royale.
 - Collections, Season and Leaderboards windows; Collections > Transmog is the transmog window (below).
 - Minimap buttons, the Mythic+ tracker and keystone countdown (with a DBM pull bar), task toasts, item tooltip
   lines and coloured server announcements.
@@ -337,6 +337,34 @@ timers down between messages.
 - Refusals show as short sentences in the error frame (not outdoors, in combat, cooldown, skill too low, ...).
 - Feature bits 512 (camping), 1024 (glide) and 2048 (field repair): what the realm has off stays hidden. The
   orb, the Camp frame, the indicator and the Glide button can be moved in AddicatUI's editor mode.
+
+## Bleakhold Royale
+
+A solo free-for-all battle royale: 20 to 40 players at level 80 on their own island (map 901, built with
+`Tools/MapForge`), one life each, and the last player standing wins. The server decides everything
+(`docs/BleakholdProtocol.md`, section 17); the addon shows its state and counts the timers down between messages.
+
+- Queue: Activities > Royale, the sword orb on the minimap ring or `/bh royale`: the queue's count, Queue and
+  Leave, and a ready check popup (15 seconds, Accept or Decline). The page is hidden while the realm has the mode
+  off (HELLO feature bit 4096), and Queue stays disabled with "Install the latest client patch" until the client
+  has the map patch (`patch-Q.MPQ`, which carries `Interface\Bleakhold\Royale\Marker.blp`).
+- Lobby: the island map opens by itself; click it to set your landing pin (the pins lock 3 seconds before the
+  drop). The last 10 seconds count down in the middle of the screen.
+- Drop: "Open parachute" while you fall (or a key: Key Bindings, Bleakhold, "Bleakhold Royale: open the
+  parachute"); it opens by itself 2.5 seconds into the fall.
+- Fight: the top bar (players alive, your eliminations, the storm's timer and stage, its damage while you are
+  outside the circle), the kill feed, the kill announcer (a banner and a voice line), a purple screen edge and an
+  arrow at the minimap's edge to the safe zone while you are outside, and the island map (key "Bleakhold Royale:
+  island map", `/bh royale map` or the orb) with the storm circles, orbs, supply drops and your own arrow.
+- Eliminated: the spectator bar (Killer, Prev, Next, Queue again, Leave) and the end card (placement,
+  eliminations, damage, healing, time survived, rewards).
+- The announcer: `/bh royale voice off|male|female` and `/bh royale quiet|normal`, or the Royale page. Its voice
+  lines are `Interface\AddOns\Bleakhold\Sounds\Royale\<voice>\<line>.wav` (16-bit PCM mono): voice `male`,
+  `female`, `male_quiet` or `female_quiet`; line `firstblood`, `doublekill`, `triplekill`, `monsterkill`, `rampage`
+  or `godlike`. Without the files it stays silent.
+- The bar, the kill feed and the spectator bar can be dragged or placed in AddicatUI's editor mode.
+- Art: `python3 -I Tools/BlpConvert/make_royale_art.py` draws the island map from the MapForge terrain spec (with
+  none of the server's crate spots, orbs or final sites on it) and the HUD's rings, arrows and pin (needs Pillow).
 
 ## Graphics (BleakFx)
 

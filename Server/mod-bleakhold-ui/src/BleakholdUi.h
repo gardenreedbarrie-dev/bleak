@@ -27,6 +27,13 @@
  *      dropped malformed and rate-limited messages, checked the group leader for KSTART/KCANCEL and
  *      refused EMOJI while BleakholdUi.Emoji.Enable = 0.
  *
+ *   3. Bleakhold Royale (docs/BleakholdProtocol.md section 17) is wired the same way:
+ *          Ui::SetFeature(FeatureRoyale, true);                 // once the mode is set up (HELLO bit 4096)
+ *          Ui::OnIntent(IntentType::RoyaleDrop, [](Player* p, Intent const& in) { ... in.dropX, in.dropY ... });
+ *          Ui::OnRequest(Topic::RoyaleState, [](Player* p, TopicRequest const&) { Ui::SendRoyaleState(p, ...); });
+ *      QJOIN kind B arrives at your QJOIN handler (intent.queueKind == QueueKind::Royale). While the feature bit is
+ *      off the module answers QJOIN B, RDROP and RSPEC with ERR royale_off and drops RDEPLOY, whoever handles them.
+ *
  * Threading: every function here may be called from any thread (map update threads included). The
  * module queues the frames and sends them from the world thread. Your handlers and providers are
  * always called on the world thread, never while the module holds a lock.
@@ -63,6 +70,9 @@ namespace Bleakhold::Ui
     //   BleakholdUi.Case.*); CAMP GLIDE REPAIR -> the module's camping (BleakholdUi.Camp.*, Glide.*, Repair.*).
     //   BleakholdUi.Camp.Enable, Glide.Enable and Repair.Enable hold for your handler too (ERR camp_off, glide_off,
     //   repair_off).
+    //   RDROP RSPEC -> ERR "unavailable"; RDEPLOY -> nothing (it is never answered, not even with ERR busy over its
+    //   rate limit). While FeatureRoyale is off (SetFeature below) QJOIN with kind B, RDROP and RSPEC get
+    //   ERR royale_off and RDEPLOY is dropped, also with your handler.
     //   HELLO, GET and PING are handled by the module.
     using IntentHandler = std::function<void(Player* player, Intent const& intent)>;
     void OnIntent(IntentType type, IntentHandler handler);
@@ -78,12 +88,25 @@ namespace Bleakhold::Ui
     // Answer a refused intent with ERR. code: a short machine code ("not_claimable"); text: a sentence
     // for the player. Never put client-supplied text in either.
     void Refuse(Player* player, Intent const& intent, std::string_view code, std::string_view text);
+    // The same with a code of the protocol and its default sentence (RoyaleErr::Phase, ... in BleakholdMessages.h).
+    inline void Refuse(Player* player, Intent const& intent, Refusal const& refusal)
+    {
+        Refuse(player, intent, refusal.code, refusal.text);
+    }
 
     // Called after every valid HELLO (login or /reload), after the module answered it. Optional.
     void OnHello(std::function<void(Player* player, Intent const& hello)> observer);
 
     // True when this player's client completed the handshake (has the Bleakhold addon running).
     bool HasAddon(Player* player);
+
+    // HELLO feature bits (FeatureBits in BleakholdMessages.h) that your system turns on at runtime, on top of the
+    // ones mod_bleakhold_ui.conf sets: SetFeature(FeatureRoyale, true) once Bleakhold Royale validated its data,
+    // false when it turns off. false only withdraws an earlier true; it never hides a bit the configuration sets.
+    // Clients already connected get a new HELLO with the new bits. Any thread.
+    void SetFeature(uint32_t feature, bool on);
+    // Whether HELLO announces the bit now (configured, runtime or, for FeatureCases, a case exists). Any thread.
+    bool FeatureOn(uint32_t feature);
 
     // =============================================================================================
     // Topic requests (GET)
@@ -94,7 +117,7 @@ namespace Bleakhold::Ui
     //   WEEK TASKS KEY BOARD QUEUE COLL RIFT -> the last state you pushed;
     //   ERA -> bleakhold_week_schedule; SEASON -> bleakhold_season + war effort tables;
     //   SET, LIDX -> bleakhold_legacy_set; FIRSTS -> bleakhold_server_first; MPLUS -> the run tracker;
-    //   DEF -> the definition tables; CAMPST -> the module's camping state. Example:
+    //   DEF -> the definition tables; CAMPST -> the module's camping state; ROYS ROYM -> nothing. Example:
     //     Ui::OnRequest(Topic::Week, [](Player* p, TopicRequest const&) { Ui::SendWeek(p, MySeason::Week(p)); });
     using TopicProvider = std::function<void(Player* player, TopicRequest const& request)>;
     void OnRequest(Topic topic, TopicProvider provider);
@@ -137,6 +160,19 @@ namespace Bleakhold::Ui
     {
         SendToast(player, Bleakhold::Toast{ kind, std::move(title), std::move(subtitle), std::move(openTarget) });
     }
+    // Bleakhold Royale (section 17), all unrevisioned and never remembered: answer GET ROYS with SendRoyaleState then
+    // a full SendRoyaleObjects, and GET ROYM with SendRoyaleMap, from your own match state. The list versions send
+    // the same message to every player of a match (encoded once).
+    void SendRoyaleState(Player* player, RoyaleState const& state);   // ROYS (per player: me, kills, pin, watch)
+    void SendRoyaleMap(Player* player, RoyaleMap const& map);         // ROYM
+    void SendRoyaleMap(std::vector<Player*> const& players, RoyaleMap const& map);
+    void SendRoyaleObjects(Player* player, RoyaleObjects const& objects);   // ROYO
+    void SendRoyaleObjects(std::vector<Player*> const& players, RoyaleObjects const& objects);
+    void SendRoyaleKill(Player* player, RoyaleKill const& kill);      // ROYK
+    void SendRoyaleKill(std::vector<Player*> const& players, RoyaleKill const& kill);
+    void SendRoyaleEvent(Player* player, RoyaleEvent const& event);   // ROYV
+    void SendRoyaleEvent(std::vector<Player*> const& players, RoyaleEvent const& event);
+    void SendRoyaleResult(Player* player, RoyaleResult const& result);   // ROYE (the player's own result)
     // Low-level keystone run messages for one player. Prefer the run tracker below.
     void SendKeyRunStart(Player* player, Bleakhold::KeyRunStart const& start);   // MPS
     void SendKeyRunState(Player* player, KeyRunState const& state);   // MP
@@ -178,7 +214,7 @@ namespace Bleakhold::Ui
     // =============================================================================================
     // Server-wide chat announcements (CHAT_MSG_SYSTEM with a tag the addon colours and can hide)
     // =============================================================================================
-    enum class AnnounceTag : uint8_t { RaidLegacy, ServerFirst, Season, Queue, Record, Case };
+    enum class AnnounceTag : uint8_t { RaidLegacy, ServerFirst, Season, Queue, Record, Case, Royale };
     // To every online player. `text` is server text and may contain real |Hitem:...|h links.
     void Announce(AnnounceTag tag, std::string_view text);
     void AnnounceTo(Player* player, AnnounceTag tag, std::string_view text);

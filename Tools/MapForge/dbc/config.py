@@ -29,6 +29,21 @@ AREA_FLAGS = {
     "INSIDE": 0x2000000, "OUTSIDE": 0x4000000, "WINTERGRASP_2": 0x8000000, "NO_FLY_ZONE": 0x20000000,
 }
 
+# Flags a zone may keep from its template row without being asked for: AzerothCore and the client read none of
+# them for gameplay (unknown/unused bits, and OUTSIDE, which only keeps the zone outdoors: Map.cpp reads
+# INSIDE | OUTSIDE for IsOutdoors). Every other inherited flag changes the rules (duels, rest, sanctuary, city
+# chat, indoor-only spells, ghost revival, flying) and must be cleared or set on purpose: forge.check reports it.
+HARMLESS_TEMPLATE_FLAGS = (AREA_FLAGS["UNK0"] | AREA_FLAGS["UNK1"] | AREA_FLAGS["UNK2"] | AREA_FLAGS["UNK3"]
+                           | AREA_FLAGS["UNUSED1"] | AREA_FLAGS["UNUSED2"] | AREA_FLAGS["OUTSIDE"])
+
+
+def flag_names(value: int) -> list[str]:
+    """AREA_FLAG_* names of the bits in value (unnamed bits as hex)."""
+    names = [name for name, bit in AREA_FLAGS.items() if value & bit]
+    rest = value & ~sum(AREA_FLAGS.values()) & 0xFFFFFFFF
+    return names + ([f"0x{rest:X}"] if rest else [])
+
+
 # Map.dbc InstanceType (AzerothCore MapTypes, the client's IsInInstance tokens).
 INSTANCE_TYPES = {0: "none (one shared world map)", 1: "party (dungeon)", 2: "raid", 3: "pvp (battleground)",
                   4: "arena"}
@@ -41,6 +56,7 @@ EXPLORE_BITS = 128 * 32
 _DIRECTORY = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,47}")
 PATCH_NAME = re.compile(r"(?i)patch-(.)\.mpq")
 _INTERNAL_NAME = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,47}")
+MARKER_PATH = re.compile(r"(?i)[A-Za-z][A-Za-z0-9_-]*(\\[A-Za-z0-9_-]+)+\.blp")
 
 
 class ConfigError(Exception):
@@ -162,6 +178,7 @@ class ArchiveConfig:
     merge_into: str | None  # for "merge"; None: the archive "auto" would pick
     optional_packs: dict[str, list[str]]
     reserved_letters: str  # patch letters MapForge never creates (other projects use them)
+    marker_texture: str | None = None  # a generated BLP in the map archive (an addon tests it: patch installed)
 
 
 @dataclass
@@ -493,8 +510,18 @@ def _archives(r: _Reader | None) -> ArchiveConfig:
 
     out = ArchiveConfig(data.str("map", "patch-Q.MPQ"), data.str("dbc", "auto"),
                         data.str("merge_into", None, null=True), {k: list(v) for k, v in packs.items()},
-                        data.str("reserved_letters", "").upper())
+                        data.str("reserved_letters", "").upper(), data.str("marker_texture", None, null=True))
     data.finish()
+
+    if out.marker_texture is not None:
+        marker = out.marker_texture.replace("/", "\\")
+
+        if not MARKER_PATH.fullmatch(marker) or marker.lower().startswith(("world\\", "dbfilesclient\\")):
+            raise ConfigError("archives.marker_texture must be a client path like Interface\\Folder\\Name.blp "
+                              "(letters, digits, '_', '-', backslashes; not under World or DBFilesClient)")
+
+        out.marker_texture = marker
+
     names = [out.map_archive] + ([out.merge_into] if out.merge_into else [])
 
     if out.dbc not in ("auto", "map", "merge"):

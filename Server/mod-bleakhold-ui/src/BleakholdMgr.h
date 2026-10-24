@@ -46,7 +46,8 @@ namespace Bleakhold
         uint32_t heartbeatMs = 15000;
         bool serverPullTimer = false;
         bool colorTagsWithoutAddon = true;
-        std::array<std::string, 6> tagColors{ { "E5C07B", "FF9D3B", "6CC6D9", "9FD8E5", "F1D9A0", "C9A2F5" } };
+        std::array<std::string, 7> tagColors{
+            { "E5C07B", "FF9D3B", "6CC6D9", "9FD8E5", "F1D9A0", "C9A2F5", "B98CFF" } };
         uint32_t tokenItemId = 0;
         uint32_t pointsPerToken = 0;
         uint32_t tokenPart = 1;
@@ -157,6 +158,10 @@ namespace Bleakhold
         void Announce(Ui::AnnounceTag tag, std::string_view text, uint64_t onlyGuid = 0);
         // BleakholdUi.Case.Enable (the case list is empty to clients while it is off).
         bool CasesEnabled() const { return _cfg.caseEnable; }
+        // HELLO feature bits a system turns on at runtime (Ui::SetFeature), on top of the configured ones (any thread).
+        // A change sends a new HELLO to every ready client on the next world tick.
+        void SetFeature(uint32_t feature, bool on);
+        bool FeatureOn(uint32_t feature);
         // Pushes the full DEF set to one player (answer to GET DEF,0) or to every ready player.
         void SendDefinitions(Player* player);
         void BroadcastDefinitions();
@@ -228,6 +233,7 @@ namespace Bleakhold
         std::vector<std::pair<uint64_t, std::function<void()>>> _timers;
         std::thread::id _worldThread;
         std::atomic<uint32_t> _dataVer{ 1 };
+        std::atomic<uint32_t> _runtimeFeatures{ 0 };
         std::atomic<bool> _enabled{ true };
         std::atomic<bool> _debugOn{ false };
         uint64_t _lastSweepMs = 0;

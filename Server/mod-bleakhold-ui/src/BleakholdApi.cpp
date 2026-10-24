@@ -23,6 +23,8 @@ namespace Bleakhold::Ui
     void Refuse(Player* player, Intent const& intent, std::string_view code, std::string_view text) { M().Refuse(player, intent, code, text); }
     void OnHello(std::function<void(Player*, Intent const&)> observer) { M().SetHelloObserver(std::move(observer)); }
     bool HasAddon(Player* player) { return M().HasAddon(player); }
+    void SetFeature(uint32_t feature, bool on) { M().SetFeature(feature, on); }
+    bool FeatureOn(uint32_t feature) { return M().FeatureOn(feature); }
 
     // ---- requests ----
     void OnRequest(Topic topic, TopicProvider provider) { M().SetProvider(topic, std::move(provider)); }
@@ -102,6 +104,67 @@ namespace Bleakhold::Ui
     void SendCampState(Player* player, CampState const& m)
     {
         M().Push(player, "CAMPST", Topic::Count, nullptr, [&](uint32_t) { return EncodeCampState(m); });
+    }
+
+    // ---- Bleakhold Royale (section 17) ----
+    namespace
+    {
+        // one payload to every player of a list (unrevisioned, nothing remembered)
+        void PushAll(std::vector<Player*> const& players, char const* op, std::string const& payload)
+        {
+            for (Player* p : players)
+                M().Push(p, op, Topic::Count, nullptr, [&](uint32_t) { return payload; });
+        }
+    }
+
+    void SendRoyaleState(Player* player, RoyaleState const& m)
+    {
+        M().Push(player, "ROYS", Topic::Count, nullptr, [&](uint32_t) { return EncodeRoyaleState(m); });
+    }
+
+    void SendRoyaleMap(Player* player, RoyaleMap const& m)
+    {
+        M().Push(player, "ROYM", Topic::Count, nullptr, [&](uint32_t) { return EncodeRoyaleMap(m); });
+    }
+
+    void SendRoyaleMap(std::vector<Player*> const& players, RoyaleMap const& m)
+    {
+        PushAll(players, "ROYM", EncodeRoyaleMap(m));
+    }
+
+    void SendRoyaleObjects(Player* player, RoyaleObjects const& m)
+    {
+        M().Push(player, "ROYO", Topic::Count, nullptr, [&](uint32_t) { return EncodeRoyaleObjects(m); });
+    }
+
+    void SendRoyaleObjects(std::vector<Player*> const& players, RoyaleObjects const& m)
+    {
+        PushAll(players, "ROYO", EncodeRoyaleObjects(m));
+    }
+
+    void SendRoyaleKill(Player* player, RoyaleKill const& m)
+    {
+        M().Push(player, "ROYK", Topic::Count, nullptr, [&](uint32_t) { return EncodeRoyaleKill(m); });
+    }
+
+    void SendRoyaleKill(std::vector<Player*> const& players, RoyaleKill const& m)
+    {
+        PushAll(players, "ROYK", EncodeRoyaleKill(m));
+    }
+
+    void SendRoyaleEvent(Player* player, RoyaleEvent const& m)
+    {
+        M().Push(player, "ROYV", Topic::Count, nullptr, [&](uint32_t) { return EncodeRoyaleEvent(m); });
+    }
+
+    void SendRoyaleEvent(std::vector<Player*> const& players, RoyaleEvent const& m)
+    {
+        PushAll(players, "ROYV", EncodeRoyaleEvent(m));
+    }
+
+    void SendRoyaleResult(Player* player, RoyaleResult const& m)
+    {
+        M().Push(player, "ROYE", Topic::Count, nullptr, [&](uint32_t) { return EncodeRoyaleResult(m); });
     }
 
     void RiftStatus(Player* player, RiftState const& m)

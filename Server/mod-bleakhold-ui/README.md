@@ -112,6 +112,7 @@ To change names, texts, the week schedule or seasons later: edit the `bleakhold_
 | Keystone, key mode, weekly best | | `SendKeyState`, `KMODE`/`KSTART`/`KCANCEL` handlers |
 | Dungeon Journey board, bounty, queue and group proposals | | `BoardSnapshot`, `QueueStatus`, `QJOIN`/`QLEAVE`/`QREPLY`/`BCLAIM` handlers |
 | Eclipse Rift | | `RiftStatus`, `RiftEnded`, `QJOIN` with kind `R` |
+| Bleakhold Royale (protocol section 17) | the protocol: `QJOIN` kind `B`, `RDROP`/`RDEPLOY`/`RSPEC` with their rate limits, `GET ROYS`/`ROYM`, the `ROYS ROYM ROYO ROYK ROYV ROYE` encoders, `[Royale]` chat tag; `ERR royale_off` while feature bit 4096 is off; no `GLIDE` in battlegrounds | the match (mod-bleakhold): `SetFeature(FeatureRoyale, true)`, the handlers and providers, the `SendRoyale*` pushes |
 | Daily and weekly tasks, Mythic Coins, Shards | | `SendTasks`, `TaskProgress`, `SendWeek`, `TCLAIM`/`TREROLL` handlers |
 | Collections counts | | `SendCollections` |
 | Emoji bubbles (Animations tab, emote wheel, `/bh emoji`) | everything: the module checks `EMOJI` and shows the emoji over the player's head to everyone nearby; config `BleakholdUi.Emoji.*` | nothing (players need the Bleakhold client to see the bubbles) |
@@ -369,13 +370,15 @@ Ui::OnIntent(IntentType::Emoji, [](Player* p, Intent const& in) {
 | ERR | `Refuse(player, intent, code, text)` | |
 | DEF, HELLO, PONG | automatic | |
 | CAMPST | automatic (the module's camping); `SendCampState(player, CampState)` for a replacement | |
+| ROYS / ROYM / ROYO / ROYK / ROYV / ROYE | `SendRoyaleState`, `SendRoyaleMap`, `SendRoyaleObjects`, `SendRoyaleKill`, `SendRoyaleEvent` (the last four also for a list of players), `SendRoyaleResult` | |
 
 Intents (`Ui::OnIntent(IntentType::..., handler)`): `TaskClaim` (`in.taskUid`), `TaskReroll` (`in.taskUid`),
 `QueueJoin` (`in.queueKind, activityId, tier, roles, groupSize`), `QueueLeave`, `QueueReply`
 (`in.proposalId, in.accept`), `KeyMode` (`in.mode`), `KeyStart`, `KeyCancel`, `BountyClaim` (`in.bountyId`),
 `WarEffortHandIn`, `Outfit` (`in.setId`), `LeaderboardQuery` (`in.board, seasonId, dungeonId, classId, page`),
 `Emoji` (`in.emojiId`), `Dance` (`in.danceId`), `CaseOpen` (`in.caseItemId, in.caseNonce`), `Camp` (`in.campAct`:
-`CampAct::Make`, `Object` with `in.campSkill`, `Pack`), `Glide`, `Repair`.
+`CampAct::Make`, `Object` with `in.campSkill`, `Pack`), `Glide`, `Repair`, `RoyaleDrop` (`in.dropX, in.dropY`),
+`RoyaleDeploy`, `RoyaleSpectate` (`in.spectateDir`). Runtime feature bits: `SetFeature(bit, on)`, `FeatureOn(bit)`.
 
 ---
 

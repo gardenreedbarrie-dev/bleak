@@ -54,6 +54,7 @@ class Report:
         self.wdt_flags = 0
         self.main: set = set()
         self.wdl: dict = {}  # (tx, ty) -> list of 545 heights
+        self.summary_pois: dict | None = None  # kind -> count, when the output has a pois.json
 
     def error(self, where: str, msg: str) -> None:
         self.errors.append(f"{where}: {msg}")
@@ -969,6 +970,113 @@ def _check_trs(rep: Report, root: str, name: str) -> None:
                                       "the stock file plus these lines")
 
 
+# pois.json kinds with fixed meanings (the Royale server's bh_royale_poi): allowed params, weight required.
+ROYALE_POI_KINDS = {
+    "lobby": ((0,), False), "landmark": ((0,), False), "crate": ((1, 2), False), "orb_shadow": ((0,), False),
+    "orb_buff": ((1, 2, 3), False), "supply_site": ((0,), False), "final_site": ((0,), True),
+    "crossing": ((0,), False),
+}
+FINAL_SITE_REACH = 490.0  # the storm chain ends at most this far from the map centre
+POI_BELOW_TERRAIN = 0.25
+
+
+def _quad_heights(rep: Report, x: float, y: float):
+    """(min, max) of the five vertices of the terrain quad holding a world point, or None off the map."""
+    gx = (ORIGIN - x) / UNIT
+    gy = (ORIGIN - y) / UNIT
+    info = rep.adts.get((int(gy // 128), int(gx // 128)))
+    if info is None:
+        return None
+    ch = info.chunks.get((int(gy // 8) % 16, int(gx // 8) % 16))
+    if not ch or not ch["heights"]:
+        return None
+    qr = int(gx % 8)
+    qc = int(gy % 8)
+    hs = ch["heights"]
+    quad = [hs[qr * 17 + qc], hs[qr * 17 + qc + 1], hs[(qr + 1) * 17 + qc], hs[(qr + 1) * 17 + qc + 1],
+            hs[qr * 17 + 9 + qc]]
+    return min(quad), max(quad)
+
+
+def _check_pois(rep: Report, path: str, name: str) -> None:
+    """pois.json next to World/: what the server's spawn table gets (bh_royale_poi)."""
+    where = "pois.json"
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError) as e:
+        rep.error(where, f"unreadable: {e}")
+        return
+    if not isinstance(doc, dict) or not isinstance(doc.get("pois"), list):
+        rep.error(where, "expected an object with a 'pois' list")
+        return
+    if str(doc.get("map_directory", "")).lower() != name.lower():
+        rep.error(where, f"map_directory {doc.get('map_directory')!r} is not this map ({name})")
+    tiles = sorted(rep.main)
+    if not tiles:
+        return
+    x0 = ORIGIN - (max(t[1] for t in tiles) + 1) * TILE
+    x1 = ORIGIN - min(t[1] for t in tiles) * TILE
+    y0 = ORIGIN - (max(t[0] for t in tiles) + 1) * TILE
+    y1 = ORIGIN - min(t[0] for t in tiles) * TILE
+    cx, cy = (x0 + x1) * 0.5, (y0 + y1) * 0.5
+    names = set()
+    ids = set()
+    kinds: dict = {}
+    for i, p in enumerate(doc["pois"]):
+        pw = f"{where} pois[{i}]"
+        if not isinstance(p, dict):
+            rep.error(pw, "expected an object")
+            continue
+        pname = p.get("name")
+        if not isinstance(pname, str) or not pname or pname in names:
+            rep.error(pw, f"name {pname!r} is missing or used twice (the server keys spawns on it)")
+        names.add(pname)
+        pw = f"{where} {pname}"
+        pid = p.get("id")
+        if "id" in p:
+            if isinstance(pid, bool) or not isinstance(pid, int) or not 0 < pid <= 0x7FFFFFFF or pid in ids:
+                rep.error(pw, f"id {pid!r} is not a unique integer 1..2147483647 (bh_royale_poi's key)")
+            ids.add(pid)
+        else:
+            rep.warn(pw, "no id: the server table bh_royale_poi needs one (rebuild with the current MapForge)")
+        kind = p.get("kind")
+        if not isinstance(kind, str) or not kind:
+            rep.error(pw, "kind is missing")
+            continue
+        kinds[kind] = kinds.get(kind, 0) + 1
+        values = [p.get(k) for k in ("x", "y", "z")]
+        if not all(isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) for v in values):
+            rep.error(pw, f"x, y, z must be finite numbers (got {values})")
+            continue
+        x, y, z = values
+        if not (x0 <= x <= x1 and y0 <= y <= y1):
+            rep.error(pw, f"({x}, {y}) is outside the map's tiles")
+            continue
+        for key in ("radius", "weight"):
+            v = p.get(key, 0)
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or v < 0:
+                rep.error(pw, f"{key} {v!r} must be a number >= 0")
+        rule = ROYALE_POI_KINDS.get(kind)
+        if rule is not None:
+            params, needs_weight = rule
+            if p.get("param", 0) not in params:
+                rep.error(pw, f"a {kind} takes param {' or '.join(map(str, params))}, not {p.get('param')!r}")
+            weight = p.get("weight", 0)
+            if needs_weight and not (isinstance(weight, int) and weight > 0):
+                rep.error(pw, f"a {kind} needs an integer weight above 0 (got {weight!r})")
+            if not needs_weight and weight not in (0, None):
+                rep.error(pw, f"only final_site POIs carry a weight (got {weight!r})")
+            if kind == "final_site" and math.hypot(x - cx, y - cy) > FINAL_SITE_REACH:
+                rep.error(pw, f"final site {math.hypot(x - cx, y - cy):.1f} yd from the map centre; the storm "
+                              f"reaches at most {FINAL_SITE_REACH:g}")
+        quad = _quad_heights(rep, x, y)
+        if quad is not None and z < quad[0] - POI_BELOW_TERRAIN:
+            rep.error(pw, f"z {z:.3f} is below the terrain there ({quad[0]:.3f}): a server object would spawn "
+                          "underground")
+    rep.summary_pois = dict(sorted(kinds.items()))
+
+
 def validate_map(path: str, name: str | None = None, assets: str | None = None, dbc: str | None = None) -> Report:
     """Check a map. `assets` (extracted client files) and `dbc` (a DBC folder) enable the real-data checks."""
     rep = Report()
@@ -1013,6 +1121,8 @@ def validate_map(path: str, name: str | None = None, assets: str | None = None, 
     _check_wdl_heights(rep)
     root = os.path.dirname(os.path.dirname(os.path.dirname(folder)))
     _check_trs(rep, root, name)
+    if os.path.isfile(os.path.join(root, "pois.json")):
+        _check_pois(rep, os.path.join(root, "pois.json"), name)
     if dbc:
         _check_dbc(rep, dbc)
     if assets:
@@ -1061,6 +1171,7 @@ def _summary(name: str, rep: Report) -> dict:
         "unique_objects": len(uids),
         "max_normal_error_deg": round(normal_err, 2),
         "wdl_tiles": len(rep.wdl),
+        "pois_by_kind": rep.summary_pois,
         "errors": len(rep.errors),
         "warnings": len(rep.warnings),
     }

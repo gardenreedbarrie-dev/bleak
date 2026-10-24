@@ -42,6 +42,9 @@ namespace Bleakhold
         Camp,             // CAMP     act[,skill]
         Glide,            // GLIDE
         Repair,           // REPAIR
+        RoyaleDrop,       // RDROP    x, y (section 17)
+        RoyaleDeploy,     // RDEPLOY
+        RoyaleSpectate,   // RSPEC    dir
         Count
     };
 
@@ -50,14 +53,22 @@ namespace Bleakhold
     {
         Week, Era, Tasks, Key, Board, Queue, Coll, Lidx, Season,   // revisioned
         Firsts, Mplus, Rift, Set, Def, Cases, Case, CampState,
+        RoyaleState, RoyaleMap,                                    // ROYS, ROYM (section 17)
         Count
     };
     inline constexpr uint8_t RevisionedTopicCount = 9;
 
-    enum class QueueKind : char { Dungeon = 'D', Rift = 'R' };
+    // QJOIN kind: the dungeon board, the Eclipse Rift, Bleakhold Royale (section 17: activityId is the mode id,
+    // tier 0, size 1).
+    enum class QueueKind : char { Dungeon = 'D', Rift = 'R', Royale = 'B' };
     enum class Board : char { Keys = 'K', Rift = 'R', RaidEchoes = 'E', Firsts = 'F' };
     // CAMP act (section 16): make camp, place a camp object, pack up my camp.
     enum class CampAct : char { Make = 'M', Object = 'O', Pack = 'P' };
+    // RSPEC dir (section 17): watch the killer (or the first player alive), the next one, the previous one.
+    enum class SpectateDir : uint8_t { Killer = 0, Next = 1, Previous = 2 };
+
+    // RDROP x and y are integer world yards within the limits of a WoW map (+-32 tiles of 533.33 yards).
+    inline constexpr int32_t MaxWorldCoord = 17067;
 
     // Role bits of QJOIN and QUEUE members.
     enum RoleMask : uint8_t { RoleTank = 1, RoleHealer = 2, RoleDamage = 4 };
@@ -89,10 +100,10 @@ namespace Bleakhold
 
         // QJOIN
         QueueKind queueKind = QueueKind::Dungeon;
-        uint32_t activityId = 0;       // dungeon (map) id, 0 for the Rift
-        uint8_t tier = 0;              // 0 Normal, 1 Veteran, 2 Elite, 3 Nightmare
-        uint8_t roles = 0;             // RoleMask bits, 1..7
-        uint8_t groupSize = 0;         // 1..5, 1 = enter alone
+        uint32_t activityId = 0;       // dungeon (map) id, 0 for the Rift, the mode id (> 0) for Royale
+        uint8_t tier = 0;              // 0 Normal, 1 Veteran, 2 Elite, 3 Nightmare (always 0 for Royale)
+        uint8_t roles = 0;             // RoleMask bits, 1..7 (ignored for Royale)
+        uint8_t groupSize = 0;         // 1..5, 1 = enter alone (always 1 for Royale)
 
         // QREPLY
         uint32_t proposalId = 0;
@@ -131,6 +142,14 @@ namespace Bleakhold
         // checks it against its camp objects)
         CampAct campAct = CampAct::Make;
         uint32_t campSkill = 0;
+
+        // RDROP: the landing pin the player asks for, integer world yards (may be negative), each within
+        // -MaxWorldCoord..MaxWorldCoord; the server snaps it to a valid point
+        int32_t dropX = 0;
+        int32_t dropY = 0;
+
+        // RSPEC
+        SpectateDir spectateDir = SpectateDir::Killer;
     };
 
     // Why a message was not accepted.

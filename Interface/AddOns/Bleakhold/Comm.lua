@@ -232,7 +232,7 @@ local function token(maxLen) return { kind = "token", max = maxLen } end
 
 Comm.TOPICS = {
     WEEK = 0, ERA = 0, TASKS = 0, KEY = 0, BOARD = 0, QUEUE = 0, MPLUS = 0, RIFT = 0, COLL = 0,
-    SET = 2, LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1, CASES = 0, CASE = 1, CAMPST = 0,
+    SET = 2, LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1, CASES = 0, CASE = 1, CAMPST = 0, ROYS = 0, ROYM = 0,
 }
 
 -- A schema lists its fields in order; `min` (default: all of them) is how many must be given, the rest may be
@@ -242,7 +242,12 @@ Comm.INTENTS = {
     GET = "records",                                                  -- topic[,args] per record
     TCLAIM = { int(1, INT32) },                                       -- task uid (from TASKS)
     TREROLL = { int(1, INT32) },                                      -- task uid
-    QJOIN = { enum("D", "R"), int(0, INT32), int(0, 3), int(1, 7), int(1, 5) }, -- kind, activity, tier (0 Normal .. 3 Nightmare), roles, size
+    -- kind (D dungeon, R Rift, B Bleakhold Royale), activity, tier (0 Normal .. 3 Nightmare), roles, size; for
+    -- Royale the activity is the mode id (above 0), tier 0 and size 1 (section 17)
+    QJOIN = { enum("D", "R", "B"), int(0, INT32), int(0, 3), int(1, 7), int(1, 5),
+        check = function(kind, activity, tier, _, size)
+            return kind ~= "B" or (tonumber(activity) >= 1 and tonumber(tier) == 0 and tonumber(size) == 1)
+        end },
     QLEAVE = {},
     QREPLY = { int(1, INT32), int(0, 1) },                            -- proposal id, accept
     KMODE = { int(0, 2) },                                            -- 0 normal, 1 heroic, 2 mythic
@@ -260,6 +265,9 @@ Comm.INTENTS = {
     CAMP = { enum("M", "O", "P"), int(1, INT32), min = 1, check = function(act, skill) return (act == "O") == (skill ~= nil) end },
     GLIDE = {},
     REPAIR = {},
+    RDROP = { int(-17067, 17067), int(-17067, 17067) },               -- Royale landing pin: world x, y (yards)
+    RDEPLOY = {},                                                     -- Royale: open the parachute now
+    RSPEC = { int(0, 2) },                                            -- Royale spectator: 0 killer, 1 next, 2 previous
 }
 
 local function checkField(spec, v)
@@ -794,7 +802,7 @@ end)
 
 -- Feature bits from HELLO (the server can hide boards that are not ready).
 Comm.FEATURE = { RIFT_SCORE = 1, SHARDS = 2, DBM_BY_SERVER = 4, SEASON = 8, LEADERBOARDS = 16, COLLECTIONS = 32,
-    EMOJI = 64, DANCE = 128, CASES = 256, CAMP = 512, GLIDE = 1024, FIELD_REPAIR = 2048 }
+    EMOJI = 64, DANCE = 128, CASES = 256, CAMP = 512, GLIDE = 1024, FIELD_REPAIR = 2048, ROYALE = 4096 }
 
 function Comm.HasFeature(bitValue)
     local f = Comm.server and Comm.server.features or 0

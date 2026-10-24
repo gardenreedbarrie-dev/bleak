@@ -11,6 +11,7 @@
 #include "BleakholdCodec.h"
 
 #include <algorithm>
+#include <string_view>
 
 namespace Bleakhold
 {
@@ -37,6 +38,19 @@ namespace Bleakhold
                     break;
                 w.Record().Char(Letter(r.kind)).Opt(r.amount).Opt(r.itemId).Text(r.text, 60);
             }
+        }
+
+        // ROYK announce (section 17): one of F D T M R G, and only with a credited killer and not for a forfeit or
+        // AFK; anything else is 0, which Char() writes as an empty field.
+        char RoyaleAnnounceLetter(RoyaleKill const& m)
+        {
+            char const c = Letter(m.announce);
+            if (c == 0 || std::string_view("FDTMRG").find(c) == std::string_view::npos)
+                return 0;
+            if (Proto::CleanText(m.killerName, RoyaleNameBytes).empty() || m.cause == RoyaleCause::Left
+                || m.cause == RoyaleCause::Afk)
+                return 0;
+            return c;
         }
     }
 
@@ -134,6 +148,13 @@ namespace Bleakhold
         PayloadWriter w;
         w.Int(rev).Int(Num(m.state)).Char(Letter(m.kind)).Opt(m.activityId).Opt(m.tier).Opt(m.size).Opt(m.queuedSec).Opt(m.estWaitSec)
             .Opt(m.proposalId).Opt(m.timeoutSec).Opt(m.bandMin).Opt(m.bandMax);
+        // Bleakhold Royale (section 17): the queue counts after bandMax, and no member records
+        if (m.kind == QueueKind::Royale)
+        {
+            w.Opt(m.queued).Opt(m.minPlayers).Opt(m.maxPlayers).Opt(m.accepted).Opt(m.proposalSize)
+                .Opt(m.matchesRunning);
+            return w.Take();
+        }
         std::size_t n = 0;
         for (QueueMember const& q : m.members)
         {
@@ -274,6 +295,71 @@ namespace Bleakhold
         w.Char(Letter(m.state)).Int(m.state == CampStateId::Resting ? m.settleSec : 0).Int(m.fireSec).Bool(m.mine).Int(m.cooldownSec)
             .Int(m.warmthSec).Int(m.xpPct).Tuples(objects, MaxCampObjects).Tuples(place, MaxCampPlaces).Opt(m.glideSec).Bool(m.repair)
             .Bool(m.fed);
+        return w.Take();
+    }
+
+    std::string EncodeRoyaleState(RoyaleState const& m)
+    {
+        PayloadWriter w;
+        w.Int(m.matchId).Int(Num(m.phase)).Int(m.phaseMsLeft).Int(m.alive).Int(m.total).Int(Num(m.me)).Int(m.kills)
+            .Opt(m.placement).Opt(m.pinX).Opt(m.pinY).Int(m.stage).Int(m.curX).Int(m.curY).Int(m.curR).Opt(m.nextX)
+            .Opt(m.nextY).Opt(m.nextR).Opt(m.shrinkStartMs).Opt(m.shrinkEndMs).Int(m.dmgPermille)
+            .Text(m.watchName, RoyaleNameBytes).Opt(m.myX).Opt(m.myY);
+        return w.Take();
+    }
+
+    std::string EncodeRoyaleMap(RoyaleMap const& m)
+    {
+        PayloadWriter w;
+        w.Int(m.mapId).Int(m.minX).Int(m.maxX).Int(m.minY).Int(m.maxY).Int(m.lobbyX).Int(m.lobbyY).Int(m.lobbyR)
+            .Int(m.boundHalf).Int(m.centerX).Int(m.centerY);
+        std::size_t n = 0;
+        for (RoyalePoi const& p : m.pois)
+        {
+            if (n++ >= MaxRoyalePois)
+                break;
+            w.Record().Int(p.id).Char(Letter(p.kind)).Int(p.x).Int(p.y).Int(p.r).Text(p.name, 40);
+        }
+        return w.Take();
+    }
+
+    std::string EncodeRoyaleObjects(RoyaleObjects const& m)
+    {
+        PayloadWriter w;
+        w.Int(m.matchId).Bool(m.full);
+        std::size_t n = 0;
+        for (RoyaleObject const& o : m.objects)
+        {
+            if (n++ >= MaxRoyaleObjects)
+                break;
+            w.Record().Int(o.objId).Char(Letter(o.kind)).Int(o.subtype).Int(o.x).Int(o.y).Int(Num(o.state))
+                .Opt(o.msLeft);
+        }
+        return w.Take();
+    }
+
+    std::string EncodeRoyaleKill(RoyaleKill const& m)
+    {
+        PayloadWriter w;
+        w.Text(m.killerName, RoyaleNameBytes).Opt(m.killerClassId).Text(m.victimName, RoyaleNameBytes)
+            .Int(m.victimClassId).Char(Letter(m.cause)).Int(m.aliveAfter).Opt(m.killerKills)
+            .Char(RoyaleAnnounceLetter(m));
+        return w.Take();
+    }
+
+    std::string EncodeRoyaleEvent(RoyaleEvent const& m)
+    {
+        PayloadWriter w;
+        w.Char(Letter(m.kind)).Int(m.value).Opt(m.x).Opt(m.y).Opt(m.msLeft).Text(m.name, RoyaleNameBytes);
+        return w.Take();
+    }
+
+    std::string EncodeRoyaleResult(RoyaleResult const& m)
+    {
+        PayloadWriter w;
+        w.Int(m.matchId).Int(m.placement).Int(m.total).Int(m.kills).Int(m.damage).Int(m.healing).Int(m.survivedSec)
+            .Text(m.winnerName, RoyaleNameBytes).Opt(m.winnerClassId).Opt(m.winnerKills).Bool(m.rewarded);
+        WriteRewards(w, m.rewards);
         return w.Take();
     }
 

@@ -23,7 +23,7 @@ GOLDEN = {
     "World/Maps/GoldenT/GoldenT.wdt": "949e7e8dc6ce829b2ac4fd0afd8a26cb1c918931070e3bb523a23bc82890d13b",
     "World/Maps/GoldenT/GoldenT.wdl": "a5700bd0b3e3ce64e9a4c31fecc5cc29abe41ad87287797128fb61df3e65eea3",
     "World/Maps/GoldenT/GoldenT_32_32.adt": "8a328741b3932582ca11425cdf7281640ac1aac51430231fa4761318291c273c",
-    "pois.json": "1e4173d7def0354188d9a106553952621f38597edec696d88ad70e13ecfbc7e3",
+    "pois.json": "d4d076f444050e04e8493ebdf6119d823b121af5624bfeaf5503c81505f389c6",
 }
 # MVER(18), MHDR(64): flags 0, mcin 64, mtex, mmdx, mmid, mwmo, mwid, mddf, modf, mfbo 0, mh2o, mtxf, mamp 0.
 GOLDEN_ADT_HEAD = (

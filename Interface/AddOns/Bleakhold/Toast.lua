@@ -114,6 +114,9 @@ ns.On("TOAST", function(d)
     Toast.Push({ kicker = KICKERS[d.kind] or KICKERS.I, title = d.title, sub = d.sub, target = d.target })
 end)
 
-ns.On("QUEUE_PROPOSAL", function()
+ns.On("QUEUE_PROPOSAL", function(q)
+    if q and q.kind == "B" then
+        return    -- Bleakhold Royale's ready check has its own popup (Royale.lua)
+    end
     Toast.Push({ kicker = "GROUP FOUND", title = "Your group is ready", sub = "Accept in Activities - Dungeons", target = "dungeons" })
 end)

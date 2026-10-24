@@ -4,7 +4,8 @@ h(x, y) = base + sum(noise layers), then every feature in spec order:
 
 - hill:     h += height * falloff(distance / radius)   (smooth (1-u^2)^2, cone 1-u, dome sqrt(1-u^2))
 - flatten:  blend h toward a target height inside a shape, fading out over `falloff` yards (plateaus, base pads);
-            height null = the terrain height at the shape's centre before this feature
+            height null = the terrain height at the shape's centre before this feature; `offset` is added to the
+            target (a mesa: height null, offset +25, mode raise)
 - river:    carve to `bed` inside width/2, blend back to the terrain over `bank` yards
 - ramp:     blend toward the straight line from `from` to `to` (z null = terrain height there before the ramp)
 - border:   add `height` near the edge of the tile range (cliffs, or a sunken shore with a negative height): full
@@ -47,9 +48,11 @@ class HeightField:
         # Resolve "terrain height here" targets in order; each one only sees the features before it.
         for i, feat in enumerate(self.features):
             d = feat.data
-            if feat.kind == "flatten" and d["height"] is None:
-                rx, ry = d["shape"].reference_point()
-                d["height"] = self._eval(rx, ry, i)
+            if feat.kind == "flatten":
+                if d["height"] is None:
+                    rx, ry = d["shape"].reference_point()
+                    d["height"] = self._eval(rx, ry, i)
+                d["height"] += d["offset"]
             elif feat.kind == "ramp":
                 if d["z0"] is None:
                     d["z0"] = self._eval(d["x0"], d["y0"], i)
@@ -67,7 +70,8 @@ class HeightField:
             x0, x1, y0, y1 = f["shape"].bbox()
             fo = f["falloff"]
             return _Feature("flatten", (x0 - fo, x1 + fo, y0 - fo, y1 + fo),
-                            {"shape": f["shape"], "height": f["height"], "falloff": fo, "mode": f["mode"]})
+                            {"shape": f["shape"], "height": f["height"], "offset": f.get("offset", 0.0),
+                             "falloff": fo, "mode": f["mode"]})
         if kind == "river":
             line = Polyline(list(f["path"]), f["width"])
             x0, x1, y0, y1 = line.bbox()

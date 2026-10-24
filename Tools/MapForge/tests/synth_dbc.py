@@ -203,7 +203,13 @@ def default_config() -> dict:
         },
         "zone": {
             "id": 5100, "template": 3277, "name": "Bleakhold Royale",
-            "set_flags": ["ARENA"], "clear_flags": ["SANCTUARY"], "subzones": [],
+            "set_flags": ["ARENA"], "subzones": [],
+            # bleakhold_royale.json's list: every template flag that changes the rules (forge.check fails on any
+            # that remains besides HARMLESS_TEMPLATE_FLAGS).
+            "clear_flags": ["SANCTUARY", "OUTLAND", "OUTLAND2", "CAPITAL", "SLAVE_CAPITAL", "SLAVE_CAPITAL2", "CITY",
+                            "TOWN", "REST_ZONE_HORDE", "REST_ZONE_ALLIANCE", "CONTESTED_AREA", "WINTERGRASP",
+                            "WINTERGRASP_2", "ALLOW_DUELS", "NEED_FLY", "OUTDOOR_PVP", "ARENA_INSTANCE", "UNK4",
+                            "LOWLEVEL", "INSIDE"],
         },
         "loading_screen": None,
         "light": {"skybox": "Environments\\Stars\\WintergraspSmokySky.M2"},

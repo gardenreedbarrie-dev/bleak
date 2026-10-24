@@ -2,7 +2,8 @@
 
 preview.png: one pixel per half unit (2.08 yards), north up and east right (world +X up, -Y right). Colour = the
 chunk's texture layers mixed with the textures' preview colours, shaded by the terrain normal (light from the
-north-west), water tinted blue, tile borders dark, WMOs red, doodads yellow, POIs magenta.
+north-west), water tinted blue, tile borders dark, WMOs red, doodads yellow (scattered ones a single darker pixel),
+POIs by kind (POI_COLORS; magenta for other kinds), final sites with a ring at the last circle's radius.
 heightmap.png: grey levels from the lowest (black) to the highest (white) point.
 """
 
@@ -30,6 +31,21 @@ def write_png(path: str, width: int, height: int, rows: list[bytes]) -> None:
             + png_chunk(b"IDAT", zlib.compress(bytes(raw), 9)) + png_chunk(b"IEND", b""))
     with open(path, "wb") as f:
         f.write(data)
+
+
+# POI kind -> (colour, dot half-size in pixels). Crates and buff orbs by param.
+POI_COLORS = {
+    "lobby": ((255, 255, 255), 4),
+    "landmark": ((230, 60, 230), 3),
+    "crossing": ((60, 220, 230), 3),
+    "crate:1": ((255, 150, 30), 1),
+    "crate:2": ((255, 40, 40), 2),
+    "orb_shadow": ((150, 70, 255), 2),
+    "orb_buff": ((60, 230, 90), 2),
+    "supply_site": ((255, 255, 60), 3),
+    "final_site": ((120, 200, 255), 2),
+}
+FINAL_RING_YARDS = 35.0  # the storm's last circle (stage 5 radius)
 
 
 def _clamp8(v: float) -> int:
@@ -105,11 +121,25 @@ def render(ctx, tiles: dict, out_preview: str, out_height: str) -> None:
         for c in range(width):
             if (r % coords.LATTICE_PER_TILE == 0) or (c % coords.LATTICE_PER_TILE == 0):
                 rows[r][c * 3:c * 3 + 3] = b"\x20\x20\x20"
+    def ring(x: float, y: float, radius: float, rgb) -> None:
+        steps = max(24, int(radius * 2))
+        for i in range(steps):
+            a = 360.0 * i / steps
+            dot(x + radius * coords.dcos(a), y + radius * coords.dsin(a), rgb, 0)
+
+    scattered = {p.label for p in getattr(ctx, "scattered", [])}
     for d in ctx.doodads:
-        dot(d.world[0], d.world[1], (250, 220, 40), 1)
+        if d.label in scattered:
+            dot(d.world[0], d.world[1], (190, 170, 30), 0)
+        else:
+            dot(d.world[0], d.world[1], (250, 220, 40), 1)
     for w in ctx.wmos:
         dot(w.world[0], w.world[1], (220, 40, 40), 3)
     for m in ctx.pois:
-        dot(m["x"], m["y"], (230, 60, 230), 2)
+        key = f"{m['kind']}:{m.get('param', 0)}" if m["kind"] == "crate" else m["kind"]
+        rgb, size = POI_COLORS.get(key, ((230, 60, 230), 2))
+        if m["kind"] == "final_site":
+            ring(m["x"], m["y"], FINAL_RING_YARDS, rgb)
+        dot(m["x"], m["y"], rgb, size)
     write_png(out_preview, width, height, rows)
     write_png(out_height, width, height, hrows)

@@ -110,9 +110,13 @@ local function statusLines(key)
         end
         local q = S.queue
         if q and q.state == 1 then
-            lines[#lines + 1] = { "In queue", C.goldLight }
+            lines[#lines + 1] = { q.kind == "B" and "In the Bleakhold Royale queue" or "In queue", C.goldLight }
         elseif q and q.state == 2 then
-            lines[#lines + 1] = { "Group found - accept in Dungeons", C.teal }
+            local text = "Group found - accept in Dungeons"
+            if q.kind == "B" then
+                text = "Bleakhold Royale: answer the ready check"
+            end
+            lines[#lines + 1] = { text, C.teal }
         end
         lines[#lines + 1] = { "Click to open", C.mute }
         return lines

@@ -22,13 +22,14 @@ if __package__ in (None, ""):
 from terrain import coords  # noqa: E402
 from terrain.adt import build_adt  # noqa: E402
 from terrain.heightmap import HeightField, LatticeGrid  # noqa: E402
-from terrain.placements import resolve_placements  # noqa: E402
+from terrain.placements import resolve_placements, scatter_placements  # noqa: E402
 from terrain.spec import Spec, load_spec, parse_spec  # noqa: E402
 from terrain.spec_errors import SpecError  # noqa: E402
 from terrain.texturing import TexturePainter  # noqa: E402
 from terrain.wdt_wdl import build_wdl, build_wdt  # noqa: E402
 
 GENERATOR = "MapForge terrain 1"
+POI_BELOW_GROUND = 0.25  # a POI this far below the terrain gets a warning
 
 
 class Context:
@@ -38,16 +39,38 @@ class Context:
         self.field = HeightField(spec)
         self.grid = LatticeGrid(spec, self.field)
         self.painter = TexturePainter(spec, self.grid)
-        self.doodads, self.wmos, w = resolve_placements(spec, self.grid, assets)
+        self.scattered, self.scatter_stats = scatter_placements(spec, self.grid)
+        self.doodads, self.wmos, w = resolve_placements(spec, self.grid, assets, self.scattered)
         self.warnings += w
+        self.border = None
+        self.texture_overflow: list[dict] = []
+        by_label: dict[str, list] = {}
+        for p in self.doodads + self.wmos:
+            if p.label:
+                by_label.setdefault(p.label, []).append(p)
         self.pois = []
         wx0, wx1, wy0, wy1 = spec.world_bounds()
         for m in spec.pois:
             if not (wx0 <= m["x"] <= wx1 and wy0 <= m["y"] <= wy1):
                 raise SpecError(f"poi {m['name']!r} is outside the map's tiles")
             ground = self.grid.ground_height(m["x"], m["y"])
-            z = (ground if m["z"] is None else m["z"]) + m["z_offset"]
-            self.pois.append(dict(m, z=z, ground=ground))
+            if m["z_from"] is not None:
+                found = by_label.get(m["z_from"], [])
+                if len(found) != 1:
+                    raise SpecError(f"poi {m['name']!r}: z_from {m['z_from']!r} names {len(found)} placements "
+                                    "(it must name exactly one WMO or doodad label)")
+                z = found[0].world[2] + m["z_offset"]
+                source = f"placement:{m['z_from']}"
+            elif m["z"] is None:
+                z = ground + m["z_offset"]
+                source = "ground"
+            else:
+                z = m["z"] + m["z_offset"]
+                source = "explicit"
+            if z < ground - POI_BELOW_GROUND:
+                self.warnings.append(f"poi {m['name']!r} is {ground - z:.2f} yards below the terrain (z {z:.2f}, "
+                                     f"ground {ground:.2f}): a server object there would spawn underground")
+            self.pois.append(dict(m, z=z, ground=ground, z_source=source))
 
 
 class BuildResult:
@@ -77,6 +100,11 @@ def build(spec: Spec, assets=None) -> BuildResult:
     result.files[f"{base}/{spec.directory}.wdt"] = build_wdt(spec)
     result.files[f"{base}/{spec.directory}.wdl"] = build_wdl(spec, ctx.grid, holes)
     result.files["pois.json"] = _pois_json(spec, ctx)
+    ctx.texture_overflow = texture_overflow(result.tiles)
+    if ctx.texture_overflow:
+        names = sorted({spec.textures[k].name for c in ctx.texture_overflow for k in c["dropped"]})
+        ctx.warnings.append(f"{len(ctx.texture_overflow)} chunks hold more than 4 textures; dropped there: "
+                            f"{', '.join(names)} (keep regional layers at least one chunk apart)")
     ctx.border = border_check(spec, ctx.grid)
     if not ctx.border["closed"]:
         x, y = ctx.border["at"]
@@ -87,6 +115,16 @@ def build(spec: Spec, assets=None) -> BuildResult:
 
 
 WALKABLE_SLOPE_DEG = 50.0  # the client's walkable limit (steeper ground makes a character slide)
+
+
+def texture_overflow(tiles: dict) -> list[dict]:
+    """Chunks where a texture above the layer threshold did not fit into the client's 4 layers."""
+    out = []
+    for (tx, ty) in sorted(tiles):
+        for (ix, iy), tex in sorted(tiles[(tx, ty)].texturing.items()):
+            if tex.dropped:
+                out.append({"tile": [tx, ty], "chunk": [ix, iy], "dropped": list(tex.dropped)})
+    return out
 
 
 def border_check(spec: Spec, grid, max_slope_deg: float = WALKABLE_SLOPE_DEG) -> dict:
@@ -128,12 +166,30 @@ def border_check(spec: Spec, grid, max_slope_deg: float = WALKABLE_SLOPE_DEG) ->
             "at": [_round(coords.lattice_x(r0 + r)), _round(coords.lattice_y(c0 + c))]}
 
 
+def poi_counts(pois: list[dict]) -> dict:
+    """{kind: count}, with crates and buff orbs also counted per param ("crate:1", "orb_buff:3")."""
+    counts: dict[str, int] = {}
+    for m in pois:
+        counts[m["kind"]] = counts.get(m["kind"], 0) + 1
+        if m["kind"] in ("crate", "orb_buff"):
+            key = f"{m['kind']}:{m['param']}"
+            counts[key] = counts.get(key, 0) + 1
+    return dict(sorted(counts.items()))
+
+
 def _pois_json(spec: Spec, ctx: Context) -> bytes:
-    """pois.json: the named points for the server's spawn tables (orb shrines, crate drops, storm centres)."""
-    pois = [{"name": m["name"], "kind": m["kind"], "x": _round(m["x"]), "y": _round(m["y"]), "z": _round(m["z"]),
-             "ground": _round(m["ground"]), "radius": m["radius"]} for m in ctx.pois]
+    """pois.json: the named points for the server's spawn tables (bh_royale_poi: crates, orbs, landmarks, the lobby,
+    supply and final sites), with resolved heights. `z` is what the server uses; `ground` the terrain height."""
+    pois = [{"id": m["id"], "name": m["name"], "kind": m["kind"], "title": m["title"], "x": _round(m["x"]),
+             "y": _round(m["y"]), "z": _round(m["z"]), "ground": _round(m["ground"]), "z_source": m["z_source"],
+             "facing": _round(m["facing"]), "radius": m["radius"], "weight": m["weight"], "param": m["param"]}
+            for m in ctx.pois]
+    world = spec.world_bounds()
     doc = {"generator": GENERATOR, "map_id": spec.map_id, "map_directory": spec.directory,
-           "coordinates": "world (server .go xyz)", "pois": pois}
+           "coordinates": "world (server .go xyz); facing in degrees, 0 = north (+X), counter-clockwise",
+           "world_bounds": {"min_x": _round(world[0]), "max_x": _round(world[1]), "min_y": _round(world[2]),
+                            "max_y": _round(world[3])},
+           "counts": poi_counts(ctx.pois), "pois": pois}
     return (json.dumps(doc, indent=2) + "\n").encode("ascii")
 
 
@@ -170,8 +226,16 @@ def _manifest(spec: Spec, ctx: Context, result: BuildResult) -> dict:
         "area_ids": sorted({spec.area_id} | {a for a, _ in spec.areas}),
         "textures": [{"name": t.name, "path": t.path} for t in spec.textures],
         "placements": placements,
-        "pois": [{"name": m["name"], "kind": m["kind"], "world": [_round(m["x"]), _round(m["y"]), _round(m["z"])],
-                  "ground": _round(m["ground"]), "radius": m["radius"]} for m in ctx.pois],
+        "pois": [{"id": m["id"], "name": m["name"], "kind": m["kind"],
+                  "world": [_round(m["x"]), _round(m["y"]), _round(m["z"])], "ground": _round(m["ground"]),
+                  "radius": m["radius"]} for m in ctx.pois],
+        "poi_counts": poi_counts(ctx.pois),
+        "roads": [{"name": r["name"], "width": r["width"], "points": [[_round(v) for v in p] for p in r["points"]]}
+                  for r in spec.roads],
+        "scatter": ctx.scatter_stats,
+        "doodad_count": len(ctx.doodads),
+        "wmo_count": len(ctx.wmos),
+        "texture_overflow_chunks": len(ctx.texture_overflow),
         "water": [{"liquid_type": w["liquid_type"], "height": w["height"]} for w in spec.water],
         "water_chunks": water_chunks,
         "border": ctx.border,
@@ -240,7 +304,12 @@ def main(argv: list[str] | None = None) -> int:
         b = m["world_bounds"]
         print(f"{m['directory']}: {len(m['tiles'])} tiles, X {b['min_x']}..{b['max_x']}, Y {b['min_y']}..{b['max_y']}, "
               f"heights {m['height_range'][0]}..{m['height_range'][1]}")
-        print(f"  {len(m['placements'])} placements, {len(m['pois'])} pois, {m['water_chunks']} chunks with water")
+        print(f"  {len(m['placements'])} placements ({m['doodad_count']} doodads, {m['wmo_count']} WMOs), "
+              f"{len(m['pois'])} pois, {m['water_chunks']} chunks with water")
+        for g in m["scatter"]:
+            print(f"  scatter {g['name']}: {g['placed']} of {g['candidates']} candidates")
+        if m["poi_counts"]:
+            print("  pois: " + ", ".join(f"{k} {v}" for k, v in m["poi_counts"].items()))
         for w in m["warnings"]:
             print(f"  warning: {w}")
         for path in written:

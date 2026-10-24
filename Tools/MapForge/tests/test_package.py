@@ -350,6 +350,118 @@ class ExtractArchiveTests(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(out, "server", "extract")))
 
 
+MARKER_BLP = "Interface\\Bleakhold\\Royale\\Marker.blp"
+
+
+def write_pois(folder: str, kinds=("storm_center",), map_id=901):
+    pois = [{"id": i + 1, "name": f"p{i}", "kind": kind, "title": "", "x": -100.0 - i, "y": -100.0, "z": 5.0,
+             "facing": 0.0, "radius": 3.0, "weight": 0, "param": 0} for i, kind in enumerate(kinds)]
+    doc = {"map_id": map_id, "map_directory": DIRECTORY, "counts": {k: kinds.count(k) for k in kinds},
+           "world_bounds": {"min_x": -1066.667, "max_x": 533.333, "min_y": -1066.667, "max_y": 533.333},
+           "pois": pois}
+
+    with open(os.path.join(folder, "pois.json"), "w", encoding="utf-8") as f:
+        json.dump(doc, f)
+
+
+class MarkerAndPoiTests(unittest.TestCase):
+    """The generated patch marker in patch-Q, and the bh_royale_poi SQL from the terrain's pois.json."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.dbc = os.path.join(self.tmp, "dbc")
+        synth_dbc.write_tables(self.dbc)
+        self.terrain = os.path.join(self.tmp, "terrain")
+        write_terrain(self.terrain)
+        self.config = os.path.join(self.tmp, "map.json")
+        data = synth_dbc.default_config()
+        data["archives"]["marker_texture"] = "Interface/Bleakhold/Royale/Marker.blp"
+
+        with open(self.config, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+        self.out = os.path.join(self.tmp, "out")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def build(self):
+        return run("build", "--config", self.config, "--dbc", self.dbc, "--terrain", self.terrain, "--out",
+                   self.out, "--force")
+
+    def test_marker_and_poi_sql(self):
+        write_pois(self.terrain)
+        code, output = self.build()
+        self.assertEqual(code, 0, output)
+
+        with mpqpack.MpqArchive(os.path.join(self.out, "client", "patch-Q.MPQ")) as archive:
+            self.assertIn(MARKER_BLP, archive.names())
+            blp = archive.read(MARKER_BLP)
+
+        import blpconvert
+
+        header = blpconvert.read_blp_header(blp)
+        self.assertEqual((header["magic"], header["width"], header["height"]), (b"BLP2", 32, 32))
+        self.assertEqual(header["preferredFormat"], blpconvert.PIXEL_DXT5)
+        self.assertTrue(header["hasMips"])
+        self.assertEqual(sum(1 for size in header["sizes"] if size), 6)  # 32x32 down to 1x1
+
+        sql = os.path.join(self.out, "server", "sql")
+        self.assertIn("bh_royale_poi.sql", os.listdir(sql))
+        self.assertIn("bh_royale_poi_table.sql", os.listdir(sql))
+
+        with open(os.path.join(sql, "bh_royale_poi.sql"), encoding="utf-8") as f:
+            text = f.read()
+
+        self.assertIn("DELETE FROM `bh_royale_poi` WHERE `map` = 901;", text)
+        self.assertIn("(901, 1, 'storm_center', 'p0', -100, -100, 5, 0, 3, 0, 0)", text)
+
+        with open(os.path.join(self.out, "report.txt"), encoding="utf-8") as f:
+            report = f.read()
+
+        self.assertIn("[PASS] Interface\\Bleakhold\\Royale\\Marker.blp (patch marker, generated)", report)
+        self.assertIn("bh_royale_poi.sql: 1 rows", report)
+        self.assertNotIn("Royale POIs", report)  # no Royale kinds, no Royale rules
+        code, output = run("validate", "--config", self.config, "--out", self.out)
+        self.assertEqual(code, 0, output)
+        self.assertIn("holds the patch marker", output)
+
+    def test_royale_rules_fail_the_build(self):
+        write_pois(self.terrain, kinds=("lobby", "landmark", "final_site"))
+        code, output = self.build()
+        self.assertEqual(code, 1)  # the final site has weight 0 and most kinds are missing
+        self.assertIn("[FAIL] Royale POIs", output)
+        self.assertIn("44", output)
+
+    def test_map_id_mismatch(self):
+        write_pois(self.terrain, map_id=902)
+        code, output = self.build()
+        self.assertEqual(code, 1)
+        self.assertIn("[FAIL] pois.json map id", output)
+
+    def test_poi_sql_command(self):
+        write_pois(self.terrain)
+        sql = os.path.join(self.tmp, "sql")
+        code, output = run("poi-sql", "--pois", self.terrain, "--out", sql)
+        self.assertEqual(code, 0, output)
+        self.assertEqual(sorted(os.listdir(sql)), ["bh_royale_poi.sql", "bh_royale_poi_table.sql"])
+        code, output = run("poi-sql", "--pois", os.path.join(self.terrain, "pois.json"), "--out", sql,
+                           "--map-id", "950")
+        self.assertEqual(code, 1)  # pois.json says 901
+        code, output = run("poi-sql", "--pois", os.path.join(self.tmp, "nothing.json"), "--out", sql)
+        self.assertEqual(code, 2)
+
+    def test_marker_path_rules(self):
+        from dbc import config as configmod
+
+        for bad in ("World\\Maps\\X\\Marker.blp", "Interface\\Marker.png", "Marker.blp", "Interface\\a b\\M.blp"):
+            data = synth_dbc.default_config()
+            data["archives"]["marker_texture"] = bad
+
+            with self.assertRaises(configmod.ConfigError, msg=bad):
+                configmod.parse(data)
+
+
 class ConfigFileTests(unittest.TestCase):
     def test_shipped_config_loads(self):
         from dbc import config as configmod
@@ -361,6 +473,14 @@ class ConfigFileTests(unittest.TestCase):
         self.assertNotIn("Q", cfg.archives.reserved_letters)
         self.assertTrue(cfg.zone.set_flags & 0x80)
         self.assertEqual(cfg.warnings, [])
+        self.assertEqual(cfg.map.time_of_day_override, 1050)
+        self.assertEqual(cfg.zone.template, 10)
+        self.assertEqual([a.id for a in cfg.zone.subzones], list(range(5101, 5114)))
+        self.assertEqual(cfg.archives.marker_texture, MARKER_BLP)
+        self.assertFalse(cfg.zone.clear_flags & cfg.zone.set_flags)
+        # Everything but ARENA, NO_FLY_ZONE and the harmless bits is cleared, whatever template 10 holds.
+        kept = ~(cfg.zone.set_flags | cfg.zone.clear_flags | configmod.HARMLESS_TEMPLATE_FLAGS) & 0xFFFFFFFF
+        self.assertEqual(kept & sum(configmod.AREA_FLAGS.values()), 0)
 
 
 if __name__ == "__main__":

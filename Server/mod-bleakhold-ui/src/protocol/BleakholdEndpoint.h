@@ -61,7 +61,11 @@ namespace Bleakhold::Proto
         uint32_t campIntervalMs = 1000;      // CAMP (every act together): 1 per BleakholdUi.RateLimit.CampIntervalMs
         uint32_t glideIntervalMs = 1000;     // GLIDE: 1 per BleakholdUi.RateLimit.GlideIntervalMs
         uint32_t repairIntervalMs = 2000;    // REPAIR: 1 per BleakholdUi.RateLimit.RepairIntervalMs
-        uint32_t duplicateWindowMs = 1000;   // the same action intent again within this window is ignored (0 = off)
+        uint32_t royaleIntervalMs = 500;     // RDROP, RSPEC: 1 each per BleakholdUi.RateLimit.RoyaleIntervalMs
+        uint32_t royaleDeployIntervalMs = 1000; // RDEPLOY: 1 per BleakholdUi.RateLimit.RoyaleDeployIntervalMs
+        // the same action intent again within this window is ignored (0 = off); RSPEC is never a duplicate (next,
+        // next is two steps)
+        uint32_t duplicateWindowMs = 1000;
     };
 
     enum class Verdict : uint8_t
@@ -141,6 +145,9 @@ namespace Bleakhold::Proto
         TokenBucket _camp;
         TokenBucket _glide;
         TokenBucket _repair;
+        TokenBucket _royaleDrop;
+        TokenBucket _royaleDeploy;
+        TokenBucket _royaleSpectate;
         std::unordered_map<std::string, uint64_t> _lastGet;
         struct LastIntent { std::string key; uint64_t atMs = 0; bool set = false; };
         std::array<LastIntent, static_cast<std::size_t>(IntentType::Count)> _last{};

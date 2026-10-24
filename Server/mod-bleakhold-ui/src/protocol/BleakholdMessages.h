@@ -31,7 +31,8 @@ namespace Bleakhold
     // ---------------------------------------------------------------------------------------------
     // Shared enums
     // ---------------------------------------------------------------------------------------------
-    enum class RewardKind : char { MythicCoins = 'C', Shards = 'S', Item = 'I', Copper = 'G', Text = 'T' };
+    // H honor: Bleakhold Royale results (ROYE, section 17) only
+    enum class RewardKind : char { MythicCoins = 'C', Shards = 'S', Item = 'I', Copper = 'G', Text = 'T', Honor = 'H' };
     enum class Currency : char { Copper = 'G', MythicCoins = 'C' };
     enum class TaskKind : char { Daily = 'D', Weekly = 'W' };
     enum class TaskState : uint8_t { Open = 0, Claimable = 1, Claimed = 2 };
@@ -60,6 +61,7 @@ namespace Bleakhold
         FeatureCamp = 512,            // camping: campfire, camp objects, warmth, food XP, repair at a camp anvil (section 16)
         FeatureGlide = 1024,          // the High Elf glide (GLIDE, section 16)
         FeatureFieldRepair = 2048,    // blacksmiths repair anywhere (REPAIR, section 16)
+        FeatureRoyale = 4096,         // Bleakhold Royale is live (section 17); set at runtime with Ui::SetFeature
     };
 
     // One reward line of MPE / RIFTE.
@@ -108,7 +110,7 @@ namespace Bleakhold
         ToastKind kind = ToastKind::Info;
         std::string title;
         std::string subtitle;
-        std::string openTarget;   // tasks, dungeons, keys, rift, collections, season, leaderboards or empty
+        std::string openTarget;   // tasks, dungeons, keys, rift, collections, season, leaderboards, royale or empty
     };
 
     // ---------------------------------------------------------------------------------------------
@@ -243,7 +245,10 @@ namespace Bleakhold
         QueueStateId state = QueueStateId::NotQueued;
         QueueKind kind = QueueKind::Dungeon;
         Opt<uint32_t> activityId, tier, size, queuedSec, estWaitSec, proposalId, timeoutSec, bandMin, bandMax;
-        std::vector<QueueMember> members;    // for proposals
+        // kind B (Bleakhold Royale, section 17) only, appended after bandMax: players in the queue, the players a
+        // match needs and takes, how many accepted the open ready check and how many it went to, matches running
+        Opt<uint32_t> queued, minPlayers, maxPlayers, accepted, proposalSize, matchesRunning;
+        std::vector<QueueMember> members;    // for proposals (never for Royale)
     };
 
     struct CollectionState
@@ -426,6 +431,156 @@ namespace Bleakhold
     };
 
     // ---------------------------------------------------------------------------------------------
+    // Bleakhold Royale (section 17): ROYS ROYM ROYO ROYK ROYV ROYE, all unrevisioned. Positions are integer world
+    // yards; times (phaseMsLeft, shrinkStartMs, shrinkEndMs, msLeft) count from the moment the message arrives.
+    // ---------------------------------------------------------------------------------------------
+    enum class RoyalePhase : uint8_t
+    {
+        Arriving = 0, Countdown = 1, Drop = 2, Fight = 3, Overtime = 4, Victory = 5, Ended = 6, Cancelled = 7
+    };
+    enum class RoyaleMe : uint8_t { Lobby = 0, Dropping = 1, Alive = 2, Spectating = 3, Left = 4, Winner = 5 };
+    enum class RoyalePoiKind : char { Landmark = 'L', Crossing = 'C', Lobby = 'Y' };
+    enum class RoyaleObjectKind : char { ShadowSight = 'S', Buff = 'B', Supply = 'D' };
+    enum class RoyaleBuff : uint8_t { None = 0, Speed = 1, Restoration = 2, Berserk = 3 };   // ROYO subtype of a B
+    enum class RoyaleObjectState : uint8_t { Hidden = 0, Ready = 1, Taken = 2, Incoming = 3, Opened = 4 };
+    // ROYK cause: killed by a player, the storm (killer filled when credited), a fall or the environment, left
+    // the match, eliminated for being AFK
+    enum class RoyaleCause : char { Player = 'P', Storm = 'S', Fall = 'F', Left = 'L', Afk = 'A' };
+    // ROYK announce: the kill announcer line every client of the match plays, decided by the server. First blood (the
+    // first credited kill of the match) takes priority, then the killer's kills in this match: double (2), triple
+    // (3), monster (4), rampage (5), godlike (6 and every further kill). None: no announcement (an empty field).
+    enum class RoyaleAnnounce : char
+    {
+        None = 0, FirstBlood = 'F', DoubleKill = 'D', TripleKill = 'T', MonsterKill = 'M', Rampage = 'R', Godlike = 'G'
+    };
+    // ROYV kind: circle revealed (value = stage), storm moving (stage), supply incoming, landed, opened, players
+    // left (value 10, 5 or 2), winner (value = kills, name)
+    enum class RoyaleEventKind : char
+    {
+        Revealed = 'R', StormMoving = 'S', SupplyIncoming = 'D', SupplyLanded = 'L', SupplyOpened = 'O',
+        PlayersLeft = 'N', Winner = 'W'
+    };
+    inline constexpr std::size_t MaxRoyalePois = 64;      // ROYM records after the header
+    inline constexpr std::size_t MaxRoyaleObjects = 64;   // ROYO records after the header
+    inline constexpr std::size_t RoyaleNameBytes = 48;    // character names (two-word names fit)
+
+    struct RoyaleState   // ROYS: the match as this player sees it
+    {
+        uint32_t matchId = 0;
+        RoyalePhase phase = RoyalePhase::Arriving;
+        uint32_t phaseMsLeft = 0;            // until the next phase (0: none planned)
+        uint32_t alive = 0;
+        uint32_t total = 0;                  // players who dropped (or are in the lobby before the drop)
+        RoyaleMe me = RoyaleMe::Lobby;
+        uint32_t kills = 0;
+        Opt<uint32_t> placement;             // once eliminated or the winner
+        Opt<int32_t> pinX, pinY;             // the snapped landing pin (empty: none set)
+        uint32_t stage = 0;                  // storm stage, 0 before stage 1
+        int32_t curX = 0, curY = 0;          // the storm circle now
+        uint32_t curR = 0;
+        Opt<int32_t> nextX, nextY;           // the next circle, once revealed
+        Opt<uint32_t> nextR;
+        // shrinkStartMs 0 and shrinkEndMs > 0: cur moves linearly to next over shrinkEndMs; both empty: no shrink
+        Opt<uint32_t> shrinkStartMs, shrinkEndMs;
+        uint32_t dmgPermille = 0;            // storm damage outside the circle now, permille of max health per second
+        std::string watchName;               // spectators: the player they watch
+        Opt<int32_t> myX, myY;               // the player's position (the client's map fallback)
+    };
+
+    struct RoyalePoi
+    {
+        uint32_t id = 0;
+        RoyalePoiKind kind = RoyalePoiKind::Landmark;
+        int32_t x = 0, y = 0;
+        uint32_t r = 0;
+        std::string name;
+    };
+    struct RoyaleMap     // ROYM: the island map (crate spots and final sites are never sent)
+    {
+        uint32_t mapId = 0;
+        int32_t minX = 0, maxX = 0, minY = 0, maxY = 0;   // the map texture's frame
+        int32_t lobbyX = 0, lobbyY = 0;
+        uint32_t lobbyR = 0;
+        uint32_t boundHalf = 0;                            // half size of the playable square around the centre
+        int32_t centerX = 0, centerY = 0;
+        std::vector<RoyalePoi> pois;
+    };
+
+    struct RoyaleObject
+    {
+        uint32_t objId = 0;
+        RoyaleObjectKind kind = RoyaleObjectKind::ShadowSight;
+        uint32_t subtype = 0;                // RoyaleBuff for kind B, else 0
+        int32_t x = 0, y = 0;
+        RoyaleObjectState state = RoyaleObjectState::Hidden;
+        Opt<uint32_t> msLeft;                // Taken: respawn in; Incoming: lands in; Hidden: appears in
+    };
+    struct RoyaleObjects // ROYO: orbs and supply drops
+    {
+        uint32_t matchId = 0;
+        bool full = false;                   // true: replaces every object the client knows
+        std::vector<RoyaleObject> objects;
+    };
+
+    struct RoyaleKill    // ROYK: one line of the kill feed
+    {
+        std::string killerName;              // empty: nobody (the storm, a fall, ...)
+        Opt<uint32_t> killerClassId;
+        std::string victimName;
+        uint32_t victimClassId = 0;
+        RoyaleCause cause = RoyaleCause::Player;
+        uint32_t aliveAfter = 0;
+        Opt<uint32_t> killerKills;           // the killer's eliminations in this match, this one included
+        // Appended last (fields are only ever appended). Written only when it is one of the six codes, there is a
+        // credited killer (killerName) and cause is not Left or Afk; otherwise the field is empty.
+        RoyaleAnnounce announce = RoyaleAnnounce::None;
+    };
+
+    struct RoyaleEvent   // ROYV
+    {
+        RoyaleEventKind kind = RoyaleEventKind::Revealed;
+        uint32_t value = 0;
+        Opt<int32_t> x, y;
+        Opt<uint32_t> msLeft;
+        std::string name;
+    };
+
+    struct RoyaleResult  // ROYE: the player's own result
+    {
+        uint32_t matchId = 0;
+        uint32_t placement = 0;
+        uint32_t total = 0;
+        uint32_t kills = 0;
+        uint32_t damage = 0;
+        uint32_t healing = 0;
+        uint32_t survivedSec = 0;
+        std::string winnerName;              // empty while the match goes on
+        Opt<uint32_t> winnerClassId, winnerKills;
+        bool rewarded = false;               // the player passed the reward rules
+        std::vector<Reward> rewards;         // kinds as for MPE, plus H honor
+    };
+
+    // ERR codes of Bleakhold Royale (section 17) with a default sentence; Ui::Refuse(player, intent, refusal) sends
+    // one. `dead` and `in_combat` are the generic codes. royale_lockout should carry the seconds left: send it with
+    // Ui::Refuse(player, intent, RoyaleErr::Lockout.code, "<your sentence with the seconds>").
+    struct Refusal { char const* code; char const* text; };
+    namespace RoyaleErr
+    {
+        inline constexpr Refusal Off{ "royale_off", "Bleakhold Royale is not open right now." };
+        inline constexpr Refusal Level{ "royale_level", "You must be level 80 to join Bleakhold Royale." };
+        inline constexpr Refusal Grouped{ "royale_grouped", "Bleakhold Royale is solo: leave your group first." };
+        inline constexpr Refusal Busy{ "royale_busy", "You cannot join Bleakhold Royale from where you are now." };
+        inline constexpr Refusal Deserter{ "royale_deserter", "You cannot join while you are a deserter." };
+        inline constexpr Refusal Bags{ "royale_bags", "Make room in your bags first." };
+        inline constexpr Refusal Ip{ "royale_ip", "Too many players from your connection are in Bleakhold Royale." };
+        inline constexpr Refusal Lockout{ "royale_lockout", "You declined a match: you can queue again soon." };
+        inline constexpr Refusal NoProposal{ "no_proposal", "There is no match waiting for your answer." };
+        inline constexpr Refusal Phase{ "royale_phase", "You cannot do that now." };
+        inline constexpr Refusal Nobody{ "royale_nobody", "There is nobody left to watch." };
+        inline constexpr Refusal GlideHere{ "glide_here", "You cannot glide here." };
+    }
+
+    // ---------------------------------------------------------------------------------------------
     // Encoders: payload of each op (without frame header). `rev` is the revision of the topic.
     // ---------------------------------------------------------------------------------------------
     std::string EncodeHello(HelloReply const& m);
@@ -456,6 +611,12 @@ namespace Bleakhold
     std::string EncodeCase(CaseInfo const& m);
     std::string EncodeUnbox(Unbox const& m);
     std::string EncodeCampState(CampState const& m);
+    std::string EncodeRoyaleState(RoyaleState const& m);     // ROYS
+    std::string EncodeRoyaleMap(RoyaleMap const& m);         // ROYM
+    std::string EncodeRoyaleObjects(RoyaleObjects const& m); // ROYO
+    std::string EncodeRoyaleKill(RoyaleKill const& m);       // ROYK
+    std::string EncodeRoyaleEvent(RoyaleEvent const& m);     // ROYV
+    std::string EncodeRoyaleResult(RoyaleResult const& m);   // ROYE
 
     // DEF: one payload per non-empty kind, in a fixed order, followed by "Z,<dataVer>".
     std::vector<std::string> EncodeDefinitions(Definitions const& d, uint32_t dataVer);

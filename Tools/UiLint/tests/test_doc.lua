@@ -14,6 +14,7 @@ end
 test("every S> example in the protocol document is accepted by the client", function(M, ns)
     local frames = docLines("S>")
     H.ok(#frames >= 25, "examples found: " .. #frames)
+    local proposal   -- the last QUEUE with members: section 7's proposal (Bleakhold Royale's QUEUE has none)
     for _, body in ipairs(frames) do
         local before = ns.Comm.stats.framesIn
         local dropsBefore = 0
@@ -21,6 +22,9 @@ test("every S> example in the protocol document is accepted by the client", func
         local unknownBefore = ns.Comm.stats.unknown
         H.ok(#body <= 1000, "example within 1000 bytes")
         H.deliver(M, body)
+        if ns.S.queue and ns.S.queue.members and #ns.S.queue.members > 0 then
+            proposal = ns.S.queue
+        end
         local drops = 0
         for _, v in pairs(ns.Comm.stats.dropped) do drops = drops + v end
         H.eq(drops, dropsBefore, "example dropped: " .. body)
@@ -31,7 +35,7 @@ test("every S> example in the protocol document is accepted by the client", func
     H.eq(ns.S.week.coins, 2140)
     H.eq(ns.S.tasks.byUid[102].state, 1)
     H.eq(#ns.S.board.dungeons, 3)
-    H.eq(ns.S.queue.members[2].name, "Brenna")
+    H.eq(proposal and proposal.members[2].name, "Brenna")
     H.eq(ns.S.mplus.result.newLevel, 9)
     H.eq(ns.S.lidx[16866].collected, true)
     H.eq(ns.S.lb.K.rows[1].members[5].name, "Eamon")

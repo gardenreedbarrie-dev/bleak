@@ -83,6 +83,9 @@ BleakholdUi.Season.Id = 0
 #    BleakholdUi.Feature.Season         1 to show the season and war effort            Default: 1
 #    BleakholdUi.Feature.Leaderboards   1 to show the leaderboards                     Default: 1
 #    BleakholdUi.Feature.Collections    1 when your collection system sends COLL/SET   Default: 0
+#
+#    Bleakhold Royale (feature bit 4096) has no key here: the system that runs it turns the bit on at runtime
+#    (Ui::SetFeature; mod-bleakhold does it when Bleakhold.Royale.Enable = 1 and its data checks pass).
 
 BleakholdUi.Feature.RiftScoring = 0
 BleakholdUi.Feature.Shards = 0
@@ -132,6 +135,10 @@ BleakholdUi.Frame.MaxBody = 1000
 #                                              this many ms                               Default: 1000
 #    BleakholdUi.RateLimit.GlideIntervalMs       GLIDE one per this many ms                 Default: 1000
 #    BleakholdUi.RateLimit.RepairIntervalMs      REPAIR one per this many ms                Default: 2000
+#    BleakholdUi.RateLimit.RoyaleIntervalMs      Bleakhold Royale RDROP (landing pin) and RSPEC (spectator
+#                                              camera): one each per this many ms           Default: 500
+#    BleakholdUi.RateLimit.RoyaleDeployIntervalMs  Bleakhold Royale RDEPLOY (open the parachute) one per this
+#                                              many ms                                     Default: 1000
 
 BleakholdUi.RateLimit.Burst = 10
 BleakholdUi.RateLimit.PerSecond = 5
@@ -149,6 +156,8 @@ BleakholdUi.RateLimit.DuplicateWindowMs = 1000
 BleakholdUi.RateLimit.CampIntervalMs = 1000
 BleakholdUi.RateLimit.GlideIntervalMs = 1000
 BleakholdUi.RateLimit.RepairIntervalMs = 2000
+BleakholdUi.RateLimit.RoyaleIntervalMs = 500
+BleakholdUi.RateLimit.RoyaleDeployIntervalMs = 1000
 
 ###################################################################################################
 # EMOJI BUBBLES (EMOJI: an emoji over the player's head for everyone nearby; needs the Bleakhold client)
@@ -401,7 +410,7 @@ BleakholdUi.KeyRun.HeartbeatSec = 15
 BleakholdUi.KeyRun.ServerPullTimer = 0
 
 ###################################################################################################
-# CHAT ANNOUNCEMENTS ([Raid Legacy], [Server First], [Season], [Queue], [Record], [Case])
+# CHAT ANNOUNCEMENTS ([Raid Legacy], [Server First], [Season], [Queue], [Record], [Case], [Royale])
 ###################################################################################################
 #
 #    BleakholdUi.Announce.ColorTagsWithoutAddon
@@ -419,6 +428,7 @@ BleakholdUi.Announce.Color.Season = "6CC6D9"
 BleakholdUi.Announce.Color.Queue = "9FD8E5"
 BleakholdUi.Announce.Color.Record = "F1D9A0"
 BleakholdUi.Announce.Color.Case = "C9A2F5"
+BleakholdUi.Announce.Color.Royale = "B98CFF"
 
 ###################################################################################################
 # WAR EFFORT TOKEN HAND-IN (the "Hand in" button of the Season window)

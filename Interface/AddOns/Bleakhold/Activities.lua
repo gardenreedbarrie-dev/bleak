@@ -1,7 +1,8 @@
--- Bleakhold: Activities window. Nav rail (Dungeons, Keys, Rift, Tasks, Legacies, Season), header with
+-- Bleakhold: Activities window. Nav rail (Dungeons, Keys, Rift, Royale, Tasks, Legacies, Season), header with
 -- the daily and weekly reset, and the Tasks page: era banner with affixes, daily task cards with
 -- progress rings and Claim, weekly tasks, "your week" aside and Find a group.
--- Dungeons.lua, Keys.lua and Rift.lua add their pages through Activities.AddPage.
+-- Dungeons.lua, Keys.lua, Rift.lua and Royale.lua add their pages through Activities.AddPage. A nav entry with an
+-- available() test (Royale: HELLO feature bit 4096) is left out of the rail while it says no (A.LayoutNav).
 local ADDON, ns = ...
 local U, UI, Comm, Data = ns.U, ns.UI, ns.Comm, ns.Data
 local C = UI.C
@@ -100,6 +101,9 @@ local navDefs = {
     { key = "dungeons", glyph = "dungeon", label = "Dungeons" },
     { key = "keys", glyph = "key", label = "Keys" },
     { key = "rift", glyph = "rift", label = "Rift" },
+    { key = "royale", glyph = "sword", label = "Royale", available = function()
+        return ns.Royale ~= nil and ns.Royale.Live()
+    end },
     { key = "tasks", glyph = "tasks", label = "Tasks" },
     { key = "legacies", glyph = "legacy", label = "Legacies" },
     { key = "season", glyph = "banner", label = "Season" },
@@ -159,12 +163,29 @@ end
 for i, d in ipairs(navDefs) do
     local b = UI.IconButton(rail, 76, 58, d.glyph, d.label, "tab")
     b.key = d.key
+    b.available = d.available
     b:SetPoint("TOP", rail, "TOP", 0, -12 - (i - 1) * 66)
     b:SetScript("OnClick", function()
         A.Show(d.key)
     end)
     A.nav[i] = b
 end
+
+-- Stack the rail's entries without gaps, leaving out the ones whose available() says no.
+function A.LayoutNav()
+    local n = 0
+    for _, b in ipairs(A.nav) do
+        if not b.available or b.available() then
+            b:ClearAllPoints()
+            b:SetPoint("TOP", rail, "TOP", 0, -12 - n * 66)
+            b:Show()
+            n = n + 1
+        else
+            b:Hide()
+        end
+    end
+end
+A.LayoutNav()
 
 ------------------------------------------------------------------------------------------------------
 -- Tasks page
@@ -516,6 +537,7 @@ end
 -- Window behaviour
 ------------------------------------------------------------------------------------------------------
 function win:OnOpen()
+    A.LayoutNav()
     updateHeader()
     A.Show(A.current or ns.cdb.activitiesTab or "tasks")
 end
@@ -547,6 +569,7 @@ ns.On("STATE", function(topic)
 end)
 
 ns.On("HELLO", function()
+    A.LayoutNav()
     if win:IsShown() then
         updateHeader()
     end

@@ -87,6 +87,45 @@ class ForgeTests(unittest.TestCase):
         bits = {result.area_bits[i] for i in (5100, 5101, 5102)}
         self.assertEqual(len(bits), 3)
 
+    def test_inherited_zone_flags_must_be_harmless(self):
+        # Template 12 (synthetic "Elwynn Fjord") carries ALLOW_DUELS; subzones copy the row, so they would too.
+        data = synth_dbc.default_config()
+        data["zone"]["template"] = 12
+        data["zone"]["set_flags"] = ["ARENA", "NO_FLY_ZONE"]
+        data["zone"]["clear_flags"] = ["SANCTUARY"]
+        data["zone"]["subzones"] = [{"id": 5101, "name": "The Bleak Hold"}]
+        cfg, tables, result, raw = run_forge(data)
+        output = {name: tables[name].to_bytes() for name in result.changes}
+        problems = forgemod.check({n: raw[n] for n in output}, output, cfg, result)
+        self.assertEqual(len([p for p in problems if "keeps ALLOW_DUELS from template 12" in p]), 2, problems)
+
+        data["zone"]["clear_flags"] = synth_dbc.default_config()["zone"]["clear_flags"]
+        cfg, tables, result, raw = run_forge(data)
+        output = {name: tables[name].to_bytes() for name in result.changes}
+        self.assertEqual(forgemod.check({n: raw[n] for n in output}, output, cfg, result), [])
+        row = tables["AreaTable"].by_id()[5101]
+        self.assertEqual(tables["AreaTable"].get(row, "flags"), 0x80 | 0x20000000)  # ARENA | NO_FLY_ZONE only
+        note = next(n for n in result.notes if n.startswith("zone 5100"))
+        self.assertIn("ARENA | NO_FLY_ZONE", note)
+        self.assertIn("kept from template 12: none", note)
+
+    def test_harmless_template_flags_stay(self):
+        # The default template (3277) has OUTSIDE | OUTLAND: OUTLAND is cleared, OUTSIDE is harmless and stays.
+        cfg, tables, result, _ = run_forge()
+        flags = tables["AreaTable"].get(tables["AreaTable"].by_id()[5100], "flags")
+        self.assertEqual(flags, 0x80 | 0x4000000)
+        self.assertEqual(configmod.flag_names(flags), ["ARENA", "OUTSIDE"])
+        self.assertTrue(configmod.HARMLESS_TEMPLATE_FLAGS & configmod.AREA_FLAGS["OUTSIDE"])
+        self.assertFalse(configmod.HARMLESS_TEMPLATE_FLAGS & configmod.AREA_FLAGS["ALLOW_DUELS"])
+        self.assertEqual(configmod.flag_names(0x40000000), ["0x40000000"])
+
+    def test_time_of_day_override(self):
+        data = synth_dbc.default_config()
+        data["map"]["time_of_day_override"] = 1050
+        cfg, tables, result, _ = run_forge(data)
+        maps = tables["Map"]
+        self.assertEqual(maps.get(maps.by_id()[901], "timeOfDayOverride"), 1050)
+
     def test_light_from_skybox(self):
         cfg, tables, result, _ = run_forge()
         light = tables["Light"]

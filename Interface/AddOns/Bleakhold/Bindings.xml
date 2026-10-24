@@ -23,4 +23,10 @@
 	<Binding name="BLEAKHOLD_GLIDE">
 		BleakholdGlide()
 	</Binding>
+	<Binding name="BLEAKHOLD_ROYALE_DEPLOY">
+		BleakholdRoyaleDeploy()
+	</Binding>
+	<Binding name="BLEAKHOLD_ROYALE_MAP">
+		BleakholdToggle("royalemap")
+	</Binding>
 </Bindings>

@@ -43,6 +43,9 @@ namespace Bleakhold
             { "CAMP", IntentType::Camp },
             { "GLIDE", IntentType::Glide },
             { "REPAIR", IntentType::Repair },
+            { "RDROP", IntentType::RoyaleDrop },
+            { "RDEPLOY", IntentType::RoyaleDeploy },
+            { "RSPEC", IntentType::RoyaleSpectate },
         }};
 
         struct TopicInfo
@@ -70,6 +73,8 @@ namespace Bleakhold
             { "CASES", Topic::Cases, 0 },
             { "CASE", Topic::Case, 1 },
             { "CAMPST", Topic::CampState, 0 },
+            { "ROYS", Topic::RoyaleState, 0 },
+            { "ROYM", Topic::RoyaleMap, 0 },
         }};
 
         constexpr char const* DropNames[] = {
@@ -114,6 +119,18 @@ namespace Bleakhold
             if (*v < lo || *v > hi)
                 return DropReason::OutOfRange;
             out = static_cast<uint32_t>(*v);
+            return DropReason::None;
+        }
+
+        // Integer field in [lo, hi] that may be negative.
+        DropReason Signed(std::string_view f, int64_t lo, int64_t hi, int32_t& out)
+        {
+            std::optional<int64_t> v = Proto::ParseDecimal(f);
+            if (!v)
+                return DropReason::BadField;
+            if (*v < lo || *v > hi)
+                return DropReason::OutOfRange;
+            out = static_cast<int32_t>(*v);
             return DropReason::None;
         }
 
@@ -164,6 +181,9 @@ namespace Bleakhold
                 case IntentType::Camp: return 1;
                 case IntentType::Glide: return 0;
                 case IntentType::Repair: return 0;
+                case IntentType::RoyaleDrop: return 2;
+                case IntentType::RoyaleDeploy: return 0;
+                case IntentType::RoyaleSpectate: return 1;
                 default: return -1;
             }
         }
@@ -236,14 +256,19 @@ namespace Bleakhold
                         out.queueKind = QueueKind::Dungeon;
                     else if (f[0] == "R")
                         out.queueKind = QueueKind::Rift;
+                    else if (f[0] == "B")
+                        out.queueKind = QueueKind::Royale;
                     else
                         return DropReason::BadField;
                     BH_TRY(Int(f[1], 0, Int32Max, out.activityId));
                     BH_TRY(Small(f[2], 0, 3, out.tier));
                     BH_TRY(Small(f[3], 1, 7, out.roles));
                     BH_TRY(Small(f[4], 1, 5, out.groupSize));
-                    // activityId is a dungeon id for D and 0 for the Rift
+                    // activityId is a dungeon id for D, 0 for the Rift and the mode id for Royale
                     if (out.queueKind == QueueKind::Rift ? out.activityId != 0 : out.activityId == 0)
+                        return DropReason::OutOfRange;
+                    // Royale is solo and has no tiers (section 17)
+                    if (out.queueKind == QueueKind::Royale && (out.tier != 0 || out.groupSize != 1))
                         return DropReason::OutOfRange;
                     break;
                 }
@@ -308,6 +333,17 @@ namespace Bleakhold
                     else
                         return DropReason::BadField;
                     break;
+                case IntentType::RoyaleDrop:
+                    BH_TRY(Signed(f[0], -MaxWorldCoord, MaxWorldCoord, out.dropX));
+                    BH_TRY(Signed(f[1], -MaxWorldCoord, MaxWorldCoord, out.dropY));
+                    break;
+                case IntentType::RoyaleSpectate:
+                {
+                    uint8_t dir = 0;
+                    BH_TRY(Small(f[0], 0, 2, dir));
+                    out.spectateDir = static_cast<SpectateDir>(dir);
+                    break;
+                }
                 default:
                     break;
             }
@@ -492,6 +528,10 @@ namespace Bleakhold
                 return n(in.caseItemId) + "," + n(in.caseNonce);
             case IntentType::Camp:
                 return in.campAct == CampAct::Object ? "O," + n(in.campSkill) : std::string(1, static_cast<char>(in.campAct));
+            case IntentType::RoyaleDrop:
+                return std::to_string(in.dropX) + "," + std::to_string(in.dropY);
+            case IntentType::RoyaleSpectate:
+                return n(static_cast<uint32_t>(in.spectateDir));
             default:
                 return std::string();
         }

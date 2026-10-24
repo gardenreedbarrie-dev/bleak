@@ -32,7 +32,9 @@ namespace Bleakhold
 {
     namespace
     {
-        constexpr char const* TagNames[] = { "Raid Legacy", "Server First", "Season", "Queue", "Record", "Case" };
+        constexpr char const* TagNames[] = {
+            "Raid Legacy", "Server First", "Season", "Queue", "Record", "Case", "Royale",
+        };
         constexpr std::size_t TagCount = sizeof(TagNames) / sizeof(TagNames[0]);
         constexpr uint64_t RunMaxAgeMs = 6ull * 3600 * 1000;
         constexpr uint64_t SweepIntervalMs = 60000;
@@ -177,11 +179,15 @@ namespace Bleakhold
         l.campIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.CampIntervalMs", 1000);
         l.glideIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.GlideIntervalMs", 1000);
         l.repairIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.RepairIntervalMs", 2000);
+        l.royaleIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.RoyaleIntervalMs", 500);
+        l.royaleDeployIntervalMs =
+            sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.RoyaleDeployIntervalMs", 1000);
 
         c.heartbeatMs = 1000 * std::max<uint32_t>(1, sConfigMgr->GetOption<uint32_t>("BleakholdUi.KeyRun.HeartbeatSec", 15));
         c.colorTagsWithoutAddon = sConfigMgr->GetOption<bool>("BleakholdUi.Announce.ColorTagsWithoutAddon", true);
-        char const* const colorKeys[] = { "RaidLegacy", "ServerFirst", "Season", "Queue", "Record", "Case" };
+        char const* const colorKeys[] = { "RaidLegacy", "ServerFirst", "Season", "Queue", "Record", "Case", "Royale" };
         static_assert(sizeof(colorKeys) / sizeof(colorKeys[0]) == TagCount, "one colour per tag");
+        static_assert(std::tuple_size_v<decltype(c.tagColors)> == TagCount, "one default colour per tag");
         for (std::size_t i = 0; i < c.tagColors.size(); ++i)
         {
             std::string const v = sConfigMgr->GetOption<std::string>(std::string("BleakholdUi.Announce.Color.") + colorKeys[i], c.tagColors[i]);
@@ -297,7 +303,9 @@ namespace Bleakhold
                 break;
             case Proto::Verdict::Refused:
                 DebugLog("refused " + std::string(IntentOpName(intent.type)) + " from " + who + ": rate limit");
-                Refuse(player, intent, "busy", TextBusy);
+                // RDEPLOY is never answered (section 17): a deploy key pressed again too soon is only dropped
+                if (intent.type != IntentType::RoyaleDeploy)
+                    Refuse(player, intent, "busy", TextBusy);
                 break;
             case Proto::Verdict::Accepted:
                 if (Debug())
@@ -439,6 +447,18 @@ namespace Bleakhold
             return;
         }
 
+        // Bleakhold Royale (section 17) is open only while its system has turned feature bit 4096 on (Ui::SetFeature):
+        // QJOIN B, RDROP and RSPEC get ERR royale_off, RDEPLOY is dropped, whoever handles them.
+        bool const royale = (intent.type == IntentType::QueueJoin && intent.queueKind == QueueKind::Royale) ||
+            intent.type == IntentType::RoyaleDrop || intent.type == IntentType::RoyaleDeploy ||
+            intent.type == IntentType::RoyaleSpectate;
+        if (royale && !FeatureOn(FeatureRoyale))
+        {
+            if (intent.type != IntentType::RoyaleDeploy)
+                Refuse(player, intent, RoyaleErr::Off.code, RoyaleErr::Off.text);
+            return;
+        }
+
         Ui::IntentHandler handler;
         {
             std::lock_guard<std::recursive_mutex> guard(_lock);
@@ -447,7 +467,7 @@ namespace Bleakhold
         }
         if (handler)
             handler(player, intent);
-        else
+        else if (intent.type != IntentType::RoyaleDeploy)   // RDEPLOY is never answered (section 17)
             Refuse(player, intent, "unavailable", TextUnavailable);
     }
 
@@ -464,7 +484,7 @@ namespace Bleakhold
         h.serverEpoch = static_cast<uint32_t>(GameTime::GetGameTime().count());
         h.utcOffsetMin = _cfg.utcOffsetAuto ? LocalUtcOffsetMinutes() : _cfg.utcOffsetMin;
         h.dataVer = DataVersion();
-        h.featureBits = _cfg.featureBits | (cases ? static_cast<uint32_t>(FeatureCases) : 0u);
+        h.featureBits = _cfg.featureBits | (cases ? static_cast<uint32_t>(FeatureCases) : 0u) | _runtimeFeatures.load();
         if (season)
             h.seasonId = season;
         if (resets.first)
@@ -474,6 +494,33 @@ namespace Bleakhold
         h.realmName = _cfg.realmName.empty() ? realm.Name : _cfg.realmName;
         h.siteUrl = _cfg.siteUrl;
         PushTo(player->GetGUID().GetRawValue(), "HELLO", EncodeHello(h));
+    }
+
+    void Mgr::SetFeature(uint32_t feature, bool on)
+    {
+        uint32_t const before = on ? _runtimeFeatures.fetch_or(feature) : _runtimeFeatures.fetch_and(~feature);
+        uint32_t const after = on ? (before | feature) : (before & ~feature);
+        if (before == after)
+            return;
+        // clients learn feature bits from HELLO: tell the ones already connected (world thread)
+        After(0, [this]() { ForEachReadyPlayer([this](Player* p) { SendHello(p); }); });
+    }
+
+    bool Mgr::FeatureOn(uint32_t feature)
+    {
+        if (_runtimeFeatures.load() & feature)
+            return true;
+        uint32_t bits = 0;
+        bool caseEnable = false;
+        {
+            std::lock_guard<std::recursive_mutex> guard(_lock);
+            bits = _cfg.featureBits;
+            caseEnable = _cfg.caseEnable;
+        }
+        if (bits & feature)
+            return true;
+        // as SendHello: the case bit also needs a case (never take the Data lock under the Mgr lock)
+        return (feature & FeatureCases) && caseEnable && Data::Instance().HasCases();
     }
 
     void Mgr::Refresh(Player* player, Topic topic)

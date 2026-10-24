@@ -8,15 +8,17 @@ local INT = "^%d+$"
 local SCHEMA = {
     HELLO = { INT, "^[%w_%.%-]+$", INT, "^%a%a%a%a$" },
     TCLAIM = { INT }, TREROLL = { INT },
-    QJOIN = { "^[DR]$", INT, "^%d$", "^[1-7]$", "^[1-5]$" },
+    QJOIN = { "^[DRB]$", INT, "^%d$", "^[1-7]$", "^[1-5]$" },
     QLEAVE = {}, QREPLY = { INT, "^[01]$" },
     KMODE = { "^[012]$" }, KSTART = {}, KCANCEL = {},
     BCLAIM = { INT }, WEHANDIN = {}, OUTFIT = { INT },
     LBQ = { "^[KREF]$", INT, INT, INT, INT },
     PING = { INT },
     EMOJI = { "^%d%d?%d?$" },
+    RDROP = { "^%-?%d+$", "^%-?%d+$" }, RDEPLOY = {}, RSPEC = { "^[012]$" },
 }
-local TOPICS = { WEEK = 0, ERA = 0, TASKS = 0, KEY = 0, BOARD = 0, QUEUE = 0, MPLUS = 0, RIFT = 0, COLL = 0, SET = 2, LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1 }
+local TOPICS = { WEEK = 0, ERA = 0, TASKS = 0, KEY = 0, BOARD = 0, QUEUE = 0, MPLUS = 0, RIFT = 0, COLL = 0, SET = 2,
+    LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1, ROYS = 0, ROYM = 0 }
 
 local function checkBody(body)
     H.ok(#body <= 251, "body over 251 bytes: " .. #body)

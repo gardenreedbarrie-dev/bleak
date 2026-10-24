@@ -14,7 +14,7 @@ import struct
 from dataclasses import dataclass, field
 
 from . import layout
-from .config import AREA_FLAGS, EXPLORE_BITS, Config
+from .config import AREA_FLAGS, EXPLORE_BITS, HARMLESS_TEMPLATE_FLAGS, Config, flag_names
 
 from rflib.dbc import DbcError, DbcTable, to_signed  # noqa: E402
 
@@ -341,9 +341,16 @@ class Forge:
 
         self._remove_stale("AreaTable", set(self.config.area_ids()), ours)
         flags = table.get(zone, "flags")
+        inherited = flags & ~z.set_flags
 
         if not flags & AREA_FLAGS["ARENA"]:
             self.result.warnings.append("the zone has no ARENA flag (0x80): it is not free-for-all PvP")
+
+        self.result.notes.append(
+            f"zone {z.id} (and its {len(z.subzones)} subzones) flags 0x{flags:X}: "
+            f"{' | '.join(flag_names(flags)) or 'none'}; set by the config: "
+            f"{' | '.join(flag_names(flags & z.set_flags)) or 'none'}; kept from template {z.template}: "
+            f"{' | '.join(flag_names(inherited)) or 'none'}")
 
     def _map(self) -> None:
         m = self.config.map
@@ -642,6 +649,13 @@ def check(base: dict[str, bytes], output: dict[str, bytes], config: Config, resu
 
             if flags & z.set_flags != z.set_flags or flags & z.clear_flags:
                 problems.append(f"AreaTable.dbc row {area_id}: flags 0x{flags:X} do not follow the config")
+
+            # Bits AzerothCore has no name for are read by nothing, and no config can name them to clear them.
+            harmful = flags & ~z.set_flags & ~HARMLESS_TEMPLATE_FLAGS & sum(AREA_FLAGS.values())
+
+            if harmful:
+                problems.append(f"AreaTable.dbc row {area_id}: keeps {' | '.join(flag_names(harmful))} from template "
+                                f"{z.template}; add them to zone.clear_flags (or set_flags when they are wanted)")
 
             bits[area_id] = areas.get(area, "areaBit")
 

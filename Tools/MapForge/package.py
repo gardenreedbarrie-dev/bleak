@@ -7,6 +7,7 @@
     python3 -I Tools/MapForge/package.py pull --patches <folder> --out <folder> [--config <map.json>]
     python3 -I Tools/MapForge/package.py doctor --patches <folder> [--config <map.json>]
     python3 -I Tools/MapForge/package.py validate --config <map.json> --out <folder>
+    python3 -I Tools/MapForge/package.py poi-sql --pois <terrain output or pois.json> --out <folder> [--map-id N]
     python3 -I Tools/MapForge/package.py schemas [--check | --write]
 
 It ships no game data: it reads the DBC files and archives you give it and writes modified copies. The terrain
@@ -308,6 +309,62 @@ def write_marker(work_dir: str) -> str:
     return path
 
 
+def stage_marker_texture(cfg: configmod.Config, staging: dict[str, str], work_dir: str, report) -> None:
+    """The generated patch marker BLP (dbc/marker.py), when the config names one."""
+    if not cfg.archives.marker_texture:
+        return
+
+    import blpconvert  # noqa: PLC0415  (Tools/BlpConvert, on sys.path)
+    from dbc import marker as markermod  # noqa: PLC0415
+
+    path = markermod.write_marker_blp(os.path.join(work_dir, "marker.blp"))
+    _, _, problems = blpconvert.check_blp(path)
+    report.check(not problems, f"{cfg.archives.marker_texture} (patch marker, generated)", "; ".join(problems))
+    staging[cfg.archives.marker_texture] = path
+
+
+def read_pois(path: str) -> dict:
+    """pois.json from a terrain output folder (or the file itself)."""
+    if os.path.isdir(path):
+        path = os.path.join(path, "pois.json")
+
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except OSError as e:
+        raise BuildError(f"{path}: {e.strerror}") from None
+    except json.JSONDecodeError as e:
+        raise BuildError(f"{path}: invalid JSON: {e}") from None
+
+
+def write_poi_sql(doc: dict, sql_dir: str, map_id: int | None, label: str, report) -> int:
+    """bh_royale_poi.sql (the map's rows) and bh_royale_poi_table.sql (the table) into sql_dir; returns the rows."""
+    if map_id is not None and doc.get("map_id") not in (None, map_id):
+        report.check(False, "pois.json map id", f"{doc.get('map_id')} is not the config's {map_id}")
+
+    try:
+        text = sqlgen.poi_sql(doc, map_id, label)
+        rows = len(sqlgen.poi_rows(doc, map_id))
+    except sqlgen.PoiError as e:
+        report.check(False, f"{sqlgen.POI_TABLE} rows", str(e))
+        return 0
+
+    os.makedirs(sql_dir, exist_ok=True)
+
+    for filename, body in ((sqlgen.POI_FILE, text), (sqlgen.POI_TABLE_FILE, sqlgen.poi_table_sql())):
+        with open(os.path.join(sql_dir, filename), "w", encoding="utf-8", newline="\n") as f:
+            f.write(body)
+
+    if any(p["kind"] in sqlgen.ROYALE_POI_KINDS for p in doc.get("pois", [])):
+        problems = sqlgen.royale_poi_problems(doc)
+        report.check(not problems, "Royale POIs (startup validation and final-site reach)", "; ".join(problems))
+
+    counts = ", ".join(f"{k} {v}" for k, v in sorted(doc.get("counts", {}).items()))
+    report.say(f"[NOTE] {sqlgen.POI_FILE}: {rows} rows for `{sqlgen.POI_TABLE}` ({counts}); it goes to bleakserv "
+               f"data/sql/updates/pending_db_world as its own rev file after {sqlgen.POI_TABLE_FILE}")
+    return rows
+
+
 def pack(staging: dict[str, str], out_path: str) -> None:
     try:
         mpqpack.write_archive_streaming(out_path, sorted(staging.items()))
@@ -467,6 +524,7 @@ def cmd_build(args) -> int:
         # The map archive.
         staging = dict(terrain_files)
         staging[MARKER_FILE] = write_marker(work_dir)
+        stage_marker_texture(cfg, staging, work_dir, report)
 
         for note in convert_loading_screens(cfg, staging, work_dir):
             report.say(f"[NOTE] {note}")
@@ -535,6 +593,12 @@ def cmd_build(args) -> int:
 
         report.say(f"[NOTE] server SQL: {sql_dir}; bleakhold_royale.sql goes to bleakserv "
                    "data/sql/updates/pending_db_world/rev_<timestamp>.sql")
+
+        if args.terrain and os.path.isfile(os.path.join(args.terrain, "pois.json")):
+            write_poi_sql(read_pois(args.terrain), sql_dir, cfg.map.id, f"{cfg.map.name.name} ({cfg.map.directory})",
+                          report)
+        elif args.terrain:
+            report.say("[WARN] the terrain output has no pois.json: no bh_royale_poi rows")
 
         if args.pending:
             path = os.path.join(args.pending, f"rev_{time.time_ns()}.sql")
@@ -682,11 +746,23 @@ def cmd_validate(args) -> int:
             report.check(not verify.problems, cfg.archives.map_archive, "; ".join(verify.problems))
             wdt = f"World\\Maps\\{cfg.map.directory}\\{cfg.map.directory}.wdt"
             report.check(archive.has_file(wdt), f"{cfg.archives.map_archive} holds the WDT", wdt)
+
+            if cfg.archives.marker_texture:
+                report.check(archive.has_file(cfg.archives.marker_texture),
+                             f"{cfg.archives.map_archive} holds the patch marker", cfg.archives.marker_texture)
     else:
         report.check(False, "map archive", f"{archive_path} is missing")
 
     print("\n".join(report.lines))
     return 1 if report.failed else 0
+
+
+def cmd_poi_sql(args) -> int:
+    report = Report()
+    doc = read_pois(args.pois)
+    rows = write_poi_sql(doc, args.out, args.map_id, args.label or doc.get("map_directory", ""), report)
+    print("\n".join(report.lines))
+    return 1 if report.failed or not rows else 0
 
 
 def cmd_schemas(args) -> int:
@@ -753,6 +829,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--config", required=True)
     p.add_argument("--out", required=True)
     p.set_defaults(func=cmd_validate)
+
+    p = sub.add_parser("poi-sql", help="write the bh_royale_poi SQL from a terrain build's pois.json")
+    p.add_argument("--pois", required=True, help="the terrain build's output folder, or its pois.json")
+    p.add_argument("--out", required=True, help="folder for bh_royale_poi.sql and bh_royale_poi_table.sql")
+    p.add_argument("--map-id", type=int, help="the map id (default: pois.json's map_id)")
+    p.add_argument("--label", help="a name for the SQL header (default: the map directory)")
+    p.set_defaults(func=cmd_poi_sql)
 
     p = sub.add_parser("schemas", help="check or regenerate dbc/schemas.py from WoW/Source/DB/Rec")
     p.add_argument("--write", action="store_true")

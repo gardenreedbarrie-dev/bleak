@@ -355,3 +355,79 @@ test("CAMPST frames produced by the C++ module (bh_gen) parse into a camp state"
     H.eq(c.objs[1].skill, 164); H.eq(c.objs[1].tier, 2); H.eq(c.objs[1].mine, true)
     H.eq(c.objs[3].skill, 197); H.eq(c.objs[3].tier, 3); H.eq(c.objs[3].mine, false)
 end)
+
+------------------------------------------------------------------------------------------------------
+-- Bleakhold Royale (section 17): the C++ module's Royale session (bh_gen.cpp `royale`: QUEUE kind B, ROYS ROYM ROYO
+-- ROYK ROYV ROYE) through the addon's transport at every frame size. The Royale HUD checks the values
+-- (Tools/UiLint/tests/test_royale.lua); here every frame must be accepted and every message reassembled, whether or
+-- not the addon has a handler for the op yet.
+------------------------------------------------------------------------------------------------------
+for _, size in ipairs({ 1000, 251, 64 }) do
+    test("C++ Royale frames (max body " .. size .. ") pass the addon's transport", function(M, ns)
+        local data = loadFrames(size).royale
+        H.ok(data and #data.frames >= data.messages and data.messages >= 20, "bh_gen wrote the Royale session")
+        local C = ns.Comm
+        feed(M, data)
+        M.Advance(1)
+        local drops = {}
+        for k, v in pairs(C.stats.dropped) do drops[#drops + 1] = k .. "=" .. v end
+        H.eq(#drops, 0, "dropped frames: " .. table.concat(drops, " "))
+        H.eq(C.stats.framesIn, #data.frames, "frames in")
+        H.eq(C.stats.gaps, 0, "revision gaps")
+        H.eq(C.PendingChunks(), 0, "unfinished chunk buffers")
+        H.eq(C.topicRev.QUEUE, data.revs.QUEUE, "revision of QUEUE")
+        if size < 1000 then
+            H.ok(#data.frames > data.messages, "small frames: messages were chunked")
+        end
+        H.ok(C.ready, "connected")
+        H.ok(C.HasFeature(4096), "HELLO feature bit 4096: Bleakhold Royale live")
+        H.eq(C.stats.unknown, 0, "the addon handles every Royale op")
+        H.eq(ns.S.err.op, "GLIDE"); H.eq(ns.S.err.code, "glide_here"); H.eq(ns.S.err.seq, "c")
+        H.eq(ns.S.err.shown, "You cannot glide here.")
+        -- QUEUE kind B: the last one says "not queued"
+        local S = ns.S
+        H.eq(S.queue.state, 0); H.eq(S.queue.kind, "B")
+        -- ROYM: the frame and the places (crate spots and final sites are never sent)
+        local map = S.royaleMap
+        H.eq(map.mapId, 901); H.eq(map.minX, -1066); H.eq(map.maxY, 533); H.eq(map.lobbyX, 455); H.eq(map.lobbyR, 32)
+        H.eq(map.boundHalf, 750); H.eq(map.centerY, -267); H.eq(#map.pois, 14)
+        H.eq(map.pois[1].name, "The Bleak Hold"); H.eq(map.pois[1].r, 88); H.eq(map.pois[11].kind, "C")
+        H.eq(map.pois[13].r, 0); H.ok(#map.pois[13].name <= 40, "place names at most 40 bytes")
+        H.eq(map.pois[13].name:sub(1, 33), "Pit Bridge; the third, crossing: ", "separators unescaped")
+        H.eq(map.pois[14].kind, "Y"); H.eq(map.pois[14].name, "The Overlook")
+        -- ROYS: the last one (the victory hold, watching)
+        local m = S.royale
+        H.eq(m.matchId, 7001); H.eq(m.phase, 5); H.eq(m.phaseMsLeft, 12000); H.eq(m.alive, 1); H.eq(m.total, 24)
+        H.eq(m.me, 3); H.eq(m.placement, 12); H.eq(m.pinX, 104); H.eq(m.pinY, 96); H.eq(m.stage, 1)
+        H.eq(m.curR, 1080); H.eq(m.nextX, -150); H.eq(m.nextY, -310); H.eq(m.nextR, 520)
+        H.eq(m.shrinkStartMs, 0); H.eq(m.shrinkEndMs, 170000); H.eq(m.dmgPermille, 10)
+        H.eq(m.watchName, "Aldric Stormwind"); H.eq(m.myX, nil); H.eq(m.myY, nil)
+        -- ROYO: the full list, then the change (the supply drop opened)
+        local o = S.royaleObjects
+        H.eq(o.matchId, 7001); H.eq(#o.list, 11)
+        H.eq(o.byId[1].kind, "S"); H.eq(o.byId[1].state, 2); H.eq(o.byId[1].msLeft, 61000)
+        H.eq(o.byId[2].state, 1); H.eq(o.byId[2].msLeft, nil)
+        H.eq(o.byId[10].kind, "B"); H.eq(o.byId[10].subtype, 2); H.eq(o.byId[10].x, 130); H.eq(o.byId[10].y, -260)
+        H.eq(o.byId[20].kind, "D"); H.eq(o.byId[20].state, 4); H.eq(o.byId[20].msLeft, nil)
+        -- ROYK: the triple kill, then the storm with nobody credited (no announcement)
+        local feed = S.royaleFeed
+        H.eq(#feed, 2)
+        H.eq(feed[1].killer, "Aldric Stormwind"); H.eq(feed[1].killerClassId, 1); H.eq(feed[1].victim, "Br\195\169nna")
+        H.eq(feed[1].victimClassId, 8); H.eq(feed[1].cause, "P"); H.eq(feed[1].aliveAfter, 23);
+        H.eq(feed[1].killerKills, 3)
+        H.eq(feed[1].announce, "T")
+        H.eq(feed[2].killer, nil); H.eq(feed[2].victim, "Corwin"); H.eq(feed[2].victimClassId, 12);
+        H.eq(feed[2].cause, "S")
+        H.eq(feed[2].announce, nil)
+        -- ROYV: the last is the winner
+        H.eq(S.royaleEvent.kind, "W"); H.eq(S.royaleEvent.value, 7); H.eq(S.royaleEvent.name, "Dalia")
+        -- ROYE: sent again at the end with the winner; the last counts
+        local r = S.royaleResult
+        H.eq(r.matchId, 7001); H.eq(r.placement, 12); H.eq(r.total, 24); H.eq(r.kills, 1); H.eq(r.damage, 18400)
+        H.eq(r.healing, 2100); H.eq(r.survivedSec, 214); H.eq(r.rewarded, true)
+        H.eq(r.winnerName, "Dalia"); H.eq(r.winnerClassId, 11); H.eq(r.winnerKills, 7)
+        H.eq(#r.rewards, 3)
+        H.eq(r.rewards[1].line, "70 Honor - Placement"); H.eq(r.rewards[2].line, "25 Honor - 1 elimination")
+        H.eq(r.rewards[3].line, "5 Shards")
+    end)
+end

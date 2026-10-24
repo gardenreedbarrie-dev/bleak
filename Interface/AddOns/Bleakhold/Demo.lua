@@ -115,7 +115,8 @@ end
 
 local function pushHello()
     local now = time()
-    Demo.Push("HELLO", { { ns.PROTO, 1, now, 0, 0, 2 + 8 + 16 + 32 + 64, 1, now + 7 * 3600 + 12 * 60, now + 3 * 86400 + 5 * 3600, "Bleakhold", "bleakhold.com" } })
+    Demo.Push("HELLO", { { ns.PROTO, 1, now, 0, 0, 2 + 8 + 16 + 32 + 64 + 4096, 1, now + 7 * 3600 + 12 * 60,
+        now + 3 * 86400 + 5 * 3600, "Bleakhold", "bleakhold.com" } })
 end
 
 local function pushWeek()
@@ -354,6 +355,10 @@ end
 function Demo.Respond(op, payload)
     local recs = Comm.SplitRecords(payload)
     local f = recs[1] or {}
+    -- Bleakhold Royale's scripted match (Royale.lua) answers its own intents
+    if ns.Royale and ns.Royale.DemoRespond(op, recs) then
+        return
+    end
     if op == "HELLO" then
         pushHello()
     elseif op == "GET" then

@@ -13,6 +13,7 @@ follows a DELETE of the same ids (the repository's SQL convention), so a file ca
 
 from __future__ import annotations
 
+import math
 import os
 import re
 
@@ -242,3 +243,151 @@ def scan_server_sql(roots: list[str], skip_directory: str | None = None) -> dict
                         found.setdefault(name, {}).setdefault(row_id, os.path.relpath(path, root))
 
     return found
+
+
+# --- the server's POI table (bh_royale_poi) from the terrain's pois.json ------------------------------------------
+
+POI_TABLE = "bh_royale_poi"
+POI_COLUMNS = ("map", "id", "kind", "name", "x", "y", "z", "o", "radius", "weight", "param")
+POI_FILE = "bh_royale_poi.sql"
+POI_TABLE_FILE = "bh_royale_poi_table.sql"
+# POI kinds the Royale server reads (terrain/spec.py POI_KINDS): allowed params, and whether a weight is required.
+ROYALE_POI_KINDS = {
+    "lobby": ((0,), False), "landmark": ((0,), False), "crate": ((1, 2), False), "orb_shadow": ((0,), False),
+    "orb_buff": ((1, 2, 3), False), "supply_site": ((0,), False), "final_site": ((0,), True),
+    "crossing": ((0,), False),
+}
+FINAL_SITE_MAX_DIST = 490.0  # Storm.FinalSiteMaxDist: the storm chain reaches 540 yd from the map centre
+
+
+class PoiError(Exception):
+    pass
+
+
+def poi_table_sql() -> str:
+    """CREATE TABLE for bh_royale_poi (world database). The server code owns the table; this is its layout."""
+    return "\n".join([
+        f"{MARKER}: the layout of `{POI_TABLE}` (world database), the Royale map points (pois.json).",
+        f"CREATE TABLE IF NOT EXISTS `{POI_TABLE}` (",
+        "    `map` SMALLINT UNSIGNED NOT NULL,",
+        "    `id` INT UNSIGNED NOT NULL,",
+        "    `kind` VARCHAR(32) NOT NULL,",
+        "    `name` VARCHAR(64) NOT NULL DEFAULT '',",
+        "    `x` FLOAT NOT NULL,",
+        "    `y` FLOAT NOT NULL,",
+        "    `z` FLOAT NOT NULL,",
+        "    `o` FLOAT NOT NULL DEFAULT 0,",
+        "    `radius` FLOAT NOT NULL DEFAULT 0,",
+        "    `weight` INT UNSIGNED NOT NULL DEFAULT 0,",
+        "    `param` INT NOT NULL DEFAULT 0,",
+        "    PRIMARY KEY (`map`, `id`)",
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;",
+    ]) + "\n"
+
+
+def _poi_float(value: float, digits: int) -> str:
+    text = f"{value:.{digits}f}".rstrip("0").rstrip(".")
+    return "0" if text in ("-0", "") else text
+
+
+def poi_rows(doc: dict, map_id: int | None = None) -> list[tuple]:
+    """(map, id, kind, name, x, y, z, o, radius, weight, param) per POI. name is the title players see (the POI name
+    when it has none); o is the facing in radians, 0..2pi."""
+    map_id = doc.get("map_id") if map_id is None else map_id
+
+    if not isinstance(map_id, int) or not 0 < map_id <= 0xFFFF:
+        raise PoiError("pois.json has no map id (set map.id in the terrain spec) and none was given")
+
+    rows = []
+    seen = set()
+
+    for p in doc.get("pois", []):
+        poi_id = p.get("id")
+
+        if not isinstance(poi_id, int) or not 0 < poi_id <= 0x7FFFFFFF or poi_id in seen:
+            raise PoiError(f"poi {p.get('name')!r}: id {poi_id!r} is missing, out of range or used twice")
+
+        seen.add(poi_id)
+        name = p.get("title") or p["name"]
+
+        if len(name) > 64:
+            raise PoiError(f"poi {p['name']!r}: name longer than 64 characters")
+
+        o = math.radians(float(p.get("facing", 0.0)) % 360.0)
+        rows.append((map_id, poi_id, p["kind"], name, float(p["x"]), float(p["y"]), float(p["z"]), o,
+                     float(p.get("radius", 0.0)), int(p.get("weight", 0)), int(p.get("param", 0))))
+
+    return sorted(rows, key=lambda r: r[1])
+
+
+def poi_sql(doc: dict, map_id: int | None = None, label: str = "") -> str:
+    """The rows of bh_royale_poi for one map: DELETE of the map's rows, then one INSERT (runs again safely)."""
+    rows = poi_rows(doc, map_id)
+    map_id = rows[0][0] if rows else (doc.get("map_id") if map_id is None else map_id)
+    lines = [f"{MARKER}: `{POI_TABLE}` rows for {label or doc.get('map_directory', '')} (map {map_id}) from "
+             "pois.json.",
+             f"-- World database. Run {POI_TABLE_FILE} (or the server's own CREATE TABLE) first. z is the spawn",
+             "-- height (the server snaps it to the floor below z + 2); o is in radians.",
+             f"DELETE FROM `{POI_TABLE}` WHERE `map` = {map_id};"]
+
+    if rows:
+        names = ", ".join(f"`{c}`" for c in POI_COLUMNS)
+        values = [f"({r[0]}, {r[1]}, {_text(r[2])}, {_text(r[3])}, {_poi_float(r[4], 3)}, {_poi_float(r[5], 3)}, "
+                  f"{_poi_float(r[6], 3)}, {_poi_float(r[7], 4)}, {_poi_float(r[8], 2)}, {r[9]}, {r[10]})"
+                  for r in rows]
+        lines.append(f"INSERT INTO `{POI_TABLE}` ({names}) VALUES")
+        lines.append(",\n".join(values) + ";")
+
+    return "\n".join(lines) + "\n"
+
+
+def royale_poi_problems(doc: dict) -> list[str]:
+    """What the Royale server's startup validation (royale-spec.md 6.2, item 7) and the map rules would refuse:
+    unknown params, 1 lobby, >= 3 landmarks, 2 Shadow Sight orbs, >= 44 common crate spots, >= 2 supply sites,
+    >= 1 final site, and every final site at most 490 yd from the map centre."""
+    problems = []
+    pois = doc.get("pois", [])
+    bounds = doc.get("world_bounds")
+
+    if not bounds:
+        return ["pois.json has no world_bounds (rebuild the terrain)"]
+
+    cx = (bounds["min_x"] + bounds["max_x"]) * 0.5
+    cy = (bounds["min_y"] + bounds["max_y"]) * 0.5
+    count: dict[str, int] = {}
+
+    for p in pois:
+        kind = p["kind"]
+        rule = ROYALE_POI_KINDS.get(kind)
+
+        if rule is None:
+            continue
+
+        params, needs_weight = rule
+
+        if p.get("param", 0) not in params:
+            problems.append(f"poi {p['name']!r} ({kind}): param {p.get('param')} is not {params}")
+
+        if needs_weight != (p.get("weight", 0) > 0):
+            problems.append(f"poi {p['name']!r} ({kind}): weight {p.get('weight', 0)}")
+
+        key = f"crate:{p.get('param')}" if kind == "crate" else kind
+        count[key] = count.get(key, 0) + 1
+
+        if kind == "final_site":
+            dist = math.hypot(p["x"] - cx, p["y"] - cy)
+
+            if dist > FINAL_SITE_MAX_DIST:
+                problems.append(f"final site {p['name']!r} is {dist:.1f} yd from the centre ({cx:.2f}, {cy:.2f}); "
+                                f"the storm reaches final sites up to {FINAL_SITE_MAX_DIST:g}")
+
+    for key, low, high, what in (("lobby", 1, 1, "lobby"), ("landmark", 3, None, "landmarks"),
+                                 ("orb_shadow", 2, 2, "Shadow Sight orbs"), ("crate:1", 44, None, "common crates"),
+                                 ("supply_site", 2, None, "supply sites"), ("final_site", 1, None, "final sites")):
+        n = count.get(key, 0)
+
+        if n < low or (high is not None and n > high):
+            want = f"{low}" if high == low else f"at least {low}"
+            problems.append(f"{n} {what}, want {want}")
+
+    return problems

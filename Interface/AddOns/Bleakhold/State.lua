@@ -5,7 +5,7 @@ local U, Comm, Data = ns.U, ns.Comm, ns.Data
 
 local type, pairs, ipairs, tostring = type, pairs, ipairs, tostring
 local bit = bit
-local max = math.max
+local max, floor = math.max, math.floor
 
 local INT32 = 2147483647
 local S = {}
@@ -29,6 +29,13 @@ local function reset()
     S.firsts = nil
     S.err = nil
     S.camp = nil
+    S.royale = nil
+    S.royaleMap = nil
+    S.royaleObjects = nil
+    S.royaleFeed = {}
+    S.royaleKills = {}
+    S.royaleEvent = nil
+    S.royaleResult = nil
 end
 reset()
 ns.ResetState = reset
@@ -280,6 +287,8 @@ function ns.RewardText(kind, amount, itemId, text)
         if s > 0 then parts[#parts + 1] = s .. "s" end
         if c > 0 or #parts == 0 then parts[#parts + 1] = c .. "c" end
         return table.concat(parts, " ")
+    elseif kind == "H" then   -- honor (Bleakhold Royale results)
+        return U.Commas(amount) .. " Honor"
     elseif kind == "I" and itemId then
         local name = GetItemInfo(itemId)
         local prefix = amount > 1 and (amount .. "x ") or ""
@@ -396,17 +405,28 @@ Comm.Handle("BOARD", function(r)
     changed("BOARD")
 end)
 
+-- kind D dungeon board, R Eclipse Rift, B Bleakhold Royale (section 17: the queue counts after bandMax, no members)
+local QUEUE_KINDS = { D = true, R = true, B = true }
+
 Comm.RegisterTopic("QUEUE", "QUEUE")
 Comm.Handle("QUEUE", function(r)
     local f = r[1]
     local kind = U.Str(f[3], "D", 1)
     local q = {
-        state = U.Int(f[2], 0, 0, 3), kind = (kind == "R") and "R" or "D", activityId = U.Int(f[4], 0, 0, INT32),
+        state = U.Int(f[2], 0, 0, 3), kind = QUEUE_KINDS[kind] and kind or "D", activityId = U.Int(f[4], 0, 0, INT32),
         tier = U.Int(f[5], 0, 0, 9), size = U.Int(f[6], 5, 1, 5), queuedSec = U.Int(f[7], 0, 0, 864000),
         estWaitSec = U.Int(f[8], nil, 0, 864000), proposalId = U.Int(f[9], nil, 1, INT32), timeoutSec = U.Int(f[10], nil, 0, 3600),
         bandMin = U.Int(f[11], nil, 0, 255), bandMax = U.Int(f[12], nil, 0, 255), members = {}, recvAt = GetTime(),
     }
-    for i = 2, math.min(#r, 41) do
+    if q.kind == "B" then
+        q.queued = U.Int(f[13], nil, 0, 99999)
+        q.minPlayers = U.Int(f[14], nil, 0, 999)
+        q.maxPlayers = U.Int(f[15], nil, 0, 999)
+        q.accepted = U.Int(f[16], nil, 0, 999)
+        q.proposalSize = U.Int(f[17], nil, 0, 999)
+        q.matchesRunning = U.Int(f[18], nil, 0, 999)
+    end
+    for i = 2, q.kind == "B" and 1 or math.min(#r, 41) do
         local m = r[i]
         local name = U.Str(m[1], nil, 24)
         if name then
@@ -869,7 +889,271 @@ function ns.CampLeft(key, c)
     return max(0, v - (GetTime() - (c.recvAt or GetTime())))
 end
 
-local TOAST_TARGETS = { tasks = true, dungeons = true, keys = true, rift = true, collections = true, season = true, leaderboards = true }
+------------------------------------------------------------------------------------------------------
+-- Bleakhold Royale (section 17): ROYS ROYM ROYO ROYK ROYV ROYE, unrevisioned full states and events. Positions are
+-- integer world yards; times (phaseMsLeft, shrinkStartMs, shrinkEndMs, msLeft) count from the moment the message
+-- arrived (recvAt) and ns.RoyaleLeft counts them down. Another matchId in ROYS is another match: the last one's
+-- objects, kill feed and events are forgotten (its result stays for the Activities card).
+------------------------------------------------------------------------------------------------------
+local ROYALE_POS = 100000         -- |x| <= 17067 on any map; anything wilder is clamped, never trusted for maths
+local ROYALE_MS = 86400000
+local ROYALE_NAME = 48            -- character names (two-word names fit)
+local ROYALE_PLACE = 40           -- names of places
+local ROYALE_FEED = 20            -- kill feed lines kept
+local ROYALE_POI_KINDS = { L = true, C = true, Y = true }
+local ROYALE_OBJECT_KINDS = { S = true, B = true, D = true }
+local ROYALE_CAUSES = { P = true, S = true, F = true, L = true, A = true }
+local ROYALE_ANNOUNCE = { F = true, D = true, T = true, M = true, R = true, G = true }
+local ROYALE_EVENTS = { R = true, S = true, D = true, L = true, O = true, N = true, W = true }
+ns.ROYALE_MAX_OBJECTS = 64
+
+local function royalePos(raw, default)
+    return U.Int(raw, default, -ROYALE_POS, ROYALE_POS)
+end
+
+-- An enum sent as a number: nil unless it is one of 0..maxValue (a future value is not clamped into another one).
+local function royaleEnum(raw, maxValue)
+    local v = U.Int(raw, nil)
+    if v and v >= 0 and v <= maxValue then
+        return v
+    end
+    return nil
+end
+
+local function royaleMs(raw)
+    return U.Int(raw, nil, 0, ROYALE_MS)
+end
+
+-- Seconds left of a time in ms that counted from recvAt (a ROYS, ROYO or ROYV time); nil for an empty field.
+function ns.RoyaleLeft(ms, recvAt)
+    if type(ms) ~= "number" then
+        return nil
+    end
+    return max(0, ms / 1000 - (GetTime() - (recvAt or GetTime())))
+end
+
+-- "70 Honor - Placement": the amount from the reward kind, the server's text as the reason.
+function ns.RoyaleRewardText(rw)
+    local base = ns.RewardText(rw.kind, rw.amount, rw.itemId, nil)
+    if rw.text and rw.text ~= "" then
+        return base .. " - " .. rw.text
+    end
+    return base
+end
+
+Comm.MapOpToTopic("ROYS", "ROYS")
+Comm.Handle("ROYS", function(r)
+    local f = r[1]
+    local matchId = U.Int(f[1], nil, 0, INT32)
+    if not matchId then
+        return
+    end
+    local old = S.royale
+    local same = old and old.matchId == matchId
+    local m = {
+        matchId = matchId, phase = royaleEnum(f[2], 7) or (same and old.phase) or 0, phaseMsLeft = royaleMs(f[3]) or 0,
+        alive = U.Int(f[4], 0, 0, 9999), total = U.Int(f[5], 0, 0, 9999),
+        me = royaleEnum(f[6], 5) or (same and old.me) or 0,
+        kills = U.Int(f[7], 0, 0, 9999), placement = U.Int(f[8], nil, 1, 9999), pinX = royalePos(f[9]),
+        pinY = royalePos(f[10]),
+        stage = U.Int(f[11], 0, 0, 99), curX = royalePos(f[12], 0), curY = royalePos(f[13], 0),
+        curR = U.Int(f[14], 0, 0, ROYALE_POS),
+        nextX = royalePos(f[15]), nextY = royalePos(f[16]), nextR = U.Int(f[17], nil, 0, ROYALE_POS),
+        shrinkStartMs = royaleMs(f[18]), shrinkEndMs = royaleMs(f[19]), dmgPermille = U.Int(f[20], 0, 0, 1000000),
+        watchName = U.Str(f[21], nil, ROYALE_NAME), myX = royalePos(f[22]), myY = royalePos(f[23]), recvAt = GetTime(),
+    }
+    -- a pair or nothing
+    if not (m.pinX and m.pinY) then
+        m.pinX, m.pinY = nil, nil
+    end
+    if not (m.nextX and m.nextY and m.nextR) then
+        m.nextX, m.nextY, m.nextR = nil, nil, nil
+    end
+    if not (m.myX and m.myY) then
+        m.myX, m.myY = nil, nil
+    end
+    if not same then
+        S.royaleObjects = nil
+        S.royaleFeed = {}
+        S.royaleKills = {}
+        S.royaleEvent = nil
+        if S.royaleResult and S.royaleResult.matchId ~= matchId then
+            S.royaleResult = nil
+        end
+    end
+    S.royale = m
+    if not same then
+        ns.Fire("ROYALE_MATCH", m)
+    end
+    if not same or old.phase ~= m.phase then
+        ns.Fire("ROYALE_PHASE", m, same and old.phase or nil)
+    end
+    if not same or old.me ~= m.me then
+        ns.Fire("ROYALE_ME", m, same and old.me or nil)
+    end
+    changed("ROYS")
+end)
+
+Comm.MapOpToTopic("ROYM", "ROYM")
+Comm.Handle("ROYM", function(r)
+    local f = r[1]
+    local m = {
+        mapId = U.Int(f[1], nil, 0, INT32), minX = royalePos(f[2]), maxX = royalePos(f[3]), minY = royalePos(f[4]),
+        maxY = royalePos(f[5]), lobbyX = royalePos(f[6]), lobbyY = royalePos(f[7]),
+        lobbyR = U.Int(f[8], 0, 0, ROYALE_POS),
+        boundHalf = U.Int(f[9], nil, 0, ROYALE_POS), centerX = royalePos(f[10]), centerY = royalePos(f[11]), pois = {},
+        recvAt = GetTime(),
+    }
+    -- the map picture's frame: without it nothing can be placed on the map
+    if not (m.mapId and m.minX and m.maxX and m.minY and m.maxY and m.minX < m.maxX and m.minY < m.maxY) then
+        return
+    end
+    m.centerX = m.centerX or floor((m.minX + m.maxX) / 2)
+    m.centerY = m.centerY or floor((m.minY + m.maxY) / 2)
+    if not (m.lobbyX and m.lobbyY) then
+        m.lobbyX, m.lobbyY, m.lobbyR = nil, nil, 0
+    end
+    for i = 2, math.min(#r, 65) do
+        local p = r[i]
+        local id = U.Int(p[1], nil, 0, INT32)
+        local kind = U.Str(p[2], nil, 1)
+        if id and kind and ROYALE_POI_KINDS[kind] then
+            m.pois[#m.pois + 1] = { id = id, kind = kind, x = royalePos(p[3], 0), y = royalePos(p[4], 0),
+                r = U.Int(p[5], 0, 0, ROYALE_POS), name = U.Str(p[6], nil, ROYALE_PLACE) }
+        end
+    end
+    S.royaleMap = m
+    changed("ROYM")
+end)
+
+local function parseRoyaleObject(o)
+    local id = U.Int(o[1], nil, 0, INT32)
+    local kind = U.Str(o[2], nil, 1)
+    if not id or not kind or not ROYALE_OBJECT_KINDS[kind] then
+        return nil
+    end
+    return { id = id, kind = kind, subtype = kind == "B" and U.Int(o[3], 0, 0, 3) or 0, x = royalePos(o[4], 0),
+        y = royalePos(o[5], 0), state = royaleEnum(o[6], 4) or 0, msLeft = royaleMs(o[7]), recvAt = GetTime() }
+end
+
+Comm.MapOpToTopic("ROYO", "ROYS")
+Comm.Handle("ROYO", function(r)
+    local f = r[1]
+    local matchId = U.Int(f[1], nil, 0, INT32)
+    if not matchId then
+        return
+    end
+    local full = U.Bool(f[2], false)
+    local store = S.royaleObjects
+    if full or not store or store.matchId ~= matchId then
+        if not full then
+            -- a change for objects this client never had in full: apply it and ask for the whole list
+            Comm.Get("ROYS")
+        end
+        store = { matchId = matchId, byId = {}, list = {} }
+    end
+    for i = 2, math.min(#r, ns.ROYALE_MAX_OBJECTS + 1) do
+        local o = parseRoyaleObject(r[i])
+        if o then
+            local known = store.byId[o.id]
+            if known then
+                for k, v in pairs(o) do
+                    known[k] = v
+                end
+                known.msLeft = o.msLeft
+            elseif #store.list < ns.ROYALE_MAX_OBJECTS then
+                store.byId[o.id] = o
+                store.list[#store.list + 1] = o
+            end
+        end
+    end
+    S.royaleObjects = store
+    changed("ROYO")
+end)
+
+Comm.MapOpToTopic("ROYK", "ROYS")
+Comm.Handle("ROYK", function(r)
+    local f = r[1]
+    local victim = U.Str(f[3], nil, ROYALE_NAME)
+    if not victim then
+        return
+    end
+    local cause = U.Str(f[5], "P", 1)
+    local k = {
+        killer = U.Str(f[1], nil, ROYALE_NAME), killerClassId = U.Int(f[2], nil, 0, 255), victim = victim,
+        victimClassId = U.Int(f[4], 0, 0, 255), cause = ROYALE_CAUSES[cause] and cause or "P",
+        aliveAfter = U.Int(f[6], nil, 0, 9999),
+        killerKills = U.Int(f[7], nil, 0, 9999), announce = U.Str(f[8], nil, 1), at = GetTime(),
+    }
+    if not k.killer then
+        k.killerClassId, k.killerKills = nil, nil
+    end
+    -- the server decides the announcer line; nothing without a credited killer, for a forfeit or an AFK elimination
+    if not ROYALE_ANNOUNCE[k.announce or ""] or not k.killer or k.cause == "L" or k.cause == "A" then
+        k.announce = nil
+    end
+    local feed = S.royaleFeed
+    feed[#feed + 1] = k
+    while #feed > ROYALE_FEED do
+        table.remove(feed, 1)
+    end
+    if k.killer and k.killerKills then
+        S.royaleKills[k.killer] = k.killerKills
+    end
+    if S.royale and k.aliveAfter then
+        S.royale.alive = k.aliveAfter
+    end
+    ns.Fire("ROYALE_KILL", k)
+    changed("ROYK")
+end)
+
+Comm.MapOpToTopic("ROYV", "ROYS")
+Comm.Handle("ROYV", function(r)
+    local f = r[1]
+    local kind = U.Str(f[1], nil, 1)
+    if not kind or not ROYALE_EVENTS[kind] then
+        return
+    end
+    local e = { kind = kind, value = U.Int(f[2], 0, 0, INT32), x = royalePos(f[3]), y = royalePos(f[4]),
+        msLeft = royaleMs(f[5]), name = U.Str(f[6], nil, ROYALE_NAME), recvAt = GetTime() }
+    if not (e.x and e.y) then
+        e.x, e.y = nil, nil
+    end
+    S.royaleEvent = e
+    ns.Fire("ROYALE_EVENT", e)
+    changed("ROYV")
+end)
+
+Comm.MapOpToTopic("ROYE", "ROYS")
+Comm.Handle("ROYE", function(r)
+    local f = r[1]
+    local res = {
+        matchId = U.Int(f[1], nil, 0, INT32), placement = U.Int(f[2], nil, 1, 9999), total = U.Int(f[3], nil, 0, 9999),
+        kills = U.Int(f[4], 0, 0, 9999), damage = U.Int(f[5], 0, 0, INT32), healing = U.Int(f[6], 0, 0, INT32),
+        survivedSec = U.Int(f[7], 0, 0, 864000), winnerName = U.Str(f[8], nil, ROYALE_NAME),
+        winnerClassId = U.Int(f[9], nil, 0, 255),
+        winnerKills = U.Int(f[10], nil, 0, 9999), rewarded = U.Bool(f[11], false), rewards = {}, recvAt = GetTime(),
+    }
+    if not res.matchId then
+        return
+    end
+    if res.rewarded then
+        for i = 2, math.min(#r, 21) do
+            local rw = r[i]
+            local e = { kind = U.Str(rw[1], "T", 1), amount = U.Int(rw[2], 0, 0, INT32),
+                itemId = U.Int(rw[3], nil, 1, INT32), text = U.Str(rw[4], nil, 60) }
+            e.line = ns.RoyaleRewardText(e)
+            res.rewards[#res.rewards + 1] = e
+        end
+    end
+    local first = not (S.royaleResult and S.royaleResult.matchId == res.matchId)
+    S.royaleResult = res
+    ns.Fire("ROYALE_RESULT", res, first)
+    changed("ROYE")
+end)
+
+local TOAST_TARGETS = { tasks = true, dungeons = true, keys = true, rift = true, collections = true, season = true,
+    leaderboards = true, royale = true }
 Comm.Handle("TOAST", function(r)
     local f = r[1]
     local title = U.Str(f[2], nil, 60)

@@ -778,6 +778,10 @@ namespace Bleakhold
             return;
         if (!CanGlide(player))
             return Ui::Refuse(player, intent, "glide_race", "Your people cannot glide.");
+        // no glide in battlegrounds and arenas, Bleakhold Royale's map included (a battleground map: its players
+        // drop with their own slow fall, section 17)
+        if (player->InBattleground() || player->InArena() || player->GetMap()->IsBattlegroundOrArena())
+            return Ui::Refuse(player, intent, RoyaleErr::GlideHere);
         if (!player->IsAlive())
             return Ui::Refuse(player, intent, "dead", TextDead);
         uint64_t const now = NowSec();

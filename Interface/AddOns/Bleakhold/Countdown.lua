@@ -1,4 +1,6 @@
--- Bleakhold: keystone start countdown. The server starts it (MPS countdownMs) and roots the group;
+-- Bleakhold: keystone start countdown, and a generic one (CD.StartGeneric: Bleakhold Royale's drop) with the same ring
+-- and numerals but its own kicker and title and no DBM message. The server starts the keystone one (MPS countdownMs)
+-- and roots the group;
 -- this draws the centre countdown (dungeon, level, affixes, era, a draining ring and big numerals from
 -- the Digits atlas, since fonts stop at 32 px), and makes DBM show its own "Pull in" bar: the group
 -- leader's client sends DBM's pull-timer message (prefix "DBMv4-PT", body = seconds) to the group, or
@@ -27,9 +29,11 @@ f:SetFrameStrata("DIALOG")
 f:Hide()
 CD.frame = f
 
+CD.KEY_KICKER = "K E Y S T O N E   S T A R T S   I N"
+
 f.kicker = UI.Text(f, 13, C.mid, "body", "CENTER")
 f.kicker:SetPoint("TOP", f, "TOP", 0, 0)
-f.kicker:SetText("K E Y S T O N E   S T A R T S   I N")
+f.kicker:SetText(CD.KEY_KICKER)
 f.title = UI.Text(f, 26, C.goldPale, "title", "CENTER")
 f.title:SetPoint("TOP", f.kicker, "BOTTOM", 0, -8)
 f.pills = {}
@@ -138,6 +142,10 @@ end
 -- Countdown
 ------------------------------------------------------------------------------------------------------
 function CD.Remaining()
+    local g = CD.generic
+    if g then
+        return g.endsAt - GetTime()
+    end
     local m = S.mplus
     if not m or m.state ~= 0 or m.result then
         return 0
@@ -150,6 +158,8 @@ function CD.Start(m)
     if secs <= 0 then
         return
     end
+    CD.generic = nil
+    f.kicker:SetText(CD.KEY_KICKER)
     UI.SetText(f.title, ns.DungeonName(m.dungeonId) .. ((m.level or 0) > 0 and (" +" .. m.level) or ""))
     local shown = {}
     local names = ns.AffixNames(m.affixes)
@@ -181,7 +191,39 @@ function CD.Start(m)
     end
 end
 
+-- A countdown of another kind (Bleakhold Royale's drop): the same ring and numerals, the given kicker and title,
+-- no pills and no DBM pull timer. ms counts from now; a new call replaces a running generic countdown, and a
+-- keystone countdown (CD.Start) replaces it too.
+function CD.StartGeneric(kicker, title, ms)
+    local secs = (tonumber(ms) or 0) / 1000
+    if secs <= 0 then
+        return
+    end
+    CD.generic = { endsAt = GetTime() + secs, kicker = kicker, title = title }
+    UI.SetText(f.kicker, kicker or "")
+    UI.SetText(f.title, title or "")
+    for _, p in ipairs(f.pills) do
+        p:Hide()
+    end
+    CD.total = secs
+    f:Show()
+    CD.Update()
+end
+
+-- Hide a generic countdown (the keystone one is left alone).
+function CD.StopGeneric()
+    if CD.generic then
+        CD.generic = nil
+        f:Hide()
+        f.kicker:SetText(CD.KEY_KICKER)
+    end
+end
+
 function CD.Stop(cancelled)
+    if CD.generic then
+        CD.generic = nil
+        f.kicker:SetText(CD.KEY_KICKER)
+    end
     f:Hide()
     if cancelled and CD.sentPull then
         CD.SendPull(0)

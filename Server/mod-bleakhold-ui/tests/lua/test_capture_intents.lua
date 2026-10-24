@@ -6,6 +6,15 @@
 -- Run by the repository's Tools/UiLint/testrunner.lua (see ../run_tests.sh).
 local FX = host_loadfile(repo .. "/Tools/UiLint/tests/fixtures.lua")()
 
+-- Click Bleakhold Royale's island map at pixel (px, py) from its top-left corner.
+local function clickMap(M, ns, px, py)
+    local canvas = ns.RoyaleMap.canvas
+    local sc = canvas:GetEffectiveScale()
+    M.cursorX = (canvas:GetLeft() + px) * sc
+    M.cursorY = (canvas:GetTop() - py) * sc
+    M.Fire(canvas, "OnMouseUp", "LeftButton")
+end
+
 local function clickAll(M, root)
     for _, b in ipairs(M.Clickables(root)) do
         if b:IsVisible() and b:IsEnabled() and b.__scripts.OnClick then
@@ -21,7 +30,7 @@ end
 
 test("every intent the addon can send, captured for the C++ parser", function(M, ns)
     local C = ns.Comm
-    FX.connect(M, H, { [6] = 512 + 1024 + 2048 })   -- camping, glide and field repair (the other windows need no bit)
+    FX.connect(M, H, { [6] = 512 + 1024 + 2048 + 4096 })   -- camping, glide, field repair, Bleakhold Royale
     FX.all(M, H)
 
     -- the windows' own buttons (the paths players use)
@@ -108,6 +117,63 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
     H.eq(table.concat(camps, " "), "M O,185 O,356 P O,1 O,2147483647", "the CAMP intents the UI sent")
     H.eq(H.countIntents(M, "GLIDE"), 1)
     H.eq(H.countIntents(M, "REPAIR"), 2)
+    -- Bleakhold Royale (section 17) from the real UI, as the addon spaces it: the queue's intents 1.1 s apart (1 per
+    -- second each), RDROP and RSPEC 0.55 s (one per 0.5 s), RDEPLOY 1.05 s (one per second)
+    M.Advance(1.3)
+    ns.UI.Open("royale")
+    M.Advance(0.3)
+    ns.Royale.page.join:Click()                                            -- Queue: QJOIN B,901,0,4,1
+    M.Advance(1.3)
+    H.send(M, "QUEUE", { { 900, 2, "B", 901, 0, 1, 95, "", 412, 15, 80, 80, 24, 20, 40, 0, 24, 1 } })
+    M.env.BleakholdRoyaleReady.accept:Click()                              -- ready check: QREPLY 412,1
+    M.Advance(1.3)
+    H.send(M, "ROYM", { { 901, -1066, 533, -1066, 533, 455, 455, 32, 750, -267, -267 },
+        { 1, "L", -266, -266, 88, "The Bleak Hold" } })
+    local function roys(phase, me, watch)
+        H.send(M, "ROYS", { { 7001, phase, 30000, 24, 24, me, 0, "", "", "", 0, -267, -267, 1080, "", "", "", "", "", 0,
+            watch or "", 450, 452 } })
+    end
+    roys(0, 0)
+    M.Advance(0.3)
+    clickMap(M, ns, 100, 200)                                              -- landing pin: RDROP -92,221
+    M.Advance(0.6)
+    clickMap(M, ns, 500, 10)                                               -- RDROP 502,-1029
+    M.Advance(0.6)
+    roys(2, 1)
+    M.Advance(0.6)
+    M.env.BleakholdRoyaleDeploy()                                          -- the parachute binding: RDEPLOY
+    M.Advance(1.1)
+    roys(3, 3, "Aldric")
+    M.Advance(0.3)
+    local spec = M.env.BleakholdRoyaleSpectate
+    -- RSPEC 0, 2, 1, 1 ("next" twice: two steps)
+    for _, b in ipairs({ spec.killer, spec.prev, spec.next, spec.next }) do
+        b:Click()
+        M.Advance(0.6)
+    end
+    H.eq(C.Send("RDROP", -17067, 17067), true, "the client sends RDROP with the smallest x and the largest y")
+    M.Advance(0.6)
+    H.eq(C.Send("RDROP", 17067, -17067), true, "the client sends RDROP with the largest x and the smallest y")
+    M.Advance(0.6)
+    H.eq(C.Send("RSPEC", 2), true)
+    M.Advance(0.6)
+    H.eq(C.Send("RDEPLOY"), true)
+    M.Advance(1.1)
+    H.eq(C.Send("QJOIN", "B", 1, 0, 1, 1), true, "QJOIN B with the smallest mode id")
+    M.Advance(1.1)
+    H.eq(C.Send("RDROP", -17068, 0), false, "outside -17067..17067")
+    H.eq(C.Send("RSPEC", 3), false, "dir 0..2")
+    H.eq(C.Send("QJOIN", "B", 901, 1, 4, 1), false, "Royale: tier 0")
+    H.eq(C.Send("QJOIN", "B", 901, 0, 4, 2), false, "Royale: size 1")
+    H.eq(C.Send("QJOIN", "B", 0, 0, 4, 1), false, "Royale: a mode id above 0")
+    local royale = {}
+    for _, it in ipairs(H.intents(M)) do
+        if it.op == "RDROP" or it.op == "RSPEC" or it.op == "RDEPLOY" then
+            royale[#royale + 1] = it.op .. " " .. it.payload
+        end
+    end
+    H.eq(table.concat(royale, "|"), "RDROP -92,221|RDROP 502,-1029|RDEPLOY |RSPEC 0|RSPEC 2|RSPEC 1|RSPEC 1|"
+        .. "RDROP -17067,17067|RDROP 17067,-17067|RSPEC 2|RDEPLOY ", "the Royale intents the UI sent")
     -- GET of every topic; the client batches one frame's requests (8 records at most per GET)
     for _, topic in ipairs({ "WEEK", "ERA", "TASKS", "KEY", "BOARD", "QUEUE", "COLL", "LIDX", "SEASON", "FIRSTS", "MPLUS", "RIFT" }) do
         C.Refresh(topic)
@@ -118,6 +184,8 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
     C.Refresh("CASES")
     C.Refresh("CASE", 990001)
     C.Refresh("CAMPST")
+    C.Refresh("ROYS")
+    C.Refresh("ROYM")
     M.Advance(10)
 
     local ops, topics, n = {}, {}, 0

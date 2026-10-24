@@ -16,7 +16,15 @@
         "ADTs). WintergraspSmokySky is the smoky battlefield sky; other verified 3.3.5a choices: DeathSkybox,",
         "DeathClouds, StratholmeSkybox, IceCrownDarkSky, IceCrownScourgeSky, DragonblightScarletSkyBox, Stars.",
         "Alternatives: params_from_map <map id> copies an existing map's default light set (532 = Karazhan's dark",
-        "night), params_from_light / params pick exact rows; drop the section for the default sky (Light id 1)."
+        "night), params_from_light / params pick exact rows; drop the section for the default sky (Light id 1).",
+        "Atmosphere (royale-spec.md 2.4): time_of_day_override 1050 (17:30 light; the client uses value/1440),",
+        "zone.template 10 (Duskwood) for its ambience and music. Subzones 5101-5113 copy the zone row, so they",
+        "inherit ARENA and NO_FLY_ZONE; the terrain spec (specs/royale_v1.json 'areas') assigns them to chunks.",
+        "clear_flags drops every template flag that changes the rules (duels, rest, sanctuary, cities, ghost",
+        "revival, indoor-only, outdoor PvP); package.py fails when anything but ARENA, NO_FLY_ZONE and harmless",
+        "bits (dbc/config.py HARMLESS_TEMPLATE_FLAGS) remains, and report.txt lists the final flags.",
+        "archives.marker_texture: a tiny generated BLP (no game data) packed into patch-Q; the Bleakhold addon",
+        "tests it with Texture:SetTexture to know the client has the map patch."
     ],
     "map": {
         "id": 901,
@@ -31,19 +39,36 @@
         "corpse_map": -1,
         "corpse_x": 0,
         "corpse_y": 0,
+        "time_of_day_override": 1050,
         "expansion": 0,
         "max_players": 40
     },
     "zone": {
         "id": 5100,
-        "template": 3277,
+        "template": 10,
         "name": "Bleakhold Royale",
         "set_flags": ["ARENA", "NO_FLY_ZONE"],
-        "clear_flags": ["SANCTUARY", "OUTLAND", "CAPITAL", "SLAVE_CAPITAL", "SLAVE_CAPITAL2", "CITY", "TOWN",
-                        "REST_ZONE_HORDE", "REST_ZONE_ALLIANCE", "CONTESTED_AREA", "WINTERGRASP", "WINTERGRASP_2"],
+        "clear_flags": ["SANCTUARY", "OUTLAND", "OUTLAND2", "CAPITAL", "SLAVE_CAPITAL", "SLAVE_CAPITAL2", "CITY",
+                        "TOWN", "REST_ZONE_HORDE", "REST_ZONE_ALLIANCE", "CONTESTED_AREA", "WINTERGRASP",
+                        "WINTERGRASP_2", "ALLOW_DUELS", "NEED_FLY", "OUTDOOR_PVP", "ARENA_INSTANCE", "UNK4",
+                        "LOWLEVEL", "INSIDE"],
         "exploration_level": 0,
         "faction_group_mask": 0,
-        "subzones": []
+        "subzones": [
+            { "id": 5101, "name": "The Bleak Hold" },
+            { "id": 5102, "name": "Harrow Farm" },
+            { "id": 5103, "name": "Blackvein Pit" },
+            { "id": 5104, "name": "Gloomtimber Mill" },
+            { "id": 5105, "name": "The Pale Shrine" },
+            { "id": 5106, "name": "Broken Siege" },
+            { "id": 5107, "name": "Crow's Rise" },
+            { "id": 5108, "name": "Wrecked Caravan" },
+            { "id": 5109, "name": "Mirefen Hollow" },
+            { "id": 5110, "name": "Forgotten Graves" },
+            { "id": 5111, "name": "Old Ford" },
+            { "id": 5112, "name": "Covered Bridge" },
+            { "id": 5113, "name": "The Overlook" }
+        ]
     },
     "loading_screen": null,
     "light": {
@@ -67,6 +92,7 @@
     },
     "archives": {
         "map": "patch-Q.MPQ",
+        "marker_texture": "Interface\\Bleakhold\\Royale\\Marker.blp",
         "dbc": "auto",
         "reserved_letters": "ABCDEGHIJLMNPRSTUVWXYZ",
         "optional_packs": {

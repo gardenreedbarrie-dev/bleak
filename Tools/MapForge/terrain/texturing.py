@@ -113,13 +113,14 @@ class TexturePainter:
 
 
 class ChunkTexturing:
-    __slots__ = ("layers", "alpha", "low_quality", "weights")
+    __slots__ = ("layers", "alpha", "low_quality", "weights", "dropped")
 
-    def __init__(self, layers, alpha, low_quality, weights):
+    def __init__(self, layers, alpha, low_quality, weights, dropped=()):
         self.layers = layers  # texture indices, layer 0 first
         self.alpha = alpha  # bytes (2048) for layers 1..3
         self.low_quality = low_quality  # 16 bytes, MCNK +0x40
         self.weights = weights  # per layer, 17 x 17 renormalized weights (row-major lists), for the preview
+        self.dropped = dropped  # textures above MIN_LAYER_WEIGHT that did not fit into the 4 layers
 
 
 def _upsample(block: list[list[float]]) -> list[list[float]]:
@@ -170,6 +171,7 @@ def texture_chunk(weights: list[array], ix: int, iy: int) -> ChunkTexturing:
         totals = [(0.0, 0)]
     totals.sort()
     chosen = [k for _, k in totals[:4]]
+    dropped = tuple(sorted(k for _, k in totals[4:]))
     layers = [chosen[0]] + sorted(chosen[1:])
 
     # Renormalize over the chosen layers.
@@ -209,4 +211,4 @@ def texture_chunk(weights: list[array], ix: int, iy: int) -> ChunkTexturing:
             value |= best << (2 * cx)
         lq[2 * cy] = value & 0xFF
         lq[2 * cy + 1] = value >> 8
-    return ChunkTexturing(layers, alpha, bytes(lq), lw)
+    return ChunkTexturing(layers, alpha, bytes(lq), lw, dropped)

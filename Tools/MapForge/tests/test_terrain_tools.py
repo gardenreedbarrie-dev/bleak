@@ -94,32 +94,43 @@ class TestCli(unittest.TestCase):
             shutil.rmtree(out)
 
 
+SAMPLES = ("royale_v1.json", "royale_draft.json")  # the first is the default (README)
+
+
 class TestSampleSpec(unittest.TestCase):
-    def test_sample_spec_loads(self):
-        path = os.path.join(TOOL_DIR, "specs", "royale_draft.json")
-        spec = load_spec(path)
-        self.assertEqual(spec.directory, "BleakholdRoyale")
-        self.assertEqual(len(spec.tiles), 9)
-        self.assertEqual(spec.warnings, [])  # real kit paths, no TODO placeholders
-        names = {p["name"] for p in spec.pois}
+    def test_sample_specs_load(self):
+        for name in SAMPLES:
+            with self.subTest(name):
+                spec = load_spec(os.path.join(TOOL_DIR, "specs", name))
+                self.assertEqual(spec.directory, "BleakholdRoyale")
+                self.assertEqual(len(spec.tiles), 9)
+                self.assertEqual(spec.warnings, [])  # real kit paths, no TODO placeholders
+                self.assertTrue(any(f["type"] == "border" for f in spec.features))
+                self.assertFalse(spec.holes)  # ground everywhere for the parachute drop
+        names = {p["name"] for p in load_spec(os.path.join(TOOL_DIR, "specs", "royale_draft.json")).pois}
         for poi in ("keep", "village", "watchtower", "crypt", "ford_camp"):
             self.assertIn(poi, names)
-        self.assertTrue(any(f["type"] == "border" for f in spec.features))
-        self.assertFalse(spec.holes)  # ground everywhere for the parachute drop
 
-    def test_sample_spec_matches_packaging_config(self):
+    def test_readme_builds_the_default_spec(self):
+        with open(os.path.join(TOOL_DIR, "README.md"), encoding="utf-8") as f:
+            readme = f.read()
+        self.assertIn(f"terrain/build.py Tools/MapForge/specs/{SAMPLES[0]}", readme)
+
+    def test_sample_specs_match_packaging_config(self):
         # package.py refuses terrain whose directory or MCNK area ids differ from its config.
         cfg_path = os.path.join(TOOL_DIR, "bleakhold_royale.json")
         if not os.path.isfile(cfg_path):
             self.skipTest("no bleakhold_royale.json")
         with open(cfg_path, encoding="utf-8") as f:
             cfg = json.load(f)
-        spec = load_spec(os.path.join(TOOL_DIR, "specs", "royale_draft.json"))
-        self.assertEqual(spec.directory, cfg["map"]["directory"])
-        self.assertEqual(spec.map_id, cfg["map"]["id"])
         allowed = {cfg["zone"]["id"]} | {z["id"] for z in cfg["zone"].get("subzones", [])}
-        self.assertIn(spec.area_id, allowed)
-        self.assertTrue({a for a, _ in spec.areas} <= allowed)
+        for name in SAMPLES:
+            with self.subTest(name):
+                spec = load_spec(os.path.join(TOOL_DIR, "specs", name))
+                self.assertEqual(spec.directory, cfg["map"]["directory"])
+                self.assertEqual(spec.map_id, cfg["map"]["id"])
+                self.assertIn(spec.area_id, allowed)
+                self.assertTrue({a for a, _ in spec.areas} <= allowed)
 
 
 @unittest.skipUnless(os.environ.get("MAPFORGE_AC_EXTRACTOR"), "set MAPFORGE_AC_EXTRACTOR to a built map_extractor")

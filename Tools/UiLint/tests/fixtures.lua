@@ -82,6 +82,17 @@ function FX.examples(M)
             { 32838, 1, 400, 5 } },
         UNBOX = { { 990001, 2, 32838, 1 } },
         CAMPST = { { "C", 0, 620, 1, 880, 1500, 15, { { 164, 2, 1 }, { 171, 1, 0 } }, { { 185, 1 }, { 356, 2 } }, 0, 1, 1 } },
+        -- Bleakhold Royale (section 17), unrevisioned
+        ROYS = { { 7001, 3, 0, 23, 24, 2, 1, "", 104, 96, 1, -267, -267, 1080, -150, -310, 520, 20000, 190000, 10, "",
+            104, 96 } },
+        ROYM = { { 901, -1066, 533, -1066, 533, 455, 455, 32, 750, -267, -267 },
+            { 1, "L", -266, -266, 88, "The Bleak Hold" }, { 11, "C", -80, -710, 16, "Old Ford" },
+            { 14, "Y", 455, 455, 32, "The Overlook" } },
+        ROYO = { { 7001, 1 }, { 1, "S", 0, -266, -266, 2, 61000 }, { 3, "B", 1, 120, 80, 1, "" },
+            { 20, "D", 0, -80, -180, 3, 20000 } },
+        ROYK = { { "Aldric", 1, "Brenna", 8, "P", 23, 2, "D" } },
+        ROYV = { { "D", 0, -80, -180, 20000, "" } },
+        ROYE = { { 7001, 12, 24, 1, 18400, 0, 214, "Dalia", 11, 7, 1 }, { "H", 70, "", "Placement" }, { "S", 5 } },
     }
 end
 
@@ -97,6 +108,10 @@ function FX.openEverything(M, ns)
     for _, tab in ipairs({ "transmog", "later", "legacy", "mounts", "pets", "animations" }) do
         ns.Collections.ShowTab(tab)
     end
+    ns.UI.Open("royale")
+    M.Advance(0.3)
+    ns.UI.Open("royalemap")
+    M.Advance(0.3)
     ns.UI.Open("season")
     ns.UI.Open("leaderboards")
     for _, b in ipairs({ "K", "R", "E", "F" }) do

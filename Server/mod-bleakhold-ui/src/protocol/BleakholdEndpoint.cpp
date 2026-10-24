@@ -61,6 +61,9 @@ namespace Bleakhold::Proto
         _camp.Configure(1, perInterval(l.campIntervalMs));
         _glide.Configure(1, perInterval(l.glideIntervalMs));
         _repair.Configure(1, perInterval(l.repairIntervalMs));
+        _royaleDrop.Configure(1, perInterval(l.royaleIntervalMs));
+        _royaleDeploy.Configure(1, perInterval(l.royaleDeployIntervalMs));
+        _royaleSpectate.Configure(1, perInterval(l.royaleIntervalMs));
     }
 
     void Endpoint::CountDrop(uint64_t nowMs, ReceiveResult& r)
@@ -97,6 +100,9 @@ namespace Bleakhold::Proto
             case IntentType::Camp: return _camp.Take(nowMs);
             case IntentType::Glide: return _glide.Take(nowMs);
             case IntentType::Repair: return _repair.Take(nowMs);
+            case IntentType::RoyaleDrop: return _royaleDrop.Take(nowMs);
+            case IntentType::RoyaleDeploy: return _royaleDeploy.Take(nowMs);
+            case IntentType::RoyaleSpectate: return _royaleSpectate.Take(nowMs);
             case IntentType::TaskClaim:
             case IntentType::TaskReroll:
             case IntentType::BountyClaim:
@@ -220,10 +226,13 @@ namespace Bleakhold::Proto
         }
         else if (IsActionIntent(parsed.type))
         {
-            // duplicate guard: the same intent as the last accepted one of its op, within the window
+            // duplicate guard: the same intent as the last accepted one of its op, within the window. RSPEC is a step
+            // through the players alive, so the same dir again is a new request (its rate limit still holds).
             LastIntent& last = _last[static_cast<std::size_t>(parsed.type)];
             std::string key = EncodeIntentPayload(parsed);
-            if (_limits.duplicateWindowMs && last.set && last.key == key && nowMs - last.atMs < _limits.duplicateWindowMs)
+            bool const dedupe = parsed.type != IntentType::RoyaleSpectate;
+            if (dedupe && _limits.duplicateWindowMs && last.set && last.key == key &&
+                nowMs - last.atMs < _limits.duplicateWindowMs)
             {
                 r.reason = DropReason::Duplicate;
                 CountDrop(nowMs, r);

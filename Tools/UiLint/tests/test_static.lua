@@ -44,7 +44,10 @@ test("every texture the addon sets exists, and fonts are stock client fonts", fu
     for path in pairs(M.textures) do
         local sub = path:match("^Interface\\AddOns\\Bleakhold\\(.+)$")
         local emoji = path:match("^Interface\\Bleakhold\\Emoji\\Emoji%d%d%d$")
-        if sub then
+        if path == ns.Royale.MARKER then
+            -- Bleakhold Royale's patch gate: a marker MapForge packs into patch-Q (archives.marker_texture)
+            H.eq(path, "Interface\\Bleakhold\\Royale\\Marker", "the patch marker MapForge packs")
+        elseif sub then
             local file = addonDir .. "/" .. sub:gsub("\\", "/")
             H.ok(fileExistsCI(file .. ".tga") or fileExistsCI(file .. ".blp") or fileExistsCI(file), "texture file for " .. path)
             n = n + 1

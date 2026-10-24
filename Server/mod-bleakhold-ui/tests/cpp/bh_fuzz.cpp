@@ -6,7 +6,8 @@
 //     to the same intent;
 //   * the Endpoint (rate limits, handshake, duplicates) gets the input at a time taken from the input
 //     and may never accept more than its token bucket allows;
-//   * EscapeText/BuildFrames/PayloadWriter keep their invariants for the input used as server text.
+//   * EscapeText/BuildFrames/PayloadWriter keep their invariants for the input used as server text;
+//   * the Bleakhold Royale encoders (section 17) keep their field and record counts with the input as every name.
 //
 // Standalone (mutation driver):  bh_fuzz [iterations] [seed] [corpus files...]
 // libFuzzer:                     build with -DBH_LIBFUZZER -fsanitize=fuzzer (see run_tests.sh)
@@ -16,6 +17,7 @@
 #include "BleakholdCodec.h"
 #include "BleakholdEndpoint.h"
 #include "BleakholdIntent.h"
+#include "BleakholdMessages.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -94,7 +96,8 @@ namespace
             std::vector<std::string> recs = Split(payload, ';');
             if (recs.size() > 8)
                 return false;
-            static std::regex const plain("WEEK|ERA|TASKS|KEY|BOARD|QUEUE|COLL|LIDX|SEASON|FIRSTS|MPLUS|RIFT|CASES|CAMPST");
+            static std::regex const plain(
+                "WEEK|ERA|TASKS|KEY|BOARD|QUEUE|COLL|LIDX|SEASON|FIRSTS|MPLUS|RIFT|CASES|CAMPST|ROYS|ROYM");
             for (std::string const& r : recs)
             {
                 std::vector<std::string> f = Split(r, ',');
@@ -122,13 +125,21 @@ namespace
             return n(1) && RefInt(f[0], 1, I32);
         if (op == "QJOIN")
         {
-            if (!n(5) || (f[0] != "D" && f[0] != "R") || !RefInt(f[1], 0, I32) || !RefInt(f[2], 0, 3) || !RefInt(f[3], 1, 7) || !RefInt(f[4], 1, 5))
+            if (!n(5) || (f[0] != "D" && f[0] != "R" && f[0] != "B") || !RefInt(f[1], 0, I32) || !RefInt(f[2], 0, 3) ||
+                !RefInt(f[3], 1, 7) || !RefInt(f[4], 1, 5))
                 return false;
             long long const activity = std::stoll(f[1]);
+            if (f[0] == "B")   // Bleakhold Royale: a mode id, no tier, solo (section 17)
+                return activity != 0 && std::stoll(f[2]) == 0 && std::stoll(f[4]) == 1;
             return f[0] == "R" ? activity == 0 : activity != 0;
         }
-        if (op == "QLEAVE" || op == "KSTART" || op == "KCANCEL" || op == "WEHANDIN" || op == "GLIDE" || op == "REPAIR")
+        if (op == "QLEAVE" || op == "KSTART" || op == "KCANCEL" || op == "WEHANDIN" || op == "GLIDE" ||
+            op == "REPAIR" || op == "RDEPLOY")
             return n(0);
+        if (op == "RDROP")   // integer world yards, may be negative
+            return n(2) && RefInt(f[0], -17067, 17067) && RefInt(f[1], -17067, 17067);
+        if (op == "RSPEC")
+            return n(1) && RefInt(f[0], 0, 2);
         if (op == "QREPLY")
             return n(2) && RefInt(f[0], 1, I32) && RefInt(f[1], 0, 1);
         if (op == "KMODE")
@@ -275,6 +286,80 @@ namespace
             Die("frames do not reassemble to the payload", text);
     }
 
+    // The input as every name of the Royale messages: it may never add or remove a field or a record, and each name
+    // decodes to the input cleaned and cut to the encoder's limit.
+    void CheckRoyaleEncoders(std::string const& text, unsigned char k)
+    {
+        auto name = [&](std::string const& field, std::size_t maxBytes, char const* what) {
+            std::optional<std::string> back = Unescape(field);
+            if (!back || *back != CleanText(text, maxBytes))
+                Die(std::string(what) + ": the name does not decode to the cleaned input", text);
+        };
+        auto fields = [&](std::string const& record, std::size_t want, char const* what) {
+            std::vector<std::string> f = Split(record, ',');
+            if (f.size() != want)
+                Die(std::string(what) + ": " + std::to_string(f.size()) + " fields instead of " + std::to_string(want),
+                    text);
+            return f;
+        };
+        auto records = [&](std::string const& payload, std::size_t want, char const* what) {
+            std::vector<std::string> r = Split(payload, ';');
+            if (r.size() != want)
+                Die(std::string(what) + ": " + std::to_string(r.size()) + " records instead of " + std::to_string(want),
+                    text);
+            return r;
+        };
+
+        RoyaleKill kill;
+        kill.killerName = text; kill.killerClassId = 1u; kill.victimName = text; kill.victimClassId = 8;
+        kill.cause = RoyaleCause::Storm; kill.aliveAfter = k; kill.killerKills = 2u;
+        // announce from the input's first byte: written only for the six codes with a credited killer (the name
+        // cleans to something)
+        kill.announce = static_cast<RoyaleAnnounce>(static_cast<char>(k));
+        bool const announced = k != 0 && std::strchr("FDTMRG", k) && !CleanText(text, RoyaleNameBytes).empty();
+        std::vector<std::string> f = fields(records(EncodeRoyaleKill(kill), 1, "ROYK")[0], announced ? 8 : 7, "ROYK");
+        name(f[0], RoyaleNameBytes, "ROYK killer");
+        name(f[2], RoyaleNameBytes, "ROYK victim");
+        if (announced && f[7] != std::string(1, static_cast<char>(k)))
+            Die("ROYK: the announce field is not the code given", text);
+
+        RoyaleState st;
+        st.watchName = text; st.pinX = -17067; st.myX = -1; st.myY = static_cast<int32_t>(k);
+        f = fields(records(EncodeRoyaleState(st), 1, "ROYS")[0], 23, "ROYS");
+        name(f[20], RoyaleNameBytes, "ROYS watchName");
+
+        RoyaleMap mp;
+        mp.pois = { { 1, RoyalePoiKind::Landmark, -1, 1, 2, text }, { 2, RoyalePoiKind::Lobby, 0, 0, k, text } };
+        std::vector<std::string> r = records(EncodeRoyaleMap(mp), 3, "ROYM");
+        fields(r[0], 11, "ROYM header");
+        for (std::size_t i = 1; i < r.size(); ++i)
+        {
+            // the name is the last field: an empty one is left out
+            bool const empty = CleanText(text, 40).empty();
+            f = fields(r[i], empty ? 5 : 6, "ROYM place");
+            if (!empty)
+                name(f[5], 40, "ROYM place");
+        }
+
+        RoyaleEvent ev;
+        ev.kind = RoyaleEventKind::Winner; ev.value = k; ev.x = 1; ev.y = -1; ev.msLeft = 5u; ev.name = text;
+        f = Split(records(EncodeRoyaleEvent(ev), 1, "ROYV")[0], ',');
+        if (f.size() != 6 && !(f.size() == 5 && CleanText(text, RoyaleNameBytes).empty()))
+            Die("ROYV: wrong field count", text);
+        if (f.size() == 6)
+            name(f[5], RoyaleNameBytes, "ROYV name");
+
+        RoyaleResult res;
+        res.matchId = 1; res.placement = 1; res.total = 2; res.winnerName = text; res.rewarded = true;
+        Reward rw; rw.kind = RewardKind::Honor; rw.amount = 25u; rw.itemId = 0u; rw.text = text;
+        res.rewards = { rw, rw };
+        r = records(EncodeRoyaleResult(res), 3, "ROYE");
+        f = fields(r[0], 11, "ROYE");
+        name(f[7], RoyaleNameBytes, "ROYE winnerName");
+        if (Split(r[1], ',').size() > 4 || Split(r[1], ',')[0] != "H")
+            Die("ROYE: wrong reward record", text);
+    }
+
     void FuzzOne(uint8_t const* data, std::size_t size)
     {
         std::string const raw(reinterpret_cast<char const*>(data), size);
@@ -284,6 +369,7 @@ namespace
         CheckEndpoint("BHc\t" + raw, k);
         CheckEndpoint(raw, static_cast<unsigned char>(k >> 3));
         CheckEncoders(raw, k);
+        CheckRoyaleEncoders(raw, k);
     }
 
 #ifndef BH_LIBFUZZER
@@ -299,7 +385,8 @@ namespace
             "1 OUTFIT f 1/1 201", "1 LBQ g 1/1 K,1,0,0,2", "1 PING h 1/1 12345", "1 EMOJI i 1/1 7", "1 DANCE j 1/1 5",
             "1 GET k 1/1 CASES;CASE,990001", "1 CASEOPEN l 1/1 990001,7", "1 WEEK 2s 1/1 3,4",
             "1 GET m 1/1 CAMPST", "1 CAMP n 1/1 M", "1 CAMP o 1/1 O,164", "1 CAMP p 1/1 P", "1 GLIDE q 1/1", "1 REPAIR r 1/1",
-            "2 HELLO 1 1/1 2,2.0,7,deDE",
+            "1 GET s 1/1 ROYS;ROYM", "1 QJOIN t 1/1 B,901,0,4,1", "1 RDROP u 1/1 -412,96", "1 RDEPLOY v 1/1",
+            "1 RSPEC w 1/1 2", "1 RDROP x 1/1 -17067,17067", "2 HELLO 1 1/1 2,2.0,7,deDE",
         };
     }
 
@@ -308,7 +395,8 @@ namespace
         static char const dict[] = { ',', ';', ':', '~', '%', ' ', '/', '\t', '\0', '-', '+', '0', '1', '9', 'A', 'Z', 'a', 'z', '.', '_',
             static_cast<char>(0x80), static_cast<char>(0xC3), static_cast<char>(0xFF), '\n', 'E', 'x' };
         static char const* const words[] = { "2147483647", "2147483648", "-1", "0", "00000000000000000001", "999", "1000", "SET", "DEF", "WEEK", "CASE", "CASES", "CAMPST", "CAMP", "GLIDE", "REPAIR", "O,", "M", "P", "O",
-            "HELLO", "GET", "BHc\t", "BHs\t", "1/1", "1/2", "99/99", "zzzzzz", "%00", "%2C", "\xC3\xA9", ";;", ",,", "R,0", "D,0" };
+            "HELLO", "GET", "BHc\t", "BHs\t", "1/1", "1/2", "99/99", "zzzzzz", "%00", "%2C", "\xC3\xA9", ";;", ",,",
+            "R,0", "D,0", "B,", "B,901", "RDROP", "RDEPLOY", "RSPEC", "ROYS", "ROYM", "-17067", "17068", "-0", "--1" };
         int const steps = 1 + static_cast<int>(rng() % 4);
         for (int i = 0; i < steps; ++i)
         {
