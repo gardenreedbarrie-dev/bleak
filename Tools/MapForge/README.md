@@ -137,11 +137,21 @@ The exit code is 0 when every check passed; read `out/report.txt`. Then:
    must list nothing but rows of this map. Then add `out/server/sql/bleakhold_royale.sql` to bleakserv as
    `data/sql/updates/pending_db_world/rev_<timestamp>.sql` (`create_sql.sh` makes the name; `build --pending
    <that folder>` writes it directly). `bleakhold_royale_remove.sql` undoes it.
-3. **Server terrain**: the extractors read only numbered patches, never lettered ones. Stage
-   `out/server/extract/patch-5.MPQ` (the terrain and the new Map.dbc) in a copy of the client as both
-   `Data/patch-5.MPQ` and `Data/enUS/patch-enUS-9.MPQ` (map_extractor lets the common patches win, vmap4_extractor
-   the locale patches), run `map_extractor -e 1`, `vmap4_extractor` and `vmap4_assembler`, then
-   `mmaps_generator 901`, and copy the `901*` files into the server's maps, vmaps and mmaps.
+3. **Server terrain**: `bash deploy/maps/install-map.sh --from-json /root/mapforge/out/server/extract/server-map.json`
+   in bleakserv (its `deploy/maps/README.md`) makes the server's maps, vmaps and mmaps from
+   `out/server/extract/patch-5.MPQ`. The extractors read only numbered patches, never lettered ones, so the
+   installer stages that archive in a copy of the client as `Data/patch-5.MPQ` (the last archive map_extractor
+   opens) and `Data/enUS/patch-enUS-99.MPQ` (vmap4_extractor opens locale patches -2 to -99 last, so a lower number
+   could lose to a realm locale patch holding a Map.dbc).
+
+   The archive is for the server only. Its Map.dbc holds **only this map's row** and it adds an **empty
+   GameObjectDisplayInfo.dbc** (both in the client's exact layouts), so map_extractor and vmap4_extractor walk this
+   one map and convert no game object models: seconds and a few MB instead of 30-90 minutes and several GB. That
+   is safe because nothing else they read changes: map_extractor reads LiquidType.dbc from the stock archives,
+   vmap4_extractor reads nothing else, neither reads AreaTable.dbc, and the installer keeps only this map's files
+   (never `vmaps/GameObjectModels.dtree`). `build --full-extract-dbc` ships the full Map.dbc and no
+   GameObjectDisplayInfo.dbc instead. The players' `patch-Q.MPQ` and the rebuilt realm archives are the same
+   either way.
 
 `package.py validate --config bleakhold_royale.json --out <folder>` checks an output folder again.
 
@@ -154,7 +164,8 @@ The exit code is 0 when every check passed; read `out/report.txt`. Then:
 | `client/DBFilesClient/*.dbc` | the modified tables, forged on the input copies |
 | `server/sql/bleakhold_royale.sql` | the install: DELETE + INSERT per table, passes `codestyle-sql.py` |
 | `server/sql/bleakhold_royale_check.sql`, `_remove.sql` | the pre-install check and the removal |
-| `server/extract/patch-5.MPQ` | terrain + Map.dbc for the server's extractors |
+| `server/extract/patch-5.MPQ` | server only: terrain, a Map.dbc with only this map, an empty GameObjectDisplayInfo |
+| `server/extract/server-map.json` | `{"map_id", "dir", "patch"}` for `install-map.sh --from-json` |
 | `report.txt` | every decision and check |
 
 ### Config

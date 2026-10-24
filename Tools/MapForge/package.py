@@ -38,6 +38,7 @@ import mpqpack  # noqa: E402
 from rflib.dbc import DbcError, DbcTable  # noqa: E402
 
 MARKER_FILE = "MapForge\\mapforge.txt"
+EXTRACT_PATCH = "patch-5.MPQ"
 LOADING_SIZE = (1024, 1024)
 LOADING_WIDE_SIZE = (2048, 1024)
 OUTPUT_ENTRIES = ("client", "server", "report.txt")
@@ -243,6 +244,58 @@ def collisions(patchset: PatchSet, map_archive: str, staging: dict[str, str]) ->
             problems.append(f"{name} is already in {', '.join(a.name for a in holders)}")
 
     return problems
+
+
+def write_extract(out_dir: str, cfg: configmod.Config, terrain_files: list, maps: DbcTable, work_dir: str,
+                  full: bool) -> list[str]:
+    """server/extract/patch-5.MPQ and server-map.json, for the server's extractors (deploy/maps/install-map.sh in
+    bleakserv). Server-only: the players' archives never get these tables.
+
+    The extractors read only numbered patches, never a lettered one: map_extractor opens Data/patch-5.MPQ last
+    (System.cpp:103-114) and vmap4_extractor opens Data/<locale>/patch-<locale>-2..99.MPQ last (vmapexport.cpp
+    scan_patches), so the archive is staged as Data/patch-5.MPQ and Data/enUS/patch-enUS-99.MPQ. Both list the maps
+    from Map.dbc and walk every one. By default the archive's Map.dbc holds only this map's row, and an empty
+    GameObjectDisplayInfo.dbc stops vmap4_extractor from converting every game object model
+    (ExtractGameobjectModels), so both finish in seconds with a few MB instead of 30-90 minutes and gigabytes.
+    Nothing else they read is affected: map_extractor reads LiquidType.dbc (stock, from the locale archives) and
+    vmap4_extractor nothing more; neither reads AreaTable.dbc. The installer keeps only this map's
+    maps/vmaps/mmaps files, never vmaps/GameObjectModels.dtree. full=True ships the whole Map.dbc and no
+    GameObjectDisplayInfo.dbc (every map and model is extracted, as before)."""
+    extract = dict(terrain_files)
+    os.makedirs(work_dir, exist_ok=True)
+    map_path = os.path.join(work_dir, "extract-Map.dbc")
+
+    if full:
+        maps.write(map_path)
+        notes = ["server/extract/patch-5.MPQ: terrain + the full Map.dbc (every map; slow extract)"]
+    else:
+        only = DbcTable.empty(layout.get("Map"))
+        row = list(maps.by_id()[cfg.map.id])
+
+        for i, column in enumerate(only.schema.columns):
+            if column.is_string:
+                row[i] = only.add_string(maps.string_at(row[i]))
+
+        only.rows.append(row)
+        only.write(map_path)
+        empty_path = os.path.join(work_dir, "extract-GameObjectDisplayInfo.dbc")
+        DbcTable.empty(layout.get("GameObjectDisplayInfo")).write(empty_path)
+        extract[layout.archive_name("GameObjectDisplayInfo")] = empty_path
+        notes = [f"server/extract/patch-5.MPQ: terrain + a Map.dbc with only map {cfg.map.id} + an empty "
+                 "GameObjectDisplayInfo.dbc (fast extract; --full-extract-dbc for every map)"]
+
+    extract[layout.archive_name("Map")] = map_path
+    extract_dir = os.path.join(out_dir, "server", "extract")
+    os.makedirs(extract_dir, exist_ok=True)
+    pack(extract, os.path.join(extract_dir, EXTRACT_PATCH))
+
+    with open(os.path.join(extract_dir, "server-map.json"), "w", encoding="utf-8", newline="\n") as f:
+        json.dump({"map_id": cfg.map.id, "dir": cfg.map.directory, "patch": EXTRACT_PATCH}, f)
+        f.write("\n")
+
+    notes.append("server/extract/server-map.json: for `install-map.sh --from-json`; the installer stages the patch "
+                 "as Data/patch-5.MPQ and Data/enUS/patch-enUS-99.MPQ")
+    return notes
 
 
 def write_marker(work_dir: str) -> str:
@@ -491,16 +544,9 @@ def cmd_build(args) -> int:
 
             report.say(f"[NOTE] wrote {path}")
 
-        # The server's extractors read only patch.MPQ / patch-2..5.MPQ (map_extractor) and patch-N.MPQ
-        # (vmap4_extractor), never a lettered patch, and list the maps from Map.dbc: give them one archive with the
-        # terrain and the new Map.dbc, to stage as Data/patch-5.MPQ and Data/enUS/patch-enUS-9.MPQ.
         if terrain_files:
-            extract = dict(terrain_files)
-            extract["DBFilesClient\\Map.dbc"] = os.path.join(dbc_dir, "Map.dbc")
-            extract_dir = os.path.join(args.out, "server", "extract")
-            os.makedirs(extract_dir, exist_ok=True)
-            pack(extract, os.path.join(extract_dir, "patch-5.MPQ"))
-            report.say(f"[NOTE] {extract_dir}/patch-5.MPQ: terrain + Map.dbc for map_extractor / vmap4_extractor")
+            for note in write_extract(args.out, cfg, terrain_files, tables["Map"], work_dir, args.full_extract_dbc):
+                report.say(f"[NOTE] {note}")
 
         # Re-read the archive and check it holds what was staged.
         with mpqpack.MpqArchive(map_archive_path) as archive:
@@ -686,6 +732,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--trs", help="the realm's current md5translate.trs (default: read from --patches)")
     p.add_argument("--pending", help="also write the install SQL as rev_<ns>.sql into this folder "
                                      "(bleakserv/data/sql/updates/pending_db_world)")
+    p.add_argument("--full-extract-dbc", action="store_true",
+                   help="server/extract/patch-5.MPQ gets the full Map.dbc and no empty GameObjectDisplayInfo.dbc "
+                        "(the extractors then walk every map and model)")
     p.add_argument("--force", action="store_true", help="replace existing output")
     p.set_defaults(func=cmd_build)
 

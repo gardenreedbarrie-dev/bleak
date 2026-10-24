@@ -22,6 +22,7 @@ from rflib import recparse  # noqa: E402  (Tools/RaceForge, added to sys.path by
 TABLES = (
     "AreaTable",
     "BattlemasterList",
+    "GameObjectDisplayInfo",
     "Light",
     "LightParams",
     "LightSkybox",

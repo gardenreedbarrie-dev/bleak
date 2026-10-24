@@ -126,6 +126,8 @@ class PackageTests(unittest.TestCase):
             report = f.read()
 
         self.assertNotIn("[FAIL]", report)
+        self.assertIn("patch-enUS-99.MPQ", report)
+        self.assertNotIn("patch-enUS-9.MPQ", report)
 
         # A second run needs --force, and validate passes on the output.
         code, output = self.build()
@@ -229,6 +231,123 @@ class PackageTests(unittest.TestCase):
         self.assertIn("Data\\patch-A.MPQ [pack hd]", output)
         self.assertIn("DBFilesClient\\Map.dbc: Patch-Z.MPQ", output)
         self.assertIn("DBFilesClient\\AreaTable.dbc: patch-Q.MPQ", output)
+
+
+def extractor_open(data: bytes, strict: bool) -> tuple[int, int, int]:
+    """The header checks of the server extractors' DBCFile::open: map_extractor (strict) wants fieldCount * 4 ==
+    recordSize and the whole data present; vmap4_extractor asserts fieldCount * 4 >= recordSize."""
+    magic, records, fields, record_size, string_size = struct.unpack_from("<4sIIII", data)
+    assert magic == b"WDBC"
+
+    if strict:
+        assert fields * 4 == record_size
+        assert len(data) - 20 == record_size * records + string_size
+    else:
+        assert fields * 4 >= record_size
+
+    return records, fields, record_size
+
+
+class ExtractArchiveTests(unittest.TestCase):
+    """server/extract/: the server-only archive for deploy/maps/install-map.sh."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.dbc = os.path.join(self.tmp, "dbc")
+        self.raw = synth_dbc.write_tables(self.dbc)
+        self.terrain = os.path.join(self.tmp, "terrain")
+        write_terrain(self.terrain)
+        self.config = os.path.join(self.tmp, "map.json")
+
+        with open(self.config, "w", encoding="utf-8") as f:
+            json.dump(synth_dbc.default_config(), f)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def build(self, out: str, *extra) -> dict[str, bytes]:
+        code, output = run("build", "--config", self.config, "--dbc", self.dbc, "--terrain", self.terrain,
+                           "--out", out, *extra)
+        self.assertEqual(code, 0, output)
+        files = {}
+
+        with mpqpack.MpqArchive(os.path.join(out, "server", "extract", "patch-5.MPQ")) as archive:
+            self.assertEqual(archive.verify().problems, [])
+
+            for name in archive.names():
+                files[name] = archive.read(name)
+
+        return files
+
+    def test_fast_extract_is_the_default(self):
+        out = os.path.join(self.tmp, "out")
+        files = self.build(out)
+        self.assertEqual(sorted(n for n in files if n.startswith("DBFilesClient\\")),
+                         [layout.archive_name("GameObjectDisplayInfo"), MAP])
+        # Only the tables the extractors read: no LiquidType (stock) and no AreaTable (neither extractor reads it).
+        self.assertNotIn(layout.archive_name("AreaTable"), files)
+        self.assertEqual(len([n for n in files if n.endswith(".adt")]), 4)
+
+        # Map.dbc: the client's layout (66 columns, 264-byte rows), one row: this map, with its directory.
+        self.assertEqual(extractor_open(files[MAP], strict=True), (1, 66, 264))
+        extractor_open(files[MAP], strict=False)
+        maps = DbcTable.from_bytes(files[MAP], layout.get("Map"))
+        self.assertEqual(sorted(maps.ids()), [901])
+        self.assertEqual(maps.get_str(maps.rows[0], "directory"), DIRECTORY)
+        self.assertEqual(maps.get(maps.rows[0], "instanceType"), 3)
+
+        # GameObjectDisplayInfo.dbc: the client's layout (19 columns, 76-byte rows), no rows.
+        gdi = files[layout.archive_name("GameObjectDisplayInfo")]
+        self.assertEqual(extractor_open(gdi, strict=False), (0, 19, 76))
+        self.assertEqual(extractor_open(gdi, strict=True), (0, 19, 76))
+        self.assertEqual(DbcTable.from_bytes(gdi, layout.get("GameObjectDisplayInfo")).rows, [])
+
+        # The players' archive is untouched: the full Map.dbc, and no GameObjectDisplayInfo.dbc.
+        with mpqpack.MpqArchive(os.path.join(out, "client", "patch-Q.MPQ")) as archive:
+            self.assertEqual(sorted(DbcTable.from_bytes(archive.read(MAP), layout.get("Map")).ids()),
+                             [0, 489, 532, 901])
+            self.assertFalse(archive.has_file(layout.archive_name("GameObjectDisplayInfo")))
+
+    def test_full_extract_flag_and_players_archive_unchanged(self):
+        fast_out = os.path.join(self.tmp, "fast")
+        full_out = os.path.join(self.tmp, "full")
+        self.build(fast_out)
+        files = self.build(full_out, "--full-extract-dbc")
+
+        with open(os.path.join(full_out, "client", "DBFilesClient", "Map.dbc"), "rb") as f:
+            self.assertEqual(files[MAP], f.read())
+
+        self.assertNotIn(layout.archive_name("GameObjectDisplayInfo"), files)
+
+        # The flag changes the server archive only: the players' archive is the same bytes either way.
+        for name in ("patch-Q.MPQ",):
+            with open(os.path.join(fast_out, "client", name), "rb") as a, \
+                    open(os.path.join(full_out, "client", name), "rb") as b:
+                self.assertEqual(a.read(), b.read(), name)
+
+    def test_server_map_json(self):
+        out = os.path.join(self.tmp, "out")
+        self.build(out)
+        path = os.path.join(out, "server", "extract", "server-map.json")
+
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+
+        self.assertEqual(data, {"map_id": 901, "dir": DIRECTORY, "patch": "patch-5.MPQ"})
+        # install-map.sh takes a relative patch from the JSON's folder.
+        self.assertTrue(os.path.isfile(os.path.join(os.path.dirname(path), data["patch"])))
+
+    def test_no_extract_archive_without_terrain(self):
+        data = synth_dbc.default_config()
+        data["world_map_area"]["bounds"] = [800.0, -800.0, 533.3, -533.3]  # "auto" needs the terrain's tiles
+
+        with open(self.config, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+
+        out = os.path.join(self.tmp, "out")
+        code, output = run("build", "--config", self.config, "--dbc", self.dbc, "--out", out)
+        self.assertEqual(code, 0, output)
+        self.assertFalse(os.path.exists(os.path.join(out, "server", "extract")))
 
 
 class ConfigFileTests(unittest.TestCase):
