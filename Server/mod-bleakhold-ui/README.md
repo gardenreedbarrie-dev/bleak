@@ -12,7 +12,9 @@ The client and the server talk with small hidden addon messages (the protocol is
 - it gives your own systems (Mythic+ keystones, Dungeon Journey, Eclipse Rift, daily and weekly tasks,
   seasons) a small C++ interface: one function per thing the UI shows, and one hook per button;
 - it has its own tables for the parts that need no custom system (definitions, week schedule, season
-  and war effort, legacy sets, leaderboards, server firsts) and a GM command to test everything.
+  and war effort, legacy sets, leaderboards, server firsts) and a GM command to test everything;
+- it runs a few features entirely on its own: emoji bubbles, dances, cases and camping (campfires, camp
+  objects, the warmth and food XP bonus, field repair and the High Elf glide).
 
 It never invents game rules: what a key scores, what the war effort counts, what a task pays, how the
 Rift scales is decided by your systems or by rows you write.
@@ -114,6 +116,7 @@ To change names, texts, the week schedule or seasons later: edit the `bleakhold_
 | Collections counts | | `SendCollections` |
 | Emoji bubbles (Animations tab, emote wheel, `/bh emoji`) | everything: the module checks `EMOJI` and shows the emoji over the player's head to everyone nearby; config `BleakholdUi.Emoji.*` | nothing (players need the Bleakhold client to see the bubbles) |
 | Dances (Animations tab, emote wheel, `/bh dance`, each dance's own command) | everything: the module checks `DANCE`, starts the stock dance (emote state) and tells everyone nearby which Bleakhold dance it is, again at every loop; config `BleakholdUi.Dance.*` | nothing (players need the Bleakhold client to see the dances; stock clients see the stock dance) |
+| Camping (Make camp button and `/camp`, the Camp frame at a fire, camp objects, Pack up, Repair and `/repair`, the High Elf glide) | everything: the module lights the camp fire (`CAMP M`, a script-free bonfire that goes out by itself), counts every lit fire (camp fires, Basic Campfires players light, `BleakholdUi.Camp.ExtraFireEntries`), lets players rest there like at an inn, settles them after a minute (camp object buffs, Campfire Warmth), places and removes camp objects (`CAMP O`, `CAMP P`), adds the warmth and Well Fed XP bonus, repairs (`REPAIR`), glides (`GLIDE`) and keeps the client's `CAMPST` up to date; config `BleakholdUi.Camp.*`, `Glide.*`, `Repair.*` | nothing. Check the default buff spells in game once (`BleakholdUi.Camp.Profession.*`, `Glide.Spell`: they were chosen without the client's Spell.dbc) |
 | Cases (right-click a case item: the case window with its rewards and chances, Unlock and the reel) | everything: the module answers `GET CASES` / `GET CASE`, checks `CASEOPEN` (the case, its key, bag room), rolls the reward by weight, swaps the case for it, answers `UNBOX` and announces rare rewards (`[Case]`); config `BleakholdUi.Case.*` | the cases: rows in `bleakhold_case` and `bleakhold_case_reward` (see `data/sql/db-world/02_bleakhold_case_tables.sql`), and the case items themselves (any item, no spell needed) |
 
 Buttons whose system is not connected yet answer the player with "This is not available on this realm
@@ -365,12 +368,14 @@ Ui::OnIntent(IntentType::Emoji, [](Player* p, Intent const& in) {
 | TOAST | `SendToast(player, Toast)` / `Toast(player, kind, title, subtitle, target)` | |
 | ERR | `Refuse(player, intent, code, text)` | |
 | DEF, HELLO, PONG | automatic | |
+| CAMPST | automatic (the module's camping); `SendCampState(player, CampState)` for a replacement | |
 
 Intents (`Ui::OnIntent(IntentType::..., handler)`): `TaskClaim` (`in.taskUid`), `TaskReroll` (`in.taskUid`),
 `QueueJoin` (`in.queueKind, activityId, tier, roles, groupSize`), `QueueLeave`, `QueueReply`
 (`in.proposalId, in.accept`), `KeyMode` (`in.mode`), `KeyStart`, `KeyCancel`, `BountyClaim` (`in.bountyId`),
 `WarEffortHandIn`, `Outfit` (`in.setId`), `LeaderboardQuery` (`in.board, seasonId, dungeonId, classId, page`),
-`Emoji` (`in.emojiId`), `Dance` (`in.danceId`).
+`Emoji` (`in.emojiId`), `Dance` (`in.danceId`), `CaseOpen` (`in.caseItemId, in.caseNonce`), `Camp` (`in.campAct`:
+`CampAct::Make`, `Object` with `in.campSkill`, `Pack`), `Glide`, `Repair`.
 
 ---
 
@@ -380,7 +385,10 @@ Intents (`Ui::OnIntent(IntentType::..., handler)`): `TaskClaim` (`in.taskUid`), 
 |---|---|---|
 | `.bleakhold status` | GM | players with the UI, message counters, drop reasons, loaded rows |
 | `.bleakhold player` | GM | counters of the selected player |
-| `.bleakhold test <what>` | GM | sample data to the selected player (or you): `all`, `week`, `era`, `tasks`, `taskdone`, `key`, `board`, `queue`, `run`, `rift`, `collections`, `season`, `leaderboard`, `firsts`, `toast`, `announce`, `defs` |
+| `.bleakhold camp [show]` | GM | camping state of the selected player (or you): the fire, objects, cooldowns, warmth, XP bonus, Well Fed, glide, repair, the resting flag; and how many fires the realm tracks |
+| `.bleakhold camp reset` | GM | clears the selected player's make-camp and glide cooldowns |
+| `.bleakhold camp fire` | GM | lights a camp fire for the selected player where they stand (no rules, no cooldown) |
+| `.bleakhold test <what>` | GM | sample data to the selected player (or you): `all`, `week`, `era`, `tasks`, `taskdone`, `key`, `board`, `queue`, `run`, `rift`, `collections`, `season`, `leaderboard`, `firsts`, `toast`, `announce`, `defs`, `camp` |
 | `.bleakhold reload` | admin | re-read `mod_bleakhold_ui.conf` and the world tables; players get the changes |
 | `.bleakhold announce <tag> <text>` | admin | tag: `legacy`, `first`, `season`, `queue`, `record` |
 | `.bleakhold debug on\|off` | admin | log every message and every drop reason |
@@ -397,6 +405,10 @@ Intents (`Ui::OnIntent(IntentType::..., handler)`): `TaskClaim` (`in.taskUid`), 
   players.
 - The module checks the group leader for keystone start/cancel. Everything else (may this player claim
   this task now?) is your handler's job; refuse with `Ui::Refuse`.
+- Camping checks everything on the server: no camp in combat, water, the air, cities, dungeons, raids,
+  battlegrounds or arenas; fires only count on the continents; camp rest ends the moment combat starts
+  (rest allows a logout in combat); the warmth and food bonus is added once (after the other modules' XP
+  multipliers, at most `BleakholdUi.Camp.MaxXpPct`); cooldowns survive a relog; a repair is all or nothing.
 
 ## 6. Tests
 

@@ -1,4 +1,5 @@
--- Bleakhold: round buttons around the minimap (Activities, Collections, Season, Leaderboards).
+-- Bleakhold: round buttons around the minimap (Activities, Collections, Season, Leaderboards, and the orbs other
+-- files add with Orbs.Add, such as Camp).
 -- They live on BleakholdOrbHolder, a child of UIParent anchored to the Minimap's centre, never on the
 -- Minimap itself: AddicatUI (DragonUI) collects every button parented to Minimap/MinimapBackdrop into its drawer,
 -- and it moves and rescales the Minimap, which the holder follows. In AddicatUI's editor mode each orb has
@@ -141,6 +142,11 @@ local function statusLines(key)
     return lines
 end
 
+-- An orb is shown unless its available() says no (an orb of a feature the realm has off).
+local function orbAvailable(o)
+    return not o.available or o.available() and true or false
+end
+
 local function makeOrb(o)
     local b = CreateFrame("Button", "BleakholdOrb_" .. o.key, holder)
     b:SetSize(Orbs.SIZE, Orbs.SIZE)
@@ -159,11 +165,15 @@ local function makeOrb(o)
     b:RegisterForClicks("LeftButtonUp")
     b:RegisterForDrag("RightButton")
     b:SetScript("OnClick", function()
-        UI.Open(o.key, true)
+        if o.onClick then
+            o.onClick(b)
+        else
+            UI.Open(o.key, true)
+        end
     end)
     b:SetScript("OnEnter", function(self)
         self.ring:SetVertexColor(UI.Rgb(C.goldPale))
-        UI.ShowTooltip(self, statusLines(o.key))
+        UI.ShowTooltip(self, o.lines and o.lines(self) or statusLines(o.key))
     end)
     b:SetScript("OnLeave", function(self)
         self.ring:SetVertexColor(UI.Rgb(C.gold))
@@ -178,7 +188,16 @@ local function makeOrb(o)
     b:SetScript("OnDragStop", function(self)
         self.dragging = false
     end)
-    b:SetScript("OnUpdate", function(self)
+    -- o.update(button) redraws what changes with time (a cooldown), a few times a second while the orb shows
+    local acc = 0
+    b:SetScript("OnUpdate", function(self, elapsed)
+        if o.update then
+            acc = acc + (elapsed or 0)
+            if acc >= 0.25 then
+                acc = 0
+                o.update(self)
+            end
+        end
         if not self.dragging then
             return
         end
@@ -186,11 +205,27 @@ local function makeOrb(o)
         Orbs.SetAngleTowards(o, mx, my)
     end)
     o.button = b
+    if not orbAvailable(o) then
+        b:Hide()
+    end
     return b
 end
 
 for _, o in ipairs(Orbs.list) do
     makeOrb(o)
+end
+
+-- Shows or hides the orbs that depend on a feature (call when it may have changed).
+function Orbs.Refresh()
+    for _, o in ipairs(Orbs.list) do
+        if o.button then
+            if orbAvailable(o) then
+                o.button:Show()
+            else
+                o.button:Hide()
+            end
+        end
+    end
 end
 
 function Orbs.UpdateBadges()
@@ -264,7 +299,7 @@ ns.AddCommand("orbs", "minimap buttons: /bh orbs on|off|reset", function(args)
 end)
 
 -- Editor mode (ns.Movers): an orb follows the outline's centre around the ring.
-for _, o in ipairs(Orbs.list) do
+local function addMover(o)
     UI.AddMover({
         name = "bleakhold_orb_" .. o.key,
         title = o.title .. " orb",
@@ -290,7 +325,25 @@ for _, o in ipairs(Orbs.list) do
             return type(ns.cdb.orbs[o.key]) ~= "number"
         end,
         visible = function()
-            return holder:IsShown() and true or false
+            return holder:IsShown() and orbAvailable(o) or false
         end,
     })
+end
+
+for _, o in ipairs(Orbs.list) do
+    addMover(o)
+end
+
+-- An orb of another file (before Integration.lua, so it is in AddicatUI's editor too):
+--   o = { key, glyph, title, angle, onClick(button), lines(button), available(), update(button) }
+-- Without onClick it opens the window registered for o.key; without lines its tooltip is the title.
+function Orbs.Add(o)
+    o.lines = o.lines or function()
+        return { o.title }
+    end
+    Orbs.list[#Orbs.list + 1] = o
+    local b = makeOrb(o)
+    addMover(o)
+    Orbs.Layout(true)
+    return b
 end

@@ -316,6 +316,27 @@ vehicles keep their own dance. The clips come in `Data\Interface\Bleakhold\Dance
   the module's `src/BleakholdDance.h` and the music README, `pack` builds the clips and `check` validates it all.
   A new dance needs a rebuilt server module and a new client package.
 
+## Camping
+
+Players light a campfire anywhere outdoors and rest by it like at an inn; after a minute by the fire they settle
+in, get Campfire Warmth (bonus experience) and the buffs of the camp objects around the fire. The server module
+decides everything (`docs/BleakholdProtocol.md`, section 16); the addon shows its `CAMPST` state and counts the
+timers down between messages.
+
+- Make camp: the flame orb on the minimap ring (the cooldown under it), `/makecamp`, `/campfire` or `/bh camp`
+  (`/makecamp pack` puts your fire out). `/camp` is left alone: it is the game's own logout command.
+- The Camp frame, shown while you are at a campfire (drag it anywhere): Resting with the settle countdown, or
+  Camping; the fire's time left; Warmth and your XP bonus; the camp objects at the fire (hover for the
+  profession, tier and buff); a Place button for each object your professions can set down (one per player per
+  fire, three per fire); Repair while repairing is allowed there; Pack up at your own fire.
+- Away from a fire, a small indicator shows Warmth time left, Well Fed and the XP bonus while they last.
+- High Elves glide: the Glide button (with its cooldown) or a key (Key Bindings, Bleakhold, Glide), or `/glide`.
+- Field repair: `/repair` (`/bh repair`) or the Repair button, for blacksmiths anywhere or anyone at a fire with a
+  blacksmith's anvil.
+- Refusals show as short sentences in the error frame (not outdoors, in combat, cooldown, skill too low, ...).
+- Feature bits 512 (camping), 1024 (glide) and 2048 (field repair): what the realm has off stays hidden. The
+  orb, the Camp frame, the indicator and the Glide button can be moved in AddicatUI's editor mode.
+
 ## Graphics (BleakFx)
 
 The Bleakhold client post-processes the 3D world after it is drawn and before the interface (BLEAKHOLD(bleakfx),

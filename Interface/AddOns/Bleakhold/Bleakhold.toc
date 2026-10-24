@@ -28,6 +28,7 @@ Collections.lua
 Animations.lua
 Transmog.lua
 Cases.lua
+Camp.lua
 Season.lua
 Leaderboards.lua
 Graphics.lua

@@ -99,6 +99,11 @@ namespace Bleakhold::Ui
         M().Push(player, "UNBOX", Topic::Count, nullptr, [&](uint32_t) { return EncodeUnbox(m); });
     }
 
+    void SendCampState(Player* player, CampState const& m)
+    {
+        M().Push(player, "CAMPST", Topic::Count, nullptr, [&](uint32_t) { return EncodeCampState(m); });
+    }
+
     void RiftStatus(Player* player, RiftState const& m)
     {
         M().Push(player, "RIFT", Topic::Count, [&](PlayerSlot& s) { s.rift = m; }, [&](uint32_t) { return EncodeRift(m); });

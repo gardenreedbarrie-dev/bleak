@@ -214,3 +214,104 @@ Data.chatTags = {
     { tag = "Record", color = "F1D9A0", key = "record" },
     { tag = "Case", color = "C9A2F5", key = "case" },
 }
+
+-- The addon's sentence for a server refusal (ERR code), shown instead of the server's text (ns.ErrorText); a
+-- function gets the error and may return nil for the server's text. Short and friendly.
+local function campTimer(key, ready, waiting)
+    local left = ns.CampLeft and ns.CampLeft(key)
+    if left and left >= 1 then
+        return string.format(waiting, ns.U.Duration(math.ceil(left)))
+    end
+    return ready
+end
+Data.errorTexts = {
+    camp_off = "Camping is turned off on this realm.",
+    camp_indoors = "You can only make camp outdoors.",
+    camp_instance = "You cannot make camp in a dungeon, raid, battleground or arena.",
+    camp_city = "You cannot make camp in a city or a sanctuary.",
+    camp_combat = "You cannot make camp while in combat.",
+    camp_mounted = "Get off your mount or vehicle to make camp.",
+    camp_water = "You cannot make camp in the water.",
+    camp_dead = "You cannot make camp while dead.",
+    camp_cooldown = function()
+        return campTimer("cd", "You cannot make camp again yet.", "You can make camp again in %s.")
+    end,
+    camp_level = "You are too low level to make camp.",
+    camp_nofire = "You are not at a campfire.",
+    camp_full = "This campfire has no room for another camp object.",
+    camp_placed = "You already placed a camp object at this fire.",
+    camp_skill = "Your skill in that profession is too low.",
+    glide_off = "Gliding is turned off on this realm.",
+    glide_race = "Only High Elves can glide.",
+    glide_cooldown = function()
+        return campTimer("glide", "Glide is not ready yet.", "Glide is not ready yet (%s).")
+    end,
+    repair_off = "Field repair is turned off on this realm.",
+    repair_skill = "You need more Blacksmithing skill, or an anvil at your campfire, to repair here.",
+    repair_gold = "You do not have enough money to repair.",
+}
+
+-- Camp objects (CAMPST objs and place): by profession skill line (SkillLine.dbc), its stock 3.3.5a icon
+-- (Interface\\Icons) and the object of each tier (1 to 3, skill 75/225/375) with the buff it gives everyone
+-- settled at the fire. These follow the server module's defaults (src/BleakholdCampRules.h, DefaultProfessions:
+-- the game object and buff spell of each tier); a realm that changes BleakholdUi.Camp.Profession.* changes what
+-- spawns and what is cast, not these names. A blacksmith's tier 2 or 3 object lets campers repair.
+Data.campProfessions = {
+    [171] = { name = "Alchemy", icon = "Trade_Alchemy", tiers = {
+        { name = "Apothecary Vials", buff = "Scroll of Spirit: more spirit." },
+        { name = "Alchemist's Table", buff = "Scroll of Spirit: much more spirit." },
+        { name = "Alchemy Lab", buff = "Sayge's fortune: 10% more spirit." } } },
+    [164] = { name = "Blacksmithing", icon = "Trade_BlackSmithing", tiers = {
+        { name = "Anvil", buff = "Scroll of Protection: more armor." },
+        { name = "Forge", buff = "Scroll of Protection: much more armor. Campers can repair here." },
+        { name = "Great Anvil", buff = "Sayge's fortune: 10% more armor. Campers can repair here." } } },
+    [333] = { name = "Enchanting", icon = "Trade_Engraving", tiers = {
+        { name = "Glowing Rune", buff = "Scroll of Intellect: more intellect." },
+        { name = "Moon Crystal", buff = "Scroll of Intellect: much more intellect." },
+        { name = "Rune Circle", buff = "Sayge's fortune: 10% more intellect." } } },
+    [202] = { name = "Engineering", icon = "Trade_Engineering", tiers = {
+        { name = "Lunchbox Tools", buff = "Scroll of Agility: more agility." },
+        { name = "Gnomish Terminal", buff = "Scroll of Agility: much more agility." },
+        { name = "Tesla Turret", buff = "Sayge's fortune: 10% more agility." } } },
+    [182] = { name = "Herbalism", icon = "Trade_Herbalism", tiers = {
+        { name = "Herb Basket", buff = "Scroll of Spirit: more spirit." },
+        { name = "Herb Pile", buff = "Scroll of Spirit: much more spirit." },
+        { name = "Great Herb Pile", buff = "Songflower Serenade: more of every stat and critical strike." } } },
+    [773] = { name = "Inscription", icon = "INV_Inscription_Tradeskill01", tiers = {
+        { name = "Rolled Scroll", buff = "Scroll of Intellect: more intellect." },
+        { name = "Open Tome", buff = "Scroll of Intellect: much more intellect." },
+        { name = "Bookcase", buff = "Sayge's fortune: 10% more damage." } } },
+    [755] = { name = "Jewelcrafting", icon = "INV_Misc_Gem_01", tiers = {
+        { name = "Jewel Grinder", buff = "Scroll of Strength: more strength." },
+        { name = "Glowing Gem", buff = "Scroll of Strength: much more strength." },
+        { name = "Twilight Crystal", buff = "Sayge's fortune: 10% more strength." } } },
+    [165] = { name = "Leatherworking", icon = "Trade_LeatherWorking", tiers = {
+        { name = "Leather Armor Stand", buff = "Scroll of Stamina: more stamina." },
+        { name = "Drying Rack", buff = "Scroll of Stamina: much more stamina." },
+        { name = "Hanging Cloak", buff = "Sayge's fortune: 10% more stamina." } } },
+    [186] = { name = "Mining", icon = "Trade_Mining", tiers = {
+        { name = "Rock Rubble", buff = "Scroll of Stamina: more stamina." },
+        { name = "Ingot Stack", buff = "Scroll of Stamina: much more stamina." },
+        { name = "Smelting Pot", buff = "Sayge's fortune: 10% more stamina." } } },
+    [393] = { name = "Skinning", icon = "INV_Misc_Pelt_Wolf_01", tiers = {
+        { name = "Fresh Carcass", buff = "Scroll of Agility: more agility." },
+        { name = "Hide Pile", buff = "Scroll of Agility: much more agility." },
+        { name = "Fine Furs", buff = "Fengus' Ferocity: more attack power." } } },
+    [197] = { name = "Tailoring", icon = "Trade_Tailoring", tiers = {
+        { name = "Rug", buff = "Scroll of Stamina: more stamina." },
+        { name = "Clothesline", buff = "Scroll of Stamina: much more stamina." },
+        { name = "Mana Loom", buff = "Mol'dar's Moxie: more stamina." } } },
+    [185] = { name = "Cooking", icon = "INV_Misc_Food_15", tiers = {
+        { name = "Cookpot", buff = "Well fed: more stamina and spirit (counts as Well Fed for bonus XP)." },
+        { name = "Potbelly Stove", buff = "Well fed: a hearty meal (counts as Well Fed for bonus XP)." },
+        { name = "Clay Oven", buff = "A feast: well fed, more attack power, spell power and stamina (bonus XP too)." } } },
+    [129] = { name = "First Aid", icon = "Spell_Holy_SealOfSacrifice", tiers = {
+        { name = "Bandage Crates", buff = "Scroll of Protection: more armor." },
+        { name = "Bandage Pile", buff = "Scroll of Protection: much more armor." },
+        { name = "Hospital Bed", buff = "Sayge's fortune: more resistance to magic." } } },
+    [356] = { name = "Fishing", icon = "Trade_Fishing", tiers = {
+        { name = "Water Bucket", buff = "You swim faster." },
+        { name = "Fish Platter", buff = "Scroll of Spirit: much more spirit." },
+        { name = "Rowboat", buff = "Slip'kik's Savvy: more spell critical strike." } } },
+}
+Data.campTierNames = { "Apprentice", "Journeyman", "Expert" }

@@ -21,7 +21,7 @@ end
 
 test("every intent the addon can send, captured for the C++ parser", function(M, ns)
     local C = ns.Comm
-    FX.connect(M, H)
+    FX.connect(M, H, { [6] = 512 + 1024 + 2048 })   -- camping, glide and field repair (the other windows need no bit)
     FX.all(M, H)
 
     -- the windows' own buttons (the paths players use)
@@ -72,6 +72,42 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
     M.Advance(1.3)
     H.eq(C.Send("CASEOPEN", 2147483647, 2147483647), true, "the client sends CASEOPEN with the largest id and nonce")
     M.Advance(1.3)
+    -- camping (section 16) from the real UI, as the addon spaces it: CAMP and GLIDE 1.25 s apart (the server
+    -- allows one a second and drops the same payload within a second), REPAIR 2.25 s (one per two seconds)
+    M.env.BleakholdOrb_camp:Click()                                        -- Make camp orb: CAMP M
+    M.Advance(1.3)
+    H.send(M, "CAMPST", { { "R", 60, 900, 1, 900, 0, 0, { { 164, 2, 1 } }, { { 185, 1 }, { 356, 3 } }, 0, 1, 0 } })
+    M.Advance(0.3)
+    local camp = M.env.BleakholdCampFrame
+    H.ok(camp:IsShown(), "camp frame shown at the fire")
+    camp.place[1]:Click()                                                  -- Place Cookpot: CAMP O,185
+    M.Advance(1.3)
+    camp.place[2]:Click()                                                  -- Place Rowboat: CAMP O,356
+    M.Advance(1.3)
+    camp.repairBtn:Click()                                                 -- Repair: REPAIR
+    M.Advance(2.3)
+    camp.packBtn:Click()                                                   -- Pack up: CAMP P
+    M.Advance(1.3)
+    M.env.BleakholdGlide()                                                 -- the Glide key binding: GLIDE
+    M.Advance(1.3)
+    M.env.SlashCmdList.BLEAKHOLD("repair")                                 -- /bh repair
+    M.Advance(2.3)
+    H.eq(C.Send("CAMP", "O", 1), true, "the client sends CAMP O with the smallest skill line")
+    M.Advance(1.3)
+    H.eq(C.Send("CAMP", "O", 2147483647), true, "the client sends CAMP O with the largest skill line")
+    M.Advance(1.3)
+    H.eq(C.Send("CAMP", "M,1"), false, "a skill line only with O")
+    H.eq(C.Send("CAMP", "M", 164), false, "a skill line only with O")
+    H.eq(C.Send("CAMP", "O"), false, "O needs its skill line")
+    H.eq(C.Send("CAMP", "O", 0), false, "skill lines start at 1")
+    H.eq(C.Send("GLIDE", 1), false, "GLIDE has no field")
+    local camps = {}
+    for _, it in ipairs(H.intents(M)) do
+        if it.op == "CAMP" then camps[#camps + 1] = it.payload end
+    end
+    H.eq(table.concat(camps, " "), "M O,185 O,356 P O,1 O,2147483647", "the CAMP intents the UI sent")
+    H.eq(H.countIntents(M, "GLIDE"), 1)
+    H.eq(H.countIntents(M, "REPAIR"), 2)
     -- GET of every topic; the client batches one frame's requests (8 records at most per GET)
     for _, topic in ipairs({ "WEEK", "ERA", "TASKS", "KEY", "BOARD", "QUEUE", "COLL", "LIDX", "SEASON", "FIRSTS", "MPLUS", "RIFT" }) do
         C.Refresh(topic)
@@ -81,6 +117,7 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
     C.Refresh("DEF", 0)
     C.Refresh("CASES")
     C.Refresh("CASE", 990001)
+    C.Refresh("CAMPST")
     M.Advance(10)
 
     local ops, topics, n = {}, {}, 0

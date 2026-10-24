@@ -58,6 +58,9 @@ namespace Bleakhold::Proto
         _emoji.Configure(1, perInterval(l.emojiIntervalMs));
         _dance.Configure(1, perInterval(l.danceIntervalMs));
         _case.Configure(1, perInterval(l.caseIntervalMs));
+        _camp.Configure(1, perInterval(l.campIntervalMs));
+        _glide.Configure(1, perInterval(l.glideIntervalMs));
+        _repair.Configure(1, perInterval(l.repairIntervalMs));
     }
 
     void Endpoint::CountDrop(uint64_t nowMs, ReceiveResult& r)
@@ -91,6 +94,9 @@ namespace Bleakhold::Proto
             case IntentType::Emoji: return _emoji.Take(nowMs);
             case IntentType::Dance: return _dance.Take(nowMs);
             case IntentType::CaseOpen: return _case.Take(nowMs);
+            case IntentType::Camp: return _camp.Take(nowMs);
+            case IntentType::Glide: return _glide.Take(nowMs);
+            case IntentType::Repair: return _repair.Take(nowMs);
             case IntentType::TaskClaim:
             case IntentType::TaskReroll:
             case IntentType::BountyClaim:

@@ -11,10 +11,12 @@
 #include "BleakholdEndpoint.h"
 #include "BleakholdIntent.h"
 #include "BleakholdMessages.h"
+#include "../../src/BleakholdCampRules.h"
 #include "../../src/BleakholdCases.h"
 #include "../../src/BleakholdDance.h"
 #include "../../src/BleakholdEmoji.h"
 
+#include <cmath>
 #include <map>
 #include <set>
 
@@ -257,6 +259,17 @@ TEST("every C> example of the document is accepted and re-encodes byte for byte"
     CHECK(Parse("1 GET k 1/1 CASES;CASE,990001", &in) == DropReason::None);
     CHECK(in.topics.size() == 2 && in.topics[0].topic == Topic::Cases && in.topics[1].topic == Topic::Case &&
         in.topics[1].arg1 == 990001);
+    CHECK(Parse("1 GET m 1/1 CAMPST", &in) == DropReason::None);
+    CHECK(in.topics.size() == 1 && in.topics[0].topic == Topic::CampState && in.seq == 22);
+    CHECK(Parse("1 CAMP n 1/1 M", &in) == DropReason::None);
+    CHECK(in.type == IntentType::Camp && in.campAct == CampAct::Make && in.campSkill == 0 && in.seq == 23);
+    CHECK(Parse("1 CAMP o 1/1 O,164", &in) == DropReason::None);
+    CHECK(in.type == IntentType::Camp && in.campAct == CampAct::Object && in.campSkill == 164 && in.seq == 24);
+    CHECK(Parse("1 CAMP p 1/1 P", &in) == DropReason::None);
+    CHECK(in.type == IntentType::Camp && in.campAct == CampAct::Pack && in.campSkill == 0);
+    CHECK(Parse("1 CAMP p 1/1 O,2147483647", &in) == DropReason::None && in.campSkill == 2147483647u);
+    CHECK(Parse("1 GLIDE q 1/1", &in) == DropReason::None && in.type == IntentType::Glide && in.seq == 26);
+    CHECK(Parse("1 REPAIR r 1/1", &in) == DropReason::None && in.type == IntentType::Repair && in.seq == 27);
 }
 
 TEST("cases: chances add up to 10000 and the roll follows the weights")
@@ -418,6 +431,27 @@ TEST("malformed client messages are dropped with the right reason")
         { "BHc\t1 GET 1 1/1 CASE", DropReason::BadTopic },
         { "BHc\t1 GET 1 1/1 CASE,0", DropReason::OutOfRange },
         { "BHc\t1 GET 1 1/1 CASES,1", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 CAMPST,1", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 CAMPSTATE", DropReason::BadTopic },
+        { "BHc\t1 CAMP 1 1/1", DropReason::FieldCount },
+        { "BHc\t1 CAMP 1 1/1 O", DropReason::FieldCount },
+        { "BHc\t1 CAMP 1 1/1 M,0", DropReason::FieldCount },
+        { "BHc\t1 CAMP 1 1/1 P,164", DropReason::FieldCount },
+        { "BHc\t1 CAMP 1 1/1 O,164,1", DropReason::FieldCount },
+        { "BHc\t1 CAMP 1 1/1 M;P", DropReason::FieldCount },
+        { "BHc\t1 CAMP 1 1/1 X", DropReason::BadField },
+        { "BHc\t1 CAMP 1 1/1 m", DropReason::BadField },
+        { "BHc\t1 CAMP 1 1/1 MP", DropReason::BadField },
+        { "BHc\t1 CAMP 1 1/1 1", DropReason::BadField },
+        { "BHc\t1 CAMP 1 1/1 X,1", DropReason::FieldCount },
+        { "BHc\t1 CAMP 1 1/1 O,0", DropReason::OutOfRange },
+        { "BHc\t1 CAMP 1 1/1 O,-1", DropReason::OutOfRange },
+        { "BHc\t1 CAMP 1 1/1 O,2147483648", DropReason::OutOfRange },
+        { "BHc\t1 CAMP 1 1/1 O,x", DropReason::BadField },
+        { "BHc\t1 CAMP 1 1/1 O,", DropReason::BadField },
+        { "BHc\t1 GLIDE 1 1/1 1", DropReason::FieldCount },
+        { "BHc\t1 REPAIR 1 1/1 0", DropReason::FieldCount },
+        { "BHc\t1 REPAIRS 1 1/1", DropReason::UnknownOp },
         { "BHc\t1 HELLO 1 1/1 1,1.0 beta,0,enUS", DropReason::BadField },
         { "BHc\t1 HELLO 1 1/1 1,,0,enUS", DropReason::BadField },
         { "BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUSenUSx", DropReason::BadField },
@@ -578,6 +612,39 @@ TEST("endpoint: per-op limits of section 8")
     ReceiveResult cs = Feed(ep, "1 CASEOPEN w 1/1 990002,2", 40500, &in);
     CHECK(cs.verdict == Verdict::Refused && in.type == IntentType::CaseOpen && in.caseItemId == 990002);
     CHECK(Feed(ep, "1 CASEOPEN x 1/1 990002,3", 41100).verdict == Verdict::Accepted);
+    // CAMP: 1 per second, every act together
+    CHECK(Feed(ep, "1 CAMP y 1/1 M", 50000).verdict == Verdict::Accepted);
+    ReceiveResult cp = Feed(ep, "1 CAMP z 1/1 O,164", 50500, &in);
+    CHECK(cp.verdict == Verdict::Refused && in.type == IntentType::Camp && in.campAct == CampAct::Object && in.campSkill == 164);
+    CHECK(Feed(ep, "1 CAMP 10 1/1 O,164", 51100).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CAMP 11 1/1 P", 51600).verdict == Verdict::Refused);
+    // GLIDE: 1 per second (another op's bucket is not touched)
+    CHECK(Feed(ep, "1 GLIDE 12 1/1", 51700).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 GLIDE 13 1/1", 53000).verdict == Verdict::Accepted);
+    // REPAIR: 1 per 2 s (the duplicate guard drops a repeat within 1 s; after it the bucket answers busy)
+    CHECK(Feed(ep, "1 REPAIR 14 1/1", 60000).verdict == Verdict::Accepted);
+    ReceiveResult rp = Feed(ep, "1 REPAIR 15 1/1", 61500, &in);
+    CHECK(rp.verdict == Verdict::Refused && in.type == IntentType::Repair);
+    CHECK(Feed(ep, "1 REPAIR 16 1/1", 62100).verdict == Verdict::Accepted);
+}
+
+TEST("endpoint: the camping limits come from Limits")
+{
+    Limits l;
+    l.duplicateWindowMs = 0;
+    l.campIntervalMs = 5000;
+    l.glideIntervalMs = 3000;
+    l.repairIntervalMs = 0;   // 0: no limit of its own
+    Endpoint ep(l);
+    Feed(ep, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    CHECK(Feed(ep, "1 CAMP 2 1/1 M", 1000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CAMP 3 1/1 P", 4000).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 CAMP 4 1/1 P", 6100).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 GLIDE 5 1/1", 7000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 GLIDE 6 1/1", 9000).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 GLIDE 7 1/1", 10100).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 REPAIR 8 1/1", 11000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 REPAIR 9 1/1", 11001).verdict == Verdict::Accepted);
 }
 
 TEST("endpoint: the same action twice within the window is ignored")
@@ -602,6 +669,160 @@ TEST("endpoint: the same action twice within the window is ignored")
     CHECK(Feed(ep, "1 CASEOPEN e 1/1 990001,5", 30000).verdict == Verdict::Accepted);
     CHECK(Feed(ep, "1 CASEOPEN f 1/1 990001,5", 30400).reason == DropReason::Duplicate);
     CHECK(Feed(ep, "1 CASEOPEN g 1/1 990001,6", 31500).verdict == Verdict::Accepted);
+    // CAMP: the same act again at once is dropped; another act is a new request (and meets the rate limit)
+    CHECK(Feed(ep, "1 CAMP h 1/1 M", 40000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CAMP i 1/1 M", 40300).reason == DropReason::Duplicate);
+    CHECK(Feed(ep, "1 CAMP j 1/1 O,164", 40400).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 CAMP k 1/1 O,164", 41500).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CAMP l 1/1 O,164", 41900).reason == DropReason::Duplicate);
+    CHECK(Feed(ep, "1 CAMP m 1/1 O,171", 42600).verdict == Verdict::Accepted);
+    // GLIDE and REPAIR have no fields: any repeat within the window is a duplicate
+    CHECK(Feed(ep, "1 GLIDE n 1/1", 50000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 GLIDE o 1/1", 50900).reason == DropReason::Duplicate);
+    CHECK(Feed(ep, "1 REPAIR p 1/1", 50950).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 REPAIR q 1/1", 51000).reason == DropReason::Duplicate);
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Camping (section 16): the core-independent rules of src/BleakholdCampRules.h and the CAMPST encoder
+// ---------------------------------------------------------------------------------------------------
+TEST("camping: tiers, id lists, XP bonus, repair rules")
+{
+    using namespace Bleakhold::CampRules;
+    Tiers const t = DefaultTierSkill;
+    CHECK(TierFor(0, t) == 0 && TierFor(74, t) == 0 && TierFor(75, t) == 1 && TierFor(224, t) == 1 && TierFor(225, t) == 2 &&
+        TierFor(374, t) == 2 && TierFor(375, t) == 3 && TierFor(450, t) == 3 && TierFor(0xFFFFFFFFu, t) == 3);
+    CHECK(ParseIds("22") == std::vector<uint32_t>({ 22 }));
+    CHECK(ParseIds(" 75, 225 ;375 ") == std::vector<uint32_t>({ 75, 225, 375 }));
+    CHECK(ParseIds("").empty() && ParseIds("x, ,").empty());
+    CHECK(ParseIds("4294967295,4294967296,7") == std::vector<uint32_t>({ 4294967295u, 7 }));   // too big: dropped
+    CHECK(ParseIds("-5") == std::vector<uint32_t>({ 5 }));
+    CHECK(ParseTiers("75,225,375") && *ParseTiers("75,225,375") == t);
+    CHECK(ParseTiers("1 2 3") && (*ParseTiers("1 2 3"))[2] == 3u);
+    CHECK(!ParseTiers("75,225") && !ParseTiers("75,225,375,450") && !ParseTiers("0,225,375") && !ParseTiers("75,75,375") &&
+        !ParseTiers("375,225,75") && !ParseTiers(""));
+    CHECK(BonusPct(false, false, 10, 5, 25) == 0);
+    CHECK(BonusPct(true, false, 10, 5, 25) == 10);
+    CHECK(BonusPct(false, true, 10, 5, 25) == 5);
+    CHECK(BonusPct(true, true, 10, 5, 25) == 15);
+    CHECK(BonusPct(true, true, 20, 15, 25) == 25);   // capped
+    CHECK(BonusPct(true, true, 0xFFFFFFFFu, 0xFFFFFFFFu, 100) == 100);
+    CHECK(AddPct(100, 15) == 115 && AddPct(5, 15) == 5 && AddPct(7, 15) == 8 && AddPct(0, 25) == 0 && AddPct(1000, 0) == 1000);
+    CHECK(AddPct(0xFFFFFFFFu, 25) == 0xFFFFFFFFu);   // saturates
+    CHECK(RepairCostMod(false, 10) == 1.0f && RepairCostMod(true, 10) == 0.9f && RepairCostMod(true, 0) == 1.0f &&
+        RepairCostMod(true, 250) == 0.0f);
+    CHECK(RepairAllowed(true, 75, 75, false, false) && !RepairAllowed(true, 74, 75, false, false));
+    CHECK(!RepairAllowed(false, 450, 75, false, false));            // feature 2048 off
+    CHECK(RepairAllowed(false, 0, 75, true, true));                 // a camp anvil, no blacksmithing
+    CHECK(RepairAllowed(true, 450, 75, false, true));               // either way
+    CHECK(!RepairAllowed(false, 0, 75, false, true));               // camping off: an anvil is just a decoration
+    CHECK(!RepairAllowed(true, 0, 0, false, false));                // MinSkill 0 still needs the profession
+    CHECK(SecondsLeft(100, 40) == 60 && SecondsLeft(40, 40) == 0 && SecondsLeft(0, 40) == 0);
+}
+
+TEST("camping: object slots stand apart around the fire")
+{
+    using namespace Bleakhold::CampRules;
+    for (float o : { 0.0f, 1.0f, 3.14159f, 6.0f })
+    {
+        Offset a = SlotOffset(0, o, 2.6f), b = SlotOffset(1, o, 2.6f), c = SlotOffset(2, o, 2.6f);
+        auto dist = [](Offset const& x, Offset const& y) { return std::sqrt((x.x - y.x) * (x.x - y.x) + (x.y - y.y) * (x.y - y.y)); };
+        auto radius = [](Offset const& x) { return std::sqrt(x.x * x.x + x.y * x.y); };
+        CHECK(std::fabs(radius(a) - 2.6f) < 0.01f && std::fabs(radius(b) - 2.6f) < 0.01f && std::fabs(radius(c) - 2.6f) < 0.01f);
+        CHECK(dist(a, b) > 4.4f && dist(b, c) > 4.4f && dist(a, c) > 4.4f);   // 2.6 * sqrt(3) = 4.5
+        CHECK(a.angle >= 0.0f && a.angle < 6.2832f);
+        // slot 0 stands beyond the fire as its maker sees it (the fire faces the way its maker looked, 1.5 yd ahead of
+        // them), never on the maker's side; the others stand at least 1 yd beside the maker's spot
+        CHECK(a.x * std::cos(o) + a.y * std::sin(o) > 2.5f);
+        float const mx = -1.5f * std::cos(o), my = -1.5f * std::sin(o);
+        for (Offset const& q : { b, c })
+            CHECK(std::sqrt((q.x - mx) * (q.x - mx) + (q.y - my) * (q.y - my)) > 1.0f);
+        // every object faces the fire
+        CHECK(std::fabs(std::cos(b.angle) * b.x + std::sin(b.angle) * b.y + 2.6f) < 0.01f);
+    }
+    CHECK(SlotOffset(3, 0.0f, 2.0f).x == SlotOffset(0, 0.0f, 2.0f).x);
+}
+
+TEST("camping: the default professions are complete and distinct")
+{
+    using namespace Bleakhold::CampRules;
+    std::set<uint32_t> skills;
+    std::set<std::string> keys;
+    std::set<uint32_t> objects;
+    for (Profession const& p : DefaultProfessions)
+    {
+        CHECK_MSG(skills.insert(p.skill).second, std::string("skill of ") + p.key + " is unique");
+        CHECK_MSG(keys.insert(p.key).second, std::string("key ") + p.key + " is unique");
+        std::string const k = p.key;
+        bool ok = !k.empty();
+        for (char ch : k)
+            ok = ok && ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z'));
+        CHECK_MSG(ok, "profession key [" + k + "] is a config key part");
+        for (uint8_t i = 0; i < TierCount; ++i)
+        {
+            CHECK_MSG(p.objects[i] != 0 && p.buffs[i] != 0, k + " tier " + std::to_string(i + 1));
+            CHECK_MSG(objects.insert(p.objects[i]).second, k + " objects are not shared with another tier or profession");
+        }
+        CHECK_MSG(p.buffs[0] != p.buffs[1] && p.buffs[1] != p.buffs[2] && p.buffs[0] != p.buffs[2], k + " buffs differ per tier");
+        // never an aura that raises XP itself (the module's bonus would come on top): Ribbon Dance
+        for (uint32_t b : p.buffs)
+            CHECK_MSG(b != 29175, k + " gives no XP aura");
+    }
+    CHECK(DefaultProfessions.size() == 14);
+    for (uint32_t s : { 129u, 164u, 165u, 171u, 182u, 185u, 186u, 197u, 202u, 333u, 356u, 393u, 755u, 773u })
+        CHECK_MSG(skills.count(s), "profession " + std::to_string(s));
+    CHECK(SkillBlacksmithing == 164 && AnvilTier == 2);
+    CHECK(DefaultProfessions[1].skill == 164 && DefaultProfessions[1].objects[2] == 171715);   // The Great Anvil
+}
+
+TEST("camping: CAMPST is sent again only when more than a timer changed")
+{
+    using namespace Bleakhold::CampRules;
+    CampState a;
+    a.state = CampStateId::Resting; a.settleSec = 40; a.fireSec = 800; a.mine = true; a.cooldownSec = 700; a.warmthSec = 0;
+    a.xpPct = 5; a.objects = { { 171, 1, false } }; a.place = { { 164, 2 } }; a.glideSec = 0u; a.repair = false; a.fed = true;
+    CampState b = a;
+    CHECK(!Changed(a, b));
+    b.settleSec = 10; b.fireSec = 300; b.cooldownSec = 1;   // counting down
+    CHECK(!Changed(a, b));
+    auto changedBy = [&](auto edit) { CampState c = a; edit(c); return Changed(a, c); };
+    CHECK(changedBy([](CampState& c) { c.state = CampStateId::Camping; }));
+    CHECK(changedBy([](CampState& c) { c.fireSec = 0; }));            // the fire went out
+    CHECK(changedBy([](CampState& c) { c.cooldownSec = 0; }));        // the cooldown is over
+    CHECK(changedBy([](CampState& c) { c.warmthSec = 1800; }));       // the warmth started
+    CHECK(changedBy([](CampState& c) { c.xpPct = 15; }));
+    CHECK(changedBy([](CampState& c) { c.mine = false; }));
+    CHECK(changedBy([](CampState& c) { c.objects.push_back({ 164, 2, true }); }));
+    CHECK(changedBy([](CampState& c) { c.objects[0].tier = 2; }));
+    CHECK(changedBy([](CampState& c) { c.place.clear(); }));
+    CHECK(changedBy([](CampState& c) { c.place[0].tier = 3; }));
+    CHECK(changedBy([](CampState& c) { c.glideSec = 120u; }));        // glide used
+    CHECK(changedBy([](CampState& c) { c.glideSec.reset(); }));       // cannot glide any more
+    CHECK(changedBy([](CampState& c) { c.repair = true; }));
+    CHECK(changedBy([](CampState& c) { c.fed = false; }));
+}
+
+TEST("camping: the CAMPST encoder keeps to the document")
+{
+    CampState s;
+    CHECK_EQ(EncodeCampState(s), "N,0,0,0,0,0,0,,,,0,0");                // nothing: glide empty in the middle
+    s.settleSec = 30;                                                     // settle only with R
+    CHECK_EQ(EncodeCampState(s), "N,0,0,0,0,0,0,,,,0,0");
+    s.state = CampStateId::Resting;
+    CHECK_EQ(EncodeCampState(s), "R,30,0,0,0,0,0,,,,0,0");
+    s.state = CampStateId::Camping;
+    s.objects = { { 164, 0, true }, { 171, 9, false } };                 // tiers clamped to 1..3
+    s.glideSec = 0u;
+    CHECK_EQ(EncodeCampState(s), "C,0,0,0,0,0,0,164~1~1:171~3~0,,0,0,0");
+    for (uint32_t i = 0; i < 20; ++i)
+    {
+        s.objects.push_back({ 100 + i, 1, false });
+        s.place.push_back({ 200 + i, 2 });
+    }
+    std::string const big = EncodeCampState(s);
+    std::vector<std::string> f = SplitStr(big, ',');
+    CHECK(f.size() == 12);
+    CHECK(SplitStr(f[7], ':').size() == MaxCampObjects && SplitStr(f[8], ':').size() == MaxCampPlaces);
 }
 
 TEST("endpoint: SEQ per message, revisions per topic, snapshots reset by HELLO")
@@ -815,6 +1036,25 @@ static std::map<std::string, std::string> BuiltExamples()
         Unbox u;
         u.caseItemId = 990001; u.rewardIndex = 2; u.itemId = 32838; u.count = 1; u.nonce = 7;
         m["UNBOX 6"] = EncodeUnbox(u);
+    }
+    {
+        CampState n;   // not at a fire: warmth and food on, the glide on cooldown
+        n.state = CampStateId::None; n.cooldownSec = 640; n.warmthSec = 1500; n.xpPct = 15; n.glideSec = 95u; n.repair = false; n.fed = true;
+        m["CAMPST 7"] = EncodeCampState(n);
+        CampState r;   // just made camp: resting at the own fire, may place two objects, a blacksmith
+        r.state = CampStateId::Resting; r.settleSec = 60; r.fireSec = 900; r.mine = true; r.cooldownSec = 900; r.xpPct = 5;
+        r.place = { { 164, 2 }, { 197, 3 } }; r.glideSec = 0u; r.repair = true; r.fed = true;
+        m["CAMPST 8"] = EncodeCampState(r);
+        CampState c;   // settled, after placing the anvil next to someone's alchemy object
+        c.state = CampStateId::Camping; c.fireSec = 700; c.mine = true; c.cooldownSec = 880; c.warmthSec = 1800; c.xpPct = 15;
+        c.objects = { { 164, 2, true }, { 171, 1, false } }; c.glideSec = 0u; c.repair = true; c.fed = true;
+        m["CAMPST 9"] = EncodeCampState(c);
+        ErrorReply g;
+        g.op = IntentType::Glide; g.seq = 26; g.code = "glide_cooldown"; g.text = "You can glide again in 95 s.";
+        m["ERR s"] = EncodeError(g);
+        ErrorReply rp;
+        rp.op = IntentType::Repair; rp.seq = 27; rp.code = "repair_gold"; rp.text = "You cannot pay for the repair (2g 10s 0c).";
+        m["ERR t"] = EncodeError(rp);
     }
     return m;
 }

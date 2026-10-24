@@ -4,6 +4,7 @@
  */
 
 #include "BleakholdMgr.h"
+#include "BleakholdCamp.h"
 #include "BleakholdCodec.h"
 #include "BleakholdData.h"
 #include "BleakholdEmoji.h"
@@ -42,6 +43,9 @@ namespace Bleakhold
         char const* const TextEmojiOff = "Emojis are turned off on this realm.";
         char const* const TextDanceOff = "Dances are turned off on this realm.";
         char const* const TextCaseOff = "Cases are turned off on this realm.";
+        char const* const TextCampOff = "Camping is turned off on this realm.";
+        char const* const TextGlideOff = "Gliding is turned off on this realm.";
+        char const* const TextRepairOff = "Field repair is turned off on this realm.";
 
         bool IsHex6(std::string const& s)
         {
@@ -135,6 +139,16 @@ namespace Bleakhold
             bits |= FeatureDance;  // the catalogue is never empty (static_assert in BleakholdDance.h)
         // FeatureCases also needs a case in bleakhold_case: SendHello adds it
         c.caseEnable = sConfigMgr->GetOption<bool>("BleakholdUi.Case.Enable", true);
+        // camping (section 16): the rest of BleakholdUi.Camp.*, Glide.* and Repair.* is Camp::LoadConfig's
+        c.campEnable = sConfigMgr->GetOption<bool>("BleakholdUi.Camp.Enable", true);
+        if (c.campEnable)
+            bits |= FeatureCamp;
+        c.glideEnable = sConfigMgr->GetOption<bool>("BleakholdUi.Glide.Enable", true);
+        if (c.glideEnable)
+            bits |= FeatureGlide;
+        c.repairEnable = sConfigMgr->GetOption<bool>("BleakholdUi.Repair.Enable", true);
+        if (c.repairEnable)
+            bits |= FeatureFieldRepair;
         c.serverPullTimer = sConfigMgr->GetOption<bool>("BleakholdUi.KeyRun.ServerPullTimer", false);
         if (c.serverPullTimer)
             bits |= FeatureServerPullTimer;
@@ -160,6 +174,9 @@ namespace Bleakhold
         l.emojiIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.Emoji.CooldownMs", 2500);
         l.danceIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.Dance.CooldownMs", 1000);
         l.caseIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.Case.CooldownMs", 1000);
+        l.campIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.CampIntervalMs", 1000);
+        l.glideIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.GlideIntervalMs", 1000);
+        l.repairIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.RepairIntervalMs", 2000);
 
         c.heartbeatMs = 1000 * std::max<uint32_t>(1, sConfigMgr->GetOption<uint32_t>("BleakholdUi.KeyRun.HeartbeatSec", 15));
         c.colorTagsWithoutAddon = sConfigMgr->GetOption<bool>("BleakholdUi.Announce.ColorTagsWithoutAddon", true);
@@ -180,12 +197,15 @@ namespace Bleakhold
         c.leaderboardPageSize = std::clamp<uint32_t>(sConfigMgr->GetOption<uint32_t>("BleakholdUi.Leaderboard.PageSize", 10), 3, 50);
         c.leaderboardMaxRows = std::max<uint32_t>(10, sConfigMgr->GetOption<uint32_t>("BleakholdUi.Leaderboard.MaxRows", 1000));
 
-        std::lock_guard<std::recursive_mutex> guard(_lock);
-        _cfg = c;
-        _enabled = c.enable;
-        _debugOn = c.debug;
-        for (auto& [guid, slot] : _slots)
-            slot.ep.SetLimits(_cfg.limits);
+        {
+            std::lock_guard<std::recursive_mutex> guard(_lock);
+            _cfg = c;
+            _enabled = c.enable;
+            _debugOn = c.debug;
+            for (auto& [guid, slot] : _slots)
+                slot.ep.SetLimits(_cfg.limits);
+        }
+        Camp::Instance().LoadConfig();   // never under the Mgr lock (lock order: Camp, then Mgr)
     }
 
     Config Mgr::CfgCopy()
@@ -328,6 +348,9 @@ namespace Bleakhold
             case IntentType::Hello:
             {
                 SendHello(player);
+                // the camping state follows HELLO when a camping feature is on (section 16)
+                if (_cfg.featureBits & (FeatureCamp | FeatureGlide | FeatureFieldRepair))
+                    Refresh(player, Topic::CampState);
                 std::function<void(Player*, Intent const&)> observer;
                 {
                     std::lock_guard<std::recursive_mutex> guard(_lock);
@@ -398,6 +421,24 @@ namespace Bleakhold
             return;
         }
 
+        // BleakholdUi.Camp.Enable, Glide.Enable and Repair.Enable hold for custom handlers too (section 16). REPAIR is also
+        // camping's (a camp anvil), so it is off only when both are.
+        if (intent.type == IntentType::Camp && !_cfg.campEnable)
+        {
+            Refuse(player, intent, "camp_off", TextCampOff);
+            return;
+        }
+        if (intent.type == IntentType::Glide && !_cfg.glideEnable)
+        {
+            Refuse(player, intent, "glide_off", TextGlideOff);
+            return;
+        }
+        if (intent.type == IntentType::Repair && !_cfg.repairEnable && !_cfg.campEnable)
+        {
+            Refuse(player, intent, "repair_off", TextRepairOff);
+            return;
+        }
+
         Ui::IntentHandler handler;
         {
             std::lock_guard<std::recursive_mutex> guard(_lock);
@@ -423,7 +464,7 @@ namespace Bleakhold
         h.serverEpoch = static_cast<uint32_t>(GameTime::GetGameTime().count());
         h.utcOffsetMin = _cfg.utcOffsetAuto ? LocalUtcOffsetMinutes() : _cfg.utcOffsetMin;
         h.dataVer = DataVersion();
-        h.featureBits = _cfg.featureBits | (cases ? FeatureCases : 0);
+        h.featureBits = _cfg.featureBits | (cases ? static_cast<uint32_t>(FeatureCases) : 0u);
         if (season)
             h.seasonId = season;
         if (resets.first)
@@ -885,6 +926,7 @@ namespace Bleakhold
         }
 
         Data::Instance().Update(now);
+        Camp::Instance().Update(now);
         FlushAll();
     }
 

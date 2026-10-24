@@ -58,6 +58,9 @@ namespace Bleakhold::Proto
         uint32_t emojiIntervalMs = 2500;     // EMOJI: 1 per BleakholdUi.Emoji.CooldownMs
         uint32_t danceIntervalMs = 1000;     // DANCE: 1 per BleakholdUi.Dance.CooldownMs
         uint32_t caseIntervalMs = 1000;      // CASEOPEN: 1 per BleakholdUi.Case.CooldownMs
+        uint32_t campIntervalMs = 1000;      // CAMP (every act together): 1 per BleakholdUi.RateLimit.CampIntervalMs
+        uint32_t glideIntervalMs = 1000;     // GLIDE: 1 per BleakholdUi.RateLimit.GlideIntervalMs
+        uint32_t repairIntervalMs = 2000;    // REPAIR: 1 per BleakholdUi.RateLimit.RepairIntervalMs
         uint32_t duplicateWindowMs = 1000;   // the same action intent again within this window is ignored (0 = off)
     };
 
@@ -135,6 +138,9 @@ namespace Bleakhold::Proto
         TokenBucket _emoji;
         TokenBucket _dance;
         TokenBucket _case;
+        TokenBucket _camp;
+        TokenBucket _glide;
+        TokenBucket _repair;
         std::unordered_map<std::string, uint64_t> _lastGet;
         struct LastIntent { std::string key; uint64_t atMs = 0; bool set = false; };
         std::array<LastIntent, static_cast<std::size_t>(IntentType::Count)> _last{};

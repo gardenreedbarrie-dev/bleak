@@ -10,6 +10,8 @@
 #include "BleakholdMessages.h"
 #include "BleakholdCodec.h"
 
+#include <algorithm>
+
 namespace Bleakhold
 {
     using Proto::PayloadWriter;
@@ -256,6 +258,22 @@ namespace Bleakhold
     {
         PayloadWriter w;
         w.Int(m.caseItemId).Int(m.rewardIndex).Int(m.itemId).Int(std::max<uint32_t>(1, m.count)).Int(m.nonce);
+        return w.Take();
+    }
+
+    std::string EncodeCampState(CampState const& m)
+    {
+        auto tier = [](uint8_t t) { return static_cast<int64_t>(std::clamp<uint8_t>(t, 1, 3)); };
+        std::vector<std::vector<std::string>> objects;
+        for (CampObjectInfo const& o : m.objects)
+            objects.push_back({ PayloadWriter::TuplePart(o.skill), PayloadWriter::TuplePart(tier(o.tier)), PayloadWriter::TuplePart(o.mine ? 1 : 0) });
+        std::vector<std::vector<std::string>> place;
+        for (CampPlace const& p : m.place)
+            place.push_back({ PayloadWriter::TuplePart(p.skill), PayloadWriter::TuplePart(tier(p.tier)) });
+        PayloadWriter w;
+        w.Char(Letter(m.state)).Int(m.state == CampStateId::Resting ? m.settleSec : 0).Int(m.fireSec).Bool(m.mine).Int(m.cooldownSec)
+            .Int(m.warmthSec).Int(m.xpPct).Tuples(objects, MaxCampObjects).Tuples(place, MaxCampPlaces).Opt(m.glideSec).Bool(m.repair)
+            .Bool(m.fed);
         return w.Take();
     }
 

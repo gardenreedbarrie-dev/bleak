@@ -27,7 +27,7 @@ import xml.etree.ElementTree as ET
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-ALLOWED_SET = re.compile(r"^(Bleakhold\w*|SLASH_BLEAKHOLD(?:TELL|TRANSMOG)?\d+|BINDING_HEADER_BLEAKHOLD|BINDING_NAME_BLEAKHOLD_\w+|ToggleCollectionsJournal|ChatEdit_ExtractTellTarget)$")
+ALLOWED_SET = re.compile(r"^(Bleakhold\w*|SLASH_BLEAKHOLD(?:TELL|TRANSMOG|MAKECAMP)?\d+|BINDING_HEADER_BLEAKHOLD|BINDING_NAME_BLEAKHOLD_\w+|ToggleCollectionsJournal|ChatEdit_ExtractTellTarget)$")
 FORBIDDEN = [
     (re.compile(r"\bC_[A-Z]\w*\s*\."), "C_* namespaces do not exist in 3.3.5a"),
     (re.compile(r"\bC_Timer\b"), "C_Timer does not exist in 3.3.5a"),

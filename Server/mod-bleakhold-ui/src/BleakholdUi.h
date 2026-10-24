@@ -60,7 +60,9 @@ namespace Bleakhold::Ui
     //   WEHANDIN -> token hand-in from mod_bleakhold_ui.conf (BleakholdUi.WarEffort.*), else "unavailable";
     //   LBQ -> the module's own leaderboard tables; EMOJI -> emoji bubble (BleakholdUi.Emoji.*);
     //   DANCE -> Bleakhold dance (BleakholdUi.Dance.*); CASEOPEN -> the module's cases (bleakhold_case,
-    //   BleakholdUi.Case.*).
+    //   BleakholdUi.Case.*); CAMP GLIDE REPAIR -> the module's camping (BleakholdUi.Camp.*, Glide.*, Repair.*).
+    //   BleakholdUi.Camp.Enable, Glide.Enable and Repair.Enable hold for your handler too (ERR camp_off, glide_off,
+    //   repair_off).
     //   HELLO, GET and PING are handled by the module.
     using IntentHandler = std::function<void(Player* player, Intent const& intent)>;
     void OnIntent(IntentType type, IntentHandler handler);
@@ -92,7 +94,7 @@ namespace Bleakhold::Ui
     //   WEEK TASKS KEY BOARD QUEUE COLL RIFT -> the last state you pushed;
     //   ERA -> bleakhold_week_schedule; SEASON -> bleakhold_season + war effort tables;
     //   SET, LIDX -> bleakhold_legacy_set; FIRSTS -> bleakhold_server_first; MPLUS -> the run tracker;
-    //   DEF -> the definition tables. Example:
+    //   DEF -> the definition tables; CAMPST -> the module's camping state. Example:
     //     Ui::OnRequest(Topic::Week, [](Player* p, TopicRequest const&) { Ui::SendWeek(p, MySeason::Week(p)); });
     using TopicProvider = std::function<void(Player* player, TopicRequest const& request)>;
     void OnRequest(Topic topic, TopicProvider provider);
@@ -124,6 +126,7 @@ namespace Bleakhold::Ui
     void SendCases(Player* player, CaseList const& cases);            // CASES (section 15)
     void SendCase(Player* player, CaseInfo const& info);              // CASE (answer to GET CASE,item)
     void SendUnbox(Player* player, Unbox const& won);                // UNBOX (answer to CASEOPEN)
+    void SendCampState(Player* player, CampState const& camp);        // CAMPST (section 16; the module sends it itself)
     void RiftStatus(Player* player, RiftState const& rift);           // RIFT (remembered for GET RIFT)
     void RiftEnded(Player* player, RiftEnd const& summary);           // RIFTE
     void SendLeaderboard(Player* player, Leaderboard const& page);    // LB

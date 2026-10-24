@@ -160,7 +160,7 @@ These topics are revisioned. The first field of the first record of every messag
   ignored as a duplicate. A gap, or a delta before any snapshot, makes the client send `GET <topic>`;
   answer with a snapshot.
 - Unrevisioned ops (`MPS`, `MP`, `MPE`, `RIFT`, `RIFTE`, `SET`, `LB`, `LBME`, `FIRSTS`, `DEF`, `TOAST`,
-  `ERR`, `HELLO`, `PONG`, `CASES`, `CASE`, `UNBOX`) are full states or events; each one stands alone.
+  `ERR`, `HELLO`, `PONG`, `CASES`, `CASE`, `UNBOX`, `CAMPST`) are full states or events; each one stands alone.
 
 Push a new snapshot or delta whenever something changes (task progress, queue state, keystone, run
 events). The client also asks with `GET` when a window opens; answer every `GET` with the current
@@ -191,6 +191,9 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `EMOJI` | `emojiId` | show emoji `emojiId` above the player's head to everyone nearby (section 13). `emojiId`: 0..255, an index into the emoji catalogue, `Tools/EmojiForge/emojis.json` |
 | `DANCE` | `danceId` | dance Bleakhold dance `danceId` until the player moves (section 14). `danceId`: 0..1023, an index into the dance catalogue, `Tools/DanceForge/dances.json` |
 | `CASEOPEN` | `caseItemId, nonce` | open one case `caseItemId` from the player's bags (section 15); `nonce` (0..2147483647) comes back in `UNBOX` |
+| `CAMP` | `act[, skill]` | camping (section 16). `act`: `M` make camp here, `O` place a camp object at the fire the player is at, `P` pack up the player's fire. `skill` (1..2147483647, a SkillLine id from `CAMPST` `place`) is sent with `O` and only with `O`: `CAMP M`, `CAMP O,164`, `CAMP P` |
+| `GLIDE` | | start the glide, a short slow fall (High Elves; section 16) |
+| `REPAIR` | | repair everything the player wears and carries in the bags, for the normal cost (section 16) |
 
 `GET` topics and what to send back:
 
@@ -203,6 +206,7 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `DEF` | `0` (all kinds) | every `DEF` kind, then `DEF Z` |
 | `CASES` | | `CASES` (section 15) |
 | `CASE` | `caseItemId` | `CASE` for that case; nothing when it is not one (section 15) |
+| `CAMPST` | | `CAMPST` (section 16) |
 
 Examples:
 
@@ -228,6 +232,12 @@ C> 1 EMOJI i 1/1 7
 C> 1 DANCE j 1/1 5
 C> 1 GET k 1/1 CASES;CASE,990001
 C> 1 CASEOPEN l 1/1 990001,7
+C> 1 GET m 1/1 CAMPST
+C> 1 CAMP n 1/1 M
+C> 1 CAMP o 1/1 O,164
+C> 1 CAMP p 1/1 P
+C> 1 GLIDE q 1/1
+C> 1 REPAIR r 1/1
 ```
 
 ## 7. Server to client
@@ -248,7 +258,9 @@ may define more with `DEF X`), item ids are item template entries.
   cache the client sends `GET DEF,0`.
 - `featureBits`: 1 Rift scoring live, 2 Shards live, 4 the server sends the DBM pull timer itself
   (section 9), 8 season live, 16 leaderboards live, 32 collections live, 64 emoji bubbles live (section 13),
-  128 dances live (section 14), 256 cases live (section 15).
+  128 dances live (section 14), 256 cases live (section 15), 512 camping live (campfires, camp objects, warmth,
+  the food XP bonus, repair at a camp anvil; section 16), 1024 the High Elf glide live, 2048 blacksmiths repair
+  anywhere (section 16).
 - `dailyResetEpoch`/`weeklyResetEpoch`: the next resets (Unix time).
 - `siteUrl`: shown for copying under the leaderboards (there is no web browser in game).
 
@@ -267,7 +279,8 @@ S> 1 PONG 2 1/1 12345,1792648730
 ### ERR (an intent was refused)
 
 `op, seq, code, text` - the refused op, the client `SEQ` of that message, a machine code, a sentence for
-the player (shown in the window and in the error frame).
+the player (shown in the window and in the error frame). `busy` (over an op's rate limit, section 8) can answer
+any action intent; the other codes are listed with each feature (sections 13 to 16).
 
 ```
 S> 1 ERR 3 1/1 TCLAIM,4,not_claimable,That task cannot be claimed yet.
@@ -516,6 +529,9 @@ does not throttle addon messages for you (AzerothCore's addon flood check is not
 | `EMOJI` | 1 per `BleakholdUi.Emoji.CooldownMs` (2.5 s); the addon waits 3.25 s itself |
 | `DANCE` | 1 per `BleakholdUi.Dance.CooldownMs` (1 s); the addon waits 1.25 s itself |
 | `CASEOPEN` | 1 per `BleakholdUi.Case.CooldownMs` (1 s); the addon waits for `UNBOX` or `ERR` (at most 5 s) |
+| `CAMP` | 1 per `BleakholdUi.RateLimit.CampIntervalMs` (1 s), every `act` together |
+| `GLIDE` | 1 per `BleakholdUi.RateLimit.GlideIntervalMs` (1 s); the glide itself has a 120 s cooldown (`ERR glide_cooldown`) |
+| `REPAIR` | 1 per `BleakholdUi.RateLimit.RepairIntervalMs` (2 s) |
 
 Also bound the work a single message can cause (for example a `GET LIDX` answer is cached per player
 rather than rebuilt on every request).
@@ -711,4 +727,220 @@ S> 1 CASES 4 1/1 990001;990002
 S> 1 CASE 5 1/1 990001,Glaive Case,Unlock it to receive one of the items below.;32837,1,1200,4;32838,1,400,5
 C> 1 CASEOPEN l 1/1 990001,7
 S> 1 UNBOX 6 1/1 990001,2,32838,1,7
+```
+
+## 16. Camping
+
+Camping lets a player make camp in the wild, rest by any lit campfire as at an inn, and set up camp objects of their
+professions that buff everyone who settles at the fire. It also carries two small extras: blacksmiths repair anywhere,
+and High Elves glide. Each part has its own `HELLO` feature bit and switch: 512 camping (`BleakholdUi.Camp.Enable`),
+1024 glide (`BleakholdUi.Glide.Enable`), 2048 field repair (`BleakholdUi.Repair.Enable`). The server decides
+everything; `CAMPST` tells the client what it decided, and the client counts its timers down itself.
+
+**Fires.** `CAMP M` lights a camp fire a step in front of the player (`BleakholdUi.Camp.FireEntry`, a WotLK bonfire
+that is also a cooking fire) that goes out by itself after `BleakholdUi.Camp.FireDuration` (900 s), also when its
+maker logs out. A player has one camp fire: a new one puts out the old one. Every lit fire counts, not just camp
+fires: the Basic Campfires players light with cooking (spell 818, game object 29784; not its world spawns) and the
+entries of `BleakholdUi.Camp.ExtraFireEntries`. Fires count only on the continents, never in a dungeon, raid,
+battleground or arena.
+
+**Resting and settling.** A player is *at a fire* within `BleakholdUi.Camp.Radius` (10 yd) of a lit fire on the same
+map and phase, alive, out of combat, not on a flight path or a vehicle, not in a free-for-all PvP area (a world arena
+such as Gurubashi) and not between maps. A player at a fire
+rests (`R`): rested XP builds up as at an inn, and a logout there counts as an inn logout. Leaving the radius, combat,
+death or the fire going out ends that rest at once (inn and city rest are never touched). After
+`BleakholdUi.Camp.SettleTime` (60 s) at the same fire the player settles (`C`): they get the buff of every camp object
+at that fire (for `BleakholdUi.Camp.BuffDuration`, 3600 s, unless the spell is passive or permanent) and Campfire
+Warmth for `BleakholdUi.Camp.WarmthDuration` (1800 s). Combat or another fire starts the settle time over. Settling
+again starts the warmth and the buffs over; they never add up, and a profession's buff never replaces a higher tier
+of the same profession's buff the player already has. A camp object placed at a fire gives its buff at once to the
+players already settled there.
+
+**Camp objects.** `CAMP O,skill` places a camp object of the profession `skill` (a SkillLine id) at the fire the
+player is at. A fire holds three, one per player. The player places the highest tier their skill reaches
+(`BleakholdUi.Camp.TierSkill`: 75, 225, 375 for tiers 1, 2, 3); objects stand around the fire and last as long as it
+(objects at a fire that never goes out last `BleakholdUi.Camp.FireDuration`). `CAMP P` puts out the player's fire with
+its objects: the fire they stand at when it is theirs (a camp fire, or a Basic Campfire they lit), else their camp
+fire wherever it is. The professions and their default objects (`BleakholdUi.Camp.Profession.<Name>` sets the objects
+and buffs):
+
+| `skill` | Profession | Tier 1 | Tier 2 | Tier 3 |
+|---|---|---|---|---|
+| 171 | Alchemy | Apothecary Vials and Bottles | Alchemist's Table | Alchemy Lab |
+| 164 | Blacksmithing | Anvil | Forge | The Great Anvil |
+| 333 | Enchanting | Blue Ground Rune | Night Elf Moon Crystal | Rune Circle |
+| 202 | Engineering | Lunchbox Tools | Gnome Terminal | Toshley's Turbo Tesla Turret |
+| 182 | Herbalism | Small Basket | Herb pile | Large herb pile |
+| 773 | Inscription | Rolled Scroll | Open Book | Apothecary Bookcase |
+| 755 | Jewelcrafting | Jewelcraft Grinder | Glowy Gem | Twilight Crystal Base |
+| 165 | Leatherworking | Leather Shirt on a stand | Meat Rack | Hanging Cloak |
+| 186 | Mining | Rock Rubble | Bar stack | Goblin Smelting Pot |
+| 393 | Skinning | Fresh Carcass | Skin pile | High Quality Fur |
+| 197 | Tailoring | Rug | Clothesline | Mana Loom |
+| 185 | Cooking | Cookpot | Potbelly Stove | Clay Oven |
+| 129 | First Aid | Bandage Crates | Bandage pile | Hospital Bed |
+| 356 | Fishing | Water Bucket | Fish of the Day | Rowboat |
+
+A Blacksmithing object of tier 2 or 3 is a camp anvil: anyone at that fire may `REPAIR`.
+
+**XP bonus.** While Campfire Warmth lasts the player gets `BleakholdUi.Camp.WarmthXpPct` (10) % more XP from kills
+and quests, and while they have a Well Fed buff (any food buff; also anywhere else) `BleakholdUi.Camp.FoodXpPct` (5) %.
+Together they are at most `BleakholdUi.Camp.MaxXpPct` (25) %. The bonus is added once, to the XP after the core's and
+the other modules' own multipliers, and players at the level cap get nothing.
+
+**Field repair.** `REPAIR` repairs everything the player wears and carries in the bags (not the bank) for the normal
+repair cost (with the realm's `Rate.RepairCost`; blacksmiths pay `BleakholdUi.Repair.BlacksmithDiscountPct`, 10 %,
+less). It is allowed for a blacksmith with at least `BleakholdUi.Repair.MinSkill` (75) skill anywhere (feature 2048)
+and for anyone at a fire with a camp anvil (feature 512). It is all or nothing: a player who cannot pay for all of it
+pays nothing. The result is a `TOAST` (kind `I`).
+
+**Glide.** `GLIDE` gives a player of a race in `BleakholdUi.Glide.Races` (22, the High Elf) a slow fall for
+`BleakholdUi.Glide.Duration` (10 s), every `BleakholdUi.Glide.Cooldown` (120 s), standing or falling. It is a triggered
+cast of `BleakholdUi.Glide.Spell` (Slow Fall): no reagent and no spell cooldown on the client.
+
+### CAMPST (the player's camping state)
+
+`state, settle, fire, mine, cd, warmth, xp, objs, place, glide, repair, fed`
+
+- `state`: `N` not at a fire, `R` at a fire (resting; the settle time runs), `C` camping (settled).
+- `settle`: seconds until the player settles (only with `R`, else 0).
+- `fire`: seconds until the fire the player is at goes out; 0 when not at a fire or at a fire that never goes out.
+- `mine`: `1` if that fire is the player's own (they may pack it up), else `0`.
+- `cd`: seconds until the player may make camp again (0 = now).
+- `warmth`: seconds of Campfire Warmth left (0 = none).
+- `xp`: the player's XP bonus now in percent (warmth and Well Fed together, at most `BleakholdUi.Camp.MaxXpPct`;
+  0 at the level cap).
+- `objs` (list): the camp objects at this fire, `skill~tier~mine` (`mine` 1 for the player's own object).
+- `place` (list): what the player may place here now, `skill~tier`: each of their professions that reaches tier 1,
+  at the highest tier they reach. Empty when they are not at a fire, the fire holds three objects or they already
+  placed one there.
+- `glide`: seconds until the player may glide again (0 = now); empty when they cannot glide (race, or gliding off).
+- `repair`: `1` when the player qualifies for `REPAIR` (a blacksmith anywhere, or at a fire with a camp anvil), else
+  `0`. `REPAIR` still refuses a dead player or one in combat.
+- `fed`: `1` while the player has a Well Fed buff (the food XP bonus), else `0`.
+
+The server sends `CAMPST` after `HELLO` when one of the three feature bits is on, for `GET CAMPST`, and whenever a
+field changes other than by counting down: the player comes to a fire or leaves it, settles, an object is placed or
+taken away, a fire goes out, a cooldown starts, the warmth starts or ends, `fed` or `xp` changes, the glide is used.
+It sends at most one `CAMPST` per second to a player (a later change waits for the second to pass).
+
+### Checks
+
+Every `CAMP`, whatever its `act`:
+
+| Check | Answer |
+|---|---|
+| malformed (`act` not `M`, `O` or `P`; `skill` missing with `O` or given with `M` or `P`) | dropped silently (section 1) |
+| the same `act` (and `skill`) as the player's last accepted `CAMP`, within 1 s | dropped silently |
+| the player's `CAMP` rate (`BleakholdUi.RateLimit.CampIntervalMs`, section 8) | `ERR` `busy` |
+| camping is off on the realm (`BleakholdUi.Camp.Enable = 0`, no feature bit 512) | `ERR` `camp_off` |
+| the player is not in the world | dropped silently |
+
+Then `CAMP M`, in this order:
+
+| Check | Answer |
+|---|---|
+| the player is dead | `ERR` `camp_dead` |
+| the player is in combat | `ERR` `camp_combat` |
+| the player is mounted, on a vehicle or a flight path, flying, falling or on a ship | `ERR` `camp_mounted` |
+| the player swims or stands in water | `ERR` `camp_water` |
+| the player is below `BleakholdUi.Camp.MinLevel` (5) | `ERR` `camp_level` |
+| the player is in a dungeon, raid, battleground or arena (a world arena such as Gurubashi too) | `ERR` `camp_instance` |
+| the player is in a capital city or a sanctuary | `ERR` `camp_city` |
+| the player is indoors | `ERR` `camp_indoors` |
+| the player made camp less than `BleakholdUi.Camp.Cooldown` (900 s) ago (a relog does not reset it) | `ERR` `camp_cooldown` |
+| the fire could not be made (logged for a game master) | `ERR` `failed` |
+
+`CAMP O,skill`:
+
+| Check | Answer |
+|---|---|
+| the player is dead | `ERR` `camp_dead` |
+| the player is in combat | `ERR` `camp_combat` |
+| the player is not at a fire | `ERR` `camp_nofire` |
+| the player already placed an object at this fire | `ERR` `camp_placed` |
+| the fire already holds three objects | `ERR` `camp_full` |
+| `skill` is not a profession with camp objects | `ERR` `camp_skill` |
+| the player's skill in it is below tier 1 (or they do not have it) | `ERR` `camp_skill` |
+| the object could not be made (logged) | `ERR` `failed` |
+
+`CAMP P`:
+
+| Check | Answer |
+|---|---|
+| the player has no fire to put out (neither the fire they stand at nor a camp fire elsewhere is theirs) | `ERR` `camp_nofire` |
+
+`GLIDE`:
+
+| Check | Answer |
+|---|---|
+| malformed (any field) | dropped silently (section 1) |
+| a `GLIDE` accepted within the last second | dropped silently |
+| the player's `GLIDE` rate (`BleakholdUi.RateLimit.GlideIntervalMs`, section 8) | `ERR` `busy` |
+| gliding is off on the realm (`BleakholdUi.Glide.Enable = 0`, no feature bit 1024) | `ERR` `glide_off` |
+| the player is not in the world | dropped silently |
+| the player's race (the real one, also in a battleground) is not in `BleakholdUi.Glide.Races` | `ERR` `glide_race` |
+| the player is dead | `ERR` `dead` |
+| the player glided less than `BleakholdUi.Glide.Cooldown` (120 s) ago | `ERR` `glide_cooldown` |
+| the aura did not land (logged) | `ERR` `failed` |
+
+`REPAIR`:
+
+| Check | Answer |
+|---|---|
+| malformed (any field) | dropped silently (section 1) |
+| a `REPAIR` accepted within the last second | dropped silently |
+| the player's `REPAIR` rate (`BleakholdUi.RateLimit.RepairIntervalMs`, section 8) | `ERR` `busy` |
+| field repair and camping are both off (`BleakholdUi.Repair.Enable = 0` and `BleakholdUi.Camp.Enable = 0`) | `ERR` `repair_off` |
+| the player is not in the world | dropped silently |
+| the player is dead | `ERR` `dead` |
+| the player is in combat | `ERR` `in_combat` |
+| neither a blacksmith with `BleakholdUi.Repair.MinSkill` (feature 2048) nor at a fire with a camp anvil (feature 512) | `ERR` `repair_skill` |
+| nothing needs repairing | `TOAST` (kind `I`) "Nothing needs repairing." |
+| the player cannot pay for the whole repair | `ERR` `repair_gold` |
+
+When every check passes the server repairs everything and sends a `TOAST` (kind `I`) with the cost.
+
+The module makes the rate, duplicate and on/off checks whoever handles `CAMP`, `GLIDE` and `REPAIR`; a server that
+replaces a handler (`Ui::OnIntent(IntentType::Camp, ...)`) keeps the others itself.
+
+Error codes of this section:
+
+| Code | Meaning |
+|---|---|
+| `camp_off` | camping is off on the realm |
+| `camp_dead` | dead |
+| `camp_combat` | in combat |
+| `camp_mounted` | mounted, on a vehicle, a flight path or a ship, flying or falling |
+| `camp_water` | in water |
+| `camp_level` | below the level to make camp |
+| `camp_instance` | in a dungeon, raid, battleground or arena |
+| `camp_city` | in a capital city or a sanctuary |
+| `camp_indoors` | indoors |
+| `camp_cooldown` | made camp not long ago |
+| `camp_nofire` | not at a fire (`O`), or no fire of one's own to pack up (`P`) |
+| `camp_full` | the fire already holds three camp objects |
+| `camp_placed` | already placed an object at this fire |
+| `camp_skill` | not a profession with camp objects, or the skill is too low |
+| `glide_off` | gliding is off on the realm |
+| `glide_race` | the player's race cannot glide |
+| `glide_cooldown` | glided not long ago |
+| `repair_off` | field repair (and camping) is off on the realm |
+| `repair_skill` | neither a blacksmith with enough skill nor at a camp anvil |
+| `repair_gold` | not enough money for the whole repair |
+| `dead`, `in_combat` | `GLIDE` while dead; `REPAIR` while dead or in combat |
+| `failed` | the server could not make the fire, the object or the glide (logged) |
+
+```
+C> 1 GET m 1/1 CAMPST
+S> 1 CAMPST 7 1/1 N,0,0,0,640,1500,15,,,95,0,1
+C> 1 CAMP n 1/1 M
+S> 1 CAMPST 8 1/1 R,60,900,1,900,0,5,,164~2:197~3,0,1,1
+C> 1 CAMP o 1/1 O,164
+S> 1 CAMPST 9 1/1 C,0,700,1,880,1800,15,164~2~1:171~1~0,,0,1,1
+C> 1 CAMP p 1/1 P
+C> 1 GLIDE q 1/1
+S> 1 ERR s 1/1 GLIDE,q,glide_cooldown,You can glide again in 95 s.
+C> 1 REPAIR r 1/1
+S> 1 ERR t 1/1 REPAIR,r,repair_gold,You cannot pay for the repair (2g 10s 0c).
 ```

@@ -55,6 +55,9 @@ namespace Bleakhold
         bool emojiEnable = true;              // EMOJI (the catalogue is BleakholdEmoji.h)
         bool danceEnable = true;              // DANCE (the catalogue is BleakholdDance.h)
         bool caseEnable = true;               // CASEOPEN (feature bit 256 also needs a case, Data::HasCases)
+        bool campEnable = true;               // CAMP, CAMPST, warmth and food XP (feature bit 512; BleakholdCamp.h)
+        bool glideEnable = true;              // GLIDE (feature bit 1024)
+        bool repairEnable = true;             // REPAIR for blacksmiths anywhere (feature bit 2048)
     };
 
     struct OutItem

@@ -7,6 +7,7 @@
  */
 
 #include "BleakholdData.h"
+#include "BleakholdCamp.h"
 #include "BleakholdCases.h"
 #include "BleakholdCodec.h"
 #include "BleakholdDance.h"
@@ -1471,5 +1472,11 @@ namespace Bleakhold
         m.SetDefaultHandler(IntentType::Emoji, [](Player* p, Intent const& in) { Data::Instance().Emoji(p, in); });
         m.SetDefaultHandler(IntentType::Dance, [](Player* p, Intent const& in) { Data::Instance().Dance(p, in); });
         m.SetDefaultHandler(IntentType::CaseOpen, [](Player* p, Intent const& in) { Data::Instance().OpenCase(p, in); });
+
+        // camping (section 16): BleakholdCamp.cpp
+        m.SetDefaultProvider(Topic::CampState, [](Player* p, TopicRequest const&) { Camp::Instance().RequestState(p); });
+        m.SetDefaultHandler(IntentType::Camp, [](Player* p, Intent const& in) { Camp::Instance().HandleCamp(p, in); });
+        m.SetDefaultHandler(IntentType::Glide, [](Player* p, Intent const& in) { Camp::Instance().HandleGlide(p, in); });
+        m.SetDefaultHandler(IntentType::Repair, [](Player* p, Intent const& in) { Camp::Instance().HandleRepair(p, in); });
     }
 }

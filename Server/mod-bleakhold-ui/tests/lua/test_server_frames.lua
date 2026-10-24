@@ -207,3 +207,151 @@ for _, size in ipairs({ 1000, 251, 64 }) do
         H.eq(events.ERR, 1)
     end)
 end
+
+------------------------------------------------------------------------------------------------------
+-- CAMPST (section 16) through the same receive path: every state, full and empty lists, empty fields, at the
+-- server's frame sizes (Comm.BuildFrames cuts like the module's framer) and in raw cuts that split tuples,
+-- delivered in order and out of order. The values follow docs/BleakholdProtocol.md section 16.
+------------------------------------------------------------------------------------------------------
+local CAMP_BITS = { [6] = 512 + 1024 + 2048 }
+
+local campSeq = 500
+local function campFrames(C, payload, size)
+    campSeq = campSeq + 1
+    return assert(C.BuildFrames("CAMPST", campSeq, payload, size))
+end
+
+local function deliverAll(M, frames, reverse)
+    local from, to, step = 1, #frames, 1
+    if reverse then from, to, step = #frames, 1, -1 end
+    for i = from, to, step do
+        H.deliver(M, frames[i])
+    end
+end
+
+local function noDrops(C, what)
+    local drops = {}
+    for k, v in pairs(C.stats.dropped) do drops[#drops + 1] = k .. "=" .. v end
+    H.eq(#drops, 0, what .. ": dropped frames: " .. table.concat(drops, " "))
+    H.eq(C.stats.unknown, 0, what .. ": unknown ops")
+    H.eq(C.PendingChunks(), 0, what .. ": unfinished chunk buffers")
+end
+
+local CAMP_RESTING = { "R", 45, 870, 1, 880, 0, 0, { { 164, 2, 1 }, { 171, 1, 0 } }, { { 185, 1 }, { 356, 3 }, { 773, 2 } }, "", 0, 0 }
+local CAMP_SETTLED = { "C", 30, 600, 0, 0, 1500, 15, { { 164, 3, 0 }, { 197, 2, 1 }, { 999, 1, 0 } }, {}, 120, 1, 1 }
+local CAMP_LONG = { "C", 0, 600, 1, 0, 1500, 25, {}, {}, 0, 0, 1 }
+for i = 1, 8 do CAMP_LONG[8][i] = { 100 + i, (i - 1) % 3 + 1, i % 2 } end
+for i = 1, 16 do CAMP_LONG[9][i] = { 200 + i, (i - 1) % 3 + 1 } end
+
+for _, size in ipairs({ 1000, 251, 64 }) do
+    test("CAMPST frames (max body " .. size .. "): every state reaches the addon's state and the camp UI", function(M, ns)
+        local C, S = ns.Comm, ns.S
+        H.hello(M, CAMP_BITS)
+        M.Advance(0.3)
+        local settled = 0
+        ns.On("CAMP_SETTLED", function() settled = settled + 1 end)
+        local f, ind = M.env.BleakholdCampFrame, M.env.BleakholdCampStatus
+
+        -- R: resting at the own fire, objects and places, no glide (empty field)
+        local frames = campFrames(C, H.payload({ CAMP_RESTING }), size)
+        for _, body in ipairs(frames) do H.ok(#body <= size, "frame within " .. size .. " bytes") end
+        deliverAll(M, frames)
+        M.Advance(0.3)
+        noDrops(C, "resting")
+        local c = S.camp
+        H.eq(c.state, "R"); H.eq(c.settle, 45); H.eq(c.fire, 870); H.eq(c.mine, true); H.eq(c.cd, 880)
+        H.eq(c.warmth, 0); H.eq(c.xp, 0); H.eq(c.glide, nil, "empty glide: cannot glide"); H.eq(c.repair, false); H.eq(c.fed, false)
+        H.eq(#c.objs, 2); H.eq(c.objs[1].skill, 164); H.eq(c.objs[1].tier, 2); H.eq(c.objs[1].mine, true); H.eq(c.objs[2].mine, false)
+        H.eq(#c.place, 3); H.eq(c.place[2].skill, 356); H.eq(c.place[2].tier, 3); H.eq(c.place[3].skill, 773)
+        H.ok(f:IsShown(), "camp frame at the fire"); H.eq(f.state:GetText(), "Resting")
+        H.eq(f.place[1].label:GetText(), "Place Cookpot"); H.eq(f.place[2].label:GetText(), "Place Rowboat")
+        H.eq(f.place[3].label:GetText(), "Place Open Tome"); H.ok(not f.place[4]:IsShown())
+        H.ok(f.packBtn:IsShown() and not f.repairBtn:IsShown(), "own fire, no anvil")
+        H.ok(not ind:IsShown(), "no indicator at a fire")
+        H.eq(settled, 0)
+
+        -- C: settled at someone else's fire (settle ignored outside R), an unknown profession, glide, repair, fed
+        deliverAll(M, campFrames(C, H.payload({ CAMP_SETTLED }), size), true)
+        M.Advance(0.3)
+        noDrops(C, "settled")
+        c = S.camp
+        H.eq(c.state, "C"); H.eq(c.settle, 0, "settle only with R"); H.eq(c.mine, false); H.eq(c.warmth, 1500); H.eq(c.xp, 15)
+        H.eq(c.glide, 120); H.eq(c.repair, true); H.eq(c.fed, true); H.eq(#c.place, 0); H.eq(c.objs[3].skill, 999)
+        H.eq(settled, 1, "settled once")
+        H.eq(f.state:GetText(), "Camping"); H.ok(f.repairBtn:IsShown() and not f.packBtn:IsShown())
+        H.ok(not f.place[1]:IsShown(), "nothing to place"); H.ok(f.objs[3]:IsShown(), "unknown profession still drawn")
+        H.contains(f.warmth:GetText(), "+15% XP")
+
+        -- the longest lists the server sends (8 objects, 16 places): chunked at the small sizes
+        local longPayload = H.payload({ CAMP_LONG })
+        local long = campFrames(C, longPayload, size)
+        if #longPayload > size - 20 then H.ok(#long > 1, "the long state is chunked at " .. size) end
+        deliverAll(M, long)
+        M.Advance(0.3)
+        noDrops(C, "long")
+        H.eq(#S.camp.objs, 8); H.eq(#S.camp.place, 16); H.eq(S.camp.place[16].skill, 216); H.eq(S.camp.xp, 25)
+        H.ok(f.objs[8]:IsShown(), "eight icons"); H.ok(f.place[6]:IsShown(), "six place buttons drawn")
+        H.eq(settled, 1, "still settled: no second toast")
+
+        -- N with only warmth and xp, every other field empty: the indicator replaces the frame
+        deliverAll(M, campFrames(C, "N,,,,,600,10,,,,,", size))
+        M.Advance(0.6)
+        noDrops(C, "away")
+        c = S.camp
+        H.eq(c.state, "N"); H.eq(c.fire, 0); H.eq(c.mine, false); H.eq(c.cd, 0); H.eq(c.warmth, 600); H.eq(c.glide, nil)
+        H.eq(#c.objs, 0); H.eq(#c.place, 0)
+        H.ok(not f:IsShown(), "frame hidden away from the fire"); H.ok(ind:IsShown(), "warmth indicator")
+        H.contains(ind.text:GetText(), "+10% XP")
+        M.Advance(30)
+        H.contains(ind.text:GetText(), "09:", "warmth counts down locally")
+
+        -- N with nothing: everything hides
+        deliverAll(M, campFrames(C, "N", size))
+        M.Advance(0.6)
+        H.ok(not f:IsShown() and not ind:IsShown(), "nothing shown")
+    end)
+end
+
+test("CAMPST in raw cuts (inside tuples and lists), duplicated and out of order", function(M, ns)
+    local C, S = ns.Comm, ns.S
+    H.hello(M, CAMP_BITS)
+    M.Advance(0.3)
+    local payload = H.payload({ CAMP_RESTING })
+    for _, chunk in ipairs({ 1, 3, 7 }) do
+        local frames = H.frames("CAMPST", payload, chunk)
+        H.ok(#frames > 5, "cut into many parts")
+        -- every second part first, then all of them (duplicates are ignored)
+        for i = 2, #frames, 2 do H.deliver(M, frames[i]) end
+        for i = #frames, 1, -1 do H.deliver(M, frames[i]) end
+        M.Advance(0.2)
+        noDrops(C, "chunk " .. chunk)
+        H.eq(S.camp.state, "R"); H.eq(#S.camp.objs, 2); H.eq(#S.camp.place, 3); H.eq(S.camp.place[3].tier, 2)
+        S.camp = nil
+    end
+    H.ok(C.stats.dups > 0, "duplicate parts counted")
+end)
+
+test("CAMPST frames produced by the C++ module (bh_gen) parse into a camp state", function(M, ns)
+    local data = loadFrames(1000)
+    local any = false
+    for _, chat in ipairs(data.frames) do
+        if chat:find("^BHs\t1 CAMPST ") then any = true end
+    end
+    if not any then
+        print("  (bh_gen.cpp sends no CAMPST yet: nothing to check here)")
+        return
+    end
+    for _, chat in ipairs(data.frames) do
+        local prefix, body = chat:match("^([^\t]*)\t(.*)$")
+        H.deliver(M, body, prefix)
+    end
+    M.Advance(0.5)
+    noDrops(ns.Comm, "bh_gen")
+    local c = ns.S.camp
+    H.ok(c and (c.state == "N" or c.state == "R" or c.state == "C"), "a camp state from the C++ encoder")
+    -- the last CAMPST of bh_gen.cpp: settled (settle is sent as 0 outside R), three objects, nothing to place
+    H.eq(c.state, "C"); H.eq(c.settle, 0); H.eq(c.fire, 700); H.eq(c.mine, true); H.eq(c.cd, 880); H.eq(c.warmth, 1800)
+    H.eq(c.xp, 15); H.eq(#c.objs, 3); H.eq(#c.place, 0); H.eq(c.glide, 95); H.eq(c.repair, true); H.eq(c.fed, true)
+    H.eq(c.objs[1].skill, 164); H.eq(c.objs[1].tier, 2); H.eq(c.objs[1].mine, true)
+    H.eq(c.objs[3].skill, 197); H.eq(c.objs[3].tier, 3); H.eq(c.objs[3].mine, false)
+end)

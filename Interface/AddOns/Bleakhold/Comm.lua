@@ -232,9 +232,11 @@ local function token(maxLen) return { kind = "token", max = maxLen } end
 
 Comm.TOPICS = {
     WEEK = 0, ERA = 0, TASKS = 0, KEY = 0, BOARD = 0, QUEUE = 0, MPLUS = 0, RIFT = 0, COLL = 0,
-    SET = 2, LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1, CASES = 0, CASE = 1,
+    SET = 2, LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1, CASES = 0, CASE = 1, CAMPST = 0,
 }
 
+-- A schema lists its fields in order; `min` (default: all of them) is how many must be given, the rest may be
+-- left off the end, and `check(...)` is called with the given values when they must agree with each other.
 Comm.INTENTS = {
     HELLO = { int(1, 99), token(16), int(0, INT32), token(8) },       -- proto, addonVer, dataVer, locale
     GET = "records",                                                  -- topic[,args] per record
@@ -254,6 +256,10 @@ Comm.INTENTS = {
     EMOJI = { int(0, 255) },                                          -- emoji id (the server checks its catalogue)
     DANCE = { int(0, 1023) },                                         -- dance id (the server checks its catalogue)
     CASEOPEN = { int(1, INT32), int(0, INT32) },                      -- case item id (from CASES), nonce (back in UNBOX)
+    -- M make camp, O place a camp object (skill line id from CAMPST place, only with O), P pack up my camp
+    CAMP = { enum("M", "O", "P"), int(1, INT32), min = 1, check = function(act, skill) return (act == "O") == (skill ~= nil) end },
+    GLIDE = {},
+    REPAIR = {},
 }
 
 local function checkField(spec, v)
@@ -317,7 +323,7 @@ function Comm.EncodeIntent(op, ...)
         return tconcat(recs, ";")
     end
     local n = select("#", ...)
-    if n ~= #schema then
+    if n < (schema.min or #schema) or n > #schema then
         return nil, "fields"
     end
     local fields = {}
@@ -327,6 +333,9 @@ function Comm.EncodeIntent(op, ...)
             return nil, "field " .. i
         end
         fields[i] = f
+    end
+    if schema.check and not schema.check(...) then
+        return nil, "fields"
     end
     return tconcat(fields, ",")
 end
@@ -785,7 +794,7 @@ end)
 
 -- Feature bits from HELLO (the server can hide boards that are not ready).
 Comm.FEATURE = { RIFT_SCORE = 1, SHARDS = 2, DBM_BY_SERVER = 4, SEASON = 8, LEADERBOARDS = 16, COLLECTIONS = 32,
-    EMOJI = 64, DANCE = 128, CASES = 256 }
+    EMOJI = 64, DANCE = 128, CASES = 256, CAMP = 512, GLIDE = 1024, FIELD_REPAIR = 2048 }
 
 function Comm.HasFeature(bitValue)
     local f = Comm.server and Comm.server.features or 0

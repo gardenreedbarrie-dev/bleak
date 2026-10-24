@@ -39,6 +39,9 @@ namespace Bleakhold
         Emoji,            // EMOJI    emojiId
         Dance,            // DANCE    danceId
         CaseOpen,         // CASEOPEN caseItemId, nonce
+        Camp,             // CAMP     act[,skill]
+        Glide,            // GLIDE
+        Repair,           // REPAIR
         Count
     };
 
@@ -46,13 +49,15 @@ namespace Bleakhold
     enum class Topic : uint8_t
     {
         Week, Era, Tasks, Key, Board, Queue, Coll, Lidx, Season,   // revisioned
-        Firsts, Mplus, Rift, Set, Def, Cases, Case,
+        Firsts, Mplus, Rift, Set, Def, Cases, Case, CampState,
         Count
     };
     inline constexpr uint8_t RevisionedTopicCount = 9;
 
     enum class QueueKind : char { Dungeon = 'D', Rift = 'R' };
     enum class Board : char { Keys = 'K', Rift = 'R', RaidEchoes = 'E', Firsts = 'F' };
+    // CAMP act (section 16): make camp, place a camp object, pack up my camp.
+    enum class CampAct : char { Make = 'M', Object = 'O', Pack = 'P' };
 
     // Role bits of QJOIN and QUEUE members.
     enum RoleMask : uint8_t { RoleTank = 1, RoleHealer = 2, RoleDamage = 4 };
@@ -121,6 +126,11 @@ namespace Bleakhold
         // CASEOPEN: an item id (the server checks it is a case) and the client's number, echoed in UNBOX
         uint32_t caseItemId = 0;
         uint32_t caseNonce = 0;
+
+        // CAMP: the action, and with CampAct::Object the skill line id of the profession (0 otherwise; the server
+        // checks it against its camp objects)
+        CampAct campAct = CampAct::Make;
+        uint32_t campSkill = 0;
     };
 
     // Why a message was not accepted.

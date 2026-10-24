@@ -57,6 +57,9 @@ namespace Bleakhold
         FeatureEmoji = 64,            // emoji bubbles (EMOJI, section 13)
         FeatureDance = 128,           // Bleakhold dances (DANCE, section 14)
         FeatureCases = 256,           // cases (CASEOPEN, section 15)
+        FeatureCamp = 512,            // camping: campfire, camp objects, warmth, food XP, repair at a camp anvil (section 16)
+        FeatureGlide = 1024,          // the High Elf glide (GLIDE, section 16)
+        FeatureFieldRepair = 2048,    // blacksmiths repair anywhere (REPAIR, section 16)
     };
 
     // One reward line of MPE / RIFTE.
@@ -400,6 +403,28 @@ namespace Bleakhold
     };
     struct Unbox { uint32_t caseItemId = 0, rewardIndex = 0, itemId = 0, count = 1, nonce = 0; };   // rewardIndex from 1
 
+    // CAMPST (section 16): the player's camping state. Timers are seconds left; the client counts them down.
+    enum class CampStateId : char { None = 'N', Resting = 'R', Camping = 'C' };
+    inline constexpr std::size_t MaxCampObjects = 8;   // list items sent (a fire holds at most 3)
+    inline constexpr std::size_t MaxCampPlaces = 16;
+    struct CampObjectInfo { uint32_t skill = 0; uint8_t tier = 1; bool mine = false; };   // tier 1..3
+    struct CampPlace { uint32_t skill = 0; uint8_t tier = 1; };
+    struct CampState
+    {
+        CampStateId state = CampStateId::None;   // N not at a fire, R resting there (settling), C camping (settled)
+        uint32_t settleSec = 0;                  // until settled; sent only with R
+        uint32_t fireSec = 0;                    // until the fire goes out (0: none, or a fire that never does)
+        bool mine = false;                       // the fire is the player's own
+        uint32_t cooldownSec = 0;                // until the player may make camp again
+        uint32_t warmthSec = 0;                  // Campfire Warmth left
+        uint32_t xpPct = 0;                      // the XP bonus now (warmth + Well Fed)
+        std::vector<CampObjectInfo> objects;     // at this fire
+        std::vector<CampPlace> place;            // what the player may place here now
+        Opt<uint32_t> glideSec;                  // glide cooldown; empty: the player cannot glide
+        bool repair = false;                     // REPAIR is allowed right now
+        bool fed = false;                        // a Well Fed buff (the food XP bonus) is active
+    };
+
     // ---------------------------------------------------------------------------------------------
     // Encoders: payload of each op (without frame header). `rev` is the revision of the topic.
     // ---------------------------------------------------------------------------------------------
@@ -430,6 +455,7 @@ namespace Bleakhold
     std::string EncodeCases(CaseList const& m);
     std::string EncodeCase(CaseInfo const& m);
     std::string EncodeUnbox(Unbox const& m);
+    std::string EncodeCampState(CampState const& m);
 
     // DEF: one payload per non-empty kind, in a fixed order, followed by "Z,<dataVer>".
     std::vector<std::string> EncodeDefinitions(Definitions const& d, uint32_t dataVer);

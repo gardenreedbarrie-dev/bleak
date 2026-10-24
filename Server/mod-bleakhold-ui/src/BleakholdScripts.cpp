@@ -3,13 +3,16 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
  * Hooks: the self-whisper that carries client messages (section 2), the prefix guard on every other
- * addon channel, login/logout, configuration and the world tick.
+ * addon channel, login/logout, configuration and the world tick; for camping (section 16) the XP bonus,
+ * the end of camp rest when combat starts, and the campfires that enter the world.
  */
 
+#include "BleakholdCamp.h"
 #include "BleakholdCodec.h"
 #include "BleakholdData.h"
 #include "BleakholdMgr.h"
 
+#include "GameObject.h"
 #include "Player.h"
 #include "ScriptMgr.h"
 #include "SharedDefines.h"
@@ -42,6 +45,8 @@ namespace
             PLAYERHOOK_CAN_PLAYER_USE_PRIVATE_CHAT,
             PLAYERHOOK_CAN_PLAYER_USE_GROUP_CHAT,
             PLAYERHOOK_CAN_PLAYER_USE_GUILD_CHAT,
+            PLAYERHOOK_ON_GIVE_EXP,
+            PLAYERHOOK_ON_PLAYER_ENTER_COMBAT,
         }) { }
 
         using PlayerScript::OnPlayerCanUseChat;
@@ -49,11 +54,30 @@ namespace
         void OnPlayerLogin(Player* player) override
         {
             Mgr::Instance().OnLogin(player);
+            Camp::Instance().OnLogin(player);
         }
 
         void OnPlayerLogout(Player* player) override
         {
             Mgr::Instance().OnLogout(player);
+            Camp::Instance().OnLogout(player);
+        }
+
+        // Campfire Warmth and Well Fed (section 16): one bonus, on kill and quest XP only, applied to the amount the core
+        // and the modules before this one made (mod-bleakhold's leveling multipliers run first); it is never applied
+        // anywhere else, and the core only uses up rested XP on top of it. Map thread.
+        void OnPlayerGiveXP(Player* player, uint32& amount, Unit* /*victim*/, uint8 xpSource) override
+        {
+            if (!amount || (xpSource != XPSOURCE_KILL && xpSource != XPSOURCE_QUEST && xpSource != XPSOURCE_QUEST_DF))
+                return;
+            if (uint32 const pct = Camp::Instance().XpBonusPct(player))
+                amount = CampRules::AddPct(amount, pct);
+        }
+
+        // rest lets a player log out in combat: camp rest ends the moment combat starts (map thread)
+        void OnPlayerEnterCombat(Player* player, Unit* /*enemy*/) override
+        {
+            Camp::OnEnterCombat(player);
         }
 
         // every way a character is deleted for good (the client, the purge of old deleted characters, commands)
@@ -115,6 +139,7 @@ namespace
         {
             Mgr::Instance().MarkWorldThread();
             Data::Instance().LoadAll();
+            Camp::Instance().OnStartup();
             Config const& c = Mgr::Instance().Cfg();
             LOG_INFO("server.loading", ">> Bleakhold UI protocol {}: data version {}, feature bits {}, frames up to {} bytes",
                 c.enable ? "enabled" : "DISABLED (BleakholdUi.Enable = 0)", Mgr::Instance().DataVersion(), c.featureBits, c.maxFrameBody);
@@ -125,6 +150,19 @@ namespace
             Mgr::Instance().Update(diff);
         }
     };
+
+    // Camping (section 16): notes the Basic Campfires players light and the fires of BleakholdUi.Camp.ExtraFireEntries as
+    // they enter the world (map threads; the check is a few integer compares for any other object).
+    class BleakholdCampFireScript : public AllGameObjectScript
+    {
+    public:
+        BleakholdCampFireScript() : AllGameObjectScript("BleakholdCampFireScript") { }
+
+        void OnGameObjectAddWorld(GameObject* go) override
+        {
+            Camp::Instance().OnGameObjectAdded(go);
+        }
+    };
 }
 
 void AddBleakholdScripts()
@@ -132,4 +170,5 @@ void AddBleakholdScripts()
     Bleakhold::Data::Instance().RegisterDefaults();
     new BleakholdPlayerScript();
     new BleakholdWorldScript();
+    new BleakholdCampFireScript();
 }

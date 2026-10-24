@@ -81,6 +81,7 @@ function FX.examples(M)
         CASE = { { 990001, "Glaive Case", "Unlock it to receive one of the items below.", "", "" }, { 32837, 1, 1200, 4 },
             { 32838, 1, 400, 5 } },
         UNBOX = { { 990001, 2, 32838, 1 } },
+        CAMPST = { { "C", 0, 620, 1, 880, 1500, 15, { { 164, 2, 1 }, { 171, 1, 0 } }, { { 185, 1 }, { 356, 2 } }, 0, 1, 1 } },
     }
 end
 

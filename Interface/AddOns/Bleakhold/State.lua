@@ -5,6 +5,7 @@ local U, Comm, Data = ns.U, ns.Comm, ns.Data
 
 local type, pairs, ipairs, tostring = type, pairs, ipairs, tostring
 local bit = bit
+local max = math.max
 
 local INT32 = 2147483647
 local S = {}
@@ -27,6 +28,7 @@ local function reset()
     S.lbme = {}
     S.firsts = nil
     S.err = nil
+    S.camp = nil
 end
 reset()
 ns.ResetState = reset
@@ -735,13 +737,27 @@ end)
 ------------------------------------------------------------------------------------------------------
 -- Errors and toasts
 ------------------------------------------------------------------------------------------------------
+-- The sentence for a refusal: the addon's own for the codes in Data.errorTexts (a string, or a function of the
+-- error that may return nil), else the server's text. Already safe for a FontString.
+function ns.ErrorText(e)
+    local t = e and e.code and Data.errorTexts[e.code]
+    if type(t) == "function" then
+        t = t(e)
+    end
+    if type(t) == "string" then
+        return t
+    end
+    return e and e.text and U.Safe(e.text) or nil
+end
+
 Comm.Handle("ERR", function(r)
     local f = r[1]
     local e = { op = U.Str(f[1], nil, 8), seq = U.Str(f[2], nil, 8), code = U.Str(f[3], nil, 24), text = U.Str(f[4], nil, 160), at = GetTime() }
+    e.shown = ns.ErrorText(e)
     S.err = e
     ns.Fire("ERR", e)
-    if e.text and UIErrorsFrame then
-        UIErrorsFrame:AddMessage(U.Safe(e.text), 1, 0.45, 0.4)
+    if e.shown and UIErrorsFrame then
+        UIErrorsFrame:AddMessage(e.shown, 1, 0.45, 0.4)
     end
 end)
 
@@ -795,6 +811,64 @@ Comm.Handle("UNBOX", function(r)
     end
 end)
 
+------------------------------------------------------------------------------------------------------
+-- Camping (CAMPST): the campfire the player is at, the camp objects, the warmth and food XP bonus, glide and
+-- field repair. A full state, not revisioned; its timers (seconds left when it arrived) count down here
+-- between messages: ns.CampLeft.
+------------------------------------------------------------------------------------------------------
+local CAMP_STATES = { N = true, R = true, C = true }
+local CAMP_MAX_OBJECTS = 8      -- the server sends at most 8 (a fire holds 3)
+local CAMP_MAX_TIME = 864000
+
+Comm.MapOpToTopic("CAMPST", "CAMPST")
+Comm.Handle("CAMPST", function(r)
+    local f = r[1]
+    local state = U.Str(f[1], "N", 1)
+    if not CAMP_STATES[state] then
+        state = "N"
+    end
+    local c = {
+        state = state, settle = state == "R" and U.Int(f[2], 0, 0, CAMP_MAX_TIME) or 0, fire = U.Int(f[3], 0, 0, CAMP_MAX_TIME),
+        mine = U.Bool(f[4], false), cd = U.Int(f[5], 0, 0, CAMP_MAX_TIME), warmth = U.Int(f[6], 0, 0, CAMP_MAX_TIME),
+        xp = U.Int(f[7], 0, 0, 1000), objs = {}, place = {}, glide = U.Int(f[10], nil, 0, CAMP_MAX_TIME),
+        repair = U.Bool(f[11], false), fed = U.Bool(f[12], false), recvAt = GetTime(),
+    }
+    for _, item in ipairs(U.List(f[8], CAMP_MAX_OBJECTS)) do
+        local t = U.Tuple(item, 3)
+        local skill = U.Int(t[1], nil, 1, INT32)
+        if skill then
+            c.objs[#c.objs + 1] = { skill = skill, tier = U.Int(t[2], 1, 1, 3), mine = U.Bool(t[3], false) }
+        end
+    end
+    local seen = {}
+    for _, item in ipairs(U.List(f[9], 16)) do
+        local t = U.Tuple(item, 2)
+        local skill = U.Int(t[1], nil, 1, INT32)
+        if skill and not seen[skill] then
+            seen[skill] = true
+            c.place[#c.place + 1] = { skill = skill, tier = U.Int(t[2], 1, 1, 3) }
+        end
+    end
+    -- settled just now (not the first state after logging in or a reload, which may already be C)
+    local before = S.camp and S.camp.state
+    S.camp = c
+    if state == "C" and before and before ~= "C" then
+        ns.Fire("CAMP_SETTLED", c)
+    end
+    changed("CAMPST")
+end)
+
+-- Seconds left on a CAMPST timer (settle, fire, cd, warmth, glide) now; nil when the field is missing (glide:
+-- the player cannot glide) or there is no camp state.
+function ns.CampLeft(key, c)
+    c = c or S.camp
+    local v = c and c[key]
+    if type(v) ~= "number" then
+        return nil
+    end
+    return max(0, v - (GetTime() - (c.recvAt or GetTime())))
+end
+
 local TOAST_TARGETS = { tasks = true, dungeons = true, keys = true, rift = true, collections = true, season = true, leaderboards = true }
 Comm.Handle("TOAST", function(r)
     local f = r[1]
@@ -824,5 +898,13 @@ ns.On("HELLO", function(s)
     Comm.Get("LIDX")
     if Comm.HasFeature(Comm.FEATURE.CASES) then
         Comm.Get("CASES")
+    end
+    -- the server sends CAMPST after HELLO too; asking makes sure (a realm with all three off has none)
+    local F = Comm.FEATURE
+    if Comm.HasFeature(F.CAMP) or Comm.HasFeature(F.GLIDE) or Comm.HasFeature(F.FIELD_REPAIR) then
+        Comm.Get("CAMPST")
+    elseif S.camp then
+        S.camp = nil
+        changed("CAMPST")
     end
 end)

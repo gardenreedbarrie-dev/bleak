@@ -128,6 +128,10 @@ BleakholdUi.Frame.MaxBody = 1000
 #    BleakholdUi.RateLimit.DuplicateWindowMs     the same action again within this many ms is ignored
 #                                              (0 = off). Your handlers must still be idempotent.
 #                                                                                         Default: 1000
+#    BleakholdUi.RateLimit.CampIntervalMs        CAMP (make camp, place an object, pack up: together) one per
+#                                              this many ms                               Default: 1000
+#    BleakholdUi.RateLimit.GlideIntervalMs       GLIDE one per this many ms                 Default: 1000
+#    BleakholdUi.RateLimit.RepairIntervalMs      REPAIR one per this many ms                Default: 2000
 
 BleakholdUi.RateLimit.Burst = 10
 BleakholdUi.RateLimit.PerSecond = 5
@@ -142,6 +146,9 @@ BleakholdUi.RateLimit.QueueIntervalMs = 1000
 BleakholdUi.RateLimit.KeyIntervalMs = 2000
 BleakholdUi.RateLimit.ClaimPerSecond = 2
 BleakholdUi.RateLimit.DuplicateWindowMs = 1000
+BleakholdUi.RateLimit.CampIntervalMs = 1000
+BleakholdUi.RateLimit.GlideIntervalMs = 1000
+BleakholdUi.RateLimit.RepairIntervalMs = 2000
 
 ###################################################################################################
 # EMOJI BUBBLES (EMOJI: an emoji over the player's head for everyone nearby; needs the Bleakhold client)
@@ -198,6 +205,173 @@ BleakholdUi.Dance.CooldownMs = 1000
 
 BleakholdUi.Case.Enable = 1
 BleakholdUi.Case.CooldownMs = 1000
+
+###################################################################################################
+# CAMPING (protocol section 16: CAMP, GLIDE, REPAIR, CAMPST)
+#
+# A player makes camp (a campfire for Camp.FireDuration), rests at any lit fire within Camp.Radius (rested XP
+# accrues like at an inn, and a logout there is an inn logout), settles after Camp.SettleTime and then gets the
+# buff of every camp object at that fire and Campfire Warmth (+Camp.WarmthXpPct % kill and quest XP for
+# Camp.WarmthDuration). Players with a profession place one camp object at a fire (three per fire); Well Fed
+# food gives +Camp.FoodXpPct % XP anywhere. Times are in seconds. The spell ids below come from camping-assets
+# research without the client's Spell.dbc: check the buffs in game and change them here if needed.
+###################################################################################################
+#
+#    BleakholdUi.Camp.Enable
+#        Description: Camping: CAMP, camp rest, warmth, the food XP bonus and repair at a camp anvil (feature
+#                     bit 512). With 0, fires stop counting, CAMP answers camp_off and the XP bonus is off.
+#        Default:     1 - Enabled
+#                     0 - Disabled
+#
+#    BleakholdUi.Camp.MinLevel
+#        Description: The level a player needs to make camp.
+#        Default:     5
+#
+#    BleakholdUi.Camp.Cooldown
+#        Description: Seconds between two CAMP M of one player (a relog does not reset it).
+#        Default:     900
+#
+#    BleakholdUi.Camp.FireDuration
+#        Description: Seconds a camp fire burns (10..86400). Camp objects last as long as their fire.
+#        Default:     900
+#
+#    BleakholdUi.Camp.FireEntry
+#        Description: gameobject_template entry of the camp fire: a generic object or a spell focus with no
+#                     script and no linked trap (else the Basic Campfire, 29784, is used). 194300 "Toasty
+#                     Fire" is a WotLK bonfire that also works as a cooking fire.
+#        Default:     194300
+#
+#    BleakholdUi.Camp.ExtraFireEntries
+#        Description: More gameobject entries that count as campfires (at most 15, any separator), world
+#                     spawns included. Basic Campfires (29784) players light always count; its world spawns
+#                     do not. Fires only count on the continents.
+#        Example:     "3797 3798 3799" (Cozy Fire in towns)
+#        Default:     ""
+#
+#    BleakholdUi.Camp.Radius
+#        Description: Yards from a fire within which a player rests there (2..30).
+#        Default:     10
+#
+#    BleakholdUi.Camp.SettleTime
+#        Description: Seconds at a fire (out of combat) before the player settles: camp object buffs and
+#                     Campfire Warmth. Combat or leaving starts it over.
+#        Default:     60
+#
+#    BleakholdUi.Camp.BuffDuration
+#        Description: Seconds a camp object buff lasts (passive or permanent auras keep their own).
+#        Default:     3600
+#
+#    BleakholdUi.Camp.WarmthDuration
+#        Description: Seconds of Campfire Warmth after settling (settling again starts it over, never adds up).
+#        Default:     1800
+#
+#    BleakholdUi.Camp.WarmthXpPct
+#        Description: Extra kill and quest XP in percent while Campfire Warmth lasts.
+#        Default:     10
+#
+#    BleakholdUi.Camp.WarmthSpell
+#        Description: An aura the player also gets for the warmth, only to show it (the XP bonus is the
+#                     module's own). Never use an aura with an XP effect (Ribbon Dance, 29175): the core would
+#                     add its bonus on top. 7353 (Cozy Fire) is the Basic Campfire's own small buff.
+#        Default:     0 - none
+#
+#    BleakholdUi.Camp.FoodXpPct
+#        Description: Extra kill and quest XP in percent while the player has a Well Fed buff (spell group
+#                     1001), anywhere.
+#        Default:     5
+#
+#    BleakholdUi.Camp.MaxXpPct
+#        Description: The warmth and food bonus together never exceed this (applied once, after other modules'
+#                     XP multipliers; nothing at the level cap).
+#        Default:     25
+#
+#    BleakholdUi.Camp.TierSkill
+#        Description: Profession skill for camp object tiers 1, 2 and 3 (three increasing values). A player
+#                     places the highest tier they reach.
+#        Default:     "75,225,375"
+#
+#    BleakholdUi.Camp.Profession.<Name>
+#        Description: The camp objects of a profession: six ids, the gameobject entries of tiers 1, 2 and 3,
+#                     then the buff spell of tiers 1, 2 and 3 (0 = none). "0" alone: no camp objects for that
+#                     profession. Objects must be generic objects or spell foci with no script and no trap;
+#                     buffs should be self auras (a party aura would reach players who never settled). Ids
+#                     that do not exist are logged at startup and left out. A Blacksmithing object of tier 2
+#                     or 3 is a camp anvil (REPAIR).
+#
+#    BleakholdUi.Repair.Enable
+#        Description: Blacksmiths repair anywhere with REPAIR (feature bit 2048). REPAIR at a camp anvil only
+#                     needs BleakholdUi.Camp.Enable.
+#        Default:     1 - Enabled
+#                     0 - Disabled
+#
+#    BleakholdUi.Repair.MinSkill
+#        Description: Blacksmithing skill a player needs to repair anywhere.
+#        Default:     75
+#
+#    BleakholdUi.Repair.BlacksmithDiscountPct
+#        Description: Blacksmiths pay this much less for any REPAIR (the normal repair cost otherwise, with
+#                     Rate.RepairCost; never part of a repair: all or nothing).
+#        Default:     10
+#
+#    BleakholdUi.Glide.Enable
+#        Description: GLIDE, a slow fall for the races in BleakholdUi.Glide.Races (feature bit 1024).
+#        Default:     1 - Enabled
+#                     0 - Disabled
+#
+#    BleakholdUi.Glide.Races
+#        Description: Race ids that can glide (any separator; 22 = High Elf, Tools/RaceForge/races.json).
+#        Default:     "22"
+#
+#    BleakholdUi.Glide.Cooldown
+#        Description: Seconds between two glides of one player.
+#        Default:     120
+#
+#    BleakholdUi.Glide.Duration
+#        Description: Seconds the glide aura lasts (1..600).
+#        Default:     10
+#
+#    BleakholdUi.Glide.Spell
+#        Description: The slow fall aura of the glide, cast triggered (no reagent, no cooldown). 130 is Slow
+#                     Fall; 44795 (the parachute) shows a parachute but may end at the first landing.
+#        Default:     130
+
+BleakholdUi.Camp.Enable = 1
+BleakholdUi.Camp.MinLevel = 5
+BleakholdUi.Camp.Cooldown = 900
+BleakholdUi.Camp.FireDuration = 900
+BleakholdUi.Camp.FireEntry = 194300
+BleakholdUi.Camp.ExtraFireEntries = ""
+BleakholdUi.Camp.Radius = 10
+BleakholdUi.Camp.SettleTime = 60
+BleakholdUi.Camp.BuffDuration = 3600
+BleakholdUi.Camp.WarmthDuration = 1800
+BleakholdUi.Camp.WarmthXpPct = 10
+BleakholdUi.Camp.WarmthSpell = 0
+BleakholdUi.Camp.FoodXpPct = 5
+BleakholdUi.Camp.MaxXpPct = 25
+BleakholdUi.Camp.TierSkill = "75,225,375"
+BleakholdUi.Camp.Profession.Alchemy = "190678,190444,187115,8113,12177,23738"
+BleakholdUi.Camp.Profession.Blacksmithing = "201893,189626,171715,8094,12175,23767"
+BleakholdUi.Camp.Profession.Enchanting = "186746,181361,184723,8097,12176,23766"
+BleakholdUi.Camp.Profession.Engineering = "193585,193668,184624,8116,12174,23736"
+BleakholdUi.Camp.Profession.Herbalism = "195194,180801,180805,8113,12177,15366"
+BleakholdUi.Camp.Profession.Inscription = "187254,191140,190693,8097,12176,23768"
+BleakholdUi.Camp.Profession.Jewelcrafting = "188190,184909,188048,8119,12179,23735"
+BleakholdUi.Camp.Profession.Leatherworking = "188221,176461,188223,8100,12178,23737"
+BleakholdUi.Camp.Profession.Mining = "190386,180780,123207,8100,12178,23737"
+BleakholdUi.Camp.Profession.Skinning = "19875,180692,187983,8116,12174,22817"
+BleakholdUi.Camp.Profession.Tailoring = "181077,200297,184803,8100,12178,22818"
+BleakholdUi.Camp.Profession.Cooking = "181790,3769,186143,24870,57288,57399"
+BleakholdUi.Camp.Profession.FirstAid = "181129,180676,178226,8094,12175,23769"
+BleakholdUi.Camp.Profession.Fishing = "186614,181143,190226,7840,12177,22820"
+BleakholdUi.Repair.Enable = 1
+BleakholdUi.Repair.MinSkill = 75
+BleakholdUi.Repair.BlacksmithDiscountPct = 10
+BleakholdUi.Glide.Enable = 1
+BleakholdUi.Glide.Races = "22"
+BleakholdUi.Glide.Cooldown = 120
+BleakholdUi.Glide.Duration = 10
+BleakholdUi.Glide.Spell = 130
 
 ###################################################################################################
 # KEYSTONE RUNS

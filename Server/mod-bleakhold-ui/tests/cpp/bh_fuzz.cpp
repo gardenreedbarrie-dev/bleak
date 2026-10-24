@@ -94,7 +94,7 @@ namespace
             std::vector<std::string> recs = Split(payload, ';');
             if (recs.size() > 8)
                 return false;
-            static std::regex const plain("WEEK|ERA|TASKS|KEY|BOARD|QUEUE|COLL|LIDX|SEASON|FIRSTS|MPLUS|RIFT|CASES");
+            static std::regex const plain("WEEK|ERA|TASKS|KEY|BOARD|QUEUE|COLL|LIDX|SEASON|FIRSTS|MPLUS|RIFT|CASES|CAMPST");
             for (std::string const& r : recs)
             {
                 std::vector<std::string> f = Split(r, ',');
@@ -127,7 +127,7 @@ namespace
             long long const activity = std::stoll(f[1]);
             return f[0] == "R" ? activity == 0 : activity != 0;
         }
-        if (op == "QLEAVE" || op == "KSTART" || op == "KCANCEL" || op == "WEHANDIN")
+        if (op == "QLEAVE" || op == "KSTART" || op == "KCANCEL" || op == "WEHANDIN" || op == "GLIDE" || op == "REPAIR")
             return n(0);
         if (op == "QREPLY")
             return n(2) && RefInt(f[0], 1, I32) && RefInt(f[1], 0, 1);
@@ -144,6 +144,8 @@ namespace
             return n(1) && RefInt(f[0], 0, 1023);
         if (op == "CASEOPEN")
             return n(2) && RefInt(f[0], 1, I32) && RefInt(f[1], 0, I32);
+        if (op == "CAMP")   // M, P; or O with a skill line id
+            return (n(1) && (f[0] == "M" || f[0] == "P")) || (n(2) && f[0] == "O" && RefInt(f[1], 1, I32));
         return false;
     }
 
@@ -296,6 +298,7 @@ namespace
             "1 QLEAVE 9 1/1", "1 KMODE a 1/1 2", "1 KSTART b 1/1", "1 KCANCEL c 1/1", "1 BCLAIM d 1/1 55", "1 WEHANDIN e 1/1",
             "1 OUTFIT f 1/1 201", "1 LBQ g 1/1 K,1,0,0,2", "1 PING h 1/1 12345", "1 EMOJI i 1/1 7", "1 DANCE j 1/1 5",
             "1 GET k 1/1 CASES;CASE,990001", "1 CASEOPEN l 1/1 990001,7", "1 WEEK 2s 1/1 3,4",
+            "1 GET m 1/1 CAMPST", "1 CAMP n 1/1 M", "1 CAMP o 1/1 O,164", "1 CAMP p 1/1 P", "1 GLIDE q 1/1", "1 REPAIR r 1/1",
             "2 HELLO 1 1/1 2,2.0,7,deDE",
         };
     }
@@ -304,7 +307,7 @@ namespace
     {
         static char const dict[] = { ',', ';', ':', '~', '%', ' ', '/', '\t', '\0', '-', '+', '0', '1', '9', 'A', 'Z', 'a', 'z', '.', '_',
             static_cast<char>(0x80), static_cast<char>(0xC3), static_cast<char>(0xFF), '\n', 'E', 'x' };
-        static char const* const words[] = { "2147483647", "2147483648", "-1", "0", "00000000000000000001", "999", "1000", "SET", "DEF", "WEEK", "CASE", "CASES",
+        static char const* const words[] = { "2147483647", "2147483648", "-1", "0", "00000000000000000001", "999", "1000", "SET", "DEF", "WEEK", "CASE", "CASES", "CAMPST", "CAMP", "GLIDE", "REPAIR", "O,", "M", "P", "O",
             "HELLO", "GET", "BHc\t", "BHs\t", "1/1", "1/2", "99/99", "zzzzzz", "%00", "%2C", "\xC3\xA9", ";;", ",,", "R,0", "D,0" };
         int const steps = 1 + static_cast<int>(rng() % 4);
         for (int i = 0; i < steps; ++i)

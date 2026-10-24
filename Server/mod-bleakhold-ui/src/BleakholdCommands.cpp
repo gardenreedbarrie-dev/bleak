@@ -8,11 +8,15 @@
  *   .bleakhold debug on|off                 log every accepted intent and every drop reason (admin)
  *   .bleakhold announce <tag> <text>        tag: legacy, first, season, queue, record (admin)
  *   .bleakhold player                       counters of the selected player (or yourself)
+ *   .bleakhold camp [show]                  camping state of the selected player (or yourself): fire, objects, timers
+ *   .bleakhold camp reset                   clears their make-camp and glide cooldowns
+ *   .bleakhold camp fire                    lights a camp fire for them where they stand (no rules, no cooldown)
  *   .bleakhold test <what>                  push sample data to the selected player (or yourself):
- *        all week era tasks taskdone key board queue run rift collections season leaderboard firsts toast announce defs
+ *        all week era tasks taskdone key board queue run rift collections season leaderboard firsts toast announce defs camp
  * The test data is only shown in that player's own UI (and remembered until they log out).
  */
 
+#include "BleakholdCamp.h"
 #include "BleakholdData.h"
 #include "BleakholdMgr.h"
 #include "BleakholdUi.h"
@@ -219,6 +223,15 @@ namespace
         Ui::Toast(p, ToastKind::Record, "New record (test)", "Halls of Lightning +8 in 24:13", "leaderboards");
     }
 
+    // a sample CAMPST (the next real change replaces it)
+    void TestCamp(Player* p)
+    {
+        CampState c;
+        c.state = CampStateId::Resting; c.settleSec = 42; c.fireSec = 812; c.mine = true; c.cooldownSec = 840; c.warmthSec = 0; c.xpPct = 5;
+        c.objects = { { 171, 1, false } }; c.place = { { 164, 2 }, { 197, 3 } }; c.glideSec = 0u; c.repair = false; c.fed = true;
+        Ui::SendCampState(p, c);
+    }
+
     void TestAnnounce(Player* p)
     {
         Ui::AnnounceTo(p, Ui::AnnounceTag::RaidLegacy, p->GetName() + " found [Belt of Might] (test)");
@@ -236,6 +249,13 @@ public:
 
     ChatCommandTable GetCommands() const override
     {
+        static ChatCommandTable campTable =
+        {
+            { "show",  HandleCampShow,  SEC_GAMEMASTER, Console::No },
+            { "reset", HandleCampReset, SEC_GAMEMASTER, Console::No },
+            { "fire",  HandleCampFire,  SEC_GAMEMASTER, Console::No },
+            { "",      HandleCampShow,  SEC_GAMEMASTER, Console::No },
+        };
         static ChatCommandTable bleakholdTable =
         {
             { "status",   HandleStatus,   SEC_GAMEMASTER,    Console::Yes },
@@ -243,6 +263,7 @@ public:
             { "debug",    HandleDebug,    SEC_ADMINISTRATOR, Console::Yes },
             { "announce", HandleAnnounce, SEC_ADMINISTRATOR, Console::Yes },
             { "player",   HandlePlayer,   SEC_GAMEMASTER,    Console::No },
+            { "camp",     campTable },
             { "test",     HandleTest,     SEC_GAMEMASTER,    Console::No },
         };
         static ChatCommandTable commandTable =
@@ -356,6 +377,43 @@ public:
         return true;
     }
 
+    static bool HandleCampShow(ChatHandler* handler)
+    {
+        Player* p = handler->getSelectedPlayerOrSelf();
+        if (!p)
+            return false;
+        for (std::string const& line : Camp::Instance().Describe(p))
+            handler->SendSysMessage(line);
+        Camp::Counts const n = Camp::Instance().GetCounts();
+        handler->PSendSysMessage("Realm: {} fires tracked, {} camp objects, {} players at a fire.", n.fires, n.objects, n.atFire);
+        return true;
+    }
+
+    static bool HandleCampReset(ChatHandler* handler)
+    {
+        Player* p = handler->getSelectedPlayerOrSelf();
+        if (!p)
+            return false;
+        Camp::Instance().ResetCooldowns(p);
+        handler->PSendSysMessage("Bleakhold: {} may make camp and glide again.", p->GetName());
+        return true;
+    }
+
+    static bool HandleCampFire(ChatHandler* handler)
+    {
+        Player* p = handler->getSelectedPlayerOrSelf();
+        if (!p)
+            return false;
+        std::string error;
+        if (!Camp::Instance().SpawnFireFor(p, error))
+        {
+            handler->PSendSysMessage("Bleakhold: no camp fire for {}: {}.", p->GetName(), error);
+            return true;
+        }
+        handler->PSendSysMessage("Bleakhold: lit a camp fire for {}.", p->GetName());
+        return true;
+    }
+
     static bool HandleTest(ChatHandler* handler, std::string_view what)
     {
         Player* p = Target(handler);
@@ -384,6 +442,7 @@ public:
         run("announce", TestAnnounce, false);
         run("run", TestRun, false);
         run("rift", TestRift, false);
+        run("camp", TestCamp);
         if (what == "taskdone")
         {
             Ui::TaskProgress(p, 102, 20, TaskState::Claimable);
@@ -396,7 +455,7 @@ public:
         }
         if (!any)
         {
-            handler->SendSysMessage("Usage: .bleakhold test all|week|era|tasks|taskdone|key|board|queue|run|rift|collections|season|leaderboard|firsts|toast|announce|defs");
+            handler->SendSysMessage("Usage: .bleakhold test all|week|era|tasks|taskdone|key|board|queue|run|rift|collections|season|leaderboard|firsts|toast|announce|defs|camp");
             return true;
         }
         handler->PSendSysMessage("Bleakhold: sent test data ({}) to {}.", what, p->GetName());

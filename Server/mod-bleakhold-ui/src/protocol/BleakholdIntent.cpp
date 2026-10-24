@@ -40,6 +40,9 @@ namespace Bleakhold
             { "EMOJI", IntentType::Emoji },
             { "DANCE", IntentType::Dance },
             { "CASEOPEN", IntentType::CaseOpen },
+            { "CAMP", IntentType::Camp },
+            { "GLIDE", IntentType::Glide },
+            { "REPAIR", IntentType::Repair },
         }};
 
         struct TopicInfo
@@ -66,6 +69,7 @@ namespace Bleakhold
             { "DEF", Topic::Def, 1 },
             { "CASES", Topic::Cases, 0 },
             { "CASE", Topic::Case, 1 },
+            { "CAMPST", Topic::CampState, 0 },
         }};
 
         constexpr char const* DropNames[] = {
@@ -135,7 +139,7 @@ namespace Bleakhold
 
 #define BH_TRY(expr) do { DropReason _r = (expr); if (_r != DropReason::None) return _r; } while (0)
 
-        // Number of fields of every op except GET.
+        // Number of fields of every op except GET (CAMP: one, or two when the first is O; see ParseFields).
         int FieldCountOf(IntentType t)
         {
             switch (t)
@@ -157,6 +161,9 @@ namespace Bleakhold
                 case IntentType::Emoji: return 1;
                 case IntentType::Dance: return 1;
                 case IntentType::CaseOpen: return 2;
+                case IntentType::Camp: return 1;
+                case IntentType::Glide: return 0;
+                case IntentType::Repair: return 0;
                 default: return -1;
             }
         }
@@ -207,7 +214,9 @@ namespace Bleakhold
             std::vector<std::string_view> f;
             if (!payload.empty())
                 f = Split(payload, ',');
-            if (static_cast<int>(f.size()) != FieldCountOf(type))
+            // CAMP O carries the skill line id; CAMP M and CAMP P carry nothing more
+            int const want = type == IntentType::Camp && !f.empty() && f[0] == "O" ? 2 : FieldCountOf(type);
+            if (static_cast<int>(f.size()) != want)
                 return DropReason::FieldCount;
             switch (type)
             {
@@ -285,6 +294,19 @@ namespace Bleakhold
                 case IntentType::CaseOpen:
                     BH_TRY(Int(f[0], 1, Int32Max, out.caseItemId));
                     BH_TRY(Int(f[1], 0, Int32Max, out.caseNonce));
+                    break;
+                case IntentType::Camp:
+                    if (f[0] == "M")
+                        out.campAct = CampAct::Make;
+                    else if (f[0] == "P")
+                        out.campAct = CampAct::Pack;
+                    else if (f[0] == "O")
+                    {
+                        out.campAct = CampAct::Object;
+                        BH_TRY(Int(f[1], 1, Int32Max, out.campSkill));
+                    }
+                    else
+                        return DropReason::BadField;
                     break;
                 default:
                     break;
@@ -468,6 +490,8 @@ namespace Bleakhold
                 return n(in.danceId);
             case IntentType::CaseOpen:
                 return n(in.caseItemId) + "," + n(in.caseNonce);
+            case IntentType::Camp:
+                return in.campAct == CampAct::Object ? "O," + n(in.campSkill) : std::string(1, static_cast<char>(in.campAct));
             default:
                 return std::string();
         }
