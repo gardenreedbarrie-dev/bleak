@@ -63,7 +63,7 @@ jobs:
       - name: Build RaceForge
         run: |
           python -m pip install pyinstaller==6.11.1
-          python -m PyInstaller --onefile --name BleakholdRaceForge --add-data "Tools/RaceForge/races.json;." --paths Tools/RaceForge --paths Tools/MpqPack --hidden-import mpqpack --distpath build/raceforge/dist --workpath build/raceforge/work Tools/RaceForge/raceforge.py
+          python -m PyInstaller --onefile --name BleakholdRaceForge --add-data "Tools/RaceForge/races.json;." --add-data "Tools/RaceForge/taken_patches.json;." --paths Tools/RaceForge --paths Tools/MpqPack --hidden-import mpqpack --distpath build/raceforge/dist --workpath build/raceforge/work Tools/RaceForge/raceforge.py
 
       # One folder the player copies over a 3.3.5a client: the executables, the glue screens, the emoji art
       # (loose BLPs in Data\Interface\Bleakhold\Emoji, like the glue files), the dance pack (built here by

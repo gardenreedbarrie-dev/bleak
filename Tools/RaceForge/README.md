@@ -104,15 +104,48 @@ question). The package is your own download; nothing of it is in this repository
 - CharSections is sorted again (the client groups consecutive rows). Ids that clash with a row you keep get new ones.
 - Helmet masks: the new races copy the template race's bit exactly, so a package mask like "every race but a few"
   cannot hide geosets the template race shows.
-- The art (every file under the package's folders except `DBFilesClient`) is packed into `client\patch-S.MPQ`,
-  `patch-T.MPQ`, ... with at most 1500 MB of files each (`--art-max-mb`, `--art-letters`), streamed one file at a
-  time. `--no-art` merges the tables only.
+- The art (every file under the package's folders except `DBFilesClient`) is packed into `client\patch-6.MPQ`,
+  then `patch-7.MPQ`, `patch-8.MPQ` and `patch-9.MPQ` as needed, with at most 3500 MB of files each
+  (`--art-max-mb`), streamed one file at a time. `--no-art` merges the tables only. See the names and sizes below.
 - `customization\base-dbc` in the output holds your DBCs with the package merged in: the starting point the checks
   compare against (`raceforge.py validate` finds it by itself). The report lists every merge step, and checks that
   the package's rows arrived exactly and your other rows did not change.
 
 The server gets the merged tables in `server\dbc` as usual; players need `patch-R.MPQ` and the art archives in
 their `Data` folder.
+
+### Art archive names and sizes
+
+Every letter but F, K, O and W already names a patch the realm ships: H L R T V X Y Z (the realm; R is RaceForge's
+own `patch-R.MPQ`, Y the HD pack), A B C D E G I M N P S U (Reforged), J (a login screen) and Q (MapForge). The
+launcher installs files by name, so an art archive under one of those names would replace that patch on every
+player's PC. The art therefore takes digits:
+
+- The client opens every `Data\patch-?.MPQ` with exactly one character, of any kind, in place of `?`, and every
+  `Data\<locale>\patch-<locale>-?.MPQ`. It sorts them by path without regard to case, and when two hold the same
+  file, the one that sorts last wins (`WoW/Source/WowServices/PatchFiles.cpp`, `OpenArchives` in
+  `WoW/Source/Client.cpp`, and `Tools/MpqPack/README.md`). Case never matters: `patch-s.MPQ` is `patch-S.MPQ`.
+- Digits sort before letters. `patch-6.MPQ` to `patch-9.MPQ` load after every base archive and the stock
+  `patch-2.MPQ` and `patch-3.MPQ`, and below every lettered patch. So the art adds files and replaces stock ones,
+  but where a realm or Reforged patch holds the same file (an HD model in Reforged's patches or in `Patch-Y.MPQ`),
+  that patch wins and the package's file is not used. For the package's files to win over Reforged's patches, give
+  the free letter after them: `--art-letters W`. It still loses to X, Y and Z.
+- `--art-letters` takes A-Z and 4-9: `patch-0` and `patch-1` would sort below the stock patches, 2 and 3 are the
+  stock patches, and 5 is MapForge's archive for the server's extractors.
+
+`taken_patches.json`, next to `races.json`, lists every name in use with its owner. RaceForge refuses an art name in
+it before it does anything else, and with `--patches-dir <folder>` (the realm's patch folder, or a client's `Data`
+folder) also every name already in that folder. `--art-letters` picks other names under the same check; the error
+lists the free ones. `--force-letters` writes the art under taken names anyway, with a warning on the console and
+in the report: never publish such archives next to the realm's patches. When a new patch ships, add its name to
+`taken_patches.json`.
+
+Size: MpqPack writes MPQ format 0 (v1), whose offsets are 32 bits, so each archive stays under 4 GiB. The client
+reads those offsets unsigned (`InitializeTables` in `Engine/Source/BlizzardCore/Source/Packages/Mopaq`), so
+archives between 2 and 4 GiB are fine. 3500 MB of files per archive leaves room for the tables (`--art-max-mb`
+takes at most 4000), and the four default names hold 14000 MB; for a larger package, add free characters
+(`--art-letters 46789`). The client also reads format 1 (v2, with 64-bit offsets, for archives over 4 GiB), but
+MpqPack does not write it.
 
 ## Output
 
@@ -124,7 +157,7 @@ their `Data` folder.
 | `server\sql\bleakhold_races.sql` | Required world-database rows |
 | `server\sql\bleakhold_races_content_masks.sql` | Optional quest, item, area spell, condition and mail race masks |
 | `server\sql\bleakhold_races_remove.sql` | Undoes both SQL files |
-| `client\patch-S.MPQ`, `patch-T.MPQ`, ... | The customization package's art (`--customization`) |
+| `client\patch-6.MPQ` ... `patch-9.MPQ` | The customization package's art (`--customization`), as many as it needs |
 | `customization\base-dbc\*.dbc` | Your DBCs with the package merged in, before the races were added |
 | `report.txt` | Every change, warning and check |
 
@@ -233,6 +266,8 @@ or `python3 -I -m unittest discover -s Tools/RaceForge/tests -t Tools/RaceForge`
 the client's layouts (`tests/synth.py`, races 1-21 with the stock faction split) and run the whole tool on them.
 They also re-derive `rflib/schemas.py` from `WoW/Source/DB/Rec` and parse every Rec class there against its
 `s_numColumns`/`s_rowSize`. They check that the mask rule gives the same answer in Python and in the generated SQL,
-and run the SQL against a model of the world database in SQLite.
+and run the SQL against a model of the world database in SQLite. `test_art_names.py` checks the art archive names:
+the default against `taken_patches.json` and the client's order, the refusal, `--patches-dir`, `--art-letters` and
+`--force-letters`.
 
 After a change to the Rec classes, regenerate the layouts with `py -3 -I Tools\RaceForge\raceforge.py schemas --write`.

@@ -124,8 +124,9 @@ scratch buffer.
    [wow.export](https://github.com/Kruithne/wow.export) or CASC Explorer. The client looks up a model's
    skins and animations by name (`<model>00.skin`, `<model><anim>-<variation>.anim`), so keep the names
    the tools give them.
-2. Pack them into a patch archive in `Data`, for example `Data/patch-Z.MPQ`, with the paths the client
-   asks for (`Creature\...`, `World\...`). The CI build already accepts unsigned archives
+2. Pack them into a patch archive in `Data` with the paths the client asks for (`Creature\...`, `World\...`),
+   under a name no other patch uses, for example `Data/patch-W.MPQ` (`Tools/RaceForge/taken_patches.json` lists
+   the names the realm already ships). The CI build already accepts unsigned archives
    (`WOWDECOMP_DISABLE_SIGNATURE_CHECKS`).
 3. Put the community listfile (`listfile.csv`, `id;path` per line) next to the executable, in `Data`, or
    inside an archive. Modern assets name many of their files by FileDataID; without the listfile those

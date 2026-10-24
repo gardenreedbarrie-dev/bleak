@@ -25,17 +25,22 @@ for path in (HERE, os.path.join(os.path.dirname(HERE), "MpqPack")):
         sys.path.insert(0, path)
 
 from rflib import config as configmod  # noqa: E402
-from rflib import customize, recparse, schema_access, sqlgen, validate  # noqa: E402
+from rflib import customize, patchnames, recparse, schema_access, sqlgen, validate  # noqa: E402
 from rflib.dbc import DbcError, DbcTable  # noqa: E402
 from rflib.forge import OPTIONAL_TABLES, REQUIRED_TABLES, Forge, ForgeError, find_dbc  # noqa: E402
 
 DEFAULT_CONFIG = os.path.join(HERE, "races.json")
 DEFAULT_MPQ = "patch-R.MPQ"
 OUTPUT_ENTRIES = ("client", "server", "customization", "report.txt")
-# Art archives of a customization package: patch-<letter>.MPQ, each at most this much file data. MPQ v1 addresses
-# 4 GB; staying well below keeps every offset clear of the sign bit.
-DEFAULT_ART_LETTERS = "STUVWXYZ"
-DEFAULT_ART_MAX_MB = 1500
+# Art archives of a customization package: patch-<character>.MPQ. Every letter but F K O W belongs to a patch the
+# realm ships (taken_patches.json); the digits 4-9 load after the stock patch-3.MPQ and below every lettered patch
+# (rflib/patchnames.py), and 5 is MapForge's server-side extract. The client reads MPQ v1 offsets as unsigned 32-bit
+# (InitializeTables), and MpqPack writes v1, so an archive stays below 4 GiB: 3500 MB (MiB) of files leaves room for
+# the tables, and the four default archives hold 14000 MB.
+DEFAULT_ART_LETTERS = "6789"
+DEFAULT_ART_MAX_MB = 3500
+MAX_ART_MB = 4000
+TAKEN_PATCHES = os.path.join(HERE, patchnames.TAKEN_FILE)
 BASE_DBC = os.path.join("customization", "base-dbc")
 
 
@@ -133,23 +138,51 @@ def write_base_dbc(out_dir: str, dbc_dir: str, merged_bytes: dict[str, bytes]) -
     return folder
 
 
-def art_archive_names(dbc_mpq: str | None, letters: str) -> list[str]:
-    letters = letters.upper()
+def choose_art_names(letters: str, dbc_mpq: str | None, patches_dir: str | None, force: bool) -> tuple[list[str], str, list[str]]:
+    """The art archive names, checked against taken_patches.json and, with --patches-dir, the names already in the
+    realm's patch folder. A taken name is refused unless force. Returns (names, what was checked, warnings)."""
+    try:
+        names = patchnames.art_archive_names(letters, dbc_mpq)
+        present = patchnames.scan_patches_dir(patches_dir) if patches_dir else None
+    except patchnames.PatchNameError as e:
+        raise ForgeError(str(e)) from None
 
-    # The client loads Data\\patch-<one character>.MPQ; letters sort after the stock patch-2 and patch-3.
-    if any(not "A" <= c <= "Z" for c in letters) or len(set(letters)) != len(letters):
-        raise ForgeError(f"--art-letters {letters!r}: give distinct letters A-Z, for example {DEFAULT_ART_LETTERS}")
+    found = []
 
-    names = [f"patch-{letter}.MPQ" for letter in letters]
+    try:
+        taken = patchnames.load_taken(TAKEN_PATCHES)
+    except patchnames.PatchNameError as e:
+        if not force:
+            raise ForgeError(str(e)) from None
 
-    if dbc_mpq and dbc_mpq.lower() in (n.lower() for n in names):
-        names = [n for n in names if n.lower() != dbc_mpq.lower()]
+        taken = {}
+        found.append(str(e))
 
-    return names
+    found += patchnames.problems(names, taken, present)
+    checked = f"{patchnames.TAKEN_FILE} ({len(taken)} names)"
+
+    if present is not None:
+        checked += f" and --patches-dir {patches_dir} ({len(present)} names)"
+
+    if not found:
+        return names, checked, []
+
+    if not force:
+        free = " ".join(patchnames.free_characters(taken, present, dbc_mpq)) or "none"
+        raise ForgeError("refusing to write the customization art over names other patches use:\n  " + "\n  ".join(found)
+                         + "\nPlayers who copy these archives would replace those patches. Choose other characters with "
+                         f"--art-letters (free: {free}), or pass --force-letters if you really mean to replace them.")
+
+    banner = "!" * 100
+    print(f"{banner}\nWARNING: --force-letters: the customization art takes names other patches use:\n  " + "\n  ".join(found)
+          + "\nPlayers who copy these archives replace those patches, and the launcher publishes files by name.\n"
+          f"Do not publish them next to the realm's patches.\n{banner}", file=sys.stderr, flush=True)
+    return names, checked, [f"--force-letters: {p}" for p in found]
 
 
-def build_art_archives(out_dir: str, package_dir: str, dbc_mpq: str | None, letters: str, max_mb: int) -> list[tuple[str, list[str]]]:
-    """Pack the package's art into client/patch-<letter>.MPQ archives. Returns (path, archive names) per archive."""
+def build_art_archives(out_dir: str, package_dir: str, names: list[str], max_mb: int) -> list[tuple[str, list[str]]]:
+    """Pack the package's art into client/<name> archives (names from choose_art_names). Returns (path, archive
+    names) per archive."""
     import mpqpack
 
     files = customize.art_files(package_dir)
@@ -158,10 +191,10 @@ def build_art_archives(out_dir: str, package_dir: str, dbc_mpq: str | None, lett
         return []
 
     groups = mpqpack.plan_split(files, max_mb * 1024 * 1024)
-    names = art_archive_names(dbc_mpq, letters)
 
     if len(groups) > len(names):
-        raise ForgeError(f"the art needs {len(groups)} archives but --art-letters gives only {len(names)} names; add letters or raise --art-max-mb")
+        raise ForgeError(f"the art needs {len(groups)} archives of at most {max_mb} MB but there are only {len(names)} names "
+                         f"({', '.join(names)}); add characters to --art-letters or raise --art-max-mb (at most {MAX_ART_MB})")
 
     archives = []
     total = sum(len(g) for g in groups)
@@ -288,6 +321,9 @@ def format_report(forge: Forge, config: configmod.Config, written: dict, sql_fil
 
     if art:
         lines.append(f"   Put the art archives ({', '.join(os.path.basename(p) for p, _ in art)}) into the Data folder as well.")
+
+        if all(os.path.basename(p)[6].isdigit() for p, _ in art):
+            lines.append("   Digits sort before letters: every lettered patch outranks them, so a realm patch holding the same file wins.")
     lines.append("   The client reads DBCs only from archives, and a Data\\patch-<letter>.MPQ later in the alphabet wins over earlier ones.")
     lines.append("2. Server: copy server/dbc/*.dbc over AzerothCore's data/dbc, run server/sql/bleakhold_races.sql on the world")
     lines.append("   database (optionally bleakhold_races_content_masks.sql), restart worldserver.")
@@ -299,6 +335,18 @@ def cmd_build(args) -> int:
     config = configmod.load(args.config)
     package_dir = getattr(args, "customization", None)
     merged = None
+
+    if args.mpq_extra and not args.mpq:
+        args.mpq = DEFAULT_MPQ
+
+    art_names, art_checked, art_warnings = [], "", []
+
+    # Checked before the long work: the art goes only to names no other patch uses.
+    if package_dir and args.mpq and not getattr(args, "no_art", False):
+        if not 1 <= args.art_max_mb <= MAX_ART_MB:
+            raise ForgeError(f"--art-max-mb {args.art_max_mb}: give 1 to {MAX_ART_MB} (MpqPack writes MPQ v1, which addresses less than 4 GiB per archive)")
+
+        art_names, art_checked, art_warnings = choose_art_names(args.art_letters, args.mpq, getattr(args, "patches_dir", None), getattr(args, "force_letters", False))
 
     if package_dir:
         try:
@@ -361,20 +409,23 @@ def cmd_build(args) -> int:
 
         sql_files.append(path)
 
-    if args.mpq_extra and not args.mpq:
-        args.mpq = DEFAULT_MPQ
-
     mpq_path = build_mpq(out_dir, args.mpq, args.mpq_extra) if args.mpq else None
     art = []
 
-    if package_dir and args.mpq and not getattr(args, "no_art", False):
-        art = build_art_archives(out_dir, package_dir, args.mpq, args.art_letters, args.art_max_mb)
+    if art_names:
+        art = build_art_archives(out_dir, package_dir, art_names, args.art_max_mb)
 
     result = validate.validate(out_dir, stock_dir, config, mpq_path)
 
     if package_dir:
         for status, name, detail in customize.check(stock_dir, args.dbc, package_dir, {r.id for r in config.races}):
             result.add(status, name, detail)
+
+        if art_names:
+            written_names = ", ".join(os.path.basename(p) for p, _ in art) or "none needed"
+            result.add("WARN" if art_warnings else "PASS", f"art archive names ({written_names}) checked against {art_checked}",
+                       "; ".join(art_warnings))
+            forge.warnings.extend(art_warnings)
 
         check_art_archives(result, art)
 
@@ -483,7 +534,8 @@ def easy_mode(argv: list[str]) -> int:
 
     out = os.path.join(os.path.dirname(os.path.abspath(dbc)), EASY_OUT)
     args = argparse.Namespace(dbc=dbc, out=out, config=DEFAULT_CONFIG, mpq=DEFAULT_MPQ, mpq_extra=None, force=True,
-                              customization=package, no_art=False, art_letters=DEFAULT_ART_LETTERS, art_max_mb=DEFAULT_ART_MAX_MB)
+                              customization=package, no_art=False, art_letters=DEFAULT_ART_LETTERS, art_max_mb=DEFAULT_ART_MAX_MB,
+                              patches_dir=None, force_letters=False)
 
     try:
         result = cmd_build(args)
@@ -495,8 +547,10 @@ def easy_mode(argv: list[str]) -> int:
         print(f"Done. Everything is in {out}:")
         print(f"  client\\{DEFAULT_MPQ}            -> copy into the game's Data folder")
 
-        if package:
-            print("  client\\patch-S.MPQ (and T, U, ...) -> the customization art: copy into the game's Data folder too")
+        art = [n for n in patchnames.art_archive_names(DEFAULT_ART_LETTERS, DEFAULT_MPQ) if os.path.isfile(os.path.join(out, "client", n))]
+
+        if art:
+            print(f"  client\\{', '.join(art)} -> the customization art: copy into the game's Data folder too")
         print("  server\\dbc\\*.dbc              -> copy into the server's data\\dbc folder")
         print("  server\\sql\\bleakhold_races.sql -> run on the world database")
     else:
@@ -530,8 +584,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--force", action="store_true", help="replace earlier RaceForge output in --out")
     p.add_argument("--customization", help="character customization package to merge first (a folder with DBFilesClient\\ and art folders)")
     p.add_argument("--no-art", action="store_true", help="with --customization: merge the tables only, do not pack the package's art")
-    p.add_argument("--art-letters", default=DEFAULT_ART_LETTERS, help=f"letters of the art archives patch-<letter>.MPQ (default {DEFAULT_ART_LETTERS})")
-    p.add_argument("--art-max-mb", type=int, default=DEFAULT_ART_MAX_MB, help=f"file data per art archive in MB (default {DEFAULT_ART_MAX_MB})")
+    p.add_argument("--art-letters", default=DEFAULT_ART_LETTERS,
+                   help=f"characters (A-Z, 4-9) of the art archives patch-<c>.MPQ (default {DEFAULT_ART_LETTERS}); names in {patchnames.TAKEN_FILE} are refused")
+    p.add_argument("--art-max-mb", type=int, default=DEFAULT_ART_MAX_MB, help=f"file data per art archive in MB, at most {MAX_ART_MB} (default {DEFAULT_ART_MAX_MB})")
+    p.add_argument("--patches-dir", help="the realm's patch folder (or a client's Data folder): also refuse art names already there")
+    p.add_argument("--force-letters", action="store_true", help="write the art even over taken names (prints a warning; never publish such archives)")
 
     p = sub.add_parser("validate", help="check an output folder again")
     p.add_argument("--dbc", required=True)
