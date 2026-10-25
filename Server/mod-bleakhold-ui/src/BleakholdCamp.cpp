@@ -136,8 +136,39 @@ namespace Bleakhold
             return total;
         }
 
-        // A spell the camp may cast on a player: it exists, raises no XP itself (the module's bonus would come on top of
-        // the core's), reaches nobody else (an area aura would buff players who never settled) and is no debuff.
+        bool ReachesOthers(SpellEffectInfo const& e)
+        {
+            return e.TargetA.IsArea() || e.TargetB.IsArea() || e.ChainTarget > 1;
+        }
+
+        // A spell that does nothing when it lands: no script (spell_script_names), no linked spell, and only dummy
+        // auras on one unit. 23770 "Sayge's Carnie Buff", the marker every Sayge's fortune triggers, is one (and the
+        // core never casts it: Spell::EffectTriggerSpell skips it).
+        bool InertMarker(uint32_t spellId)
+        {
+            SpellInfo const* info = sSpellMgr->GetSpellInfo(spellId);
+            if (!info)
+                return false;
+            SpellScriptsBounds const scripts = sObjectMgr->GetSpellScriptsBounds(spellId);
+            if (scripts.first != scripts.second)
+                return false;
+            int32_t const id = static_cast<int32_t>(spellId);
+            for (int32_t link : { id, -id, id + SPELL_LINK_HIT, id + SPELL_LINK_AURA, -(id + SPELL_LINK_AURA) })
+                if (sSpellMgr->GetSpellLinked(link))
+                    return false;
+            for (SpellEffectInfo const& e : info->Effects)
+            {
+                if (!e.IsEffect())
+                    continue;
+                if (!e.IsEffect(SPELL_EFFECT_APPLY_AURA) || e.ApplyAuraName != SPELL_AURA_DUMMY || e.TriggerSpell ||
+                    ReachesOthers(e))
+                    return false;
+            }
+            return true;
+        }
+
+        // A spell the camp may cast on a player (CampRules::CheckBuff): it exists, raises no XP itself, reaches nobody
+        // else and does the player no harm.
         bool SafeSpell(uint32_t spellId, std::string& why)
         {
             SpellInfo const* info = sSpellMgr->GetSpellInfo(spellId);
@@ -146,19 +177,25 @@ namespace Bleakhold
                 why = "does not exist";
                 return false;
             }
-            if (info->HasAura(SPELL_AURA_MOD_XP_PCT) || info->HasAura(SPELL_AURA_MOD_XP_QUEST_PCT))
+            CampRules::BuffEffects effects;
+            for (uint8_t i = 0; i < MAX_SPELL_EFFECTS && i < effects.size(); ++i)
             {
-                why = "changes XP (the camping bonus would be added twice)";
-                return false;
+                SpellEffectInfo const& e = info->Effects[i];
+                CampRules::BuffEffect& f = effects[i];
+                f.present = e.IsEffect();
+                if (!f.present)
+                    continue;
+                f.changesXp = e.IsAura(SPELL_AURA_MOD_XP_PCT) || e.IsAura(SPELL_AURA_MOD_XP_QUEST_PCT);
+                f.areaAura = e.IsAreaAuraEffect();
+                f.reachesOthers = ReachesOthers(e);
+                f.positive = info->IsPositiveEffect(i);
+                f.inertTrigger = e.IsEffect(SPELL_EFFECT_TRIGGER_SPELL) && e.TriggerSpell != spellId &&
+                    InertMarker(e.TriggerSpell);
             }
-            if (info->HasAreaAuraEffect())
+            CampRules::BuffProblem const problem = CampRules::CheckBuff(effects);
+            if (problem != CampRules::BuffProblem::None)
             {
-                why = "is an area aura (it would reach players who never settled)";
-                return false;
-            }
-            if (!info->IsPositive())
-            {
-                why = "is not a buff";
+                why = CampRules::BuffProblemText(problem);
                 return false;
             }
             return true;

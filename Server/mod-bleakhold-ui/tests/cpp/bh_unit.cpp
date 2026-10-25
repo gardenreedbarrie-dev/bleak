@@ -865,6 +865,54 @@ TEST("camping: camp objects carry no crafting station tied to a place")
     CHECK(DefaultProfessions[10].skill == 197 && DefaultProfessions[10].objects[2] == 188216);  // Armor Stand
 }
 
+TEST("camping: the buff check takes Sayge's fortunes and refuses XP, area and harmful spells")
+{
+    using namespace Bleakhold::CampRules;
+    auto aura = [] { BuffEffect e; e.present = true; e.positive = true; return e; };
+    // Spell.dbc 3.3.5a, Sayge's Dark Fortune of Spirit 23738: effect 0 a positive MOD_PERCENT_STAT aura on
+    // TARGET_UNIT_TARGET_ANY, effect 1 TRIGGER_SPELL 23770 (a dummy aura flagged AURA_IS_DEBUFF), which the core marks
+    // negative: SpellInfo::IsPositive() is false, yet the fortune is a buff
+    BuffEffect markerTrigger;
+    markerTrigger.present = true;
+    markerTrigger.inertTrigger = true;
+    BuffEffects const sayge = { aura(), markerTrigger, BuffEffect{} };
+    CHECK(CheckBuff(sayge) == BuffProblem::None);
+    // a scroll (one positive aura), Well Fed 57399 (three)
+    CHECK(CheckBuff({ aura(), BuffEffect{}, BuffEffect{} }) == BuffProblem::None);
+    CHECK(CheckBuff({ aura(), aura(), aura() }) == BuffProblem::None);
+    // the same trigger of a spell that is not an inert marker (a scripted, linked or real debuff): refused
+    BuffEffect harmfulTrigger;
+    harmfulTrigger.present = true;
+    CHECK(CheckBuff({ aura(), harmfulTrigger, BuffEffect{} }) == BuffProblem::NotBuff);
+    // a debuff, and a spell whose only effect is the inert trigger (it does the player no good)
+    BuffEffect debuff;
+    debuff.present = true;
+    CHECK(CheckBuff({ debuff, BuffEffect{}, BuffEffect{} }) == BuffProblem::NotBuff);
+    CHECK(CheckBuff({ markerTrigger, BuffEffect{}, BuffEffect{} }) == BuffProblem::NotBuff);
+    CHECK(CheckBuff({ BuffEffect{}, BuffEffect{}, BuffEffect{} }) == BuffProblem::NotBuff);
+    // XP auras (Ribbon Dance 29175), area auras and area or chain targets stay refused, positive or not
+    BuffEffect xp = aura();
+    xp.changesXp = true;
+    CHECK(CheckBuff({ aura(), xp, BuffEffect{} }) == BuffProblem::ChangesXp);
+    BuffEffect area = aura();
+    area.areaAura = true;
+    CHECK(CheckBuff({ area, BuffEffect{}, BuffEffect{} }) == BuffProblem::AreaAura);
+    BuffEffect raid = aura();
+    raid.reachesOthers = true;   // Prayer of Fortitude: APPLY_AURA on TARGET_UNIT_CASTER_AREA_RAID
+    CHECK(CheckBuff({ raid, BuffEffect{}, BuffEffect{} }) == BuffProblem::ReachesOthers);
+    BuffEffect xpTrigger = markerTrigger;
+    xpTrigger.changesXp = true;
+    CHECK(CheckBuff({ aura(), xpTrigger, BuffEffect{} }) == BuffProblem::ChangesXp);
+    // facts in an unused slot count for nothing
+    BuffEffect ghost = xp;
+    ghost.present = false;
+    CHECK(CheckBuff({ aura(), BuffEffect{}, ghost }) == BuffProblem::None);
+    CHECK_EQ(std::string(BuffProblemText(BuffProblem::NotBuff)), "is not a buff");
+    CHECK(std::string(BuffProblemText(BuffProblem::None)).empty());
+    for (BuffProblem p : { BuffProblem::ChangesXp, BuffProblem::AreaAura, BuffProblem::ReachesOthers })
+        CHECK(!std::string(BuffProblemText(p)).empty());
+}
+
 TEST("camping: object slots stand apart around the fire")
 {
     using namespace Bleakhold::CampRules;

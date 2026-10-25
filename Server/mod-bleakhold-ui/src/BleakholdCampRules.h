@@ -167,6 +167,63 @@ namespace Bleakhold::CampRules
         return end > now ? static_cast<uint32_t>(std::min<uint64_t>(end - now, 0xFFFFFFFFull)) : 0;
     }
 
+    // One effect of a spell the camp would cast on a player (BleakholdCamp.cpp reads it from SpellInfo).
+    struct BuffEffect
+    {
+        bool present = false;         // the effect slot is used
+        bool changesXp = false;       // an XP aura (MOD_XP_PCT, MOD_XP_QUEST_PCT)
+        bool areaAura = false;        // APPLY_AREA_AURA_*
+        bool reachesOthers = false;   // an area or cone target, or more than one chain target
+        bool positive = false;        // SpellInfo::IsPositiveEffect
+        bool inertTrigger = false;    // TRIGGER_SPELL of an inert marker (unscripted, unlinked, dummy auras only)
+    };
+    using BuffEffects = std::array<BuffEffect, 3>;
+
+    enum class BuffProblem : uint8_t { None, ChangesXp, AreaAura, ReachesOthers, NotBuff };
+
+    // Whether the camp may cast a spell on a player: it raises no XP itself (the module's bonus would come on top of
+    // the core's), reaches nobody else (players who never settled) and every effect is positive. SpellInfo::IsPositive
+    // is not the test: the core marks an effect negative when it triggers a negative spell, even one it never casts,
+    // and every Sayge's Dark Fortune (23735-23738, 23766-23769) triggers the server-only marker 23770 "Sayge's Carnie
+    // Buff" (a dummy aura with SPELL_ATTR0_AURA_IS_DEBUFF, skipped by Spell::EffectTriggerSpell). A trigger of such
+    // an inert marker cannot harm the player, so it does not make the spell a debuff.
+    inline BuffProblem CheckBuff(BuffEffects const& effects)
+    {
+        for (BuffEffect const& e : effects)
+            if (e.present && e.changesXp)
+                return BuffProblem::ChangesXp;
+        for (BuffEffect const& e : effects)
+            if (e.present && e.areaAura)
+                return BuffProblem::AreaAura;
+        for (BuffEffect const& e : effects)
+            if (e.present && e.reachesOthers)
+                return BuffProblem::ReachesOthers;
+        bool any = false;   // at least one effect that does the player good
+        for (BuffEffect const& e : effects)
+        {
+            if (!e.present)
+                continue;
+            if (!e.positive && !e.inertTrigger)
+                return BuffProblem::NotBuff;
+            any = any || e.positive;
+        }
+        return any ? BuffProblem::None : BuffProblem::NotBuff;
+    }
+
+    inline char const* BuffProblemText(BuffProblem p)
+    {
+        switch (p)
+        {
+            case BuffProblem::None: return "";
+            case BuffProblem::ChangesXp: return "changes XP (the camping bonus would be added twice)";
+            case BuffProblem::AreaAura: return "is an area aura (it would reach players who never settled)";
+            case BuffProblem::ReachesOthers:
+                return "has an area or chain target (it would reach players who never settled)";
+            case BuffProblem::NotBuff: return "is not a buff";
+        }
+        return "is not a buff";
+    }
+
     // A profession with camp objects: the game object of each tier and the buff it gives (tier 1..3).
     struct Profession
     {
@@ -182,8 +239,9 @@ namespace Bleakhold::CampRules
     // the buffs are scrolls (tiers 1 and 2; one scroll at a time, as in the core's spell groups), Sayge's fortunes and
     // other buffs that belong to no stacking group (tier 3), and Well Fed for cooks (which also counts as Well Fed for
     // the food XP bonus, and replaces other food). Only self buffs: a party aura would reach players who never
-    // settled. Spell values were not checked against Spell.dbc: change them in mod_bleakhold_ui.conf after a look in
-    // game.
+    // settled. Every buff passes CheckBuff (checked against Spell.dbc 3.3.5a: single-target auras, no area target, no
+    // chain; the fortunes' only non-positive effect is the inert trigger of 23770). Spell values: change them in
+    // mod_bleakhold_ui.conf after a look in game.
     inline constexpr std::array<Profession, 14> DefaultProfessions = { {
         { 171, "Alchemy",        { 190678, 190444, 190689 }, { 8113, 12177, 23738 } },
         { 164, "Blacksmithing",  { 201893, 189626, 171715 }, { 8094, 12175, 23767 } },
