@@ -374,8 +374,9 @@ addon (`Announcer.lua`) shows a big banner ("Aldric: DOUBLE KILL") and plays the
   8 monster kill, 9 godlike, 10 and more holy shit); multi-kills within 18 seconds (double, triple, ultra kill,
   rampage). A kill with both plays the multi-kill first. Lines never overlap (a sound cannot be stopped on 3.3.5a):
   each waits for the one before it, and when they pile up at most two wait and the lowest ones are dropped.
-- Settings: `/bh announcer off|male|female|quiet|normal` (`/bh announcer test` previews it), or the Royale page of
-  Activities. Male is the default; Off keeps the banners and silences the voice.
+- Settings: `/bh announcer off|male|female|quiet|normal` (`/bh announcer test` previews it), or the Tasks page of
+  Activities (shown whenever the realm runs the announcer, Bleakhold Royale on or off). Male is the default; Off
+  keeps the banners and silences the voice.
 - Voice lines: `Interface\AddOns\Bleakhold\Sounds\Announcer\<male|female>[_quiet]\<line>.wav` (22.05 kHz mono
   16-bit PCM, our own recordings made with Kokoro-82M, see `CREDITS.txt` there). After replacing them, run
   `python3 -I Tools/Announcer/import_sounds.py [--from DIR]`: it copies the sets from `DIR/<set>/<line>.wav` and

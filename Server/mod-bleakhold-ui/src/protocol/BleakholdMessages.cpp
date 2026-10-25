@@ -291,7 +291,7 @@ namespace Bleakhold
         w.Int(m.matchId).Int(Num(m.phase)).Int(m.phaseMsLeft).Int(m.alive).Int(m.total).Int(Num(m.me)).Int(m.kills)
             .Opt(m.placement).Opt(m.pinX).Opt(m.pinY).Int(m.stage).Int(m.curX).Int(m.curY).Int(m.curR).Opt(m.nextX)
             .Opt(m.nextY).Opt(m.nextR).Opt(m.shrinkStartMs).Opt(m.shrinkEndMs).Int(m.dmgPermille)
-            .Text(m.watchName, RoyaleNameBytes).Opt(m.myX).Opt(m.myY);
+            .Text(m.watchName, RoyaleNameBytes).Opt(m.myX).Opt(m.myY).Opt(m.stages);
         return w.Take();
     }
 

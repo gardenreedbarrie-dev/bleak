@@ -1,6 +1,7 @@
 -- Bleakhold: Activities window. Nav rail (Dungeons, Keys, Rift, Royale, Tasks, Legacies, Season), header with
 -- the daily and weekly reset, and the Tasks page: era banner with affixes, daily task cards with
--- progress rings and Claim, weekly tasks, "your week" aside and Find a group.
+-- progress rings and Claim, weekly tasks, "your week" aside and Find a group, and the battleground kill
+-- announcer's settings (Announcer.lua) while the realm runs it (HELLO feature bit 8192), Royale on or off.
 -- Dungeons.lua, Keys.lua, Rift.lua and Royale.lua add their pages through Activities.AddPage. A nav entry with an
 -- available() test (Royale: HELLO feature bit 4096) is left out of the rail while it says no (A.LayoutNav).
 local ADDON, ns = ...
@@ -290,6 +291,41 @@ for i = 1, 3 do
     P.rows[i] = r
 end
 
+-- The battleground kill announcer (section 18): its voice and volume, under the weekly tasks, shown while the realm
+-- runs the announcer (feature bit 8192) whether or not Bleakhold Royale is on
+local ann = UI.Box(P, LEFT, 44, C.card, C.border)
+ann:SetPoint("TOPLEFT", P, "TOPLEFT", 0, -472)
+ann.title = UI.Text(ann, 13, C.text)
+ann.title:SetPoint("TOPLEFT", ann, "TOPLEFT", 12, -7)
+ann.title:SetText("Kill announcer")
+ann.text = UI.Text(ann, 11, C.dim)
+ann.text:SetPoint("TOPLEFT", ann.title, "BOTTOMLEFT", 0, -3)
+UI.OneLine(ann.text, LEFT - 310)
+ann.text:SetText("First blood, streaks and multi-kills in every battleground")
+ann.volume = UI.Dropdown(ann, 140, function(v)
+    ns.Announcer.SetQuiet(v == "quiet")
+end)
+ann.volume:SetPoint("RIGHT", ann, "RIGHT", -9, 0)
+ann.volume:SetItems({ { value = "normal", text = "Volume: Normal" }, { value = "quiet", text = "Volume: Quiet" } })
+ann.voice = UI.Dropdown(ann, 130, function(v)
+    ns.Announcer.SetVoice(v)
+end)
+ann.voice:SetPoint("RIGHT", ann.volume, "LEFT", -8, 0)
+ann.voice:SetItems({ { value = "off", text = "Voice: Off" }, { value = "male", text = "Voice: Male" },
+    { value = "female", text = "Voice: Female" } })
+ann:Hide()
+P.announcer = ann
+
+function P:RefreshAnnouncer()
+    if not (ns.Announcer and Comm.HasFeature(Comm.FEATURE.BG_ANNOUNCER)) then
+        ann:Hide()
+        return
+    end
+    ann.voice:SetValue(ns.Announcer.Voice(), true)
+    ann.volume:SetValue(ns.Announcer.Quiet() and "quiet" or "normal", true)
+    ann:Show()
+end
+
 -- Aside
 local week = UI.Box(P, ASIDE, 150, C.card, C.border)
 week:SetPoint("TOPRIGHT", P, "TOPRIGHT", 0, -100)
@@ -525,6 +561,7 @@ function P:Refresh()
     else
         bonus:Hide()
     end
+    P:RefreshAnnouncer()
 end
 
 function P:OnOpen()
@@ -570,6 +607,7 @@ end)
 
 ns.On("HELLO", function()
     A.LayoutNav()
+    P:RefreshAnnouncer()
     if win:IsShown() then
         updateHeader()
     end

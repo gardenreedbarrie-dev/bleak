@@ -152,17 +152,52 @@ test("announcer: Male by default; Female, Quiet and Off from the settings and /b
     H.eq(ns.db.options.announcerVoice, "robot", "unknown words change nothing")
 end)
 
-test("announcer: the Royale page's dropdowns set the announcer of every battleground", function(M, ns)
-    setup(M, { bits = { [6] = 8192 + 4096 } })
-    ns.UI.Open("royale")
+test("announcer: the Tasks page holds the settings whenever bit 8192 is on, Royale off too", function(M, ns)
+    setup(M)   -- the announcer bit alone: Bleakhold Royale is off on this realm
+    local nav
+    for _, b in ipairs(ns.Activities.nav) do
+        if b.key == "royale" then nav = b end
+    end
+    H.ok(not nav:IsShown(), "no Royale page on this realm")
+    ns.UI.Open("tasks")
     M.Advance(0.3)
-    local last = ns.Royale.page.last
-    H.eq(last.voiceLabel:GetText(), "KILL ANNOUNCER (ALL BATTLEGROUNDS)")
-    last.voice:SetValue("female")
-    last.volume:SetValue("quiet")
+    local ann = ns.Activities.tasksPage.announcer
+    H.ok(ann:IsVisible(), "the settings without Royale")
+    H.eq(ann.title:GetText(), "Kill announcer")
+    H.eq(ann.voice.label:GetText(), "Voice: Male", "the default")
+    H.eq(ann.volume.label:GetText(), "Volume: Normal")
+    ann.voice:SetValue("female")
+    ann.volume:SetValue("quiet")
     H.eq(ns.Announcer.Voice(), "female"); H.eq(ns.Announcer.Quiet(), true)
-    M.env.SlashCmdList.BLEAKHOLD("royale voice off")
-    H.eq(ns.Announcer.Voice(), "off", "/bh royale voice still works")
+    H.eq(ns.db.options.announcerVoice, "female"); H.eq(ns.db.options.announcerQuiet, true)
+    -- the slash commands change the same settings, and the page shows them
+    M.env.SlashCmdList.BLEAKHOLD("announcer off")
+    M.env.SlashCmdList.BLEAKHOLD("royale normal")
+    ns.Activities.tasksPage:Refresh()
+    H.eq(ann.voice.label:GetText(), "Voice: Off"); H.eq(ann.volume.label:GetText(), "Volume: Normal")
+    -- the box sits under the weekly tasks, as wide as the task column
+    local page = ns.Activities.tasksPage
+    local _, rel, relPoint, _, y = ann:GetPoint(1)
+    H.ok(rel == page and relPoint == "TOPLEFT" and y == -472, "under the third weekly row (-422 - 44 - 6)")
+    H.eq(ann:GetWidth(), page.rows[1]:GetWidth())
+    H.ok(472 + ann:GetHeight() <= ns.Activities.PH, "inside the page")
+    -- the Royale page no longer carries them
+    H.eq(ns.Royale.page.last.voice, nil)
+    H.eq(ns.Royale.page.last.volume, nil)
+end)
+
+test("announcer: the settings follow feature bit 8192 at runtime, with or without Royale", function(M, ns)
+    FX.connect(M, H, { [6] = 4096 })
+    ns.UI.Open("tasks")
+    M.Advance(0.3)
+    local ann = ns.Activities.tasksPage.announcer
+    H.ok(not ann:IsShown(), "no announcer on this realm: no settings, even with Royale")
+    H.hello(M, BITS)
+    M.Advance(0.3)
+    H.ok(ann:IsVisible(), "the server turned the announcer on")
+    H.hello(M, { [6] = 4096 })
+    M.Advance(0.3)
+    H.ok(not ann:IsShown(), "and off again")
 end)
 
 test("announcer: the Royale announcer's settings carry over once", function(M, ns)

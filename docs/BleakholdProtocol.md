@@ -995,16 +995,17 @@ bit is off the server answers `QJOIN B`, `RDROP` and `RSPEC` with `ERR` `royale_
 |---|---|
 | 0 arriving | players arrive in the lobby, The Overlook, a mesa in a corner of the map. A warm-up brawl: damage is on, nobody dies. Landing pins can be set. |
 | 1 countdown | the big countdown; the first storm circle is shown 15 s before the drop, and the pins lock 3 s before it |
-| 2 drop | everyone falls from high above their pin and opens a parachute (by itself, or at once with `RDEPLOY`) |
-| 3 fight | the storm circle closes in six stages; outside it the storm hurts more with every stage |
+| 2 drop | everyone falls from high above their pin and opens a parachute (by itself, or at once with `RDEPLOY`); the phase ends when the last player has landed (at most 30 s after the drop). A player who has landed already fights: the client shows the fight's storm timer from `me` 2 on |
+| 3 fight | the storm circle closes in `stages` stages (six by default; the first one starts to move 2 minutes after the drop); outside it the storm hurts more with every stage. A late arrival drops on their own during this phase (`me` 1) |
 | 4 overtime | the circle is gone and the storm keeps getting stronger |
 | 5 victory | one player is left: the winner |
 | 6 ended | the scoreboard; the players leave or are sent back |
 | 7 cancelled | too few players arrived: everyone goes back to the front of the queue |
 
 A player who would die is eliminated instead and becomes an invisible spectator on the same map: they can watch the
-players still alive (`RSPEC`), queue again (`QJOIN B`) or leave. Logging out or leaving the battleground while alive
-forfeits the match.
+players still alive (`RSPEC`), queue again (`QJOIN B`) or leave. Until the match has a winner a spectator cannot
+whisper players still in the fight, nor use guild, officer or channel chat. Logging out or leaving the battleground
+while alive forfeits the match.
 
 **Positions** are integer world yards of the Royale map (X points north, Y west, as `.gps` shows them). The client
 draws its island map from `ROYM`'s frame: `u = (maxY - y) / (maxY - minY)`, `v = (maxX - x) / (maxX - minX)` (north
@@ -1018,7 +1019,8 @@ names of places at most 40.
 `tier` 0 and `size` 1; `roles` (1..7) is ignored. A repeated `QJOIN B` only sends `QUEUE` again. `QLEAVE` leaves the
 Royale queue (outside it, it does what it does for the other queues). `QREPLY proposalId,accept` answers the ready
 check when `proposalId` is the player's open Royale proposal; no answer before `timeoutSec` runs out is a decline, and
-a player who declines cannot queue for 120 s. When enough players accept (`minPlayers`, 20), the match starts and
+so is leaving the queue (`QLEAVE`, logging out) while the ready check is open, even after accepting it. A player who
+declines cannot queue for 120 s. When enough players accept (`minPlayers`, 20), the match starts and
 everyone who accepted is taken there.
 
 `QUEUE` for kind `B` has the fields of section 7, then `queued, minPlayers, maxPlayers, accepted, proposalSize,
@@ -1045,7 +1047,7 @@ matchesRunning`:
 | the player has Deserter | `ERR` `royale_deserter` |
 | the player is dead | `ERR` `dead` |
 | fewer than 6 free bag slots | `ERR` `royale_bags` |
-| too many players from the player's IP address are queued or playing | `ERR` `royale_ip` |
+| too many players from the player's IP address are queued, on the loading screen into a match or playing | `ERR` `royale_ip` |
 | the player declined a ready check less than 120 s ago | `ERR` `royale_lockout` (the text gives the seconds left) |
 
 A spectator's `QJOIN B` leaves the match and queues again. `QREPLY` without an open proposal of that id: `ERR`
@@ -1071,14 +1073,16 @@ silently unless the player is falling from the drop, has not opened the parachut
 Without it the parachute opens by itself (2.5 s into the fall, or 70 yd above the ground).
 
 `RSPEC dir` moves a spectator's camera: `dir` 0 to the player who eliminated them (or the first player alive), 1 to
-the next player alive, 2 to the previous one. The server sends `ROYS` with the new `watchName`.
+the next player alive, 2 to the previous one. The server sends `ROYS` with the new `watchName`. It works from the
+elimination on (`me` 3): during the 3 s the eliminated player lies on the ground the choice is kept, and the camera
+moves there when they become a spectator.
 
 | Check | Answer |
 |---|---|
 | malformed (`dir` not 0, 1 or 2) | dropped silently (section 1) |
 | the player's `RSPEC` rate (section 8; the same `dir` again is not a duplicate) | `ERR` `busy` |
 | Bleakhold Royale is off | `ERR` `royale_off` |
-| the player is not a spectator in a match | `ERR` `royale_phase` |
+| the player is not eliminated or spectating in a match (`me` 3) | `ERR` `royale_phase` |
 | nobody is alive to watch | `ERR` `royale_nobody` |
 
 `GET ROYS` is answered with `ROYS` then a full `ROYO`, `GET ROYM` with `ROYM`; nothing is sent to a player who is not
@@ -1086,15 +1090,16 @@ in a match. After a `/reload` in a match the client sends `GET ROYS;ROYM` once `
 
 ### ROYS (the match as the player sees it)
 
-`matchId, phase, phaseMsLeft, alive, total, me, kills, placement, pinX, pinY, stage, curX, curY, curR, nextX, nextY, nextR, shrinkStartMs, shrinkEndMs, dmgPermille, watchName, myX, myY`
+`matchId, phase, phaseMsLeft, alive, total, me, kills, placement, pinX, pinY, stage, curX, curY, curR, nextX, nextY, nextR, shrinkStartMs, shrinkEndMs, dmgPermille, watchName, myX, myY, stages`
 
 - `matchId`: the match; another id is another match.
-- `phase`: the table above. `phaseMsLeft`: until the next phase (the countdown in phase 1).
+- `phase`: the table above. `phaseMsLeft`: until the next phase (the countdown in phase 1; in phase 2 until the last
+  player falling is put on the ground at the latest).
 - `alive`: players still in the fight; `total`: players in the match (who dropped, or are in the lobby before it).
 - `me`: 0 in the lobby, 1 dropping, 2 alive, 3 spectating, 4 left, 5 the winner.
 - `kills`: the player's eliminations. `placement`: empty while the player is in the fight.
 - `pinX`, `pinY`: the player's snapped landing pin; empty when none is set.
-- `stage`: the storm stage, 1 to 6 (0 before the first circle is shown).
+- `stage`: the storm stage, 1 to `stages` (0 before the first circle is shown); `stages` + 1 in overtime (phase 4).
 - `curX`, `curY`, `curR`: the storm circle when the message was sent.
 - `nextX`, `nextY`, `nextR`: the next circle; empty until it is shown.
 - `shrinkStartMs`, `shrinkEndMs`: until the next shrink starts and ends. `shrinkStartMs` 0 and `shrinkEndMs` above 0:
@@ -1102,6 +1107,8 @@ in a match. After a `/reload` in a match the client sends `GET ROYS;ROYM` once `
 - `dmgPermille`: the storm damage outside the circle now, in permille of maximum health per second.
 - `watchName`: for a spectator, the player they watch; empty otherwise.
 - `myX`, `myY`: the player's position (the map arrow when the client cannot place the player itself).
+- `stages`: how many stages the storm has in this match (1 to 16, the server's `Storm.Stages`; six by default). A
+  server that leaves it empty has six.
 
 The server sends `ROYS` when the player arrives, on every change of `phase`, `stage` or `me`, after `RDROP` and
 `RSPEC`, every 5 s, and for `GET ROYS`.
@@ -1176,10 +1183,11 @@ in; the last one counts.
 
 `QJOIN B` -> `QUEUE` state 1 -> 20 players or more: `QUEUE` state 2 with `proposalId` and `timeoutSec` 15 ->
 `QREPLY` -> `QUEUE` state 3 and the teleport -> `ROYM` and `ROYS` (phase 0) -> `RDROP` (answered by `ROYS`) ->
-`ROYS` phase 1 and `ROYV R` (the first circle) -> phase 2: the drop, `RDEPLOY` -> phase 3: `ROYV S` as the storm
-moves, `ROYV D`, `L`, `O` for supply drops, `ROYO` for orbs, `ROYK` for every elimination, `ROYV N` -> eliminated:
-`ROYE`, then `ROYS` with `me` 3 and `RSPEC` -> one player left: `ROYV W`, `ROYS` phase 5 and the winner's `ROYE` ->
-phase 6 -> back in the world: `QUEUE` state 0. A cancelled match: `ROYS` phase 7 and `QUEUE` state 1 again.
+`ROYS` phase 1 and `ROYV R` (the first circle) -> phase 2: the drop, `RDEPLOY` -> everyone landed, phase 3:
+`ROYV S` as the storm moves, `ROYV D`, `L`, `O` for supply drops, `ROYO` for orbs, `ROYK` for every elimination,
+`ROYV N` -> eliminated: `ROYE`, then `ROYS` with `me` 3 and `RSPEC` -> one player left: `ROYV W`, `ROYS` phase 5 and
+the winner's `ROYE` -> phase 6 -> back in the world: `QUEUE` state 0. A cancelled match: `ROYS` phase 7 and `QUEUE`
+state 1 again.
 
 The realm hears about the mode on `[Royale]` lines (section 10): when the queue fills up, and for every winner.
 
@@ -1197,7 +1205,7 @@ The realm hears about the mode on `[Royale]` lines (section 10): when the queue 
 | `royale_lockout` | declined a ready check not long ago (the text gives the seconds left) |
 | `dead`, `in_combat` | the generic codes (`QJOIN B` while dead; any Royale intent the server refuses in combat) |
 | `no_proposal` | `QREPLY` with no open proposal of that id |
-| `royale_phase` | `RDROP` outside the lobby or after the pins locked; `RSPEC` from a player who is not a spectator |
+| `royale_phase` | `RDROP` outside the lobby or after the pins locked; `RSPEC` from a player who is not eliminated or a spectator |
 | `royale_nobody` | `RSPEC` with nobody alive to watch |
 | `glide_here` | `GLIDE` in a battleground, an arena or on the Royale map (section 16) |
 
@@ -1208,9 +1216,9 @@ S> 1 QUEUE g 1/1 5,2,B,901,0,1,95,,412,15,80,80,24,20,40,0,24,1
 C> 1 QREPLY 8 1/1 412,1
 S> 1 QUEUE h 1/1 6,3,B,901,0,1,,,,,80,80,,20,40,,,2
 S> 1 ROYM i 1/1 901,-1066,533,-1066,533,455,455,32,750,-267,-267;1,L,-266,-266,88,The Bleak Hold;2,L,120,80,62,Harrow Farm
-S> 1 ROYS j 1/1 7001,1,45000,24,24,0,0,,,,0,-267,-267,1080,,,,,,0,,450,452
+S> 1 ROYS j 1/1 7001,1,45000,24,24,0,0,,,,0,-267,-267,1080,,,,,,0,,450,452,6
 C> 1 RDROP 9 1/1 104,96
-S> 1 ROYS k 1/1 7001,1,41000,24,24,0,0,,104,96,0,-267,-267,1080,,,,,,0,,450,452
+S> 1 ROYS k 1/1 7001,1,41000,24,24,0,0,,104,96,0,-267,-267,1080,,,,,,0,,450,452,6
 C> 1 RDEPLOY a 1/1
 S> 1 ROYO l 1/1 7001,1;1,S,0,-266,-266,0,90000;2,S,0,-712,48,0,90000;3,B,1,120,80,1
 S> 1 ROYV m 1/1 D,0,-80,-180,20000

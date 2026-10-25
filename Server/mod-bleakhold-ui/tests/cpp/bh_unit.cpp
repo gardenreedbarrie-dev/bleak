@@ -1007,8 +1007,14 @@ TEST("royale: the encoders keep to the document")
     st.myX = 455; st.myY = -455;
     CHECK_EQ(EncodeRoyaleState(st), "7001,4,4294967295,2,40,3,3,7,-17067,17067,6,-300,-1,0,-301,0,0,0,45000,160,"
         "Br\xC3\xA9nna%2C the%3B long%7Cname,455,-455");
+    st.stages = 6;   // field 24: the stage count (stage 7 = overtime here)
+    CHECK_EQ(EncodeRoyaleState(st), "7001,4,4294967295,2,40,3,3,7,-17067,17067,6,-300,-1,0,-301,0,0,0,45000,160,"
+        "Br\xC3\xA9nna%2C the%3B long%7Cname,455,-455,6");
     st.watchName = std::string(60, 'x');
     CHECK(SplitStr(EncodeRoyaleState(st), ',')[20].size() == RoyaleNameBytes);   // names cut at 48 bytes
+    RoyaleState few;
+    few.stages = 16;   // the empty watchName, myX and myY before it stay
+    CHECK_EQ(EncodeRoyaleState(few), "0,0,0,0,0,0,0,,,,0,0,0,0,,,,,,0,,,,16");
 
     RoyaleMap mp;
     mp.mapId = 566; mp.minX = 1500; mp.maxX = 2800; mp.minY = 900; mp.maxY = 2200; mp.lobbyX = 2166; mp.lobbyY = 1564;
@@ -1408,7 +1414,7 @@ static std::map<std::string, std::string> BuiltExamples()
         RoyaleState st;
         st.matchId = 7001; st.phase = RoyalePhase::Countdown; st.phaseMsLeft = 45000; st.alive = 24; st.total = 24;
         st.me = RoyaleMe::Lobby; st.kills = 0; st.stage = 0; st.curX = -267; st.curY = -267; st.curR = 1080;
-        st.dmgPermille = 0; st.myX = 450; st.myY = 452;
+        st.dmgPermille = 0; st.myX = 450; st.myY = 452; st.stages = 6;
         m["ROYS j"] = EncodeRoyaleState(st);
         st.phaseMsLeft = 41000; st.pinX = 104; st.pinY = 96;
         m["ROYS k"] = EncodeRoyaleState(st);

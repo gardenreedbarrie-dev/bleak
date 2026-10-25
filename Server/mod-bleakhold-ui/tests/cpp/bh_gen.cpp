@@ -199,7 +199,7 @@ namespace
 
         RoyaleState st;
         st.matchId = 7001; st.phase = RoyalePhase::Arriving; st.phaseMsLeft = 60000; st.alive = 24; st.total = 24;
-        st.curX = -267; st.curY = -267; st.curR = 1080; st.myX = 450; st.myY = 452;
+        st.curX = -267; st.curY = -267; st.curR = 1080; st.myX = 450; st.myY = 452; st.stages = 6;
         send("ROYS", EncodeRoyaleState(st));
         st.phase = RoyalePhase::Countdown; st.phaseMsLeft = 41000; st.pinX = 104; st.pinY = 96;
         send("ROYS", EncodeRoyaleState(st));

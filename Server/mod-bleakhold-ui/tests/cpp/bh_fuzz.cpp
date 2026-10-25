@@ -343,6 +343,11 @@ namespace
         st.watchName = text; st.pinX = -17067; st.myX = -1; st.myY = static_cast<int32_t>(k);
         f = fields(records(EncodeRoyaleState(st), 1, "ROYS")[0], 23, "ROYS");
         name(f[20], RoyaleNameBytes, "ROYS watchName");
+        st.stages = 1u + k % 16u;
+        f = fields(records(EncodeRoyaleState(st), 1, "ROYS")[0], 24, "ROYS with stages");
+        name(f[20], RoyaleNameBytes, "ROYS watchName before stages");
+        if (f[23] != std::to_string(*st.stages))
+            Die("ROYS: stages is not the one given", text);
 
         RoyaleMap mp;
         mp.pois = { { 1, RoyalePoiKind::Landmark, -1, 1, 2, text }, { 2, RoyalePoiKind::Lobby, 0, 0, k, text } };

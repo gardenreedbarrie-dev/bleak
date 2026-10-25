@@ -1,7 +1,8 @@
 -- Bleakhold: Bleakhold Royale's HUD (docs/BleakholdProtocol.md section 17), drawn from server state only:
---   the top bar      players alive, own eliminations, the storm ("Storm moves in 0:45", "Storm moving 0:20"), six
---                    stage pips and the storm's damage while the player is outside the circle; in the lobby the
---                    drop countdown and "Pins lock in 3"
+--   the top bar      players alive, own eliminations, the storm ("Storm moves in 0:45", "Storm moving 0:20"), one
+--                    pip per storm stage (ROYS `stages`) and the storm's damage while the player is outside the
+--                    circle, from the player's landing on (the server's phase 2 lasts until everyone has landed);
+--                    in the lobby the drop countdown and "Pins lock in 3"
 --   the kill feed    five lines at the top right that fade after 8 s (ROYK)
 --   banners          milestones (ROYV N), the circle, the storm, supply drops and the winner; the kill announcer
 --                    (first blood, streaks, multi-kills) is Announcer.lua's (BGANN, section 18) in every battleground
@@ -114,11 +115,24 @@ bar.kills:SetPoint("TOPRIGHT", bar.killsLabel, "BOTTOMRIGHT", 0, -2)
 bar.main = UI.Text(bar, 15, C.goldPale, "body", "CENTER")
 bar.main:SetPoint("TOP", bar, "TOP", 0, -9)
 UI.OneLine(bar.main, 280)
+H.PIP_GAP = 14
 bar.pips = {}
-for i = 1, 6 do
+for i = 1, ns.ROYALE_MAX_STAGES do
     local p = UI.Disc(bar, 8, C.track, "ARTWORK")
-    p:SetPoint("TOP", bar, "TOP", (i - 3.5) * 14, -32)
+    p:Hide()
     bar.pips[i] = p
+end
+
+-- Centre the first n pips under the main text.
+local function layoutPips(n)
+    if bar.pipCount == n then
+        return
+    end
+    bar.pipCount = n
+    for i, p in ipairs(bar.pips) do
+        p:ClearAllPoints()
+        p:SetPoint("TOP", bar, "TOP", (i - (n + 1) / 2) * H.PIP_GAP, -32)
+    end
 end
 bar.sub = UI.Text(bar, 12, C.purple, "body", "CENTER")
 bar.sub:SetPoint("TOP", bar, "BOTTOM", 0, -4)
@@ -127,6 +141,7 @@ UI.OneLine(bar.sub, 420)
 H.SAMPLE = {
     matchId = 0, phase = 3, phaseMsLeft = 0, alive = 23, total = 32, me = 2, kills = 2, stage = 2, curX = 0, curY = 0,
     curR = 320, nextX = 0, nextY = 0, nextR = 180, shrinkStartMs = 45000, shrinkEndMs = 95000, dmgPermille = 20,
+    stages = 6,
 }
 
 function H.BarTexts(m)
@@ -147,19 +162,19 @@ function H.BarTexts(m)
         else
             sub = m.pinX and "Your landing pin is set" or "Set your landing pin on the map"
         end
-    elseif m.phase == R.PHASE.DROP then
-        main = "The drop!"
-    elseif m.phase == R.PHASE.FIGHT or m.phase == R.PHASE.OVERTIME then
+    elseif R.Fighting(m) then
         local what, sec = R.StormTimer(m)
         if what == "hold" then
             main = "Storm moves in " .. clock(sec)
         elseif what == "moving" then
             main = "Storm moving " .. clock(sec)
-        elseif m.phase == R.PHASE.OVERTIME then
+        elseif R.Overtime(m) then
             main = "Overtime: the storm has closed"
         else
             main = m.stage > 0 and ("Storm stage " .. m.stage) or "Survive"
         end
+    elseif m.phase == R.PHASE.DROP or m.phase == R.PHASE.FIGHT or m.phase == R.PHASE.OVERTIME then
+        main = "The drop!"   -- still falling (a late drop too)
     elseif m.phase == R.PHASE.VICTORY then
         local e = S.royaleEvent
         local name = (e and e.kind == "W" and e.name) or (S.royaleResult and S.royaleResult.winnerName)
@@ -183,10 +198,13 @@ function H.UpdateBar(m)
     bar.alive:SetText(lobby and tostring(m.total or 0) or ((m.alive or 0) .. " / " .. (m.total or 0)))
     bar.kills:SetText(tostring(m.kills or 0))
     UI.SetText(bar.main, main)
-    local fighting = m.phase == R.PHASE.FIGHT or m.phase == R.PHASE.OVERTIME
+    local fighting = R.Fighting(m)
+    local count = R.StageCount(m)
+    local lit = R.Overtime(m) and count or (m.stage or 0)
+    layoutPips(count)
     for i, p in ipairs(bar.pips) do
-        if fighting then
-            p:SetVertexColor(UI.Rgb(i <= (m.stage or 0) and C.purple or C.track))
+        if fighting and i <= count then
+            p:SetVertexColor(UI.Rgb(i <= lit and C.purple or C.track))
             p:Show()
         else
             p:Hide()
@@ -432,7 +450,7 @@ end
 
 function H.UpdateStorm(m)
     H.outside = false
-    local fighting = m and m.me == R.ME.ALIVE and (m.phase == R.PHASE.FIGHT or m.phase == R.PHASE.OVERTIME)
+    local fighting = m and m.me == R.ME.ALIVE and R.Fighting(m)
     local x, y = nil, nil
     if fighting then
         x, y = R.MyPos()

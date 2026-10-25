@@ -13,9 +13,9 @@
 --             from the WAV files by Tools/Announcer/import_sounds.py) plus a short gap. When lines pile up, at most
 --             two wait: the lowest ones are dropped (first blood lowest, then by rank, see A.LINES)
 --   settings  Announcer Off / Male / Female (default Male) and Volume Normal / Quiet: ns.db.options.announcerVoice and
---             announcerQuiet, on the Royale page of Activities and with /bh announcer. Off silences the voice; the
---             banners still show. A line without a sound file (or a set missing from AnnouncerData.lua) shows its
---             banner for A.SILENT_SECONDS.
+--             announcerQuiet, on the Tasks page of Activities (shown with feature bit 8192, Royale on or off) and
+--             with /bh announcer. Off silences the voice; the banners still show. A line without a sound file (or a
+--             set missing from AnnouncerData.lua) shows its banner for A.SILENT_SECONDS.
 local ADDON, ns = ...
 local U, UI, Comm = ns.U, ns.UI, ns.Comm
 local C = UI.C

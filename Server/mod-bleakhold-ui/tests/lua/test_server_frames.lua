@@ -406,7 +406,7 @@ for _, size in ipairs({ 1000, 251, 64 }) do
         H.eq(m.me, 3); H.eq(m.placement, 12); H.eq(m.pinX, 104); H.eq(m.pinY, 96); H.eq(m.stage, 1)
         H.eq(m.curR, 1080); H.eq(m.nextX, -150); H.eq(m.nextY, -310); H.eq(m.nextR, 520)
         H.eq(m.shrinkStartMs, 0); H.eq(m.shrinkEndMs, 170000); H.eq(m.dmgPermille, 10)
-        H.eq(m.watchName, "Aldric Stormwind"); H.eq(m.myX, nil); H.eq(m.myY, nil)
+        H.eq(m.watchName, "Aldric Stormwind"); H.eq(m.myX, nil); H.eq(m.myY, nil); H.eq(m.stages, 6)
         -- ROYO: the full list, then the change (the supply drop opened)
         local o = S.royaleObjects
         H.eq(o.matchId, 7001); H.eq(#o.list, 11)

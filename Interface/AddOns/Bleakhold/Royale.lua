@@ -122,6 +122,30 @@ function R.InLobby(m)
     return m ~= nil and m.phase <= R.PHASE.COUNTDOWN
 end
 
+-- The fight is on for this player: phase 3 or 4, or phase 2 once they are down from the drop. The server keeps phase
+-- 2 until the last player has landed, so a player who landed early already fights with the storm timer, the stage
+-- pips and the arrow to the safe zone; "The drop!" is for a player still falling (me 1, also a late drop in 3).
+function R.Fighting(m)
+    m = m or R.Match()
+    if not m or m.me == R.ME.DROPPING or m.me == R.ME.LOBBY then
+        return false
+    end
+    return m.phase == R.PHASE.FIGHT or m.phase == R.PHASE.OVERTIME or m.phase == R.PHASE.DROP
+end
+
+-- How many stages the storm has (ROYS `stages`; a server without the field has six) and whether it is in overtime
+-- (phase 4, or the stage past the last one).
+R.STAGES = 6
+function R.StageCount(m)
+    m = m or R.Match()
+    return (m and m.stages) or R.STAGES
+end
+
+function R.Overtime(m)
+    m = m or R.Match()
+    return m ~= nil and (m.phase == R.PHASE.OVERTIME or (m.stage or 0) > R.StageCount(m))
+end
+
 -- Seconds until the next phase (nil when none is planned).
 function R.PhaseLeft(m)
     m = m or R.Match()
@@ -659,7 +683,8 @@ ns.On("STATE", function(topic)
 end)
 
 ------------------------------------------------------------------------------------------------------
--- Activities: the Royale page (the mode's card, the last match, the kill announcer's settings for every battleground)
+-- Activities: the Royale page (the mode's card, the last match). The kill announcer's settings are on the Tasks page
+-- (Activities.lua): the announcer plays in every battleground, Royale or not.
 ------------------------------------------------------------------------------------------------------
 local P = A.NewPage()
 A.AddPage("royale", P)
@@ -730,7 +755,7 @@ local HOW = {
     "Queue alone. At 20 players a ready check goes out; answer it within 15 seconds.",
     "Brawl on The Overlook while the others arrive, and click the island map to set your landing pin.",
     "Drop from high above your pin; your parachute opens by itself (or bind a key to open it).",
-    "Loot crates, orbs and supply drops, and stay inside the storm circle: it closes in six stages.",
+    "Loot crates, orbs and supply drops, and stay inside the storm circle: it closes in stages.",
     "Eliminated players watch the rest, queue again or leave. Honor and Shards by placement.",
 }
 for i, line in ipairs(HOW) do
@@ -762,20 +787,6 @@ for i = 1, 4 do
     UI.OneLine(l, CARD_W - 24)
     last.lines[i] = l
 end
-last.voiceLabel = UI.Text(last, 11, C.dim)
-last.voiceLabel:SetPoint("BOTTOMLEFT", last, "BOTTOMLEFT", 12, 44)
-last.voiceLabel:SetText("KILL ANNOUNCER (ALL BATTLEGROUNDS)")
-last.voice = UI.Dropdown(last, 130, function(v)
-    ns.Announcer.SetVoice(v)
-end)
-last.voice:SetPoint("BOTTOMLEFT", last, "BOTTOMLEFT", 12, 12)
-last.voice:SetItems({ { value = "off", text = "Voice: Off" }, { value = "male", text = "Voice: Male" },
-    { value = "female", text = "Voice: Female" } })
-last.volume = UI.Dropdown(last, 140, function(v)
-    ns.Announcer.SetQuiet(v == "quiet")
-end)
-last.volume:SetPoint("BOTTOMLEFT", last, "BOTTOMLEFT", 152, 12)
-last.volume:SetItems({ { value = "normal", text = "Volume: Normal" }, { value = "quiet", text = "Volume: Quiet" } })
 P.last = last
 
 local QUEUE_STATUS = { [1] = "In the queue", [2] = "Match found - answer the ready check", [3] = "In a match" }
@@ -868,8 +879,6 @@ function P:Refresh()
     else
         last.place:SetText("No match yet")
     end
-    last.voice:SetValue(ns.Announcer.Voice(), true)
-    last.volume:SetValue(ns.Announcer.Quiet() and "quiet" or "normal", true)
 end
 
 function P:OnOpen()
@@ -1009,7 +1018,7 @@ local function demoState()
     local s = demo.st
     demoPush("ROYS", { { DEMO_MATCH, s.phase, s.ms or 0, s.alive, 24, s.me, s.kills or 0, s.placement or "",
         s.pinX or "", s.pinY or "", s.stage or 0, s.curX, s.curY, s.curR, s.nextX or "", s.nextY or "", s.nextR or "",
-        s.start or "", s.stop or "", s.dmg or 0, s.watch or "", s.myX or "", s.myY or "" } })
+        s.start or "", s.stop or "", s.dmg or 0, s.watch or "", s.myX or "", s.myY or "", 6 } })
 end
 
 local function demoMap()

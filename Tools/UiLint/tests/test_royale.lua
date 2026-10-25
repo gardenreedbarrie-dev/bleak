@@ -134,7 +134,7 @@ for _, size in ipairs({ 1000, 251, 64 }) do
         H.eq(m.matchId, 7001); H.eq(m.phase, 1); H.eq(m.alive, 23, "from ROYK aliveAfter"); H.eq(m.total, 24);
         H.eq(m.me, 0)
         H.eq(m.pinX, 104); H.eq(m.pinY, 96); H.eq(m.stage, 0); H.eq(m.curR, 1080); H.eq(m.nextR, nil)
-        H.eq(m.myX, 450); H.eq(m.myY, 452); H.eq(m.placement, nil); H.eq(m.watchName, nil)
+        H.eq(m.myX, 450); H.eq(m.myY, 452); H.eq(m.placement, nil); H.eq(m.watchName, nil); H.eq(m.stages, 6)
         -- ROYO l
         local o = S.royaleObjects
         H.eq(o.matchId, 7001); H.eq(#o.list, 3)
@@ -444,6 +444,95 @@ function(M, ns)
     H.ok(not M.env.BleakholdRoyaleVignette:IsShown() and not ea:IsShown(), "spectators take no storm")
 end)
 
+-- The stage pips shown and lit.
+local function pipsOf(bar)
+    local shown, lit = 0, 0
+    for _, p in ipairs(bar.pips) do
+        if p:IsShown() then
+            shown = shown + 1
+            local r = p:GetVertexColor()
+            if math.abs(r - 0xB5 / 255) < 0.01 then lit = lit + 1 end
+        end
+    end
+    return shown, lit
+end
+
+test("royale: phase 2 is the fall only: a landed player gets the storm timer, the pips and the arrow at once",
+function(M, ns)
+    connect(M)
+    H.send(M, "ROYM", MAP)
+    local bar, MP = M.env.BleakholdRoyaleBar, ns.RoyaleMap
+    local ea = M.env.BleakholdRoyaleSafeArrow
+    -- still falling: the drop
+    roys(M, { [2] = 2, [3] = 20000, [6] = 1, [11] = 1, [15] = -150, [16] = -310, [17] = 520, [18] = 100000,
+        [19] = 270000, [20] = 10, [22] = 300, [23] = 300, [24] = 6 })
+    M.Advance(0.3)
+    H.eq(bar.main:GetText(), "The drop!")
+    H.eq(pipsOf(bar), 0, "no pips while falling")
+    H.ok(not ea:IsShown(), "no arrow while falling")
+    H.eq(MP.StatusText(ns.Royale.Match()), "The drop!")
+    -- landed while others still fall (the server keeps phase 2 until the last one is down)
+    roys(M, { [2] = 2, [3] = 12000, [6] = 2, [11] = 1, [15] = -150, [16] = -310, [17] = 520, [18] = 100000,
+        [19] = 270000, [20] = 10, [22] = 300, [23] = 300, [24] = 6 })
+    M.Advance(0.3)
+    H.eq(bar.main:GetText(), "Storm moves in 01:40")
+    local shown, lit = pipsOf(bar)
+    H.eq(shown, 6); H.eq(lit, 1)
+    H.ok(ea:IsShown(), "the arrow to circle 1")
+    local left, right = MP.StatusText(ns.Royale.Match())
+    H.contains(left, "Storm moves in"); H.eq(right, "Storm stage 1 of 6")
+    -- a spectator eliminated during the drop sees the storm too, not "The drop!"
+    roys(M, { [2] = 2, [6] = 3, [11] = 1, [18] = 100000, [19] = 270000, [22] = "", [23] = "", [24] = 6 })
+    M.Advance(0.3)
+    H.contains(bar.main:GetText(), "Storm moves in")
+    -- a late drop in phase 3 is falling: the drop again
+    roys(M, { [2] = 3, [6] = 1, [11] = 2, [18] = 10000, [19] = 30000, [24] = 6 })
+    M.Advance(0.3)
+    H.eq(bar.main:GetText(), "The drop!")
+    H.ok(M.env.BleakholdRoyaleParachute:IsShown(), "the parachute prompt")
+end)
+
+test("royale: the stage count comes from ROYS; overtime is shown as overtime, never as stage 7 of 6",
+function(M, ns)
+    connect(M)
+    H.send(M, "ROYM", MAP)
+    local bar, MP, R = M.env.BleakholdRoyaleBar, ns.RoyaleMap, ns.Royale
+    -- a realm with eight stages
+    roys(M, { [2] = 3, [6] = 2, [11] = 3, [18] = 10000, [19] = 30000, [24] = 8 })
+    M.Advance(0.3)
+    local shown, lit = pipsOf(bar)
+    H.eq(shown, 8); H.eq(lit, 3)
+    local _, right = MP.StatusText(R.Match())
+    H.eq(right, "Storm stage 3 of 8")
+    local _, _, _, x1 = bar.pips[1]:GetPoint(1)
+    local _, _, _, x8 = bar.pips[8]:GetPoint(1)
+    H.ok(math.abs(x1 + x8) < 0.01, "the pips are centred")
+    -- its overtime: stage 9, phase 4
+    roys(M, { [2] = 4, [6] = 2, [11] = 9, [14] = 0, [20] = 160, [24] = 8 })
+    M.Advance(0.3)
+    shown, lit = pipsOf(bar)
+    H.eq(shown, 8); H.eq(lit, 8, "every pip lit")
+    H.eq(bar.main:GetText(), "Overtime: the storm has closed")
+    local left
+    left, right = MP.StatusText(R.Match())
+    H.eq(right, "Storm overtime"); H.eq(left, "The storm has closed")
+    -- the most stages the server takes
+    roys(M, { [2] = 3, [6] = 2, [11] = 16, [18] = 1000, [19] = 2000, [24] = 99 })
+    M.Advance(0.3)
+    H.eq(R.Match().stages, 16)
+    shown = pipsOf(bar)
+    H.eq(shown, 16)
+    -- a server without the field: six, and stage 7 in overtime is overtime
+    roys(M, { [2] = 3, [6] = 2, [11] = 2, [18] = 10000, [19] = 30000 })
+    M.Advance(0.3)
+    H.eq(R.Match().stages, nil)
+    H.eq(pipsOf(bar), 6)
+    H.eq(select(2, MP.StatusText(R.Match())), "Storm stage 2 of 6")
+    roys(M, { [2] = 4, [6] = 3, [11] = 7, [14] = 0 })
+    M.Advance(0.3)
+    H.eq(select(2, MP.StatusText(R.Match())), "Storm overtime")
+end)
+
 test("royale: the kill feed keeps five lines for 8 s; ROYK announce is superseded: no banner, no voice",
 function(M, ns)
     connect(M, { [6] = 4096 + 8192 })
@@ -534,6 +623,15 @@ test("royale: the spectator bar sends RSPEC 0/2/1, queues again and leaves", fun
     sb.requeue:Click()
     M.Advance(0.3)
     H.eq(table.concat(intentsOf(M, "QJOIN"), " "), "B,901,0,4,1")
+    -- the lie-down right after the elimination (me 3, not watching anyone yet): the camera buttons work, the server
+    -- keeps the choice until the camera can move
+    roys(M, { [2] = 3, [6] = 3, [8] = 12, [21] = "", [22] = "", [23] = "" })
+    M.Advance(0.6)
+    H.eq(sb.name:GetText(), "Nobody to watch")
+    H.ok(sb.killer:IsEnabled() and sb.next:IsEnabled() and sb.prev:IsEnabled(), "camera buttons live")
+    sb.killer:Click()
+    M.Advance(0.3)
+    H.eq(table.concat(intentsOf(M, "RSPEC"), " "), "0 2 1 1 0", "RSPEC 0 during the lie-down")
     sb.leave:Click()
     H.eq(left, 1, "a spectator leaves without a question")
     -- an alive player confirms first (a forfeit)

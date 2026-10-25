@@ -485,7 +485,10 @@ namespace Bleakhold
         uint32_t dmgPermille = 0;            // storm damage outside the circle now, permille of max health per second
         std::string watchName;               // spectators: the player they watch
         Opt<int32_t> myX, myY;               // the player's position (the client's map fallback)
+        Opt<uint32_t> stages;                // the storm's stage count (1..16); stage stages + 1 is overtime
     };
+    // RoyaleState::stages (ROYS field 24) exists: a server module may fill it.
+#define BLEAKHOLD_UI_ROYALE_STAGES 1
 
     struct RoyalePoi
     {

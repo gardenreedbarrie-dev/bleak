@@ -905,6 +905,7 @@ local ROYALE_OBJECT_KINDS = { S = true, B = true, D = true }
 local ROYALE_CAUSES = { P = true, S = true, F = true, L = true, A = true }
 local ROYALE_EVENTS = { R = true, S = true, D = true, L = true, O = true, N = true, W = true }
 ns.ROYALE_MAX_OBJECTS = 64
+ns.ROYALE_MAX_STAGES = 16         -- the server's Storm.Stages takes 1..16; ROYS `stages` (empty: six)
 
 local function royalePos(raw, default)
     return U.Int(raw, default, -ROYALE_POS, ROYALE_POS)
@@ -959,7 +960,8 @@ Comm.Handle("ROYS", function(r)
         curR = U.Int(f[14], 0, 0, ROYALE_POS),
         nextX = royalePos(f[15]), nextY = royalePos(f[16]), nextR = U.Int(f[17], nil, 0, ROYALE_POS),
         shrinkStartMs = royaleMs(f[18]), shrinkEndMs = royaleMs(f[19]), dmgPermille = U.Int(f[20], 0, 0, 1000000),
-        watchName = U.Str(f[21], nil, ROYALE_NAME), myX = royalePos(f[22]), myY = royalePos(f[23]), recvAt = GetTime(),
+        watchName = U.Str(f[21], nil, ROYALE_NAME), myX = royalePos(f[22]), myY = royalePos(f[23]),
+        stages = U.Int(f[24], nil, 1, ns.ROYALE_MAX_STAGES), recvAt = GetTime(),
     }
     -- a pair or nothing
     if not (m.pinX and m.pinY) then

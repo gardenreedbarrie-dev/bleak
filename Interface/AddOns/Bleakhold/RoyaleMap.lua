@@ -562,8 +562,10 @@ function MP.StatusText(m)
         return "", ""
     end
     local right = ""
-    if m.stage > 0 then
-        right = "Storm stage " .. m.stage .. " of 6"
+    if R.Overtime(m) then
+        right = "Storm overtime"
+    elseif m.stage > 0 then
+        right = "Storm stage " .. m.stage .. " of " .. R.StageCount(m)
     end
     if R.InLobby(m) then
         if R.CanPin(m) then
@@ -577,11 +579,11 @@ function MP.StatusText(m)
         end
         return "Pins are locked", right
     end
-    if m.phase == R.PHASE.DROP then
-        return "The drop!", right
-    end
     if m.phase >= R.PHASE.VICTORY then
         return m.phase == R.PHASE.CANCELLED and "The match was cancelled" or "The match is over", right
+    end
+    if not R.Fighting(m) then
+        return "The drop!", right   -- still falling (the fight's texts start at the landing)
     end
     local what, sec = R.StormTimer(m)
     local left
@@ -589,7 +591,7 @@ function MP.StatusText(m)
         left = "Storm moves in " .. U.Clock(ceil(sec))
     elseif what == "moving" then
         left = "Storm moving " .. U.Clock(ceil(sec))
-    elseif m.phase == R.PHASE.OVERTIME then
+    elseif R.Overtime(m) then
         left = "The storm has closed"
     else
         left = m.me == R.ME.SPECTATING and ("Watching " .. (m.watchName or "")) or ""
