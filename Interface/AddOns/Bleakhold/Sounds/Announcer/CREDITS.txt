@@ -1,0 +1,22 @@
+Bleakhold kill announcer voice lines
+====================================
+
+Kill announcer voice lines generated with Kokoro-82M by hexgrad (Apache License 2.0),
+https://huggingface.co/hexgrad/Kokoro-82M
+
+Every line in these folders is a new recording made for Bleakhold with that text-to-speech model and then
+post-processed (pitch, EQ, compression, reverb). Nothing was copied from any other game or sound library; the
+DotA-style line names are only the words spoken.
+
+  male/, male_quiet/      Kokoro voice am_michael ("dark" style)
+  female/, female_quiet/  Kokoro voice af_heart ("dark" style)
+  *_quiet/                the same lines 8 dB quieter (3.3.5a's PlaySoundFile has no volume argument)
+
+Format: 22.05 kHz, mono, 16-bit PCM WAV. Lines: firstblood, doublekill, triplekill, ultrakill, rampage,
+killingspree, dominating, megakill, unstoppable, wickedsick, monsterkill, godlike, holyshit.
+
+Only generated audio ships here, not the model or its voice files, so the Apache-2.0 attribution terms do not
+apply to these files; the credit above is a courtesy. If the model or voice files are ever bundled, include the
+Apache License 2.0 text with them.
+
+After replacing a WAV, run: python3 -I Tools/Announcer/import_sounds.py (it regenerates AnnouncerData.lua).

@@ -358,13 +358,28 @@ A solo free-for-all battle royale: 20 to 40 players at level 80 on their own isl
   island map", `/bh royale map` or the orb) with the storm circles, orbs, supply drops and your own arrow.
 - Eliminated: the spectator bar (Killer, Prev, Next, Queue again, Leave) and the end card (placement,
   eliminations, damage, healing, time survived, rewards).
-- The announcer: `/bh royale voice off|male|female` and `/bh royale quiet|normal`, or the Royale page. Its voice
-  lines are `Interface\AddOns\Bleakhold\Sounds\Royale\<voice>\<line>.wav` (16-bit PCM mono): voice `male`,
-  `female`, `male_quiet` or `female_quiet`; line `firstblood`, `doublekill`, `triplekill`, `monsterkill`, `rampage`
-  or `godlike`. Without the files it stays silent.
+- The kill announcer is the battleground one (below): it plays in Royale matches too.
 - The bar, the kill feed and the spectator bar can be dragged or placed in AddicatUI's editor mode.
 - Art: `python3 -I Tools/BlpConvert/make_royale_art.py` draws the island map from the MapForge terrain spec (with
   none of the server's crate spots, orbs or final sites on it) and the HUD's rings, arrows and pin (needs Pillow).
+
+## Battleground kill announcer
+
+A DotA-style announcer in every battleground (Warsong Gulch, Arathi Basin, Alterac Valley, Eye of the Storm, Strand
+of the Ancients, Isle of Conquest and Bleakhold Royale), never in an arena or the open world. The server keeps the
+score and sends each announced kill (`BGANN`, `docs/BleakholdProtocol.md` section 18, HELLO feature bit 8192); the
+addon (`Announcer.lua`) shows a big banner ("Aldric: DOUBLE KILL") and plays the voice line.
+
+- Lines: first blood; kill streaks (3 killing spree, 4 dominating, 5 mega kill, 6 unstoppable, 7 wicked sick,
+  8 monster kill, 9 godlike, 10 and more holy shit); multi-kills within 18 seconds (double, triple, ultra kill,
+  rampage). A kill with both plays the multi-kill first. Lines never overlap (a sound cannot be stopped on 3.3.5a):
+  each waits for the one before it, and when they pile up at most two wait and the lowest ones are dropped.
+- Settings: `/bh announcer off|male|female|quiet|normal` (`/bh announcer test` previews it), or the Royale page of
+  Activities. Male is the default; Off keeps the banners and silences the voice.
+- Voice lines: `Interface\AddOns\Bleakhold\Sounds\Announcer\<male|female>[_quiet]\<line>.wav` (22.05 kHz mono
+  16-bit PCM, our own recordings made with Kokoro-82M, see `CREDITS.txt` there). After replacing them, run
+  `python3 -I Tools/Announcer/import_sounds.py [--from DIR]`: it copies the sets from `DIR/<set>/<line>.wav` and
+  regenerates `AnnouncerData.lua`, the length of every line, which the addon uses to keep lines apart.
 
 ## Graphics (BleakFx)
 

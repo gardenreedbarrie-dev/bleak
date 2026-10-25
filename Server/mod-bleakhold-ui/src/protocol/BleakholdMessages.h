@@ -62,6 +62,7 @@ namespace Bleakhold
         FeatureGlide = 1024,          // the High Elf glide (GLIDE, section 16)
         FeatureFieldRepair = 2048,    // blacksmiths repair anywhere (REPAIR, section 16)
         FeatureRoyale = 4096,         // Bleakhold Royale is live (section 17); set at runtime with Ui::SetFeature
+        FeatureBgAnnouncer = 8192,    // the battleground kill announcer is live (BGANN, section 18); Ui::SetFeature
     };
 
     // One reward line of MPE / RIFTE.
@@ -446,9 +447,8 @@ namespace Bleakhold
     // ROYK cause: killed by a player, the storm (killer filled when credited), a fall or the environment, left
     // the match, eliminated for being AFK
     enum class RoyaleCause : char { Player = 'P', Storm = 'S', Fall = 'F', Left = 'L', Afk = 'A' };
-    // ROYK announce: the kill announcer line every client of the match plays, decided by the server. First blood (the
-    // first credited kill of the match) takes priority, then the killer's kills in this match: double (2), triple
-    // (3), monster (4), rampage (5), godlike (6 and every further kill). None: no announcement (an empty field).
+    // ROYK announce: superseded by BGANN (section 18). Kept so older callers still compile; EncodeRoyaleKill ignores it
+    // and always leaves the field empty, and the addon ignores the field, so no line plays twice.
     enum class RoyaleAnnounce : char
     {
         None = 0, FirstBlood = 'F', DoubleKill = 'D', TripleKill = 'T', MonsterKill = 'M', Rampage = 'R', Godlike = 'G'
@@ -531,8 +531,7 @@ namespace Bleakhold
         RoyaleCause cause = RoyaleCause::Player;
         uint32_t aliveAfter = 0;
         Opt<uint32_t> killerKills;           // the killer's eliminations in this match, this one included
-        // Appended last (fields are only ever appended). Written only when it is one of the six codes, there is a
-        // credited killer (killerName) and cause is not Left or Afk; otherwise the field is empty.
+        // Superseded by BGANN (section 18): ignored, the field is always sent empty.
         RoyaleAnnounce announce = RoyaleAnnounce::None;
     };
 
@@ -559,6 +558,40 @@ namespace Bleakhold
         bool rewarded = false;               // the player passed the reward rules
         std::vector<Reward> rewards;         // kinds as for MPE, plus H honor
     };
+
+    // ---------------------------------------------------------------------------------------------
+    // The battleground kill announcer (section 18): BGANN, unrevisioned, to every player of a battleground (Warsong
+    // Gulch to Isle of Conquest and Bleakhold Royale; never an arena or the open world). The server keeps the streaks
+    // and multi-kills; one kill may carry a multi-kill code and a streak (or first blood) code, and the client plays
+    // the multi-kill first. BLEAKHOLD_UI_BG_ANNOUNCE tells a server module that this API exists.
+    // ---------------------------------------------------------------------------------------------
+#define BLEAKHOLD_UI_BG_ANNOUNCE 1
+    // multi: kills by the same player with at most the server's window (18 s) between consecutive kills
+    enum class BgMultiKill : char { None = 0, Double = 'D', Triple = 'T', Ultra = 'U', Rampage = 'R' };
+    // streak: F the battleground's first credited kill, else the killer's kills since they last died (in Bleakhold
+    // Royale, one life: all of them) S 3, O 4, K 5, N 6, W 7, M 8, G 9, H 10 and every further kill
+    enum class BgStreak : char
+    {
+        None = 0, FirstBlood = 'F', KillingSpree = 'S', Dominating = 'O', MegaKill = 'K', Unstoppable = 'N',
+        WickedSick = 'W', MonsterKill = 'M', Godlike = 'G', HolyShit = 'H'
+    };
+    inline constexpr std::size_t BgNameBytes = 48;        // character names (two-word names fit)
+
+    struct BgAnnounce    // BGANN: one announced kill
+    {
+        std::string killerName;
+        uint32_t killerClassId = 0;
+        std::string victimName;
+        uint32_t victimClassId = 0;
+        BgMultiKill multi = BgMultiKill::None;
+        BgStreak streak = BgStreak::None;
+    };
+    // The codes as written: one of the letters above, else 0 (an empty field).
+    char BgMultiLetter(BgMultiKill multi);
+    char BgStreakLetter(BgStreak streak);
+    // Worth sending: both names clean to something and at least one valid code. Ui::SendBgAnnounce sends nothing
+    // otherwise.
+    bool BgAnnounceSendable(BgAnnounce const& m);
 
     // ERR codes of Bleakhold Royale (section 17) with a default sentence; Ui::Refuse(player, intent, refusal) sends
     // one. `dead` and `in_combat` are the generic codes. royale_lockout should carry the seconds left: send it with
@@ -617,6 +650,7 @@ namespace Bleakhold
     std::string EncodeRoyaleKill(RoyaleKill const& m);       // ROYK
     std::string EncodeRoyaleEvent(RoyaleEvent const& m);     // ROYV
     std::string EncodeRoyaleResult(RoyaleResult const& m);   // ROYE
+    std::string EncodeBgAnnounce(BgAnnounce const& m);       // BGANN
 
     // DEF: one payload per non-empty kind, in a fixed order, followed by "Z,<dataVer>".
     std::vector<std::string> EncodeDefinitions(Definitions const& d, uint32_t dataVer);

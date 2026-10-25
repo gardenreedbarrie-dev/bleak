@@ -90,9 +90,11 @@ function FX.examples(M)
             { 14, "Y", 455, 455, 32, "The Overlook" } },
         ROYO = { { 7001, 1 }, { 1, "S", 0, -266, -266, 2, 61000 }, { 3, "B", 1, 120, 80, 1, "" },
             { 20, "D", 0, -80, -180, 3, 20000 } },
-        ROYK = { { "Aldric", 1, "Brenna", 8, "P", 23, 2, "D" } },
+        ROYK = { { "Aldric", 1, "Brenna", 8, "P", 23, 2 } },
         ROYV = { { "D", 0, -80, -180, 20000, "" } },
         ROYE = { { 7001, 12, 24, 1, 18400, 0, 214, "Dalia", 11, 7, 1 }, { "H", 70, "", "Placement" }, { "S", 5 } },
+        -- the battleground kill announcer (section 18), unrevisioned
+        BGANN = { { "Aldric", 1, "Brenna", 8, "D", "S" } },
     }
 end
 

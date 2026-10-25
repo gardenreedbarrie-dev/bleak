@@ -34,6 +34,10 @@
  *      QJOIN kind B arrives at your QJOIN handler (intent.queueKind == QueueKind::Royale). While the feature bit is
  *      off the module answers QJOIN B, RDROP and RSPEC with ERR royale_off and drops RDEPLOY, whoever handles them.
  *
+ *   4. The battleground kill announcer (section 18) is a push only: your system keeps the streaks and calls
+ *          Ui::SetFeature(FeatureBgAnnouncer, true);            // while it is enabled (HELLO bit 8192)
+ *          Ui::SendBgAnnounce(bg_players, { killer, killerClass, victim, victimClass, BgMultiKill::Double, ... });
+ *
  * Threading: every function here may be called from any thread (map update threads included). The
  * module queues the frames and sends them from the world thread. Your handlers and providers are
  * always called on the world thread, never while the module holds a lock.
@@ -173,6 +177,12 @@ namespace Bleakhold::Ui
     void SendRoyaleEvent(Player* player, RoyaleEvent const& event);   // ROYV
     void SendRoyaleEvent(std::vector<Player*> const& players, RoyaleEvent const& event);
     void SendRoyaleResult(Player* player, RoyaleResult const& result);   // ROYE (the player's own result)
+    // The battleground kill announcer (section 18): BGANN to one player or to every player of a battleground (encoded
+    // once). Your system keeps the streaks and decides the codes; nothing is sent unless BgAnnounceSendable says so
+    // (both names, at least one code). Turn HELLO bit 8192 on with SetFeature(FeatureBgAnnouncer, true) while your
+    // announcer is enabled: the addon plays BGANN only with that bit, inside a battleground and never in an arena.
+    void SendBgAnnounce(Player* player, BgAnnounce const& announce);
+    void SendBgAnnounce(std::vector<Player*> const& players, BgAnnounce const& announce);
     // Low-level keystone run messages for one player. Prefer the run tracker below.
     void SendKeyRunStart(Player* player, Bleakhold::KeyRunStart const& start);   // MPS
     void SendKeyRunState(Player* player, KeyRunState const& state);   // MP

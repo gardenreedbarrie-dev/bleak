@@ -7,7 +7,8 @@
 // value below. Keep the two files in step.
 //
 // A second session, `royale`, holds a Bleakhold Royale match (section 17: QUEUE kind B, ROYS ROYM ROYO ROYK ROYV
-// ROYE) from its own Endpoint, so the main frames stay what the existing checks expect.
+// ROYE, and the battleground kill announcer's BGANN of section 18) from its own Endpoint, so the main frames stay what
+// the existing checks expect.
 //
 // SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -158,7 +159,7 @@ namespace
 
         HelloReply h;
         h.proto = 1; h.minProto = 1; h.serverEpoch = 1792648725; h.dataVer = 4242;
-        h.featureBits = FeatureSeason | FeatureRoyale; h.realmName = "Bleakhold";
+        h.featureBits = FeatureSeason | FeatureRoyale | FeatureBgAnnouncer; h.realmName = "Bleakhold";
         send("HELLO", EncodeHello(h));
 
         QueueState q;
@@ -252,8 +253,21 @@ namespace
 
         RoyaleKill k;
         k.killerName = "Aldric Stormwind"; k.killerClassId = 1; k.victimName = "Br\xC3\xA9nna"; k.victimClassId = 8;
-        k.cause = RoyaleCause::Player; k.aliveAfter = 23; k.killerKills = 3; k.announce = RoyaleAnnounce::TripleKill;
+        k.cause = RoyaleCause::Player; k.aliveAfter = 23; k.killerKills = 3;
+        k.announce = RoyaleAnnounce::TripleKill;   // superseded: never written
         send("ROYK", EncodeRoyaleKill(k));
+        // the kill announcer for it (section 18): a triple kill that is also a killing spree, then a long name with
+        // separators and first blood only (the last one is checked)
+        BgAnnounce ann;
+        ann.killerName = k.killerName; ann.killerClassId = 1; ann.victimName = k.victimName; ann.victimClassId = 8;
+        ann.multi = BgMultiKill::Triple; ann.streak = BgStreak::KillingSpree;
+        send("BGANN", EncodeBgAnnounce(ann));
+        ann.multi = BgMultiKill::Ultra; ann.streak = BgStreak::None;
+        send("BGANN", EncodeBgAnnounce(ann));
+        ann.killerName = "Garrick Stormwind, the; bold|one~of:many and then some more text"; ann.killerClassId = 4;
+        ann.victimName = "Corwin"; ann.victimClassId = 12; ann.multi = BgMultiKill::None;
+        ann.streak = BgStreak::HolyShit;
+        send("BGANN", EncodeBgAnnounce(ann));
         RoyaleKill storm;
         storm.victimName = "Corwin"; storm.victimClassId = 12; storm.cause = RoyaleCause::Storm; storm.aliveAfter = 22;
         send("ROYK", EncodeRoyaleKill(storm));

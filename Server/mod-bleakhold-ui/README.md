@@ -113,6 +113,7 @@ To change names, texts, the week schedule or seasons later: edit the `bleakhold_
 | Dungeon Journey board, bounty, queue and group proposals | | `BoardSnapshot`, `QueueStatus`, `QJOIN`/`QLEAVE`/`QREPLY`/`BCLAIM` handlers |
 | Eclipse Rift | | `RiftStatus`, `RiftEnded`, `QJOIN` with kind `R` |
 | Bleakhold Royale (protocol section 17) | the protocol: `QJOIN` kind `B`, `RDROP`/`RDEPLOY`/`RSPEC` with their rate limits, `GET ROYS`/`ROYM`, the `ROYS ROYM ROYO ROYK ROYV ROYE` encoders, `[Royale]` chat tag; `ERR royale_off` while feature bit 4096 is off; no `GLIDE` in battlegrounds | the match (mod-bleakhold): `SetFeature(FeatureRoyale, true)`, the handlers and providers, the `SendRoyale*` pushes |
+| Battleground kill announcer (protocol section 18: first blood, kill streaks, multi-kills in every battleground and Bleakhold Royale) | the protocol: the `BGANN` encoder and `SendBgAnnounce` (to one player or a whole battleground) | the announcer (mod-bleakhold): the streaks and codes, `SetFeature(FeatureBgAnnouncer, true)` while it is enabled |
 | Daily and weekly tasks, Mythic Coins, Shards | | `SendTasks`, `TaskProgress`, `SendWeek`, `TCLAIM`/`TREROLL` handlers |
 | Collections counts | | `SendCollections` |
 | Emoji bubbles (Animations tab, emote wheel, `/bh emoji`) | everything: the module checks `EMOJI` and shows the emoji over the player's head to everyone nearby; config `BleakholdUi.Emoji.*` | nothing (players need the Bleakhold client to see the bubbles) |
@@ -371,6 +372,7 @@ Ui::OnIntent(IntentType::Emoji, [](Player* p, Intent const& in) {
 | DEF, HELLO, PONG | automatic | |
 | CAMPST | automatic (the module's camping); `SendCampState(player, CampState)` for a replacement | |
 | ROYS / ROYM / ROYO / ROYK / ROYV / ROYE | `SendRoyaleState`, `SendRoyaleMap`, `SendRoyaleObjects`, `SendRoyaleKill`, `SendRoyaleEvent` (the last four also for a list of players), `SendRoyaleResult` | |
+| BGANN | `SendBgAnnounce(player or players, BgAnnounce)` | |
 
 Intents (`Ui::OnIntent(IntentType::..., handler)`): `TaskClaim` (`in.taskUid`), `TaskReroll` (`in.taskUid`),
 `QueueJoin` (`in.queueKind, activityId, tier, roles, groupSize`), `QueueLeave`, `QueueReply`

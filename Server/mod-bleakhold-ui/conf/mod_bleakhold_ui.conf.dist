@@ -86,6 +86,8 @@ BleakholdUi.Season.Id = 0
 #
 #    Bleakhold Royale (feature bit 4096) has no key here: the system that runs it turns the bit on at runtime
 #    (Ui::SetFeature; mod-bleakhold does it when Bleakhold.Royale.Enable = 1 and its data checks pass).
+#    The battleground kill announcer (feature bit 8192, BGANN) has none either: mod-bleakhold turns it on while
+#    Bleakhold.BgAnnouncer.Enable = 1.
 
 BleakholdUi.Feature.RiftScoring = 0
 BleakholdUi.Feature.Shards = 0

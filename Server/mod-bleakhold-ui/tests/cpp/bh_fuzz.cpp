@@ -7,7 +7,8 @@
 //   * the Endpoint (rate limits, handshake, duplicates) gets the input at a time taken from the input
 //     and may never accept more than its token bucket allows;
 //   * EscapeText/BuildFrames/PayloadWriter keep their invariants for the input used as server text;
-//   * the Bleakhold Royale encoders (section 17) keep their field and record counts with the input as every name.
+//   * the Bleakhold Royale encoders (section 17) and BGANN (section 18) keep their field and record counts with the
+//     input as every name.
 //
 // Standalone (mutation driver):  bh_fuzz [iterations] [seed] [corpus files...]
 // libFuzzer:                     build with -DBH_LIBFUZZER -fsanitize=fuzzer (see run_tests.sh)
@@ -313,15 +314,30 @@ namespace
         RoyaleKill kill;
         kill.killerName = text; kill.killerClassId = 1u; kill.victimName = text; kill.victimClassId = 8;
         kill.cause = RoyaleCause::Storm; kill.aliveAfter = k; kill.killerKills = 2u;
-        // announce from the input's first byte: written only for the six codes with a credited killer (the name
-        // cleans to something)
+        // announce from the input's first byte: superseded by BGANN, never written whatever it holds
         kill.announce = static_cast<RoyaleAnnounce>(static_cast<char>(k));
-        bool const announced = k != 0 && std::strchr("FDTMRG", k) && !CleanText(text, RoyaleNameBytes).empty();
-        std::vector<std::string> f = fields(records(EncodeRoyaleKill(kill), 1, "ROYK")[0], announced ? 8 : 7, "ROYK");
+        std::vector<std::string> f = fields(records(EncodeRoyaleKill(kill), 1, "ROYK")[0], 7, "ROYK");
         name(f[0], RoyaleNameBytes, "ROYK killer");
         name(f[2], RoyaleNameBytes, "ROYK victim");
-        if (announced && f[7] != std::string(1, static_cast<char>(k)))
-            Die("ROYK: the announce field is not the code given", text);
+
+        // BGANN (section 18): the input as both names, the codes from the input's first two bytes; only the
+        // documented letters are written, an empty streak is left out at the end
+        BgAnnounce ann;
+        ann.killerName = text; ann.killerClassId = k; ann.victimName = text; ann.victimClassId = 1;
+        ann.multi = static_cast<BgMultiKill>(static_cast<char>(k));
+        ann.streak = static_cast<BgStreak>(static_cast<char>(text.empty() ? 0 : text[0]));
+        char const bgMulti = BgMultiLetter(ann.multi);
+        char const bgStreak = BgStreakLetter(ann.streak);
+        if ((bgMulti && !std::strchr("DTUR", bgMulti)) || (bgStreak && !std::strchr("FSOKNWMGH", bgStreak)))
+            Die("BGANN: a code outside the document", text);
+        std::size_t const want = bgStreak ? 6 : bgMulti ? 5 : 4;   // victimClassId (1) is always written
+        f = fields(records(EncodeBgAnnounce(ann), 1, "BGANN")[0], want, "BGANN");
+        name(f[0], BgNameBytes, "BGANN killer");
+        name(f[2], BgNameBytes, "BGANN victim");
+        if ((bgMulti && f[4] != std::string(1, bgMulti)) || (bgStreak && f[5] != std::string(1, bgStreak)))
+            Die("BGANN: a code is not the one given", text);
+        if (BgAnnounceSendable(ann) != ((bgMulti || bgStreak) && !CleanText(text, BgNameBytes).empty()))
+            Die("BGANN: sendable disagrees with the document", text);
 
         RoyaleState st;
         st.watchName = text; st.pinX = -17067; st.myX = -1; st.myY = static_cast<int32_t>(k);

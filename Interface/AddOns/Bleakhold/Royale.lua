@@ -659,7 +659,7 @@ ns.On("STATE", function(topic)
 end)
 
 ------------------------------------------------------------------------------------------------------
--- Activities: the Royale page (the mode's card, the last match, the announcer's settings)
+-- Activities: the Royale page (the mode's card, the last match, the kill announcer's settings for every battleground)
 ------------------------------------------------------------------------------------------------------
 local P = A.NewPage()
 A.AddPage("royale", P)
@@ -764,15 +764,15 @@ for i = 1, 4 do
 end
 last.voiceLabel = UI.Text(last, 11, C.dim)
 last.voiceLabel:SetPoint("BOTTOMLEFT", last, "BOTTOMLEFT", 12, 44)
-last.voiceLabel:SetText("KILL ANNOUNCER")
+last.voiceLabel:SetText("KILL ANNOUNCER (ALL BATTLEGROUNDS)")
 last.voice = UI.Dropdown(last, 130, function(v)
-    ns.db.options.royaleVoice = v
+    ns.Announcer.SetVoice(v)
 end)
 last.voice:SetPoint("BOTTOMLEFT", last, "BOTTOMLEFT", 12, 12)
 last.voice:SetItems({ { value = "off", text = "Voice: Off" }, { value = "male", text = "Voice: Male" },
     { value = "female", text = "Voice: Female" } })
 last.volume = UI.Dropdown(last, 140, function(v)
-    ns.db.options.royaleQuiet = v == "quiet"
+    ns.Announcer.SetQuiet(v == "quiet")
 end)
 last.volume:SetPoint("BOTTOMLEFT", last, "BOTTOMLEFT", 152, 12)
 last.volume:SetItems({ { value = "normal", text = "Volume: Normal" }, { value = "quiet", text = "Volume: Quiet" } })
@@ -868,8 +868,8 @@ function P:Refresh()
     else
         last.place:SetText("No match yet")
     end
-    last.voice:SetValue(ns.Option("royaleVoice", "male"), true)
-    last.volume:SetValue(ns.Option("royaleQuiet", false) and "quiet" or "normal", true)
+    last.voice:SetValue(ns.Announcer.Voice(), true)
+    last.volume:SetValue(ns.Announcer.Quiet() and "quiet" or "normal", true)
 end
 
 function P:OnOpen()
@@ -956,11 +956,11 @@ ns.AddCommand("royale", "Bleakhold Royale: /bh royale [map|leave|voice off|male|
     elseif a == "leave" then
         R.LeaveMatch()
     elseif a == "voice" and (b == "off" or b == "male" or b == "female") then
-        ns.db.options.royaleVoice = b
-        ns.Print("Bleakhold Royale announcer voice: " .. b)
+        ns.Announcer.SetVoice(b)   -- the kill announcer of every battleground (/bh announcer)
+        ns.Print(ns.Announcer.Describe())
     elseif a == "quiet" or a == "normal" then
-        ns.db.options.royaleQuiet = a == "quiet"
-        ns.Print("Bleakhold Royale announcer volume: " .. a)
+        ns.Announcer.SetQuiet(a == "quiet")
+        ns.Print(ns.Announcer.Describe())
     else
         openPage(false)
     end
@@ -1026,10 +1026,13 @@ local function demoObjects()
         { 6, "B", 3, 220, -250, 2, 45000 }, { 7, "B", 1, 60, -420, 1, "" }, { 8, "B", 2, -520, -260, 1, "" } })
 end
 
-local function demoKill(killer, kc, victim, vc, cause, kills, announce)
+-- A kill feed line, and the kill announcer's BGANN when it carries a multi-kill or streak code (section 18).
+local function demoKill(killer, kc, victim, vc, cause, kills, multi, streak)
     demo.st.alive = demo.st.alive - 1
-    demoPush("ROYK", { { killer or "", killer and kc or "", victim, vc, cause, demo.st.alive, killer and kills or "",
-        announce or "" } })
+    demoPush("ROYK", { { killer or "", killer and kc or "", victim, vc, cause, demo.st.alive, killer and kills or "" } })
+    if killer and (multi or streak) then
+        demoPush("BGANN", { { killer, kc, victim, vc, multi or "", streak or "" } })
+    end
 end
 
 local function demoMatch()
@@ -1056,16 +1059,16 @@ local function demoMatch()
         st.phase, st.ms, st.me, st.start, st.stop, st.dmg = 3, 0, 2, 20000, 50000, 10
         demoState()
         demoObjects()
-        demoKill("Aldric Stormwind", 1, "Brenna", 8, "P", 1, "F")
+        demoKill("Aldric Stormwind", 1, "Brenna", 8, "P", 1, nil, "F")
     end)
     demoAfter(36, function()
-        demoKill("Aldric Stormwind", 1, "Corwin", 5, "P", 2, "D")
+        demoKill("Aldric Stormwind", 1, "Corwin", 5, "P", 2, "D", nil)
         demoPush("ROYV", { { "D", 0, -80, -180, 20000, "" } })
         demoPush("ROYO", { { DEMO_MATCH, 0 }, { 20, "D", 0, -80, -180, 3, 20000 } })
     end)
     demoAfter(39, function()
-        demoKill(nil, nil, "Eamon", 11, "S", nil, nil)
-        demoKill("Dalia", 11, "Fenna", 3, "P", 1, nil)
+        demoKill(nil, nil, "Eamon", 11, "S", nil)
+        demoKill("Dalia", 11, "Fenna", 3, "P", 1)
     end)
     demoAfter(52, function()
         st.curX, st.curY, st.curR, st.start, st.stop = -150, -310, 520, "", ""
@@ -1075,7 +1078,7 @@ local function demoMatch()
         demoState()
     end)
     demoAfter(58, function()
-        demoKill("Aldric Stormwind", 1, ns.PlayerName() or "You", 1, "P", 3, "T")
+        demoKill("Aldric Stormwind", 1, ns.PlayerName() or "You", 1, "P", 3, nil, "S")
         demoPush("ROYE", { { DEMO_MATCH, 9, 24, demo.kills or 0, 9400, 0, 26, "", "", "", 1 },
             { "H", 120, "", "Placement" }, { "S", 12, "", "Placement" } })
         st.me, st.placement, st.watch, st.myX, st.myY = 3, 9, "Aldric Stormwind", nil, nil
@@ -1083,7 +1086,7 @@ local function demoMatch()
     end)
     demoAfter(72, function()
         st.alive = 1
-        demoKill("Dalia", 11, "Aldric Stormwind", 1, "P", 7, "G")
+        demoKill("Dalia", 11, "Aldric Stormwind", 1, "P", 7, nil, "W")
         demoPush("ROYV", { { "W", 7, "", "", "", "Dalia" } })
         st.phase, st.ms, st.watch = 5, 12000, "Dalia"
         demoState()

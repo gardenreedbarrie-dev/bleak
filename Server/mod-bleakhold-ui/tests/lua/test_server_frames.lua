@@ -367,6 +367,11 @@ for _, size in ipairs({ 1000, 251, 64 }) do
         local data = loadFrames(size).royale
         H.ok(data and #data.frames >= data.messages and data.messages >= 20, "bh_gen wrote the Royale session")
         local C = ns.Comm
+        -- inside a battleground, so the kill announcer plays its BGANN lines
+        M.inInstance, M.instanceType = true, "pvp"
+        local played, announced = {}, {}
+        M.env.PlaySoundFile = function(path) played[#played + 1] = path end
+        ns.On("BG_ANNOUNCE", function(a) announced[#announced + 1] = (a.multi or "-") .. (a.streak or "-") end)
         feed(M, data)
         M.Advance(1)
         local drops = {}
@@ -415,10 +420,18 @@ for _, size in ipairs({ 1000, 251, 64 }) do
         H.eq(feed[1].killer, "Aldric Stormwind"); H.eq(feed[1].killerClassId, 1); H.eq(feed[1].victim, "Br\195\169nna")
         H.eq(feed[1].victimClassId, 8); H.eq(feed[1].cause, "P"); H.eq(feed[1].aliveAfter, 23);
         H.eq(feed[1].killerKills, 3)
-        H.eq(feed[1].announce, "T")
+        H.eq(feed[1].announce, nil, "ROYK announce is superseded by BGANN")
         H.eq(feed[2].killer, nil); H.eq(feed[2].victim, "Corwin"); H.eq(feed[2].victimClassId, 12);
         H.eq(feed[2].cause, "S")
         H.eq(feed[2].announce, nil)
+        -- BGANN (section 18): the triple kill with its killing spree, an ultra kill, a long name with holy shit
+        H.ok(C.HasFeature(8192), "HELLO feature bit 8192: the kill announcer live")
+        H.eq(table.concat(announced, " "), "TS U- -H")
+        local a = S.bgAnnounce
+        H.eq(a.killer, "Garrick Stormwind, the; bold|one~of:many and the"); H.eq(#a.killer, 48)
+        H.eq(a.killerClassId, 4); H.eq(a.victim, "Corwin"); H.eq(a.victimClassId, 12); H.eq(a.multi, nil)
+        H.eq(a.streak, "H")
+        H.eq(played[1], "Interface\\AddOns\\Bleakhold\\Sounds\\Announcer\\male\\triplekill.wav", "the multi-kill first")
         -- ROYV: the last is the winner
         H.eq(S.royaleEvent.kind, "W"); H.eq(S.royaleEvent.value, 7); H.eq(S.royaleEvent.name, "Dalia")
         -- ROYE: sent again at the end with the winner; the last counts

@@ -167,6 +167,19 @@ namespace Bleakhold::Ui
         M().Push(player, "ROYE", Topic::Count, nullptr, [&](uint32_t) { return EncodeRoyaleResult(m); });
     }
 
+    // ---- the battleground kill announcer (section 18) ----
+    void SendBgAnnounce(Player* player, BgAnnounce const& m)
+    {
+        if (BgAnnounceSendable(m))
+            M().Push(player, "BGANN", Topic::Count, nullptr, [&](uint32_t) { return EncodeBgAnnounce(m); });
+    }
+
+    void SendBgAnnounce(std::vector<Player*> const& players, BgAnnounce const& m)
+    {
+        if (BgAnnounceSendable(m))
+            PushAll(players, "BGANN", EncodeBgAnnounce(m));
+    }
+
     void RiftStatus(Player* player, RiftState const& m)
     {
         M().Push(player, "RIFT", Topic::Count, [&](PlayerSlot& s) { s.rift = m; }, [&](uint32_t) { return EncodeRift(m); });

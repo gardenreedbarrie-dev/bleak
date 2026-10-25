@@ -903,7 +903,6 @@ local ROYALE_FEED = 20            -- kill feed lines kept
 local ROYALE_POI_KINDS = { L = true, C = true, Y = true }
 local ROYALE_OBJECT_KINDS = { S = true, B = true, D = true }
 local ROYALE_CAUSES = { P = true, S = true, F = true, L = true, A = true }
-local ROYALE_ANNOUNCE = { F = true, D = true, T = true, M = true, R = true, G = true }
 local ROYALE_EVENTS = { R = true, S = true, D = true, L = true, O = true, N = true, W = true }
 ns.ROYALE_MAX_OBJECTS = 64
 
@@ -1083,14 +1082,11 @@ Comm.Handle("ROYK", function(r)
         killer = U.Str(f[1], nil, ROYALE_NAME), killerClassId = U.Int(f[2], nil, 0, 255), victim = victim,
         victimClassId = U.Int(f[4], 0, 0, 255), cause = ROYALE_CAUSES[cause] and cause or "P",
         aliveAfter = U.Int(f[6], nil, 0, 9999),
-        killerKills = U.Int(f[7], nil, 0, 9999), announce = U.Str(f[8], nil, 1), at = GetTime(),
+        killerKills = U.Int(f[7], nil, 0, 9999), at = GetTime(),
     }
+    -- f[8] (`announce`) is superseded by BGANN (section 18) and ignored, so no announcer line plays twice
     if not k.killer then
         k.killerClassId, k.killerKills = nil, nil
-    end
-    -- the server decides the announcer line; nothing without a credited killer, for a forfeit or an AFK elimination
-    if not ROYALE_ANNOUNCE[k.announce or ""] or not k.killer or k.cause == "L" or k.cause == "A" then
-        k.announce = nil
     end
     local feed = S.royaleFeed
     feed[#feed + 1] = k
@@ -1105,6 +1101,30 @@ Comm.Handle("ROYK", function(r)
     end
     ns.Fire("ROYALE_KILL", k)
     changed("ROYK")
+end)
+
+------------------------------------------------------------------------------------------------------
+-- BGANN (section 18): one announced kill of the battleground kill announcer, unrevisioned and never stored. Codes
+-- the client does not know are dropped; a message left with neither code, or without both names, is ignored.
+------------------------------------------------------------------------------------------------------
+local BG_MULTI = { D = true, T = true, U = true, R = true }
+local BG_STREAK = { F = true, S = true, O = true, K = true, N = true, W = true, M = true, G = true, H = true }
+local BG_NAME = 48
+
+Comm.Handle("BGANN", function(r)
+    local f = r[1]
+    local multi, streak = U.Str(f[5], nil, 2), U.Str(f[6], nil, 2)   -- 2: "DD" is no code, not "D"
+    local a = {
+        killer = U.Str(f[1], nil, BG_NAME), killerClassId = U.Int(f[2], 0, 0, 255),
+        victim = U.Str(f[3], nil, BG_NAME), victimClassId = U.Int(f[4], 0, 0, 255),
+        multi = BG_MULTI[multi or ""] and multi or nil, streak = BG_STREAK[streak or ""] and streak or nil,
+        at = GetTime(),
+    }
+    if not a.killer or not a.victim or not (a.multi or a.streak) then
+        return
+    end
+    S.bgAnnounce = a
+    ns.Fire("BG_ANNOUNCE", a)
 end)
 
 Comm.MapOpToTopic("ROYV", "ROYS")

@@ -271,7 +271,8 @@ may define more with `DEF X`), item ids are item template entries.
   (section 9), 8 season live, 16 leaderboards live, 32 collections live, 64 emoji bubbles live (section 13),
   128 dances live (section 14), 256 cases live (section 15), 512 camping live (campfires, camp objects, warmth,
   the food XP bonus, repair at a camp anvil; section 16), 1024 the High Elf glide live, 2048 blacksmiths repair
-  anywhere (section 16), 4096 Bleakhold Royale live (section 17).
+  anywhere (section 16), 4096 Bleakhold Royale live (section 17), 8192 the battleground kill announcer live
+  (section 18).
 - The server may send `HELLO` again at any time, without a client `HELLO`, when its feature bits change (Bleakhold
   Royale turns 4096 on or off at runtime). The client reads it like an answer to its own.
 - `dailyResetEpoch`/`weeklyResetEpoch`: the next resets (Unix time).
@@ -1137,12 +1138,9 @@ Sent full for `GET ROYS`, and with the objects that changed whenever one does.
   world, `L` left the match, `A` eliminated for being away.
 - `killerName` and `killerClassId` are empty when nobody gets the credit. `killerKills`: the killer's eliminations
   in this match, this one included. `aliveAfter`: players left in the fight.
-- `announce`: the kill announcer line every client of the match plays, decided by the server. `F` first blood: the
-  first credited kill of the match, whatever the cause (a storm or fall elimination with a credited killer counts);
-  it takes priority. Otherwise by `killerKills`: `D` double kill (2), `T` triple kill (3), `M` monster kill (4), `R`
-  rampage (5), `G` godlike (6 and every further kill). Empty for no announcement: nobody gets the credit, a forfeit
-  (`L`) or an AFK elimination (`A`) (these never take first blood either), or the killer's first kill after first
-  blood. Knockdowns in the lobby brawl are not eliminations: they send no `ROYK` and never count.
+- `announce`: **superseded** by the battleground kill announcer (`BGANN`, section 18), which also covers Bleakhold
+  Royale. The server sends it empty and the addon ignores it, so no announcer line plays twice. (It used to carry
+  `F` `D` `T` `M` `R` `G`.) Knockdowns in the lobby brawl are not eliminations: they send no `ROYK` and never count.
 
 Sent to every player of the match, spectators included.
 
@@ -1216,10 +1214,69 @@ S> 1 ROYS k 1/1 7001,1,41000,24,24,0,0,,104,96,0,-267,-267,1080,,,,,,0,,450,452
 C> 1 RDEPLOY a 1/1
 S> 1 ROYO l 1/1 7001,1;1,S,0,-266,-266,0,90000;2,S,0,-712,48,0,90000;3,B,1,120,80,1
 S> 1 ROYV m 1/1 D,0,-80,-180,20000
-S> 1 ROYK n 1/1 Aldric,1,Brenna,8,P,23,1,F
+S> 1 ROYK n 1/1 Aldric,1,Brenna,8,P,23,1
+S> 1 BGANN u 1/1 Aldric,1,Brenna,8,,F
 S> 1 ROYE o 1/1 7001,12,24,1,18400,0,214,,,,1;H,70,,Placement;H,25,,1 elimination;S,5,,Placement
 C> 1 RSPEC b 1/1 1
 S> 1 ROYV p 1/1 W,7,,,,Dalia
 C> 1 GLIDE c 1/1
 S> 1 ERR q 1/1 GLIDE,c,glide_here,You cannot glide here.
 ```
+
+## 18. Battleground kill announcer
+
+A DotA-style kill announcer for every battleground: Warsong Gulch, Arathi Basin, Alterac Valley, Eye of the Storm,
+Strand of the Ancients, Isle of Conquest and Bleakhold Royale (section 17). Never in an arena or the open world. The
+server keeps the score and tells every player of the battleground about each kill worth announcing with `BGANN`; the
+client shows a big banner in the middle of the screen ("Aldric: DOUBLE KILL") and plays the voice line.
+
+`HELLO` feature bit 8192 is on while the server's announcer is enabled. The client plays `BGANN` only with that bit,
+only inside a battleground and never in an arena.
+
+**Rules** (all on the server):
+
+- Only kills of players count, credited to the player who dealt the killing blow; a pet's, a totem's or a damage over
+  time's killing blow counts for its owner. Kills of creatures never count, nor a player killing themselves (a fall,
+  the environment) or a player of their own team.
+- **First blood** (`F`): the first credited kill in each battleground instance.
+- **Kill streak**: the killer's kills since they last died; any death (by a player, a creature, a fall) starts the
+  count again. In Bleakhold Royale a player has one life, so the streak is all their eliminations; there an
+  elimination by a player, or by the storm or a fall with a credited killer, counts, a forfeit (`L`) or an AFK
+  elimination (`A`) does not. Each kill that reaches a step is announced: 3 `S` killing spree, 4 `O` dominating,
+  5 `K` mega kill, 6 `N` unstoppable, 7 `W` wicked sick, 8 `M` monster kill, 9 `G` godlike, 10 and every further
+  kill `H` holy shit.
+- **Multi-kill**: kills by the same player with at most 18 seconds (the server's `MultiKillWindowSec`) between one
+  kill and the next. 2 `D` double kill, 3 `T` triple kill, 4 `U` ultra kill, 5 and every further kill in the chain
+  `R` rampage. The killer's death does not end a chain; 18 seconds without a kill do.
+- One kill can carry a multi-kill code and a streak code (or first blood). A kill with neither sends nothing.
+
+### BGANN (an announced kill)
+
+`killerName, killerClassId, victimName, victimClassId, multi, streak`
+
+- `killerName`, `victimName`: character names, at most 48 bytes. `killerClassId`, `victimClassId`: ChrClasses ids.
+- `multi`: `D` `T` `U` `R`, or empty.
+- `streak`: `F` first blood or `S` `O` `K` `N` `W` `M` `G` `H`, or empty (as the last field it may be left out,
+  section 4). At least one of `multi` and `streak` is set.
+
+Sent to every player in the battleground (Bleakhold Royale's spectators included), once per kill, at the moment of
+the kill. Unrevisioned; there is nothing to `GET`.
+
+**The client** plays the multi-kill line first and then the streak (or first blood) line, one after the other, each
+with its banner. A voice line cannot be stopped or turned down on 3.3.5a, so lines never overlap: each waits until the
+one before it has finished. When lines pile up the client keeps at most two waiting and drops the lowest ones (a
+higher streak or multi-kill ranks above a lower one; first blood ranks lowest). Settings: announcer Off, Male (the
+default) or Female, and volume Normal or Quiet.
+
+```
+S> 1 BGANN v 1/1 Aldric,1,Brenna,8,,F
+S> 1 BGANN w 1/1 Aldric,1,Corwin,5,D
+S> 1 BGANN x 1/1 Aldric,1,Dalia,11,T,S
+S> 1 BGANN y 1/1 Garrick Stormwind,4,Aldric,1,,O
+S> 1 BGANN z 1/1 Eamon,9,Fenna,3,R,H
+```
+
+The first is first blood, the second Aldric's second kill within 18 s (a double kill; his streak of 2 has no step), the
+third a triple kill that is also his third kill without dying (killing spree). Then Garrick Stormwind ends Aldric's
+streak with his fourth kill since he last died (dominating), and Eamon's fifth kill in one chain is a rampage on his
+tenth or later kill without dying.

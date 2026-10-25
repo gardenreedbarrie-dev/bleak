@@ -3,8 +3,8 @@
 --                    stage pips and the storm's damage while the player is outside the circle; in the lobby the
 --                    drop countdown and "Pins lock in 3"
 --   the kill feed    five lines at the top right that fade after 8 s (ROYK)
---   the announcer    ROYK `announce`: a banner "<killer> / FIRST BLOOD ... GODLIKE" and a voice line, one at a time;
---                    milestones (ROYV N), the circle and the winner get a banner too
+--   banners          milestones (ROYV N), the circle, the storm, supply drops and the winner; the kill announcer
+--                    (first blood, streaks, multi-kills) is Announcer.lua's (BGANN, section 18) in every battleground
 --   the parachute    "Open parachute" while falling from the drop (RDEPLOY; key binding BLEAKHOLD_ROYALE_DEPLOY)
 --   the storm        a purple screen edge while outside the circle, and an arrow on the minimap's edge to the safe
 --                    zone (the next circle once shown) with the distance
@@ -13,11 +13,7 @@
 --   the countdown    the last seconds before the drop in the centre (Countdown.lua CD.StartGeneric)
 -- The bar, the feed and the spectator bar are movable (drag, or AddicatUI's editor mode through ns.Movers).
 --
--- The announcer's voice: PlaySoundFile(path) on 3.3.5a plays on the script sound group (Master volume and Enable
--- Sound only), cannot be stopped and has no volume argument, so "Quiet" is a second, pre-attenuated set of files:
--- Interface\AddOns\Bleakhold\Sounds\Royale\<male|female>[_quiet]\<line>.wav (16-bit PCM mono; they ship separately
--- and a missing file is silent). Lines never overlap: while one plays, only the highest pending one waits
--- (G > R > M > T > D > F) and plays when it ends (H.VOICE_SECONDS, the length of each line).
+-- ROYK's `announce` field is superseded by BGANN and ignored (State.lua), so nothing plays twice.
 local ADDON, ns = ...
 local U, UI, Comm = ns.U, ns.UI, ns.Comm
 local C = UI.C
@@ -34,15 +30,6 @@ H.FEED_LINES = 5
 H.FEED_TIME = 8                  -- s a kill feed line stays
 H.BANNER_TIME = 2.5              -- s a banner holds (fade in and out included)
 H.COUNTDOWN = 10                 -- the centre countdown shows the last seconds before the drop
-H.SOUND_DIR = "Interface\\AddOns\\Bleakhold\\Sounds\\Royale\\"
-H.VOICE_FILES = {
-    F = "firstblood", D = "doublekill", T = "triplekill", M = "monsterkill", R = "rampage", G = "godlike",
-}
-H.VOICE_SECONDS = { F = 2.0, D = 2.0, T = 2.0, M = 2.0, R = 2.0, G = 2.0 }
-H.PRIORITY = { F = 1, D = 2, T = 3, M = 4, R = 5, G = 6 }
-H.ANNOUNCE = {
-    F = "FIRST BLOOD", D = "DOUBLE KILL", T = "TRIPLE KILL", M = "MONSTER KILL", R = "RAMPAGE", G = "GODLIKE",
-}
 H.CAUSE_GLYPH = { P = "sword", S = "flame", F = "down", L = "left", A = "hourglass" }
 H.CAUSE_COLOR = { P = C.goldLight, S = C.purple, F = C.mid, L = C.mute, A = C.mute }
 H.CAUSE_SUFFIX = { L = " (left)", A = " (away)", F = " (fell)" }
@@ -303,7 +290,7 @@ function H.UpdateFeed()
 end
 
 ------------------------------------------------------------------------------------------------------
--- The announcer: banners one at a time, at most one waiting per kind; the voice never overlaps itself
+-- Event banners: one at a time, at most one waiting per kind
 ------------------------------------------------------------------------------------------------------
 local banner = CreateFrame("Frame", "BleakholdRoyaleBanner", UIParent)
 banner:SetSize(660, 86)
@@ -322,9 +309,8 @@ UI.OneLine(banner.title, 660)
 H.queue = {}
 H.current = nil
 
--- e = { key, kicker (already safe for a FontString), title, color }. Keys "k<code>" are the kill announcer's, "e<kind>"
--- the match events'. A kill banner goes before the events waiting and cuts a showing event banner short, so it shows
--- with its voice line; kill banners never cut each other.
+-- e = { key, kicker (already safe for a FontString), title, color }; keys "e<kind>" are the match events'. A newer
+-- banner of a kind already waiting takes its place.
 function H.Banner(e)
     for i, q in ipairs(H.queue) do
         if q.key == e.key then
@@ -332,21 +318,7 @@ function H.Banner(e)
             return
         end
     end
-    local kill = e.key:sub(1, 1) == "k"
-    local at = #H.queue + 1
-    if kill then
-        for i, q in ipairs(H.queue) do
-            if q.key:sub(1, 1) ~= "k" then
-                at = i
-                break
-            end
-        end
-        local cur = H.current
-        if cur and cur.key:sub(1, 1) ~= "k" then
-            cur.shownAt = GetTime() - H.BANNER_TIME
-        end
-    end
-    table.insert(H.queue, at, e)
+    H.queue[#H.queue + 1] = e
 end
 
 function H.UpdateBanner()
@@ -372,55 +344,6 @@ function H.UpdateBanner()
     banner:SetAlpha(U.Clamp(min(t / 0.15, (H.BANNER_TIME - t) / 0.3), 0, 1))
     banner:Show()
 end
-
-H.voiceBusyUntil = 0
-H.voicePending = nil
-
-function H.VoicePath(code)
-    local voice = ns.Option("royaleVoice", "male")
-    local file = H.VOICE_FILES[code]
-    if (voice ~= "male" and voice ~= "female") or not file then
-        return nil
-    end
-    local set = voice .. (ns.Option("royaleQuiet", false) and "_quiet" or "")
-    return H.SOUND_DIR .. set .. "\\" .. file .. ".wav"
-end
-
-local function playVoice(code)
-    local path = H.VoicePath(code)
-    H.voiceBusyUntil = GetTime() + (H.VOICE_SECONDS[code] or 2)
-    H.lastVoice = code
-    if path and PlaySoundFile then
-        PlaySoundFile(path)
-    end
-end
-
-function H.Voice(code)
-    if not H.VOICE_FILES[code] then
-        return
-    end
-    if GetTime() >= H.voiceBusyUntil then
-        playVoice(code)
-    elseif not H.voicePending or H.PRIORITY[code] > H.PRIORITY[H.voicePending] then
-        H.voicePending = code
-    end
-end
-
-function H.UpdateVoice()
-    if H.voicePending and GetTime() >= H.voiceBusyUntil then
-        local code = H.voicePending
-        H.voicePending = nil
-        playVoice(code)
-    end
-end
-
-ns.On("ROYALE_KILL", function(k)
-    if k.announce and H.ANNOUNCE[k.announce] then
-        H.Banner({ key = "k" .. k.announce, kicker = classText(k.killer, k.killerClassId),
-            title = H.ANNOUNCE[k.announce], color = k.announce == "F" and C.red or C.purple })
-        H.Voice(k.announce)
-    end
-end)
 
 ns.On("ROYALE_EVENT", function(e)
     if e.kind == "N" and e.value > 0 then
@@ -765,7 +688,6 @@ function H.Tick()
     H.UpdateBar(m)
     H.UpdateFeed()
     H.UpdateBanner()
-    H.UpdateVoice()
     H.UpdateDeploy(m)
     H.UpdateSpectator(m)
     H.UpdateCountdown(m)
@@ -780,7 +702,6 @@ ns.Every(0.1, H.Tick)
 ns.On("ROYALE_MATCH", function()
     wipe(H.queue)
     H.current = nil
-    H.voicePending = nil
     H.resultDismissed = nil
     ec:Hide()
 end)

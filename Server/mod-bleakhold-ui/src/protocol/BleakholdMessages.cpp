@@ -39,19 +39,6 @@ namespace Bleakhold
                 w.Record().Char(Letter(r.kind)).Opt(r.amount).Opt(r.itemId).Text(r.text, 60);
             }
         }
-
-        // ROYK announce (section 17): one of F D T M R G, and only with a credited killer and not for a forfeit or
-        // AFK; anything else is 0, which Char() writes as an empty field.
-        char RoyaleAnnounceLetter(RoyaleKill const& m)
-        {
-            char const c = Letter(m.announce);
-            if (c == 0 || std::string_view("FDTMRG").find(c) == std::string_view::npos)
-                return 0;
-            if (Proto::CleanText(m.killerName, RoyaleNameBytes).empty() || m.cause == RoyaleCause::Left
-                || m.cause == RoyaleCause::Afk)
-                return 0;
-            return c;
-        }
     }
 
     std::string EncodeHello(HelloReply const& m)
@@ -342,8 +329,8 @@ namespace Bleakhold
     {
         PayloadWriter w;
         w.Text(m.killerName, RoyaleNameBytes).Opt(m.killerClassId).Text(m.victimName, RoyaleNameBytes)
-            .Int(m.victimClassId).Char(Letter(m.cause)).Int(m.aliveAfter).Opt(m.killerKills)
-            .Char(RoyaleAnnounceLetter(m));
+            .Int(m.victimClassId).Char(Letter(m.cause)).Int(m.aliveAfter).Opt(m.killerKills);
+        // `announce` (the 8th field) is superseded by BGANN (section 18): always empty, so it is left out
         return w.Take();
     }
 
@@ -360,6 +347,32 @@ namespace Bleakhold
         w.Int(m.matchId).Int(m.placement).Int(m.total).Int(m.kills).Int(m.damage).Int(m.healing).Int(m.survivedSec)
             .Text(m.winnerName, RoyaleNameBytes).Opt(m.winnerClassId).Opt(m.winnerKills).Bool(m.rewarded);
         WriteRewards(w, m.rewards);
+        return w.Take();
+    }
+
+    char BgMultiLetter(BgMultiKill multi)
+    {
+        char const c = Letter(multi);
+        return c != 0 && std::string_view("DTUR").find(c) != std::string_view::npos ? c : 0;
+    }
+
+    char BgStreakLetter(BgStreak streak)
+    {
+        char const c = Letter(streak);
+        return c != 0 && std::string_view("FSOKNWMGH").find(c) != std::string_view::npos ? c : 0;
+    }
+
+    bool BgAnnounceSendable(BgAnnounce const& m)
+    {
+        return (BgMultiLetter(m.multi) || BgStreakLetter(m.streak))
+            && !Proto::CleanText(m.killerName, BgNameBytes).empty() && !Proto::CleanText(m.victimName, BgNameBytes).empty();
+    }
+
+    std::string EncodeBgAnnounce(BgAnnounce const& m)
+    {
+        PayloadWriter w;
+        w.Text(m.killerName, BgNameBytes).Int(m.killerClassId).Text(m.victimName, BgNameBytes).Int(m.victimClassId)
+            .Char(BgMultiLetter(m.multi)).Char(BgStreakLetter(m.streak));
         return w.Take();
     }
 

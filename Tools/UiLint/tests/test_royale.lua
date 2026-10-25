@@ -144,7 +144,7 @@ for _, size in ipairs({ 1000, 251, 64 }) do
         H.eq(#kills, 1)
         local k = kills[1]
         H.eq(k.killer, "Aldric"); H.eq(k.killerClassId, 1); H.eq(k.victim, "Brenna"); H.eq(k.victimClassId, 8)
-        H.eq(k.cause, "P"); H.eq(k.aliveAfter, 23); H.eq(k.killerKills, 1); H.eq(k.announce, "F")
+        H.eq(k.cause, "P"); H.eq(k.aliveAfter, 23); H.eq(k.killerKills, 1); H.eq(k.announce, nil, "superseded")
         H.eq(S.royaleKills.Aldric, 1)
         -- ROYV m and p
         H.eq(table.concat(events, ""), "DW")
@@ -174,7 +174,7 @@ for _, size in ipairs({ 1000, 251, 64 }) do
         H.ok(M.env.BleakholdRoyaleFeed:IsShown(), "kill feed")
         H.contains(ns.RoyaleHud.feed.lines[1].killer:GetText(), "Aldric")
         H.contains(ns.RoyaleHud.feed.lines[1].victim:GetText(), "Brenna")
-        H.eq(ns.RoyaleHud.banner.title:GetText(), "FIRST BLOOD")
+        H.eq(ns.RoyaleHud.banner.title:GetText(), "SUPPLY DROP", "match events only: kills are BGANN's")
     end)
 end
 
@@ -444,35 +444,27 @@ function(M, ns)
     H.ok(not M.env.BleakholdRoyaleVignette:IsShown() and not ea:IsShown(), "spectators take no storm")
 end)
 
-test("royale: the kill feed keeps five lines for 8 s; banners take turns; only the highest waiting line is voiced",
+test("royale: the kill feed keeps five lines for 8 s; ROYK announce is superseded: no banner, no voice",
 function(M, ns)
-    connect(M)
+    connect(M, { [6] = 4096 + 8192 })
+    M.inInstance, M.instanceType = true, "pvp"
     roys(M, { [2] = 3, [6] = 2 })
     local played = {}
     M.env.PlaySoundFile = function(path) played[#played + 1] = path end
     local Hud = ns.RoyaleHud
     H.send(M, "ROYK", { { "Aldric", 1, "Brenna", 8, "P", 23, 1, "F" } })
-    M.Advance(0.2)
-    H.eq(played[1], "Interface\\AddOns\\Bleakhold\\Sounds\\Royale\\male\\firstblood.wav")
-    H.eq(Hud.banner.title:GetText(), "FIRST BLOOD")
-    H.contains(Hud.banner.kicker:GetText(), "Aldric")
     H.send(M, "ROYK", { { "Corwin", 5, "Dalia", 11, "P", 22, 2, "D" } })
     H.send(M, "ROYK", { { "Eamon", 9, "Fenna", 3, "P", 21, 2, "D" } })
     H.send(M, "ROYK", { { "Corwin", 5, "Garrick", 4, "P", 20, 3, "T" } })
     H.send(M, "ROYK", { { "Corwin", 5, "Hesper", 6, "S", 19, 6, "G" } })
     H.send(M, "ROYK", { { "", "", "Ivo", 2, "L", 18, "", "" } })
-    M.Advance(0.2)
-    H.eq(#played, 1, "the first line still plays")
-    H.eq(#Hud.queue, 3, "one waiting banner per line: D, T, G")
-    H.contains(Hud.queue[1].kicker, "Eamon", "the newer double kill replaced the older one")
-    M.Advance(2.4)
-    H.eq(played[2], "Interface\\AddOns\\Bleakhold\\Sounds\\Royale\\male\\godlike.wav", "only the highest waiting line")
-    H.eq(Hud.banner.title:GetText(), "DOUBLE KILL", "banners in order, 2.5 s each")
-    M.Advance(2.5)
-    H.eq(Hud.banner.title:GetText(), "TRIPLE KILL")
-    M.Advance(2.5)
-    H.eq(Hud.banner.title:GetText(), "GODLIKE")
-    H.eq(#played, 2, "D and T were never voiced")
+    M.Advance(0.3)
+    H.eq(#played, 0, "nothing voiced from ROYK (BGANN does it)")
+    H.ok(not Hud.banner:IsShown(), "no Royale banner for a kill")
+    H.ok(not ns.Announcer.banner:IsShown(), "no announcer banner either")
+    for _, k in ipairs(ns.S.royaleFeed) do
+        H.eq(k.announce, nil)
+    end
     -- the feed: newest first, five lines, the forfeit says so
     local feed = Hud.feed
     H.ok(feed:IsShown())
@@ -482,41 +474,15 @@ function(M, ns)
     H.ok(feed.lines[5]:IsShown() and feed.lines[5].victim:GetText():find("Dalia", 1, true), "five lines")
     H.eq(ns.S.royale.alive, 18, "alive from aliveAfter")
     H.eq(ns.Royale.KillsOf("Corwin"), 6)
-    M.Advance(1.5)
+    M.Advance(8)
     roys(M, { [2] = 3, [6] = 2 })
     M.Advance(0.5)
     H.ok(not feed:IsShown(), "faded after 8 s")
-    -- the voice setting: female, quiet; off is silent
-    ns.db.options.royaleVoice = "female"
-    ns.db.options.royaleQuiet = true
-    M.Advance(3)
-    H.send(M, "ROYK", { { "Aldric", 1, "Jory", 7, "P", 17, 4, "M" } })
+    -- the match's announcer lines come as BGANN, like in any battleground
+    H.send(M, "BGANN", { { "Aldric", 1, "Jory", 7, "D", "" } })
     M.Advance(0.2)
-    H.eq(played[#played], "Interface\\AddOns\\Bleakhold\\Sounds\\Royale\\female_quiet\\monsterkill.wav")
-    ns.db.options.royaleVoice = "off"
-    M.Advance(3)
-    local n = #played
-    H.send(M, "ROYK", { { "Aldric", 1, "Kell", 7, "P", 16, 5, "R" } })
-    M.Advance(0.2)
-    H.eq(#played, n, "voice off")
-    H.eq(Hud.banner.title:GetText(), "RAMPAGE", "the banner still shows")
-end)
-
-test("royale: no announcement without a credited killer, for a forfeit or an AFK elimination", function(M, ns)
-    connect(M)
-    roys(M, { [2] = 3, [6] = 2 })
-    local played = {}
-    M.env.PlaySoundFile = function(path) played[#played + 1] = path end
-    H.send(M, "ROYK", { { "", "", "Brenna", 8, "S", 23, "", "F" } })
-    H.send(M, "ROYK", { { "Aldric", 1, "Corwin", 5, "L", 22, 1, "F" } })
-    H.send(M, "ROYK", { { "Aldric", 1, "Dalia", 11, "A", 21, 1, "D" } })
-    H.send(M, "ROYK", { { "Aldric", 1, "Eamon", 9, "P", 20, 1, "X" } })
-    M.Advance(0.3)
-    H.eq(#played, 0, "silent")
-    H.ok(not ns.RoyaleHud.banner:IsShown(), "no banner")
-    for _, k in ipairs(ns.S.royaleFeed) do
-        H.eq(k.announce, nil)
-    end
+    H.eq(played[1], "Interface\\AddOns\\Bleakhold\\Sounds\\Announcer\\male\\doublekill.wav")
+    H.ok(not Hud.banner:IsShown(), "the Royale banner stays for match events")
 end)
 
 test("royale: milestones, the circle and the winner get banners", function(M, ns)
@@ -529,17 +495,16 @@ test("royale: milestones, the circle and the winner get banners", function(M, ns
     M.Advance(2.6)
     H.eq(ns.RoyaleHud.banner.title:GetText(), "VICTORY")
     H.contains(ns.RoyaleHud.banner.kicker:GetText(), "Dalia - 7 eliminations")
-    -- a kill line cuts a showing event banner short and goes before the waiting ones, so it shows with its voice
+    -- event banners take turns, a newer one of a kind replaces the waiting one
     M.Advance(3)
     H.send(M, "ROYV", { { "D", 0, -80, -180, 20000, "" } })
     H.send(M, "ROYV", { { "S", 2, "", "", "", "" } })
+    H.send(M, "ROYV", { { "S", 3, "", "", "", "" } })
     M.Advance(0.2)
     H.eq(ns.RoyaleHud.banner.title:GetText(), "SUPPLY DROP")
-    H.send(M, "ROYK", { { "Aldric", 1, "Brenna", 8, "P", 23, 1, "F" } })
-    M.Advance(0.2)
-    H.eq(ns.RoyaleHud.banner.title:GetText(), "FIRST BLOOD")
+    H.eq(#ns.RoyaleHud.queue, 1, "one storm banner waits")
     M.Advance(2.5)
-    H.eq(ns.RoyaleHud.banner.title:GetText(), "THE STORM IS MOVING", "the waiting event after the kill")
+    H.eq(ns.RoyaleHud.banner.title:GetText(), "THE STORM IS MOVING", "the waiting event after the drop")
 end)
 
 ------------------------------------------------------------------------------------------------------

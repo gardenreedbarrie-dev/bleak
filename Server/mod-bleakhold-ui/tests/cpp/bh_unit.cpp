@@ -1062,62 +1062,79 @@ TEST("royale: the encoders keep to the document")
     CHECK(FeatureRoyale == 4096u && (FeatureRoyale & (FeatureFieldRepair * 2 - 1)) == 0);
 }
 
-TEST("royale: ROYK announce is the last field: F D T M R G for a credited kill, else empty")
+TEST("royale: ROYK announce is superseded by BGANN: the field is never written, whatever the caller sets")
 {
     RoyaleKill k;
     k.killerName = "Aldric"; k.killerClassId = 1; k.victimName = "Brenna"; k.victimClassId = 8;
     k.cause = RoyaleCause::Player; k.aliveAfter = 23; k.killerKills = 1; k.announce = RoyaleAnnounce::FirstBlood;
-    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,P,23,1,F");
-    struct Code
-    {
-        RoyaleAnnounce announce;
-        uint32_t kills;
-        char const* frame;
-    };
-    for (Code const& c : { Code{ RoyaleAnnounce::DoubleKill, 2, "Aldric,1,Brenna,8,P,23,2,D" },
-             Code{ RoyaleAnnounce::TripleKill, 3, "Aldric,1,Brenna,8,P,23,3,T" },
-             Code{ RoyaleAnnounce::MonsterKill, 4, "Aldric,1,Brenna,8,P,23,4,M" },
-             Code{ RoyaleAnnounce::Rampage, 5, "Aldric,1,Brenna,8,P,23,5,R" },
-             Code{ RoyaleAnnounce::Godlike, 6, "Aldric,1,Brenna,8,P,23,6,G" },
-             Code{ RoyaleAnnounce::Godlike, 17, "Aldric,1,Brenna,8,P,23,17,G" } })
-    {
-        k.killerKills = c.kills; k.announce = c.announce;
-        CHECK_EQ(EncodeRoyaleKill(k), c.frame);
-    }
-    // a storm or fall elimination with a credited killer is announced too
-    k.killerKills = 2; k.announce = RoyaleAnnounce::DoubleKill; k.cause = RoyaleCause::Storm;
-    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,S,23,2,D");
-    k.cause = RoyaleCause::Fall;
-    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,F,23,2,D");
-    // the empty fields before it stay
-    k.killerKills.reset();
-    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,F,23,,D");
-    k.killerKills = 2;
-    // never for a forfeit or AFK, never without a credited killer (a name that cleans to nothing included)
-    k.cause = RoyaleCause::Left;
-    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,L,23,2");
-    k.cause = RoyaleCause::Afk;
-    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,A,23,2");
-    k.cause = RoyaleCause::Storm;
-    k.killerName = std::string(3, '\0');
-    CHECK_EQ(EncodeRoyaleKill(k), ",1,Brenna,8,S,23,2");
-    k.killerName.clear(); k.killerClassId.reset(); k.killerKills.reset();
-    CHECK_EQ(EncodeRoyaleKill(k), ",,Brenna,8,S,23");
-    // only the six codes: None and every other value are an empty field
-    k.killerName = "Aldric"; k.killerClassId = 1; k.killerKills = 3; k.cause = RoyaleCause::Player;
-    k.announce = RoyaleAnnounce::None;
-    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,P,23,3");
-    int written = 0;
+    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,P,23,1");
     for (int v = 0; v < 256; ++v)
     {
         k.announce = static_cast<RoyaleAnnounce>(static_cast<char>(v));
-        std::string const frame = EncodeRoyaleKill(k);
-        bool const code = v != 0 && std::string("FDTMRG").find(static_cast<char>(v)) != std::string::npos;
-        written += code;
-        CHECK_EQ(frame, code ? "Aldric,1,Brenna,8,P,23,3," + std::string(1, static_cast<char>(v))
-                             : std::string("Aldric,1,Brenna,8,P,23,3"));
+        CHECK_EQ(EncodeRoyaleKill(k), std::string("Aldric,1,Brenna,8,P,23,1"));
     }
-    CHECK_EQN(written, 6);
+    k.killerKills.reset();
+    k.announce = RoyaleAnnounce::Godlike;
+    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,P,23");   // the empty fields at the end go
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The battleground kill announcer (section 18): BGANN
+// ---------------------------------------------------------------------------------------------------
+TEST("bgann: the encoder keeps to the document; multi first, then streak")
+{
+    BgAnnounce a;
+    a.killerName = "Aldric"; a.killerClassId = 1; a.victimName = "Brenna"; a.victimClassId = 8;
+    a.streak = BgStreak::FirstBlood;
+    CHECK_EQ(EncodeBgAnnounce(a), "Aldric,1,Brenna,8,,F");
+    a.multi = BgMultiKill::Double; a.streak = BgStreak::None;
+    CHECK_EQ(EncodeBgAnnounce(a), "Aldric,1,Brenna,8,D");   // an empty last field is left out
+    a.multi = BgMultiKill::Rampage; a.streak = BgStreak::HolyShit;
+    CHECK_EQ(EncodeBgAnnounce(a), "Aldric,1,Brenna,8,R,H");
+    a.killerName = "Br\xC3\xA9nna, the; long|name";
+    CHECK_EQ(EncodeBgAnnounce(a), "Br\xC3\xA9nna%2C the%3B long%7Cname,1,Brenna,8,R,H");
+    a.killerName = std::string(60, 'x');
+    CHECK(SplitStr(EncodeBgAnnounce(a), ',')[0].size() == BgNameBytes);   // names cut at 48 bytes
+    CHECK(FeatureBgAnnouncer == 8192u && FeatureBgAnnouncer == FeatureRoyale * 2);
+    CHECK(BgNameBytes == RoyaleNameBytes);
+}
+
+TEST("bgann: only the documented letters are written; nothing is sendable without a code and both names")
+{
+    std::string const multi = "DTUR";
+    std::string const streak = "FSOKNWMGH";
+    int multis = 0;
+    int streaks = 0;
+    for (int v = 0; v < 256; ++v)
+    {
+        char const c = static_cast<char>(v);
+        bool const m = v != 0 && multi.find(c) != std::string::npos;
+        bool const s = v != 0 && streak.find(c) != std::string::npos;
+        multis += m;
+        streaks += s;
+        CHECK_EQN(BgMultiLetter(static_cast<BgMultiKill>(c)), m ? c : '\0');
+        CHECK_EQN(BgStreakLetter(static_cast<BgStreak>(c)), s ? c : '\0');
+        BgAnnounce a;
+        a.killerName = "Aldric"; a.killerClassId = 1; a.victimName = "Brenna"; a.victimClassId = 8;
+        a.multi = static_cast<BgMultiKill>(c);
+        CHECK_EQ(EncodeBgAnnounce(a), m ? "Aldric,1,Brenna,8," + std::string(1, c) : std::string("Aldric,1,Brenna,8"));
+        CHECK(BgAnnounceSendable(a) == m);
+        a.multi = BgMultiKill::None;
+        a.streak = static_cast<BgStreak>(c);
+        CHECK_EQ(EncodeBgAnnounce(a), s ? "Aldric,1,Brenna,8,," + std::string(1, c) : std::string("Aldric,1,Brenna,8"));
+        CHECK(BgAnnounceSendable(a) == s);
+    }
+    CHECK_EQN(multis, 4);
+    CHECK_EQN(streaks, 9);
+    BgAnnounce a;
+    a.killerName = "Aldric"; a.victimName = "Brenna"; a.multi = BgMultiKill::Triple;
+    CHECK(BgAnnounceSendable(a));
+    a.killerName = std::string(3, '\0');   // cleans to nothing
+    CHECK(!BgAnnounceSendable(a));
+    a.killerName = "Aldric"; a.victimName.clear();
+    CHECK(!BgAnnounceSendable(a));
+    a.victimName = "Brenna"; a.multi = BgMultiKill::None; a.streak = BgStreak::None;
+    CHECK(!BgAnnounceSendable(a));
 }
 
 TEST("royale: the ERR codes of section 17 are short machine codes and documented")
@@ -1411,7 +1428,7 @@ static std::map<std::string, std::string> BuiltExamples()
         m["ROYV m"] = EncodeRoyaleEvent(d);
         RoyaleKill k;
         k.killerName = "Aldric"; k.killerClassId = 1; k.victimName = "Brenna"; k.victimClassId = 8;
-        k.cause = RoyaleCause::Player; k.aliveAfter = 23; k.killerKills = 1; k.announce = RoyaleAnnounce::FirstBlood;
+        k.cause = RoyaleCause::Player; k.aliveAfter = 23; k.killerKills = 1;
         m["ROYK n"] = EncodeRoyaleKill(k);
         RoyaleResult r;
         r.matchId = 7001; r.placement = 12; r.total = 24; r.kills = 1; r.damage = 18400; r.healing = 0;
@@ -1427,6 +1444,21 @@ static std::map<std::string, std::string> BuiltExamples()
         ErrorReply g;
         g.op = IntentType::Glide; g.seq = 12; g.code = RoyaleErr::GlideHere.code; g.text = RoyaleErr::GlideHere.text;
         m["ERR q"] = EncodeError(g);
+    }
+    {
+        // the battleground kill announcer (sections 17 and 18)
+        auto ann = [](char const* killer, uint32_t kc, char const* victim, uint32_t vc, BgMultiKill mk, BgStreak st) {
+            BgAnnounce a;
+            a.killerName = killer; a.killerClassId = kc; a.victimName = victim; a.victimClassId = vc;
+            a.multi = mk; a.streak = st;
+            return EncodeBgAnnounce(a);
+        };
+        m["BGANN u"] = ann("Aldric", 1, "Brenna", 8, BgMultiKill::None, BgStreak::FirstBlood);
+        m["BGANN v"] = ann("Aldric", 1, "Brenna", 8, BgMultiKill::None, BgStreak::FirstBlood);
+        m["BGANN w"] = ann("Aldric", 1, "Corwin", 5, BgMultiKill::Double, BgStreak::None);
+        m["BGANN x"] = ann("Aldric", 1, "Dalia", 11, BgMultiKill::Triple, BgStreak::KillingSpree);
+        m["BGANN y"] = ann("Garrick Stormwind", 4, "Aldric", 1, BgMultiKill::None, BgStreak::Dominating);
+        m["BGANN z"] = ann("Eamon", 9, "Fenna", 3, BgMultiKill::Rampage, BgStreak::HolyShit);
     }
     return m;
 }
