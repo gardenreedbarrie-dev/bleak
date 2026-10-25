@@ -4,9 +4,13 @@ Bleakhold kill announcer voice lines
 Kill announcer voice lines generated with Kokoro-82M by hexgrad (Apache License 2.0),
 https://huggingface.co/hexgrad/Kokoro-82M
 
-Every line in these folders is a new recording made for Bleakhold with that text-to-speech model and then
-post-processed (pitch, EQ, compression, reverb). Nothing was copied from any other game or sound library; the
-DotA-style line names are only the words spoken.
+The ten lines above Triple Kill (ultrakill, rampage, killingspree, dominating, megakill, unstoppable,
+wickedsick, monsterkill, godlike, holyshit) were generated with Chatterbox by Resemble AI (MIT License),
+https://github.com/resemble-ai/chatterbox, cloning the Kokoro voices above, for a shouted delivery.
+
+Every line in these folders is a new recording made for Bleakhold with these text-to-speech models and
+then post-processed (pitch, EQ, compression, saturation, reverb). Nothing was copied from any other game or
+sound library; the DotA-style line names are only the words spoken.
 
   male/, male_quiet/      Kokoro voice am_michael ("dark" style)
   female/, female_quiet/  Kokoro voice af_heart ("dark" style)
@@ -15,8 +19,8 @@ DotA-style line names are only the words spoken.
 Format: 22.05 kHz, mono, 16-bit PCM WAV. Lines: firstblood, doublekill, triplekill, ultrakill, rampage,
 killingspree, dominating, megakill, unstoppable, wickedsick, monsterkill, godlike, holyshit.
 
-Only generated audio ships here, not the model or its voice files, so the Apache-2.0 attribution terms do not
-apply to these files; the credit above is a courtesy. If the model or voice files are ever bundled, include the
-Apache License 2.0 text with them.
+Only generated audio ships here, not the models or their voice files, so the Apache-2.0 and MIT attribution
+terms do not apply to these files; the credits above are a courtesy. If the models or voice files are ever
+bundled, include their license texts with them.
 
 After replacing a WAV, run: python3 -I Tools/Announcer/import_sounds.py (it regenerates AnnouncerData.lua).
