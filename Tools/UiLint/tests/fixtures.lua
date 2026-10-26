@@ -95,6 +95,12 @@ function FX.examples(M)
         ROYE = { { 7001, 12, 24, 1, 18400, 0, 214, "Dalia", 11, 7, 1 }, { "H", 70, "", "Placement" }, { "S", 5 } },
         -- the battleground kill announcer (section 18), unrevisioned
         BGANN = { { "Aldric", 1, "Brenna", 8, "D", "S" } },
+        -- arena seasons and the 1v1 ladder (section 20), unrevisioned
+        ARENA = { { 1, 1, now - 86400, now + 86400 * 30, now + 86400 * 32, 1, 0, "Arena Season 1" },
+            { "S", 1, "Arena Season 1", 1, now - 86400, now + 86400 * 30 },
+            { "B", 1, 1, 1734, 12, 48, 61, 38, 9, 6, 1734, 14, 3, 4, 66, 0, "Aldric" },
+            { "T", 1, 4, 6, 6, 1801, 1800 }, { "N", 1, 48, 1, 1 }, { "M", 1, 1, 14, "Brenna", now - 60, 0, "" },
+            { "F", 1, 12, 1734, 3, 0 } },
     }
 end
 

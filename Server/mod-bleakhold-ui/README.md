@@ -114,6 +114,7 @@ To change names, texts, the week schedule or seasons later: edit the `bleakhold_
 | Eclipse Rift | | `RiftStatus`, `RiftEnded`, `QJOIN` with kind `R` |
 | Bleakhold Royale (protocol section 17) | the protocol: `QJOIN` kind `B`, `RDROP`/`RDEPLOY`/`RSPEC` with their rate limits, `GET ROYS`/`ROYM`, the `ROYS ROYM ROYO ROYK ROYV ROYE` encoders, `[Royale]` chat tag; `ERR royale_off` while feature bit 4096 is off; no `GLIDE` in battlegrounds | the match (mod-bleakhold): `SetFeature(FeatureRoyale, true)`, the handlers and providers, the `SendRoyale*` pushes |
 | Battleground kill announcer (protocol section 18: first blood, kill streaks, multi-kills in every battleground and Bleakhold Royale) | the protocol: the `BGANN` encoder and `SendBgAnnounce` (to one player or a whole battleground) | the announcer (mod-bleakhold): the streaks and codes, `SetFeature(FeatureBgAnnouncer, true)` while it is enabled |
+| Arena seasons and the 1v1 ladder (protocol section 20) | the protocol: `QJOIN` kind `A`, `LBQ` board `A` (one bracket at a time), `GET ARENA`, the `ARENA` encoder, the board-A fields of `LB`/`LBME`, `DEF V`/`Q`, `QUEUE` kind `A`; `ERR arena_off` while feature bit 65536 is off; `OnBoardQuery` (one board's own LBQ handler; without one `LBQ A` gets an empty `LB`) | the seasons, ladders, verdicts and rewards (mod-bleakhold): `SetFeature(FeatureArena, true)`, the board-A handler, the `GET ARENA` provider, `SendArena`, DEF V/Q through `OnDefinitionsLoaded` |
 | Daily and weekly tasks, Mythic Coins, Shards | | `SendTasks`, `TaskProgress`, `SendWeek`, `TCLAIM`/`TREROLL` handlers |
 | Collections counts | | `SendCollections` |
 | Emoji bubbles (Animations tab, emote wheel, `/bh emoji`) | everything: the module checks `EMOJI` and shows the emoji over the player's head to everyone nearby; config `BleakholdUi.Emoji.*` | nothing (players need the Bleakhold client to see the bubbles) |
@@ -373,6 +374,7 @@ Ui::OnIntent(IntentType::Emoji, [](Player* p, Intent const& in) {
 | CAMPST | automatic (the module's camping); `SendCampState(player, CampState)` for a replacement | |
 | ROYS / ROYM / ROYO / ROYK / ROYV / ROYE | `SendRoyaleState`, `SendRoyaleMap`, `SendRoyaleObjects`, `SendRoyaleKill`, `SendRoyaleEvent` (the last four also for a list of players), `SendRoyaleResult` | |
 | BGANN | `SendBgAnnounce(player or players, BgAnnounce)` | |
+| ARENA | `SendArena(player, ArenaState)`; answer `GET ARENA` with it (`OnRequest(Topic::Arena, ...)`) | |
 
 Intents (`Ui::OnIntent(IntentType::..., handler)`): `TaskClaim` (`in.taskUid`), `TaskReroll` (`in.taskUid`),
 `QueueJoin` (`in.queueKind, activityId, tier, roles, groupSize`), `QueueLeave`, `QueueReply`
@@ -381,6 +383,9 @@ Intents (`Ui::OnIntent(IntentType::..., handler)`): `TaskClaim` (`in.taskUid`), 
 `Emoji` (`in.emojiId`), `Dance` (`in.danceId`), `CaseOpen` (`in.caseItemId, in.caseNonce`), `Camp` (`in.campAct`:
 `CampAct::Make`, `Object` with `in.campSkill`, `Pack`), `Glide`, `Repair`, `RoyaleDrop` (`in.dropX, in.dropY`),
 `RoyaleDeploy`, `RoyaleSpectate` (`in.spectateDir`). Runtime feature bits: `SetFeature(bit, on)`, `FeatureOn(bit)`.
+One board's leaderboard queries: `OnBoardQuery(Board::Arena, handler)` (before `OnIntent(LeaderboardQuery)` and the
+module's own tables; `in.dungeonId` is the bracket). `BLEAKHOLD_UI_ARENA` (BleakholdMessages.h) tells a server module that
+the arena API of section 20 exists.
 
 ---
 

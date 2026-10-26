@@ -8,7 +8,8 @@
 //
 // A second session, `royale`, holds a Bleakhold Royale match (section 17: QUEUE kind B, ROYS ROYM ROYO ROYK ROYV
 // ROYE, and the battleground kill announcer's BGANN of section 18) from its own Endpoint, so the main frames stay what
-// the existing checks expect.
+// the existing checks expect. A third, `arena`, holds an arena season (section 20: HELLO bit 65536, ARENA, LB / LBME
+// board A, DEF V and Q, QUEUE kind A, ERR arena_closed).
 //
 // SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -31,6 +32,8 @@ namespace
     std::vector<std::string> g_frames;
     Endpoint g_royaleEp;
     std::vector<std::string> g_royaleFrames;
+    Endpoint g_arenaEp;
+    std::vector<std::string> g_arenaFrames;
 
     void SendOn(Endpoint& ep, std::vector<std::string>& out, char const* op, std::string const& payload)
     {
@@ -300,6 +303,109 @@ namespace
         none.kind = QueueKind::Royale;
         queue(none);
     }
+
+    // Arena seasons and the 1v1 ladder (section 20): a live season, the 3v3 ladder of 10 rows (chunked at small
+    // frame sizes), the 1v1 queue, then the season's end
+    void ArenaSession()
+    {
+        Intent hello;
+        if (g_arenaEp.Receive("BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUS", 1000, hello).verdict != Verdict::Accepted)
+        {
+            std::fprintf(stderr, "bh_gen: arena HELLO not accepted\n");
+            std::exit(1);
+        }
+        auto send = [](char const* op, std::string const& payload) { SendOn(g_arenaEp, g_arenaFrames, op, payload); };
+        auto queue = [&](QueueState const& q) { send("QUEUE", EncodeQueue(g_arenaEp.NextRev(Topic::Queue), q)); };
+
+        HelloReply h;
+        h.proto = 1; h.minProto = 1; h.serverEpoch = 1793900000; h.dataVer = 77;
+        h.featureBits = FeatureSeason | FeatureLeaderboards | FeatureArena; h.realmName = "Bleakhold";
+        send("HELLO", EncodeHello(h));
+
+        Definitions d;
+        d.arenaTiers = { { 1, "Combatant", "9D9D9D", "Season games, 1300 rating." },
+            { 2, "Challenger", "1EFF00", "Top 35%." }, { 3, "Rival", "0070DD", "Top 10%." },
+            { 4, "Duelist", "A335EE", "Top 3%, 10 games in the last 21 days." },
+            { 5, "Gladiator", "FF8000", "Top 0.5%, 50 wins." }, { 6, "Rank One", "E6CC80", "The best team, 50 wins." },
+            { 7, "Class Champion", "C41E3A", "The best 1v1 player of a class." } };
+        ArenaRewardDef r1; r1.id = 101; r1.bracket = 3; r1.tierId = 2; r1.kind = 'T'; r1.entry = 2090; r1.text = "Challenger";
+        ArenaRewardDef r2; r2.id = 105; r2.seasonId = 1; r2.bracket = 3; r2.tierId = 5; r2.kind = 'M'; r2.entry = 30609;
+        r2.text = "Swift Nether Drake";
+        ArenaRewardDef r3; r3.id = 110; r3.bracket = 3; r3.tierId = 1; r3.kind = 'C'; r3.count = 150;
+        r3.text = "150 Dungeon Shards";
+        d.arenaRewards = { r1, r2, r3 };
+        for (std::string const& p : EncodeDefinitions(d, 77))
+            send("DEF", p);
+
+        ArenaState a;
+        a.seasonId = 1; a.state = ArenaStateId::Live; a.startEpoch = 1793318400u; a.endEpoch = 1800576000u;
+        a.ratedOpen = true; a.oneTeamCostCopper = 0u; a.seasonName = "Arena Season 1, the; first|one";
+        a.seasons = { { 1, "Arena Season 1", SeasonStateId::Current, 1793318400u, 1800576000u } };
+        ArenaBracketState one;
+        one.bracket = 1; one.hasTeam = true; one.rating = 1734; one.ladderRank = 12; one.ladderSize = 48;
+        one.seasonGames = 61; one.seasonWins = 38; one.weekGames = 9; one.weekWins = 6; one.personalRating = 1734;
+        one.recentGames = 14; one.tierId = 3; one.nextTierId = 4; one.ratingToNext = 66; one.teamName = "Aldric";
+        ArenaBracketState two;
+        two.bracket = 2; two.hasTeam = true; two.rating = 1310; two.seasonGames = 4; two.seasonWins = 1;
+        two.missingMask = ArenaMissGames | ArenaMissLevel; two.teamName = "Br\xC3\xA9nna & Co";
+        a.brackets = { one, two };
+        ArenaCutoff c;
+        c.bracket = 1; c.tierId = 4; c.slots = 6; c.cutRank = 6; c.cutRating = 1801; c.floor = 1800;
+        ArenaCutoff empty;
+        empty.bracket = 5; empty.tierId = 6; empty.slots = 0; empty.floor = 1850;
+        a.cutoffs = { c, empty };
+        a.ladders = { { 1, 48, true, true }, { 5, 7, false, false } };
+        ArenaMatch m1; m1.bracket = 1; m1.won = true; m1.ratingChange = 14; m1.opponent = "Brenna"; m1.endEpoch = 1793899000;
+        ArenaMatch m2; m2.bracket = 1; m2.won = true; m2.ratingChange = 0; m2.opponent = "Dalia"; m2.endEpoch = 1793898000;
+        m2.verdict = ArenaVerdict::NotCounted; m2.reason = ArenaReason::Effort;
+        a.matches = { m1, m2 };
+        send("ARENA", EncodeArena(a));
+
+        Leaderboard lb;
+        lb.board = Board::Arena; lb.seasonId = 1u; lb.dungeonId = 3u; lb.classId = 0u; lb.page = 1; lb.pages = 3;
+        for (uint32_t i = 1; i <= 10; ++i)
+        {
+            LeaderboardRow row;
+            row.rank = i; row.dungeonId = 3u; row.value = int64_t(2200 - 40 * i); row.dateEpoch = 1793890000u + i;
+            row.members = { { "Member" + std::to_string(i) + "a", 1u }, { "Member" + std::to_string(i) + "b", 5u },
+                { "Garrick Stormwind", 4u } };
+            row.label = "Team number " + std::to_string(i); row.seasonWins = 60 - i; row.seasonGames = 70;
+            row.tierId = i == 1 ? 6u : i <= 3 ? 5u : 4u;
+            if (i == 10)
+                row.flags = ArenaInactive | ArenaProvisional;
+            lb.rows.push_back(row);
+        }
+        send("LB", EncodeLeaderboard(lb));
+        LeaderboardMe me;
+        me.board = Board::Arena; me.rank = 4u; me.topPercent = 19u; me.value = 1912; me.dungeonId = 3u;
+        me.barPermille = 407u; me.label = "Duelist"; me.topPermille = 182u; me.tierId = 4u;
+        send("LBME", EncodeLeaderboardMe(me));
+
+        QueueState q;
+        q.state = QueueStateId::Queued; q.kind = QueueKind::Arena; q.activityId = 1u; q.tier = 1u; q.size = 1u;
+        q.queuedSec = 8u; q.estWaitSec = 95u;
+        queue(q);
+        q.state = QueueStateId::InRun; q.queuedSec.reset(); q.estWaitSec.reset();
+        queue(q);
+        QueueState none;
+        none.kind = QueueKind::Arena;
+        queue(none);
+
+        ErrorReply e;
+        e.op = IntentType::QueueJoin; e.seq = 91; e.code = ArenaErr::Closed.code;
+        e.text = "Rated arena opens again when Arena Season 2 starts.";
+        send("ERR", EncodeError(e));
+        ArenaState fin;
+        fin.seasonId = 1; fin.state = ArenaStateId::FinalStandings; fin.startEpoch = 1793318400u;
+        fin.endEpoch = 1800576000u; fin.nextStartEpoch = 1800748800u; fin.ratedOpen = false;
+        fin.seasonName = "Arena Season 1";
+        one.missingMask = ArenaMissReview;
+        fin.brackets = { one };
+        ArenaFinal f;
+        f.bracket = 1; f.finalRank = 12; f.finalRating = 1734; f.finalTierId = 3u; f.grant = ArenaGrant::Held;
+        fin.finals = { f };
+        send("ARENA", EncodeArena(fin));
+    }
 }
 
 int main(int argc, char** argv)
@@ -519,6 +625,7 @@ int main(int argc, char** argv)
     }
 
     RoyaleSession();
+    ArenaSession();
 
     std::ofstream out(argv[2], std::ios::binary);
     out << "-- generated by Server/mod-bleakhold-ui/tests/cpp/bh_gen.cpp (maxBody " << g_maxBody << "). Do not edit.\n";
@@ -531,6 +638,10 @@ int main(int argc, char** argv)
     out << "  },\n  royale = {\n    revs = { QUEUE = " << g_royaleEp.Rev(Topic::Queue) << " },\n    messages = "
         << g_royaleEp.Stats().messagesOut << ",\n    frames = {\n";
     for (std::string const& f : g_royaleFrames)
+        out << "      " << LuaString(f) << ",\n";
+    out << "    },\n  },\n  arena = {\n    revs = { QUEUE = " << g_arenaEp.Rev(Topic::Queue) << " },\n    messages = "
+        << g_arenaEp.Stats().messagesOut << ",\n    frames = {\n";
+    for (std::string const& f : g_arenaFrames)
         out << "      " << LuaString(f) << ",\n";
     out << "    },\n  },\n}\n";
     std::printf("bh_gen: %zu frames for %llu messages (max body %zu), Royale %zu frames for %llu messages -> %s\n",

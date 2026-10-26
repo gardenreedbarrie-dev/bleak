@@ -349,6 +349,12 @@ namespace Bleakhold
             _defaultProviders[static_cast<std::size_t>(topic)] = std::move(p);
     }
 
+    void Mgr::SetBoardHandler(Board board, Ui::IntentHandler h)
+    {
+        std::lock_guard<std::recursive_mutex> guard(_lock);
+        _boardHandlers[static_cast<char>(board)] = std::move(h);
+    }
+
     void Mgr::Dispatch(Player* player, Intent const& intent)
     {
         switch (intent.type)
@@ -459,11 +465,25 @@ namespace Bleakhold
             return;
         }
 
+        // The 1v1 arena queue (section 20) is open only while its system has turned feature bit 65536 on.
+        if (intent.type == IntentType::QueueJoin && intent.queueKind == QueueKind::Arena && !FeatureOn(FeatureArena))
+        {
+            Refuse(player, intent, ArenaErr::Off.code, ArenaErr::Off.text);
+            return;
+        }
+
         Ui::IntentHandler handler;
         {
             std::lock_guard<std::recursive_mutex> guard(_lock);
             std::size_t const i = static_cast<std::size_t>(intent.type);
             handler = _handlers[i] ? _handlers[i] : _defaultHandlers[i];
+            // a board's own LBQ handler (Ui::OnBoardQuery) comes first
+            if (intent.type == IntentType::LeaderboardQuery)
+            {
+                auto it = _boardHandlers.find(static_cast<char>(intent.board));
+                if (it != _boardHandlers.end() && it->second)
+                    handler = it->second;
+            }
         }
         if (handler)
             handler(player, intent);

@@ -75,6 +75,7 @@ namespace Bleakhold
             { "CAMPST", Topic::CampState, 0 },
             { "ROYS", Topic::RoyaleState, 0 },
             { "ROYM", Topic::RoyaleMap, 0 },
+            { "ARENA", Topic::Arena, 0 },
         }};
 
         constexpr char const* DropNames[] = {
@@ -258,6 +259,8 @@ namespace Bleakhold
                         out.queueKind = QueueKind::Rift;
                     else if (f[0] == "B")
                         out.queueKind = QueueKind::Royale;
+                    else if (f[0] == "A")
+                        out.queueKind = QueueKind::Arena;
                     else
                         return DropReason::BadField;
                     BH_TRY(Int(f[1], 0, Int32Max, out.activityId));
@@ -269,6 +272,10 @@ namespace Bleakhold
                         return DropReason::OutOfRange;
                     // Royale is solo and has no tiers (section 17)
                     if (out.queueKind == QueueKind::Royale && (out.tier != 0 || out.groupSize != 1))
+                        return DropReason::OutOfRange;
+                    // the 1v1 arena queue (section 20): activity 1, tier 0 skirmish or 1 rated, solo
+                    if (out.queueKind == QueueKind::Arena &&
+                        (out.activityId != ArenaActivityId || out.tier > 1 || out.groupSize != 1))
                         return DropReason::OutOfRange;
                     break;
                 }
@@ -299,12 +306,16 @@ namespace Bleakhold
                         case 'R': out.board = Board::Rift; break;
                         case 'E': out.board = Board::RaidEchoes; break;
                         case 'F': out.board = Board::Firsts; break;
+                        case 'A': out.board = Board::Arena; break;
                         default: return DropReason::BadField;
                     }
                     BH_TRY(Int(f[1], 0, Int32Max, out.seasonId));
                     BH_TRY(Int(f[2], 0, Int32Max, out.dungeonId));
                     BH_TRY(Int(f[3], 0, Int32Max, out.classId));
                     BH_TRY(Int(f[4], 1, 999, out.page));
+                    // the arena board is one bracket at a time (section 20)
+                    if (out.board == Board::Arena && !IsArenaBracket(out.dungeonId))
+                        return DropReason::OutOfRange;
                     break;
                 }
                 case IntentType::Ping:

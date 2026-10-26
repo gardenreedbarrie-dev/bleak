@@ -1208,6 +1208,167 @@ TEST("royale: the ERR codes of section 17 are short machine codes and documented
     }
 }
 
+TEST("arena: QJOIN A, LBQ A and GET ARENA parse as section 20 says; everything else is dropped")
+{
+    Intent in;
+    CHECK(Parse("1 QJOIN 1b 1/1 A,1,1,4,1", &in) == DropReason::None);
+    CHECK(in.type == IntentType::QueueJoin && in.queueKind == QueueKind::Arena && in.activityId == ArenaActivityId &&
+        in.tier == 1 && in.groupSize == 1);
+    CHECK(Parse("1 QJOIN 1c 1/1 A,1,0,7,1", &in) == DropReason::None && in.tier == 0 && in.roles == 7);
+    CHECK_EQ(EncodeIntentBody(in), "1 QJOIN 1c 1/1 A,1,0,7,1");
+    CHECK(Parse("1 QJOIN 1 1/1 A,2,1,4,1") == DropReason::OutOfRange);   // only activity 1
+    CHECK(Parse("1 QJOIN 1 1/1 A,0,1,4,1") == DropReason::OutOfRange);
+    CHECK(Parse("1 QJOIN 1 1/1 A,1,2,4,1") == DropReason::OutOfRange);   // tier 0 or 1
+    CHECK(Parse("1 QJOIN 1 1/1 A,1,3,4,1") == DropReason::OutOfRange);
+    CHECK(Parse("1 QJOIN 1 1/1 A,1,1,4,2") == DropReason::OutOfRange);   // solo
+    CHECK(Parse("1 QJOIN 1 1/1 A,1,1,0,1") == DropReason::OutOfRange);   // roles 1..7 as for every kind
+    CHECK(Parse("1 QJOIN 1 1/1 A,1,1,4") == DropReason::FieldCount);
+    CHECK(Parse("1 QJOIN 1 1/1 a,1,1,4,1") == DropReason::BadField);
+    CHECK(Parse("1 LBQ 1d 1/1 A,0,3,0,1", &in) == DropReason::None);
+    CHECK(in.board == Board::Arena && in.seasonId == 0 && in.dungeonId == 3 && in.classId == 0 && in.page == 1);
+    for (char const* ok : { "1 LBQ 1 1/1 A,2,1,8,2", "1 LBQ 1 1/1 A,0,2,0,1", "1 LBQ 1 1/1 A,0,5,11,999" })
+        CHECK_MSG(Parse(ok) == DropReason::None, ok);
+    for (char const* bad : { "1 LBQ 1 1/1 A,0,0,0,1", "1 LBQ 1 1/1 A,0,4,0,1", "1 LBQ 1 1/1 A,0,6,0,1",
+             "1 LBQ 1 1/1 A,0,11,0,1" })
+        CHECK_MSG(Parse(bad) == DropReason::OutOfRange, bad);   // one bracket at a time, never "all"
+    CHECK(Parse("1 LBQ 1 1/1 A,0,3,0,0") == DropReason::OutOfRange);
+    CHECK(Parse("1 LBQ 1 1/1 K,0,0,0,1") == DropReason::None);     // the other boards keep 0 = all
+    CHECK(Parse("1 GET 1a 1/1 ARENA", &in) == DropReason::None);
+    CHECK(in.topics.size() == 1 && in.topics[0].topic == Topic::Arena);
+    CHECK(Parse("1 GET 1 1/1 ARENA,1") == DropReason::BadTopic);
+    CHECK(Parse("1 GET 1 1/1 ARENA;QUEUE;ROYS", &in) == DropReason::None && in.topics.size() == 3);
+    CHECK_EQ(TopicName(Topic::Arena), "ARENA");
+    CHECK(!IsRevisioned(Topic::Arena));
+    CHECK(static_cast<uint8_t>(Topic::Arena) == static_cast<uint8_t>(Topic::RoyaleMap) + 1);   // appended
+    CHECK_EQN(RevisionedTopicCount, 9u);
+    CHECK(IsArenaBracket(1) && IsArenaBracket(2) && IsArenaBracket(3) && IsArenaBracket(5));
+    CHECK(!IsArenaBracket(0) && !IsArenaBracket(4) && !IsArenaBracket(6));
+}
+
+TEST("arena: the feature bit and the ERR codes of section 20")
+{
+    CHECK_EQN(static_cast<uint32_t>(FeatureArena), 65536u);
+    // 16384 and 32768 belong to World PvP (section 19): FeatureArena never overlaps a lower bit
+    CHECK_EQN(static_cast<uint32_t>(FeatureArena) & 0xFFFFu, 0u);
+    std::string const doc = bhtest::ReadFile(g_repo + "/docs/BleakholdProtocol.md");
+    CHECK(doc.find("65536 arena seasons") != std::string::npos);
+    for (Refusal const& r : { ArenaErr::Off, ArenaErr::Level, ArenaErr::Closed, ArenaErr::Busy, ArenaErr::Deserter,
+             ArenaErr::Talents, ArenaErr::Team, ArenaErr::Gold })
+    {
+        std::string const code = r.code;
+        bool ok = !code.empty() && code.size() <= 24 && code.compare(0, 6, "arena_") == 0;
+        for (char c : code)
+            ok = ok && ((c >= 'a' && c <= 'z') || c == '_');
+        CHECK_MSG(ok, "code [" + code + "]");
+        CHECK_MSG(doc.find("| `" + code + "` |") != std::string::npos, code + " is in an error table of the document");
+        CHECK_MSG(std::string(r.text).size() <= 160 && !std::string(r.text).empty(), code + " has a sentence");
+    }
+}
+
+TEST("arena: ARENA keeps every record's field order and caps")
+{
+    ArenaState a;
+    CHECK_EQ(EncodeArena(a), "0,0,,,,0");   // no arena season: an empty header
+    a.seasonId = 3; a.state = ArenaStateId::Upcoming; a.nextStartEpoch = 1800748800u; a.oneTeamCostCopper = 400000u;
+    a.seasonName = "Arena Season 3; the, long|one";
+    CHECK_EQ(EncodeArena(a), "3,6,,,1800748800,0,400000,Arena Season 3%3B the%2C long%7Cone");
+    ArenaBracketState b;
+    b.bracket = 2; b.hasTeam = false; b.missingMask = 0x1FF;   // bit 256 is not a protocol bit: cut to 8 bits
+    a.brackets = { b };
+    ArenaBracketState bad;
+    bad.bracket = 4;   // not a bracket: never written
+    a.brackets.push_back(bad);
+    ArenaCutoff c;
+    c.bracket = 5; c.tierId = 1; c.slots = 10; c.floor = 1300;   // nobody inside it yet: cutRank and cutRating empty
+    a.cutoffs = { c };
+    ArenaLadderInfo l;
+    l.bracket = 5; l.eligibleTeams = 7; l.rewardsOpen = false; l.titlesOpen = false;
+    a.ladders = { l };
+    ArenaFinal f;
+    f.bracket = 1; f.finalRank = 3; f.finalRating = 1990; f.grant = ArenaGrant::Delivered;   // no tier
+    a.finals = { f };
+    CHECK_EQ(EncodeArena(a), "3,6,,,1800748800,0,400000,Arena Season 3%3B the%2C long%7Cone;B,2,0,,,,,,,,,,,,,255;"
+        "T,5,1,10,,,1300;N,5,7,0,0;F,1,3,1990,,1");
+    ArenaState many;
+    for (uint32_t i = 0; i < 40; ++i)
+    {
+        many.seasons.push_back({ i + 1, "S", SeasonStateId::Past, 1u, 2u });
+        ArenaMatch m;
+        m.bracket = 1; m.opponent = "X"; m.endEpoch = i; m.reason = ArenaReason::Repeat; m.verdict = ArenaVerdict::Reduced;
+        many.matches.push_back(m);
+        many.cutoffs.push_back(c);
+    }
+    std::vector<std::string> recs = SplitStr(EncodeArena(many), ';');
+    std::size_t s = 0, m = 0, t = 0;
+    for (std::string const& r : recs)
+    {
+        s += r.compare(0, 2, "S,") == 0;
+        m += r.compare(0, 2, "M,") == 0;
+        t += r.compare(0, 2, "T,") == 0;
+    }
+    CHECK_EQN(s, MaxArenaSeasons);
+    CHECK_EQN(m, MaxArenaMatches);
+    CHECK_EQN(t, MaxArenaCutoffs);
+    CHECK(recs.back() == "M,1,0,0,X,4,1,R");
+}
+
+TEST("arena: LB and LBME carry the four and the two arena fields on board A only")
+{
+    Leaderboard lb;
+    lb.board = Board::Keys; lb.page = 1; lb.pages = 1;
+    LeaderboardRow r;
+    r.rank = 1; r.dungeonId = 602u; r.value = 15; r.label = "x";
+    r.seasonWins = 1u; r.seasonGames = 2u; r.tierId = 3u; r.flags = 4u;   // ignored on K
+    lb.rows = { r };
+    CHECK_EQ(EncodeLeaderboard(lb), "K,,,,1,1;1,602,15,,,,x");
+    lb.board = Board::Arena; lb.seasonId = 1u; lb.dungeonId = 3u; lb.classId = 0u;
+    r.dungeonId = 3u; r.value = 1912; r.dateEpoch = 1793896400u; r.members = { { "Ironvow", 1u }, { "Hale", 7u } };
+    r.label = "Ironvow Wardens";
+    lb.rows = { r };
+    CHECK_EQ(EncodeLeaderboard(lb), "A,1,3,0,1,1;1,3,1912,,1793896400,Ironvow~1:Hale~7,Ironvow Wardens,1,2,3,4");
+    r.flags.reset();
+    r.tierId.reset();
+    lb.rows = { r };
+    CHECK_EQ(EncodeLeaderboard(lb), "A,1,3,0,1,1;1,3,1912,,1793896400,Ironvow~1:Hale~7,Ironvow Wardens,1,2");
+    LeaderboardMe me;
+    me.board = Board::Rift; me.rank = 4u; me.topPermille = 182u; me.tierId = 4u;   // ignored on R
+    CHECK_EQ(EncodeLeaderboardMe(me), "R,4");
+    me.board = Board::Arena; me.topPercent = 19u; me.value = 1912; me.dungeonId = 3u; me.barPermille = 407u;
+    me.label = "Duelist";
+    CHECK_EQ(EncodeLeaderboardMe(me), "A,4,19,1912,3,,407,Duelist,182,4");
+    LeaderboardMe none;
+    none.board = Board::Arena;
+    CHECK_EQ(EncodeLeaderboardMe(none), "A");
+}
+
+TEST("arena: DEF V and Q follow the other kinds; QUEUE kind A has no member records")
+{
+    Definitions d;
+    d.riftBosses = { { 1, "Echo" } };
+    d.arenaTiers = { { 6, "Rank One", "E6CC80", "The best team of the bracket." } };
+    ArenaRewardDef q;
+    q.id = 105; q.seasonId = 1; q.bracket = 3; q.tierId = 5; q.kind = 'M'; q.entry = 30609; q.count = 1;
+    q.text = "Swift Nether Drake";
+    ArenaRewardDef bad = q;
+    bad.id = 1; bad.kind = 'm';   // only upper-case letters are kinds: written empty
+    d.arenaRewards = { q, bad };
+    std::vector<std::string> p = EncodeDefinitions(d, 9);
+    CHECK_EQN(p.size(), 4u);
+    CHECK_EQ(p[0], "R,9;1,Echo");
+    CHECK_EQ(p[1], "V,9;6,Rank One,E6CC80,The best team of the bracket.");
+    CHECK_EQ(p[2], "Q,9;105,1,3,5,M,30609,1,Swift Nether Drake;1,1,3,5,,30609,1,Swift Nether Drake");
+    CHECK_EQ(p[3], "Z,9");
+    Definitions e;
+    CHECK(DefinitionsHash(d) != DefinitionsHash(e));
+    QueueState qa;
+    qa.state = QueueStateId::Queued; qa.kind = QueueKind::Arena; qa.activityId = 1u; qa.tier = 1u; qa.size = 1u;
+    qa.queuedSec = 8u; qa.estWaitSec = 95u;
+    qa.queued = 3u;   // a Royale field: not part of kind A
+    QueueMember m; m.name = "Tester";
+    qa.members = { m };
+    CHECK_EQ(EncodeQueue(7, qa), "7,1,A,1,1,1,8,95");
+}
+
 TEST("endpoint: SEQ per message, revisions per topic, snapshots reset by HELLO")
 {
     Endpoint ep;
@@ -1513,6 +1674,100 @@ static std::map<std::string, std::string> BuiltExamples()
         m["BGANN x"] = ann("Aldric", 1, "Dalia", 11, BgMultiKill::Triple, BgStreak::KillingSpree);
         m["BGANN y"] = ann("Garrick Stormwind", 4, "Aldric", 1, BgMultiKill::None, BgStreak::Dominating);
         m["BGANN z"] = ann("Eamon", 9, "Fenna", 3, BgMultiKill::Rampage, BgStreak::HolyShit);
+    }
+    {
+        // arena seasons and the 1v1 ladder (section 20)
+        ArenaState a;
+        a.seasonId = 1; a.state = ArenaStateId::Live; a.startEpoch = 1793318400u; a.endEpoch = 1800576000u;
+        a.nextStartEpoch = 1800748800u; a.ratedOpen = true; a.oneTeamCostCopper = 0u; a.seasonName = "Arena Season 1";
+        a.seasons = { { 1, "Arena Season 1", SeasonStateId::Current, 1793318400u, 1800576000u },
+            { 2, "Arena Season 2", SeasonStateId::Upcoming, 1800748800u, 1808006400u } };
+        auto bracket = [](uint32_t br, uint32_t rating, uint32_t rank, uint32_t size, uint32_t games, uint32_t wins,
+                           uint32_t wg, uint32_t ww, uint32_t personal, uint32_t recent, uint32_t tier, uint32_t next,
+                           uint32_t toNext, uint32_t missing, char const* team) {
+            ArenaBracketState b;
+            b.bracket = br; b.hasTeam = true; b.rating = rating; b.ladderRank = rank; b.ladderSize = size;
+            b.seasonGames = games; b.seasonWins = wins; b.weekGames = wg; b.weekWins = ww; b.personalRating = personal;
+            b.recentGames = recent; b.tierId = tier; b.nextTierId = next; b.ratingToNext = toNext;
+            b.missingMask = missing; b.teamName = team;
+            return b;
+        };
+        a.brackets = { bracket(1, 1734, 12, 48, 61, 38, 9, 6, 1734, 14, 3, 4, 66, 0, "Aldric"),
+            bracket(3, 1912, 4, 22, 44, 30, 12, 8, 1890, 12, 4, 5, 163, ArenaMissWins, "Ironvow Wardens") };
+        auto cut = [](uint32_t tier, uint32_t slots, uint32_t rank, uint32_t rating, uint32_t floor) {
+            ArenaCutoff c;
+            c.bracket = 3; c.tierId = tier; c.slots = slots; c.cutRank = rank; c.cutRating = rating; c.floor = floor;
+            return c;
+        };
+        a.cutoffs = { cut(6, 1, 1, 2140, 2000), cut(5, 2, 2, 2075, 2000), cut(4, 4, 4, 1912, 1800),
+            cut(3, 4, 4, 1912, 1650), cut(2, 8, 8, 1702, 1500), cut(1, 22, 22, 1310, 1300) };
+        a.ladders = { { 1, 48, true, true }, { 3, 22, true, true } };
+        auto match = [](bool won, int32_t change, char const* who, uint32_t at, ArenaVerdict v, ArenaReason why) {
+            ArenaMatch x;
+            x.bracket = 1; x.won = won; x.ratingChange = change; x.opponent = who; x.endEpoch = at; x.verdict = v;
+            x.reason = why;
+            return x;
+        };
+        a.matches = { match(true, 14, "Brenna", 1793900000u, ArenaVerdict::Normal, ArenaReason::None),
+            match(false, -11, "Corwin", 1793899000u, ArenaVerdict::Normal, ArenaReason::None),
+            match(true, 0, "Dalia", 1793898000u, ArenaVerdict::NotCounted, ArenaReason::Network),
+            match(true, 7, "Eamon", 1793897000u, ArenaVerdict::Reduced, ArenaReason::Repeat) };
+        m["ARENA 2a"] = EncodeArena(a);
+        ArenaState fin;
+        fin.seasonId = 1; fin.state = ArenaStateId::FinalStandings; fin.startEpoch = 1793318400u;
+        fin.endEpoch = 1800576000u; fin.nextStartEpoch = 1800748800u; fin.ratedOpen = false; fin.oneTeamCostCopper = 0u;
+        fin.seasonName = "Arena Season 1";
+        fin.brackets = { bracket(1, 1734, 12, 48, 61, 38, 0, 0, 1734, 14, 3, 4, 66, ArenaMissReview, "Aldric") };
+        ArenaFinal f;
+        f.bracket = 1; f.finalRank = 12; f.finalRating = 1734; f.finalTierId = 3u; f.grant = ArenaGrant::Held;
+        fin.finals = { f };
+        m["ARENA 2b"] = EncodeArena(fin);
+
+        Leaderboard lb;
+        lb.board = Board::Arena; lb.seasonId = 1u; lb.dungeonId = 3u; lb.classId = 0u; lb.page = 1; lb.pages = 3;
+        auto row = [](uint32_t rank, int64_t rating, uint32_t last, std::vector<LeaderboardMember> members,
+                       char const* team, uint32_t wins, uint32_t games, uint32_t tier, Opt<uint32_t> flags) {
+            LeaderboardRow r;
+            r.rank = rank; r.dungeonId = 3u; r.value = rating; r.dateEpoch = last; r.members = std::move(members);
+            r.label = team; r.seasonWins = wins; r.seasonGames = games; r.tierId = tier; r.flags = flags;
+            return r;
+        };
+        lb.rows = { row(1, 2140, 1793896400u, { { "Brenna", 2u }, { "Corwin", 5u }, { "Dalia", 8u } }, "Dawnbreakers", 61, 70,
+                        6, std::nullopt),
+            row(2, 2075, 1793890000u, { { "Eamon", 11u }, { "Fenna", 3u }, { "Garrick Stormwind", 4u } }, "The Unbowed", 55,
+                68, 5, std::nullopt),
+            row(3, 1990, 1793200000u, { { "Hale", 7u }, { "Isolde", 9u }, { "Jorund", 6u } }, "Ashen Pact", 40, 52, 4,
+                ArenaInactive) };
+        m["LB 2d"] = EncodeLeaderboard(lb);
+        LeaderboardMe me;
+        me.board = Board::Arena; me.rank = 4u; me.topPercent = 19u; me.value = 1912; me.dungeonId = 3u;
+        me.barPermille = 407u; me.label = "Duelist"; me.topPermille = 182u; me.tierId = 4u;
+        m["LBME 2e"] = EncodeLeaderboardMe(me);
+
+        Definitions v;
+        v.arenaTiers = { { 1, "Combatant", "9D9D9D", "Enough season games and 1300 rating." },
+            { 5, "Gladiator", "FF8000", "The top 0.5% of the ladder with 50 wins." } };
+        m["DEF 2f"] = EncodeDefinitions(v, 7).at(0);
+        Definitions q;
+        auto reward = [](uint32_t id, uint32_t season, uint32_t tier, char kind, uint32_t entry, uint32_t count,
+                          char const* text) {
+            ArenaRewardDef r;
+            r.id = id; r.seasonId = season; r.bracket = 3; r.tierId = tier; r.kind = kind; r.entry = entry; r.count = count;
+            r.text = text;
+            return r;
+        };
+        q.arenaRewards = { reward(101, 0, 2, 'T', 2090, 1, "Challenger"), reward(105, 1, 5, 'M', 30609, 1, "Swift Nether Drake"),
+            reward(110, 0, 1, 'C', 0, 150, "150 Dungeon Shards") };
+        m["DEF 2g"] = EncodeDefinitions(q, 7).at(0);
+
+        QueueState qa;
+        qa.state = QueueStateId::Queued; qa.kind = QueueKind::Arena; qa.activityId = 1u; qa.tier = 1u; qa.size = 1u;
+        qa.queuedSec = 8u; qa.estWaitSec = 95u;
+        m["QUEUE 2i"] = EncodeQueue(7, qa);
+        ErrorReply e;
+        e.op = IntentType::QueueJoin; e.seq = 91; e.code = ArenaErr::Closed.code;
+        e.text = "Rated arena opens again when Arena Season 2 starts.";
+        m["ERR 2k"] = EncodeError(e);
     }
     return m;
 }

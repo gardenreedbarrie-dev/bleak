@@ -142,6 +142,9 @@ namespace Bleakhold
                 .Opt(m.matchesRunning);
             return w.Take();
         }
+        // the 1v1 arena queue (section 20): no member records (the native invite dialog takes the player in)
+        if (m.kind == QueueKind::Arena)
+            return w.Take();
         std::size_t n = 0;
         for (QueueMember const& q : m.members)
         {
@@ -416,6 +419,9 @@ namespace Bleakhold
                     mem.classId ? PayloadWriter::TuplePart(static_cast<int64_t>(*mem.classId)) : std::string() });
             }
             w.Record().Int(r.rank).Opt(r.dungeonId).Opt(r.value).Opt(r.timeSec).Opt(r.dateEpoch).Tuples(members).Text(r.label, 48);
+            // board A (section 20): season wins and games, tier, flags
+            if (m.board == Board::Arena)
+                w.Opt(r.seasonWins).Opt(r.seasonGames).Opt(r.tierId).Opt(r.flags);
         }
         return w.Take();
     }
@@ -425,6 +431,62 @@ namespace Bleakhold
         PayloadWriter w;
         w.Char(Letter(m.board)).Opt(m.rank).Opt(m.topPercent).Opt(m.value).Opt(m.dungeonId).Opt(m.timeSec).Opt(m.barPermille)
             .Text(m.label, 48);
+        if (m.board == Board::Arena)   // section 20
+            w.Opt(m.topPermille).Opt(m.tierId);
+        return w.Take();
+    }
+
+    std::string EncodeArena(ArenaState const& m)
+    {
+        PayloadWriter w;
+        w.Int(m.seasonId).Int(Num(m.state)).Opt(m.startEpoch).Opt(m.endEpoch).Opt(m.nextStartEpoch).Bool(m.ratedOpen)
+            .Opt(m.oneTeamCostCopper).Text(m.seasonName, ArenaNameBytes);
+        std::size_t n = 0;
+        for (ArenaSeasonInfo const& e : m.seasons)
+        {
+            if (n++ >= MaxArenaSeasons)
+                break;
+            w.Record().Char('S').Int(e.id).Text(e.name, ArenaNameBytes).Int(Num(e.state)).Opt(e.startEpoch).Opt(e.endEpoch);
+        }
+        n = 0;
+        for (ArenaBracketState const& b : m.brackets)
+        {
+            if (!IsArenaBracket(b.bracket) || n++ >= 4)
+                continue;
+            w.Record().Char('B').Int(b.bracket).Bool(b.hasTeam).Opt(b.rating).Opt(b.ladderRank).Opt(b.ladderSize)
+                .Opt(b.seasonGames).Opt(b.seasonWins).Opt(b.weekGames).Opt(b.weekWins).Opt(b.personalRating)
+                .Opt(b.recentGames).Opt(b.tierId).Opt(b.nextTierId).Opt(b.ratingToNext).Int(b.missingMask & 0xFFu)
+                .Text(b.teamName, ArenaNameBytes);
+        }
+        n = 0;
+        for (ArenaCutoff const& c : m.cutoffs)
+        {
+            if (!IsArenaBracket(c.bracket) || n++ >= MaxArenaCutoffs)
+                continue;
+            w.Record().Char('T').Int(c.bracket).Int(c.tierId).Int(c.slots).Opt(c.cutRank).Opt(c.cutRating).Int(c.floor);
+        }
+        n = 0;
+        for (ArenaLadderInfo const& l : m.ladders)
+        {
+            if (!IsArenaBracket(l.bracket) || n++ >= 4)
+                continue;
+            w.Record().Char('N').Int(l.bracket).Int(l.eligibleTeams).Bool(l.rewardsOpen).Bool(l.titlesOpen);
+        }
+        n = 0;
+        for (ArenaMatch const& x : m.matches)
+        {
+            if (!IsArenaBracket(x.bracket) || n++ >= MaxArenaMatches)
+                continue;
+            w.Record().Char('M').Int(x.bracket).Bool(x.won).Int(x.ratingChange).Text(x.opponent, ArenaNameBytes)
+                .Int(x.endEpoch).Int(Num(x.verdict)).Char(Letter(x.reason));
+        }
+        n = 0;
+        for (ArenaFinal const& f : m.finals)
+        {
+            if (!IsArenaBracket(f.bracket) || n++ >= 4)
+                continue;
+            w.Record().Char('F').Int(f.bracket).Int(f.finalRank).Int(f.finalRating).Opt(f.finalTierId).Int(Num(f.grant));
+        }
         return w.Take();
     }
 
@@ -479,6 +541,12 @@ namespace Bleakhold
             w.Int(e.id).Text(e.name, 24).Text(e.token, 24).Text(e.colorHex, 6).Text(e.shortLabel, 4);
         });
         kind('R', d.riftBosses, [](PayloadWriter& w, RiftBossDef const& e) { w.Int(e.id).Text(e.name, 48); });
+        kind('V', d.arenaTiers, [](PayloadWriter& w, ArenaTierDef const& e) {
+            w.Int(e.id).Text(e.name, 30).Text(e.colorHex, 6).Text(e.text, 120);
+        });
+        kind('Q', d.arenaRewards, [](PayloadWriter& w, ArenaRewardDef const& e) {
+            w.Int(e.id).Int(e.seasonId).Int(e.bracket).Int(e.tierId).Char(e.kind).Int(e.entry).Int(e.count).Text(e.text, 60);
+        });
         PayloadWriter z;
         z.Char('Z').Int(dataVer);
         out.push_back(z.Take());

@@ -38,6 +38,15 @@
  *          Ui::SetFeature(FeatureBgAnnouncer, true);            // while it is enabled (HELLO bit 8192)
  *          Ui::SendBgAnnounce(bg_players, { killer, killerClass, victim, victimClass, BgMultiKill::Double, ... });
  *
+ *   5. Arena seasons and the 1v1 ladder (section 20):
+ *          Ui::SetFeature(FeatureArena, true);                  // while your arena system runs (HELLO bit 65536)
+ *          Ui::OnBoardQuery(Board::Arena, [](Player* p, Intent const& in) { ... LB + LBME of in.dungeonId ... });
+ *          Ui::OnRequest(Topic::Arena, [](Player* p, TopicRequest const&) { Ui::SendArena(p, MyArena::View(p)); });
+ *      QJOIN kind A arrives at your QJOIN handler (intent.queueKind == QueueKind::Arena); while the feature bit is off
+ *      the module answers it with ERR arena_off, whoever handles it. DEF V (tiers) and Q (rewards) come from your
+ *      OnDefinitionsLoaded editor (Definitions::arenaTiers, arenaRewards). Without a board handler LBQ A gets an empty
+ *      LB.
+ *
  * Threading: every function here may be called from any thread (map update threads included). The
  * module queues the frames and sends them from the world thread. Your handlers and providers are
  * always called on the world thread, never while the module holds a lock.
@@ -76,10 +85,15 @@ namespace Bleakhold::Ui
     //   repair_off).
     //   RDROP RSPEC -> ERR "unavailable"; RDEPLOY -> nothing (it is never answered, not even with ERR busy over its
     //   rate limit). While FeatureRoyale is off (SetFeature below) QJOIN with kind B, RDROP and RSPEC get
-    //   ERR royale_off and RDEPLOY is dropped, also with your handler.
+    //   ERR royale_off and RDEPLOY is dropped, also with your handler. While FeatureArena is off QJOIN with kind A gets
+    //   ERR arena_off, also with your handler.
     //   HELLO, GET and PING are handled by the module.
     using IntentHandler = std::function<void(Player* player, Intent const& intent)>;
     void OnIntent(IntentType type, IntentHandler handler);
+
+    // Your handler for LBQ of one board (Board::Arena, section 20). It answers that board whoever handles LBQ (yours
+    // through OnIntent, or the module's own tables, which keep K R E F). Without one, LBQ A gets an empty LB and LBME.
+    void OnBoardQuery(Board board, IntentHandler handler);
 
     // The SMSG_PLAY_SPELL_VISUAL kit that shows emoji `emojiId` (< EmojiCatalogueCount, BleakholdEmoji.h)
     // over a unit: unit->SendPlaySpellVisual(Ui::EmojiKit(id)) (EMOJI, docs/BleakholdProtocol.md section 13).
@@ -121,7 +135,7 @@ namespace Bleakhold::Ui
     //   WEEK TASKS KEY BOARD QUEUE COLL RIFT -> the last state you pushed;
     //   ERA -> bleakhold_week_schedule; SEASON -> bleakhold_season + war effort tables;
     //   SET, LIDX -> bleakhold_legacy_set; FIRSTS -> bleakhold_server_first; MPLUS -> the run tracker;
-    //   DEF -> the definition tables; CAMPST -> the module's camping state; ROYS ROYM -> nothing. Example:
+    //   DEF -> the definition tables; CAMPST -> the module's camping state; ROYS ROYM ARENA -> nothing. Example:
     //     Ui::OnRequest(Topic::Week, [](Player* p, TopicRequest const&) { Ui::SendWeek(p, MySeason::Week(p)); });
     using TopicProvider = std::function<void(Player* player, TopicRequest const& request)>;
     void OnRequest(Topic topic, TopicProvider provider);
@@ -183,6 +197,10 @@ namespace Bleakhold::Ui
     // announcer is enabled: the addon plays BGANN only with that bit, inside a battleground and never in an arena.
     void SendBgAnnounce(Player* player, BgAnnounce const& announce);
     void SendBgAnnounce(std::vector<Player*> const& players, BgAnnounce const& announce);
+    // Arena seasons (section 20): ARENA, the player's arena season (unrevisioned, never remembered: answer GET ARENA
+    // with it). Push it after HELLO while FeatureArena is on, after each of the player's rated matches, and to
+    // everyone on every change of the season's state.
+    void SendArena(Player* player, ArenaState const& state);
     // Low-level keystone run messages for one player. Prefer the run tracker below.
     void SendKeyRunStart(Player* player, Bleakhold::KeyRunStart const& start);   // MPS
     void SendKeyRunState(Player* player, KeyRunState const& state);   // MP

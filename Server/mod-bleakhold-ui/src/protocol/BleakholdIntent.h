@@ -54,14 +54,22 @@ namespace Bleakhold
         Week, Era, Tasks, Key, Board, Queue, Coll, Lidx, Season,   // revisioned
         Firsts, Mplus, Rift, Set, Def, Cases, Case, CampState,
         RoyaleState, RoyaleMap,                                    // ROYS, ROYM (section 17)
+        Arena,                                                     // ARENA (section 20)
         Count
     };
     inline constexpr uint8_t RevisionedTopicCount = 9;
 
     // QJOIN kind: the dungeon board, the Eclipse Rift, Bleakhold Royale (section 17: activityId is the mode id,
-    // tier 0, size 1).
-    enum class QueueKind : char { Dungeon = 'D', Rift = 'R', Royale = 'B' };
-    enum class Board : char { Keys = 'K', Rift = 'R', RaidEchoes = 'E', Firsts = 'F' };
+    // tier 0, size 1), the 1v1 arena queue (section 20: activityId 1, tier 0 skirmish or 1 rated, size 1).
+    enum class QueueKind : char { Dungeon = 'D', Rift = 'R', Royale = 'B', Arena = 'A' };
+    // LBQ board. A (section 20): seasonId is an arena season id (0 = the current one), dungeonId the bracket.
+    enum class Board : char { Keys = 'K', Rift = 'R', RaidEchoes = 'E', Firsts = 'F', Arena = 'A' };
+    // QJOIN A: the one activity (the 1v1 queue); LBQ A: the brackets (1v1, 2v2, 3v3, 5v5).
+    inline constexpr uint32_t ArenaActivityId = 1;
+    inline constexpr bool IsArenaBracket(uint32_t bracket)
+    {
+        return bracket == 1 || bracket == 2 || bracket == 3 || bracket == 5;
+    }
     // CAMP act (section 16): make camp, place a camp object, pack up my camp.
     enum class CampAct : char { Make = 'M', Object = 'O', Pack = 'P' };
     // RSPEC dir (section 17): watch the killer (or the first player alive), the next one, the previous one.
@@ -100,10 +108,11 @@ namespace Bleakhold
 
         // QJOIN
         QueueKind queueKind = QueueKind::Dungeon;
-        uint32_t activityId = 0;       // dungeon (map) id, 0 for the Rift, the mode id (> 0) for Royale
-        uint8_t tier = 0;              // 0 Normal, 1 Veteran, 2 Elite, 3 Nightmare (always 0 for Royale)
-        uint8_t roles = 0;             // RoleMask bits, 1..7 (ignored for Royale)
-        uint8_t groupSize = 0;         // 1..5, 1 = enter alone (always 1 for Royale)
+        uint32_t activityId = 0;       // dungeon (map) id, 0 for the Rift, the mode id (> 0) for Royale, 1 for Arena
+        uint8_t tier = 0;              // 0 Normal, 1 Veteran, 2 Elite, 3 Nightmare (always 0 for Royale; Arena: 0
+                                       // skirmish, 1 rated)
+        uint8_t roles = 0;             // RoleMask bits, 1..7 (ignored for Royale and Arena)
+        uint8_t groupSize = 0;         // 1..5, 1 = enter alone (always 1 for Royale and Arena)
 
         // QREPLY
         uint32_t proposalId = 0;
@@ -120,9 +129,9 @@ namespace Bleakhold
 
         // LBQ
         Board board = Board::Keys;
-        uint32_t seasonId = 0;
-        uint32_t dungeonId = 0;        // 0 = all
-        uint32_t classId = 0;          // 0 = all
+        uint32_t seasonId = 0;         // A: an arena season id; 0 = the current season
+        uint32_t dungeonId = 0;        // 0 = all; A: the bracket, 1, 2, 3 or 5 (never 0)
+        uint32_t classId = 0;          // 0 = all; A: teams with a member of this class
         uint32_t page = 1;             // from 1
 
         // PING

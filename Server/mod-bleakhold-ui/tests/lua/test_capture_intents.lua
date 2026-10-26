@@ -61,6 +61,9 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
         { "KMODE", 0 }, { "KMODE", 1 }, { "KMODE", 2 }, { "KSTART" }, { "KCANCEL" },
         { "BCLAIM", 55 }, { "WEHANDIN" }, { "OUTFIT", 201 },
         { "LBQ", "K", 1, 0, 0, 1 }, { "LBQ", "R", 1, 602, 11, 999 }, { "LBQ", "E", 0, 0, 0, 3 }, { "LBQ", "F", 1, 0, 0, 1 },
+        -- arena seasons (section 20): the arena board one bracket at a time, the 1v1 queue rated and skirmish
+        { "LBQ", "A", 0, 3, 0, 1 }, { "LBQ", "A", 2147483647, 1, 11, 999 }, { "LBQ", "A", 1, 5, 0, 2 },
+        { "QJOIN", "A", 1, 1, 4, 1 }, { "QJOIN", "A", 1, 0, 7, 1 },
     }
     for _, s in ipairs(sends) do
         H.eq(C.Send(unpack(s)), true, "the client sends " .. s[1])
@@ -166,6 +169,11 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
     H.eq(C.Send("QJOIN", "B", 901, 1, 4, 1), false, "Royale: tier 0")
     H.eq(C.Send("QJOIN", "B", 901, 0, 4, 2), false, "Royale: size 1")
     H.eq(C.Send("QJOIN", "B", 0, 0, 4, 1), false, "Royale: a mode id above 0")
+    H.eq(C.Send("QJOIN", "A", 2, 1, 4, 1), false, "arena: activity 1")
+    H.eq(C.Send("QJOIN", "A", 1, 2, 4, 1), false, "arena: tier 0 or 1")
+    H.eq(C.Send("QJOIN", "A", 1, 1, 4, 2), false, "arena: solo")
+    H.eq(C.Send("LBQ", "A", 0, 0, 0, 1), false, "arena board: a bracket, never all")
+    H.eq(C.Send("LBQ", "A", 0, 4, 0, 1), false, "arena board: 1, 2, 3 or 5")
     local royale = {}
     for _, it in ipairs(H.intents(M)) do
         if it.op == "RDROP" or it.op == "RSPEC" or it.op == "RDEPLOY" then
@@ -186,6 +194,7 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
     C.Refresh("CAMPST")
     C.Refresh("ROYS")
     C.Refresh("ROYM")
+    C.Refresh("ARENA")
     M.Advance(10)
 
     local ops, topics, n = {}, {}, 0

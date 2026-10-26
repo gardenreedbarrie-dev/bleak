@@ -444,3 +444,75 @@ for _, size in ipairs({ 1000, 251, 64 }) do
         H.eq(r.rewards[3].line, "5 Shards")
     end)
 end
+
+------------------------------------------------------------------------------------------------------
+-- Arena seasons and the 1v1 ladder (section 20): the C++ module's arena session (bh_gen.cpp `arena`: HELLO bit 65536,
+-- DEF V and Q, ARENA, LB / LBME board A, QUEUE kind A, ERR arena_closed) into the addon's state at every frame size.
+------------------------------------------------------------------------------------------------------
+for _, size in ipairs({ 1000, 251, 64 }) do
+    test("C++ arena frames (max body " .. size .. ") reach the addon's state", function(M, ns)
+        local data = loadFrames(size).arena
+        H.ok(data and #data.frames >= data.messages and data.messages >= 12, "bh_gen wrote the arena session")
+        local C, S = ns.Comm, ns.S
+        feed(M, data)
+        M.Advance(1)
+        noDrops(C, "arena")
+        H.eq(C.stats.framesIn, #data.frames, "frames in")
+        H.eq(C.PendingChunks(), 0, "unfinished chunk buffers")
+        H.eq(C.topicRev.QUEUE, data.revs.QUEUE, "revision of QUEUE")
+        if size < 1000 then
+            H.ok(#data.frames > data.messages, "small frames: messages were chunked")
+        end
+        H.ok(C.HasFeature(65536), "HELLO feature bit 65536: arena seasons live")
+        -- DEF V and Q
+        H.eq(ns.Def("V", 4).name, "Duelist"); H.eq(ns.Def("V", 4).color, "A335EE"); H.eq(ns.Def("V", 7).name, "Class Champion")
+        H.eq(ns.Def("V", 5).text, "Top 0.5%, 50 wins.")
+        local q = ns.Def("Q", 105)
+        H.eq(q.seasonId, 1); H.eq(q.bracket, 3); H.eq(q.tierId, 5); H.eq(q.kind, "M"); H.eq(q.entry, 30609); H.eq(q.count, 1)
+        H.eq(q.text, "Swift Nether Drake")
+        H.eq(ns.Def("Q", 110).count, 150); H.eq(ns.Def("Q", 110).kind, "C"); H.eq(ns.Def("Q", 101).seasonId, 0)
+        -- the last ARENA: final standings, the 1v1 rewards held for review
+        local a = S.arena
+        H.eq(a.seasonId, 1); H.eq(a.state, 4); H.eq(a.ratedOpen, false); H.eq(a.nextStartEpoch, 1800748800)
+        H.eq(a.teamCost, nil, "the 1v1 queue's cost is left out: off"); H.eq(a.seasonName, "Arena Season 1")
+        H.eq(a.brackets[1].missing, 64); H.eq(a.brackets[1].rating, 1734); H.eq(a.brackets[2], nil)
+        H.eq(a.finals[1].rank, 12); H.eq(a.finals[1].rating, 1734); H.eq(a.finals[1].tierId, 3); H.eq(a.finals[1].grant, 2)
+        H.eq(#a.matches, 0); H.eq(#a.cutoffs, 0)
+        -- LB board A: ten rows with the arena fields
+        local lb = S.lb.A
+        H.eq(lb.board, "A"); H.eq(lb.dungeonId, 3); H.eq(lb.pages, 3); H.eq(#lb.rows, 10)
+        H.eq(lb.rows[1].value, 2160); H.eq(lb.rows[1].label, "Team number 1"); H.eq(lb.rows[1].tierId, 6)
+        H.eq(lb.rows[1].wins, 59); H.eq(lb.rows[1].games, 70); H.eq(lb.rows[1].flags, 0)
+        H.eq(lb.rows[10].flags, 3); H.eq(lb.rows[10].members[3].name, "Garrick Stormwind"); H.eq(lb.rows[10].members[2].classId, 5)
+        local me = S.lbme.A
+        H.eq(me.rank, 4); H.eq(me.topPercent, 19); H.eq(me.value, 1912); H.eq(me.dungeonId, 3); H.eq(me.barPermille, 407)
+        H.eq(me.label, "Duelist"); H.eq(me.topPermille, 182); H.eq(me.tierId, 4)
+        -- QUEUE kind A: queued, in the match, then not queued; never members
+        H.eq(S.queue.kind, "A"); H.eq(S.queue.state, 0); H.eq(#S.queue.members, 0)
+        -- ERR arena_closed
+        H.eq(S.err.op, "QJOIN"); H.eq(S.err.code, "arena_closed"); H.eq(S.err.seq, "2j")
+    end)
+end
+
+test("C++ arena frames: the live ARENA before the season ended", function(M, ns)
+    local data = loadFrames(1000).arena
+    -- deliver up to (and including) the first ARENA only
+    for _, chat in ipairs(data.frames) do
+        local prefix, body = chat:match("^([^\t]*)\t(.*)$")
+        H.deliver(M, body, prefix)
+        if body:find("^1 ARENA ") then break end
+    end
+    M.Advance(0.5)
+    local a = ns.S.arena
+    H.eq(a.state, 1); H.eq(a.ratedOpen, true); H.eq(a.teamCost, 0); H.eq(a.seasonName, "Arena Season 1, the; first|one")
+    H.eq(#a.seasons, 1); H.eq(a.seasons[1].name, "Arena Season 1"); H.eq(a.seasons[1].state, 1)
+    local one, two = a.brackets[1], a.brackets[2]
+    H.eq(one.rank, 12); H.eq(one.size, 48); H.eq(one.games, 61); H.eq(one.wins, 38); H.eq(one.weekGames, 9)
+    H.eq(one.personal, 1734); H.eq(one.recent, 14); H.eq(one.tierId, 3); H.eq(one.nextTierId, 4); H.eq(one.toNext, 66)
+    H.eq(one.missing, 0); H.eq(one.team, "Aldric"); H.eq(one.hasTeam, true)
+    H.eq(two.rank, nil); H.eq(two.missing, 33); H.eq(two.team, "Br\195\169nna & Co")
+    H.eq(#a.cutoffs, 2); H.eq(a.cutoffs[1].cutRating, 1801); H.eq(a.cutoffs[2].cutRank, nil); H.eq(a.cutoffs[2].floor, 1850)
+    H.eq(a.ladders[5].rewardsOpen, false); H.eq(a.ladders[5].titlesOpen, false); H.eq(a.ladders[1].eligible, 48)
+    H.eq(#a.matches, 2); H.eq(a.matches[1].change, 14); H.eq(a.matches[2].verdict, 2); H.eq(a.matches[2].reason, "E")
+    H.eq(a.matches[1].reason, nil)
+end)

@@ -7,8 +7,8 @@
 //   * the Endpoint (rate limits, handshake, duplicates) gets the input at a time taken from the input
 //     and may never accept more than its token bucket allows;
 //   * EscapeText/BuildFrames/PayloadWriter keep their invariants for the input used as server text;
-//   * the Bleakhold Royale encoders (section 17) and BGANN (section 18) keep their field and record counts with the
-//     input as every name.
+//   * the Bleakhold Royale encoders (section 17), BGANN (section 18) and ARENA / LB A (section 20) keep their field
+//     and record counts with the input as every name.
 //
 // Standalone (mutation driver):  bh_fuzz [iterations] [seed] [corpus files...]
 // libFuzzer:                     build with -DBH_LIBFUZZER -fsanitize=fuzzer (see run_tests.sh)
@@ -98,7 +98,7 @@ namespace
             if (recs.size() > 8)
                 return false;
             static std::regex const plain(
-                "WEEK|ERA|TASKS|KEY|BOARD|QUEUE|COLL|LIDX|SEASON|FIRSTS|MPLUS|RIFT|CASES|CAMPST|ROYS|ROYM");
+                "WEEK|ERA|TASKS|KEY|BOARD|QUEUE|COLL|LIDX|SEASON|FIRSTS|MPLUS|RIFT|CASES|CAMPST|ROYS|ROYM|ARENA");
             for (std::string const& r : recs)
             {
                 std::vector<std::string> f = Split(r, ',');
@@ -126,12 +126,14 @@ namespace
             return n(1) && RefInt(f[0], 1, I32);
         if (op == "QJOIN")
         {
-            if (!n(5) || (f[0] != "D" && f[0] != "R" && f[0] != "B") || !RefInt(f[1], 0, I32) || !RefInt(f[2], 0, 3) ||
-                !RefInt(f[3], 1, 7) || !RefInt(f[4], 1, 5))
+            if (!n(5) || (f[0] != "D" && f[0] != "R" && f[0] != "B" && f[0] != "A") || !RefInt(f[1], 0, I32) ||
+                !RefInt(f[2], 0, 3) || !RefInt(f[3], 1, 7) || !RefInt(f[4], 1, 5))
                 return false;
             long long const activity = std::stoll(f[1]);
             if (f[0] == "B")   // Bleakhold Royale: a mode id, no tier, solo (section 17)
                 return activity != 0 && std::stoll(f[2]) == 0 && std::stoll(f[4]) == 1;
+            if (f[0] == "A")   // the 1v1 arena queue: activity 1, skirmish or rated, solo (section 20)
+                return activity == 1 && std::stoll(f[2]) <= 1 && std::stoll(f[4]) == 1;
             return f[0] == "R" ? activity == 0 : activity != 0;
         }
         if (op == "QLEAVE" || op == "KSTART" || op == "KCANCEL" || op == "WEHANDIN" || op == "GLIDE" ||
@@ -146,8 +148,14 @@ namespace
         if (op == "KMODE")
             return n(1) && RefInt(f[0], 0, 2);
         if (op == "LBQ")
-            return n(5) && (f[0] == "K" || f[0] == "R" || f[0] == "E" || f[0] == "F") && RefInt(f[1], 0, I32) && RefInt(f[2], 0, I32) &&
-                RefInt(f[3], 0, I32) && RefInt(f[4], 1, 999);
+        {
+            if (!(n(5) && (f[0] == "K" || f[0] == "R" || f[0] == "E" || f[0] == "F" || f[0] == "A") && RefInt(f[1], 0, I32) &&
+                    RefInt(f[2], 0, I32) && RefInt(f[3], 0, I32) && RefInt(f[4], 1, 999)))
+                return false;
+            // board A: one bracket, 1, 2, 3 or 5 (section 20)
+            long long const bracket = std::stoll(f[2]);
+            return f[0] != "A" || bracket == 1 || bracket == 2 || bracket == 3 || bracket == 5;
+        }
         if (op == "PING")
             return n(1) && RefInt(f[0], 0, I32);
         if (op == "EMOJI")
@@ -370,6 +378,47 @@ namespace
         if (f.size() == 6)
             name(f[5], RoyaleNameBytes, "ROYV name");
 
+        // ARENA (section 20): the input as the season, season-list, team and opponent names
+        ArenaState ar;
+        ar.seasonId = 1; ar.state = ArenaStateId::Live; ar.startEpoch = 1u; ar.endEpoch = 2u; ar.ratedOpen = true;
+        ar.oneTeamCostCopper = 0u; ar.seasonName = text;
+        ArenaSeasonInfo si; si.id = 1; si.name = text; si.state = SeasonStateId::Current; si.startEpoch = 1u; si.endEpoch = 2u;
+        ar.seasons = { si };
+        ArenaBracketState bs; bs.bracket = 1u + k % 3u; bs.hasTeam = true; bs.rating = k; bs.missingMask = k; bs.teamName = text;
+        ar.brackets = { bs };
+        ArenaMatch am; am.bracket = 3; am.won = (k & 1) != 0; am.ratingChange = -int32_t(k); am.opponent = text;
+        am.endEpoch = 5; am.verdict = ArenaVerdict::NotCounted; am.reason = ArenaReason::Network;
+        ar.matches = { am };
+        r = records(EncodeArena(ar), 4, "ARENA");
+        bool const noName = CleanText(text, ArenaNameBytes).empty();
+        f = fields(r[0], noName ? 7 : 8, "ARENA header");
+        if (!noName)
+            name(f[7], ArenaNameBytes, "ARENA seasonName");
+        f = fields(r[1], 6, "ARENA S");
+        name(f[2], ArenaNameBytes, "ARENA S name");
+        f = fields(r[2], noName ? 16 : 17, "ARENA B");
+        if (!noName)
+            name(f[16], ArenaNameBytes, "ARENA B teamName");
+        if (f[15] != std::to_string(k & 0xFFu))
+            Die("ARENA B: missingMask is not the one given", text);
+        f = fields(r[3], 8, "ARENA M");
+        name(f[4], ArenaNameBytes, "ARENA M opponent");
+        if (f[7] != "I" || f[6] != "2")
+            Die("ARENA M: verdict or reason is not the one given", text);
+
+        // LB board A: the input as the team name and a member's name; the four arena fields follow the label
+        Leaderboard lb;
+        lb.board = Board::Arena; lb.dungeonId = 3u; lb.page = 1; lb.pages = 1;
+        LeaderboardRow row; row.rank = 1; row.dungeonId = 3u; row.value = int64_t(k); row.dateEpoch = 9u;
+        row.members = { { text, 1u } }; row.label = text; row.seasonWins = 1u; row.seasonGames = 2u; row.tierId = 3u;
+        row.flags = 4u;
+        lb.rows = { row };
+        r = records(EncodeLeaderboard(lb), 2, "LB A");
+        f = fields(r[1], 11, "LB A row");
+        if (f[7] != "1" || f[8] != "2" || f[9] != "3" || f[10] != "4")
+            Die("LB A: the arena fields moved", text);
+        name(f[6], 48, "LB A label");
+
         RoyaleResult res;
         res.matchId = 1; res.placement = 1; res.total = 2; res.winnerName = text; res.rewarded = true;
         Reward rw; rw.kind = RewardKind::Honor; rw.amount = 25u; rw.itemId = 0u; rw.text = text;
@@ -408,6 +457,8 @@ namespace
             "1 GET m 1/1 CAMPST", "1 CAMP n 1/1 M", "1 CAMP o 1/1 O,164", "1 CAMP p 1/1 P", "1 GLIDE q 1/1", "1 REPAIR r 1/1",
             "1 GET s 1/1 ROYS;ROYM", "1 QJOIN t 1/1 B,901,0,4,1", "1 RDROP u 1/1 -412,96", "1 RDEPLOY v 1/1",
             "1 RSPEC w 1/1 2", "1 RDROP x 1/1 -17067,17067", "2 HELLO 1 1/1 2,2.0,7,deDE",
+            "1 GET 1a 1/1 ARENA", "1 QJOIN 1b 1/1 A,1,1,4,1", "1 QJOIN 1c 1/1 A,1,0,4,1", "1 LBQ 1d 1/1 A,0,3,0,1",
+            "1 LBQ 1e 1/1 A,2,1,8,2",
         };
     }
 
