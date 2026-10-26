@@ -120,9 +120,17 @@ function FX.openEverything(M, ns)
     M.Advance(0.3)
     ns.UI.Open("royalemap")
     M.Advance(0.3)
+    ns.UI.Open("arena")
+    M.Advance(0.3)
+    if ns.Arena.page:IsVisible() then
+        for _, v in ipairs({ "checklist", "rewards", "cutoffs" }) do
+            ns.Arena.page.view = v
+            ns.Arena.page:Refresh()
+        end
+    end
     ns.UI.Open("season")
     ns.UI.Open("leaderboards")
-    for _, b in ipairs({ "K", "R", "E", "F" }) do
+    for _, b in ipairs({ "K", "R", "E", "F", "A" }) do
         ns.Leaderboards.board = b
         ns.Leaderboards.Refresh()
     end

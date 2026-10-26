@@ -1,9 +1,10 @@
--- Bleakhold: Activities window. Nav rail (Dungeons, Keys, Rift, Royale, Tasks, Legacies, Season), header with
+-- Bleakhold: Activities window. Nav rail (Dungeons, Keys, Rift, Royale, Arena, Tasks, Legacies, Season), header with
 -- the daily and weekly reset, and the Tasks page: era banner with affixes, daily task cards with
 -- progress rings and Claim, weekly tasks, "your week" aside and Find a group, and the battleground kill
 -- announcer's settings (Announcer.lua) while the realm runs it (HELLO feature bit 8192), Royale on or off.
--- Dungeons.lua, Keys.lua, Rift.lua and Royale.lua add their pages through Activities.AddPage. A nav entry with an
--- available() test (Royale: HELLO feature bit 4096) is left out of the rail while it says no (A.LayoutNav).
+-- Dungeons.lua, Keys.lua, Rift.lua, Royale.lua and Arena.lua add their pages through Activities.AddPage. A nav entry
+-- with an available() test (Royale: HELLO feature bit 4096, Arena: 65536) is left out of the rail while it says no
+-- (A.LayoutNav); a page with an Available() test (Arena) is not shown at all while it says no (A.Show).
 local ADDON, ns = ...
 local U, UI, Comm, Data = ns.U, ns.UI, ns.Comm, ns.Data
 local C = UI.C
@@ -105,6 +106,9 @@ local navDefs = {
     { key = "royale", glyph = "sword", label = "Royale", available = function()
         return ns.Royale ~= nil and ns.Royale.Live()
     end },
+    { key = "arena", glyph = "shield", label = "Arena", available = function()
+        return ns.Arena ~= nil and ns.Arena.Live()
+    end },
     { key = "tasks", glyph = "tasks", label = "Tasks" },
     { key = "legacies", glyph = "legacy", label = "Legacies" },
     { key = "season", glyph = "banner", label = "Season" },
@@ -134,7 +138,7 @@ function A.Show(key)
         UI.Open("season")
         return
     end
-    if not A.pages[key] then
+    if not A.pages[key] or (A.pages[key].Available and not A.pages[key].Available()) then
         key = "tasks"
     end
     A.current = key
@@ -610,6 +614,11 @@ ns.On("HELLO", function()
     P:RefreshAnnouncer()
     if win:IsShown() then
         updateHeader()
+        -- a page the realm turned off (Arena without feature bit 65536) goes back to Tasks
+        local page = A.pages[A.current or ""]
+        if page and page.Available and not page.Available() then
+            A.Show("tasks")
+        end
     end
 end)
 

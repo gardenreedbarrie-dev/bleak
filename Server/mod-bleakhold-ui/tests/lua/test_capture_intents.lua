@@ -30,7 +30,8 @@ end
 
 test("every intent the addon can send, captured for the C++ parser", function(M, ns)
     local C = ns.Comm
-    FX.connect(M, H, { [6] = 512 + 1024 + 2048 + 4096 })   -- camping, glide, field repair, Bleakhold Royale
+    -- camping, glide, field repair, Bleakhold Royale, arena seasons
+    FX.connect(M, H, { [6] = 512 + 1024 + 2048 + 4096 + 65536 })
     FX.all(M, H)
 
     -- the windows' own buttons (the paths players use)
@@ -50,6 +51,19 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
         local frameName = ({ collections = "BleakholdCollectionsFrame", season = "BleakholdSeasonFrame", leaderboards = "BleakholdLeaderboardsFrame" })[k]
         clickAll(M, ns.UI.windows[frameName].content)
     end
+    -- the Arena page (the 1v1 queue: QJOIN A, then QLEAVE once queued) and the Arena leaderboard (LBQ A)
+    H.send(M, "ARENA", FX.examples(M).ARENA)
+    M.Advance(2.1)
+    ns.UI.Open("arena")
+    M.Advance(1.2)
+    clickAll(M, ns.Arena.page)
+    M.Advance(2.1)
+    H.send(M, "QUEUE", { { 50, 1, "A", 1, 1, 1, 3, "" } })
+    clickAll(M, ns.Arena.page)
+    M.Advance(2.1)
+    ns.UI.Open("leaderboards-arena")
+    M.Advance(1.2)
+    clickAll(M, ns.UI.windows.BleakholdLeaderboardsFrame.content)
     M.Advance(10)
 
     -- every op through the client's encoder, with edge values

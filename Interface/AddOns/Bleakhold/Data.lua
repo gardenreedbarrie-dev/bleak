@@ -26,7 +26,7 @@ Data.roles = { [1] = "Tank", [2] = "Healer", [4] = "Damage" }
 
 -- Definitions by kind (see docs/BleakholdProtocol.md, DEF):
 --   A affix, E era, T task template, B weekly bonus, C chapter, D dungeon, L legacy tier, S season,
---   K rank, W season reward, M mythic level, X extra class, R rift boss
+--   K rank, W season reward, M mythic level, X extra class, R rift boss, V arena tier, Q arena reward
 local defs = {}
 Data.defs = defs
 
@@ -149,6 +149,21 @@ defs.M = {
 
 defs.X = {}
 defs.R = {}
+
+-- Arena tiers (section 20, DEF V): the server's names, colours and texts replace these; the realm's rewards come
+-- only from the server (DEF Q).
+defs.V = {
+    [1] = { name = "Combatant", color = "9D9D9D", text = "Enough season games and 1300 rating." },
+    [2] = { name = "Challenger", color = "1EFF00", text = "The top 35% of the ladder with 1500 rating (1450 in 5v5)." },
+    [3] = { name = "Rival", color = "0070DD", text = "The top 10% of the ladder with 1650 rating (1550 in 5v5)." },
+    [4] = { name = "Duelist", color = "A335EE",
+        text = "The top 3% of the ladder with 1800 rating (1700 in 5v5) and 10 games in the last 21 days." },
+    [5] = { name = "Gladiator", color = "FF8000", text = "The top 0.5% of the ladder with 50 wins." },
+    [6] = { name = "Rank One", color = "E6CC80", text = "The first team of the ladder." },
+    [7] = { name = "Class Champion", color = "3FC7EB",
+        text = "1v1 only: the best ranked player of each class with 1700 rating and 75 wins." },
+}
+defs.Q = {}
 
 -- Fallback seasons reward icons (glyph names in the art atlas).
 Data.rewardGlyphs = { "check", "chest", "mount", "banner" }
@@ -286,6 +301,21 @@ Data.errorTexts = {
     royale_nobody = "There is nobody left to watch.",
     no_proposal = "There is no match waiting for your answer.",
     glide_here = "You cannot glide here.",
+    -- arena seasons and the 1v1 queue (section 20); arena_closed keeps the server's sentence (when it opens again)
+    arena_off = "The 1v1 arena is not open on this realm right now.",
+    arena_level = "You are too low level for the 1v1 arena.",
+    arena_closed = serverText("Rated arena is closed until the next season starts."),
+    arena_busy = serverText("Leave your group, your queues and any instance, and leave combat, to join the 1v1 arena."),
+    arena_deserter = "You cannot join while you are a deserter.",
+    arena_talents = serverText("Your talents are not allowed in the 1v1 arena."),
+    arena_team = serverText("Your 1v1 arena team could not be made."),
+    arena_gold = function()
+        local a = ns.S and ns.S.arena
+        if a and a.teamCost and a.teamCost > 0 then
+            return "You need " .. ns.RewardText("G", a.teamCost) .. " for a 1v1 arena team."
+        end
+        return "You do not have enough money for a 1v1 arena team."
+    end,
 }
 
 -- Camp objects (CAMPST objs and place): by profession skill line (SkillLine.dbc), its stock 3.3.5a icon

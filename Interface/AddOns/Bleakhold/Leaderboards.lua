@@ -1,6 +1,7 @@
--- Bleakhold: Leaderboards window. Tabs Mythic Keys / Eclipse Rift / Raid Echoes / Server Firsts,
--- season, dungeon and class filters, top-three podium, ranked table with pages, your best and the
--- latest server firsts. The server ranks everything; the client only asks for pages (LBQ).
+-- Bleakhold: Leaderboards window. Tabs Mythic Keys / Eclipse Rift / Raid Echoes / Arena / Server Firsts,
+-- season, dungeon (Arena: bracket) and class filters, top-three podium, ranked table with pages, your best (Arena:
+-- your standing) and the latest server firsts. The server ranks everything; the client only asks for pages (LBQ).
+-- The Arena tab (board A, section 20) is there only with HELLO feature bit 65536; its seasons come from ARENA S.
 local ADDON, ns = ...
 local U, UI, Comm = ns.U, ns.UI, ns.Comm
 local C = UI.C
@@ -17,6 +18,8 @@ LB.season = nil
 LB.dungeon = 0
 LB.class = 0
 LB.page = 1
+LB.bracket = 3          -- board A: 1, 2, 3 or 5
+LB.arenaSeason = 0      -- board A: an arena season id, 0 the current one
 LB.ROWS = 8
 
 local win = UI.Window("BleakholdLeaderboardsFrame", LB.W, LB.H, "LEADERBOARDS", "trophy")
@@ -26,7 +29,11 @@ LB.frame = win
 -- Header: season
 ------------------------------------------------------------------------------------------------------
 local seasonDD = UI.Dropdown(win.header, 190, function(value)
-    LB.season = value
+    if LB.board == "A" then
+        LB.arenaSeason = value
+    else
+        LB.season = value
+    end
     LB.page = 1
     LB.Query()
 end)
@@ -45,12 +52,14 @@ local tabDefs = {
     { key = "K", label = "Mythic Keys" },
     { key = "R", label = "Eclipse Rift" },
     { key = "E", label = "Raid Echoes" },
+    { key = "A", label = "Arena", available = function() return ns.Arena ~= nil and ns.Arena.Live() end },
     { key = "F", label = "Server Firsts" },
 }
+LB.TAB_W, LB.TAB_STEP = 100, 106
 LB.tabs = {}
 for i, d in ipairs(tabDefs) do
-    local b = UI.Button(bar, 118, 30, d.label, "tab", 13)
-    b:SetPoint("LEFT", bar, "LEFT", 16 + (i - 1) * 124, 0)
+    local b = UI.Button(bar, LB.TAB_W, 30, d.label, "tab", 13)
+    b:SetPoint("LEFT", bar, "LEFT", 16 + (i - 1) * LB.TAB_STEP, 0)
     b:SetScript("OnClick", function()
         LB.board = d.key
         LB.page = 1
@@ -58,9 +67,36 @@ for i, d in ipairs(tabDefs) do
         LB.Refresh()
     end)
     b.key = d.key
+    b.available = d.available
     LB.tabs[i] = b
 end
-local classDD = UI.Dropdown(bar, 130, function(value)
+
+-- The board may be shown: Arena only with feature bit 65536.
+function LB.Available(board)
+    for _, b in ipairs(LB.tabs) do
+        if b.key == board then
+            return not b.available or b.available() and true or false
+        end
+    end
+    return false
+end
+
+-- Stack the tabs without gaps, leaving out the ones whose available() says no.
+function LB.LayoutTabs()
+    local n = 0
+    for _, b in ipairs(LB.tabs) do
+        if not b.available or b.available() then
+            b:ClearAllPoints()
+            b:SetPoint("LEFT", bar, "LEFT", 16 + n * LB.TAB_STEP, 0)
+            b:Show()
+            n = n + 1
+        else
+            b:Hide()
+        end
+    end
+end
+LB.LayoutTabs()
+local classDD = UI.Dropdown(bar, 120, function(value)
     LB.class = value
     LB.page = 1
     LB.Query()
@@ -69,8 +105,12 @@ classDD:SetPoint("RIGHT", bar, "RIGHT", -16, 0)
 local classLabel = UI.Text(bar, 12, C.dim)
 classLabel:SetPoint("RIGHT", classDD, "LEFT", -6, 0)
 classLabel:SetText("Class")
-local dungeonDD = UI.Dropdown(bar, 150, function(value)
-    LB.dungeon = value
+local dungeonDD = UI.Dropdown(bar, 120, function(value)
+    if LB.board == "A" then
+        LB.bracket = value
+    else
+        LB.dungeon = value
+    end
     LB.page = 1
     LB.Query()
 end)
@@ -118,6 +158,7 @@ for rank = 1, 3 do
     b.time = UI.Text(b, 11, C.mid, "body", "CENTER")
     b.time:SetPoint("BOTTOM", b, "BOTTOM", 0, 8)
     b.slot = slot
+    b.valueColor = m[1]
     podium.boxes[rank] = b
 end
 
@@ -263,8 +304,43 @@ local function dateText(epoch)
     return epoch and U.Date("%d %b %Y", epoch) or "-"
 end
 
+-- "61-9" from season wins and games (board A).
+local function winLoss(row)
+    if not row.wins or not row.games then
+        return "-"
+    end
+    return row.wins .. "-" .. max(0, row.games - row.wins)
+end
+
+local ARENA_FLAG = { INACTIVE = 1, PROVISIONAL = 2, FINAL = 4 }
+LB.ARENA_FLAG = ARENA_FLAG
+
+local function arenaTier(row)
+    if bit.band(row.flags or 0, ARENA_FLAG.PROVISIONAL) ~= 0 then
+        return U.Color(C.mute, "Provisional")
+    end
+    return row.tierId and ns.Arena.TierText(row.tierId) or "-"
+end
+
+local function arenaLast(row)
+    if bit.band(row.flags or 0, ARENA_FLAG.INACTIVE) ~= 0 then
+        return U.Color(C.mute, "Inactive")
+    end
+    return row.date and U.Date("%d %b", row.date) or "-"
+end
+
+-- Board A: the team's name (a 1v1 player: the name in its class colour).
+local function arenaName(row, maxLen)
+    if #row.members == 1 or not row.label then
+        return membersText(row.members, maxLen)
+    end
+    return U.Safe(row.label)
+end
+
 local function valueText(board, row)
-    if board == "K" then
+    if board == "A" then
+        return row.value and tostring(row.value) or "-"
+    elseif board == "K" then
         return row.value and ("+" .. row.value) or "-"
     elseif board == "R" then
         return row.value and ("Floor " .. row.value) or "-"
@@ -284,8 +360,16 @@ end
 
 function LB.Query()
     local season = LB.season or Comm.server.seasonId or 0
+    if LB.board == "A" and not LB.Available("A") then
+        LB.board = "K"
+    end
     if LB.board == "F" then
         Comm.Refresh("FIRSTS")
+    elseif LB.board == "A" then
+        Comm.Send("LBQ", "A", LB.arenaSeason or 0, LB.bracket or 3, LB.class or 0, LB.page)
+        if not S.arena then
+            ns.Arena.Ask(false)     -- the season choice comes from ARENA S
+        end
     else
         Comm.Send("LBQ", LB.board, season, LB.dungeon or 0, LB.class or 0, LB.page)
     end
@@ -297,9 +381,31 @@ local HEADERS = {
     R = { { "RANK", 44 }, { "GROUP", 230 }, { "FLOOR", 90 }, { "", 0 }, { "TIME", 72 }, { "DATE", 80 } },
     E = { { "RANK", 44 }, { "GROUP", 230 }, { "BOSS", 140 }, { "", 0 }, { "KILL TIME", 72 }, { "DATE", 80 } },
     F = { { "", 0 }, { "WHAT", 280 }, { "WHO", 220 }, { "", 0 }, { "", 0 }, { "DATE", 90 } },
+    A = { { "RANK", 44 }, { "PLAYER / TEAM", 230 }, { "RATING", 70 }, { "W-L", 80 }, { "TIER", 90 }, { "LAST", 70 } },
 }
+LB.HEADERS = HEADERS
+LB.BRACKET_ITEMS = { { value = 1, text = "1v1" }, { value = 2, text = "2v2" }, { value = 3, text = "3v3" },
+    { value = 5, text = "5v5" } }
 
 function LB.RefreshFilters()
+    if LB.board == "A" then
+        seasonDD:SetItems(ns.Arena.SeasonItems())
+        seasonDD:SetValue(LB.arenaSeason or 0, true)
+        dungeonDD:SetItems(LB.BRACKET_ITEMS)
+        dungeonDD:SetValue(LB.bracket or 3, true)
+        dungeonLabel:SetText("Bracket")
+        local classes = { { value = 0, text = "All classes" } }
+        for _, c in ipairs(ns.Classes()) do
+            classes[#classes + 1] = { value = c.id, text = c.name }
+        end
+        classDD:SetItems(classes)
+        classDD:SetValue(LB.class or 0, true)
+        for _, w in ipairs({ classDD, classLabel, dungeonDD, dungeonLabel }) do
+            w:Show()
+        end
+        return
+    end
+    dungeonLabel:SetText("Dungeon")
     local seasons = {}
     for _, id in ipairs(ns.DefIds("S")) do
         seasons[#seasons + 1] = { value = id, text = ns.DefName("S", id, "Season " .. id) }
@@ -334,6 +440,10 @@ end
 function LB.Refresh()
     if not win:IsShown() then
         return
+    end
+    LB.LayoutTabs()
+    if not LB.Available(LB.board) then
+        LB.board = "K"
     end
     for _, b in ipairs(LB.tabs) do
         b:SetStyle(b.key == LB.board and "tabOn" or "tab")
@@ -373,7 +483,14 @@ function LB.Refresh()
             for _, r in ipairs(list) do
                 if r.rank == rank then row = r end
             end
-            if row then
+            UI.SetColor(b.value, b.valueColor)
+            if row and board == "A" then
+                b.group:SetText(arenaName(row, 22))
+                b.dungeon:SetText(#row.members > 1 and membersText(row.members, 26) or "")
+                b.value:SetText(valueText(board, row))
+                UI.SetColor(b.value, row.tierId and ns.Arena.TierColor(row.tierId) or b.valueColor)
+                b.time:SetText(arenaTier(row) .. "  -  " .. winLoss(row))
+            elseif row then
                 b.group:SetText(membersText(row.members, 22))
                 UI.SetText(b.dungeon, board == "K" and ns.DungeonName(row.dungeonId) or (board == "E" and (row.label or "") or ""))
                 b.value:SetText(valueText(board, row))
@@ -386,7 +503,11 @@ function LB.Refresh()
             end
         end
         for _, r in ipairs(list) do
-            if r.rank > 3 or (data and data.page and data.page > 1) then
+            if board == "A" and (r.rank > 3 or (data and data.page and data.page > 1)) then
+                rows[#rows + 1] = {
+                    tostring(r.rank), arenaName(r, 34), valueText(board, r), winLoss(r), arenaTier(r), arenaLast(r),
+                }
+            elseif r.rank > 3 or (data and data.page and data.page > 1) then
                 rows[#rows + 1] = {
                     tostring(r.rank), membersText(r.members, 34),
                     board == "K" and U.Safe(ns.DungeonName(r.dungeonId)) or valueText(board, r),
@@ -416,9 +537,13 @@ function LB.Refresh()
         tbl.empty:Hide()
     end
 
-    -- your best
+    -- your best (Arena: your standing in the shown bracket)
     local me = S.lbme[board == "F" and "K" or board]
-    if me and (me.value or me.rank) then
+    best.label:SetText(board == "A" and "YOUR STANDING" or "YOUR BEST")
+    UI.SetColor(best.value, C.goldPale)
+    if board == "A" then
+        LB.RefreshStanding(me, data)
+    elseif me and (me.value or me.rank) then
         best.value:SetText(valueText(board == "F" and "K" or board, me))
         local detail = {}
         if me.dungeonId and me.dungeonId > 0 then detail[#detail + 1] = U.Safe(ns.DungeonName(me.dungeonId)) end
@@ -449,6 +574,68 @@ function LB.Refresh()
     end
 end
 
+-- "top 0.4%" below 10 % (topPermille), else "top 19%".
+function LB.TopText(me)
+    if me.topPermille and me.topPermille < 100 then
+        return string.format("top %.1f%%", me.topPermille / 10)
+    elseif me.topPercent then
+        return "top " .. me.topPercent .. "%"
+    end
+    return nil
+end
+
+-- The aside on board A: the player's own team in the shown bracket (LBME A).
+function LB.RefreshStanding(me, data)
+    local final = false
+    for _, r in ipairs(data and data.rows or {}) do
+        if bit.band(r.flags or 0, ARENA_FLAG.FINAL) ~= 0 then
+            final = true
+        end
+    end
+    local bracket = ns.Arena.BracketName(LB.bracket)
+    if me and (me.value or me.rank) then
+        best.value:SetText(me.value and tostring(me.value) or "-")
+        if me.tierId then
+            UI.SetColor(best.value, ns.Arena.TierColor(me.tierId))
+        end
+        local name = me.label and U.Safe(me.label) or (me.tierId and U.Safe(ns.Arena.TierName(me.tierId))) or nil
+        local tier = name and U.Color(me.tierId and ns.Arena.TierColor(me.tierId) or C.mid, name) or "No tier yet"
+        best.detail:SetText(bracket .. "  -  " .. tier .. (final and "  -  final" or " pace"))
+        best.bar:SetProgress((me.barPermille or 0) / 1000)
+        local rk = {}
+        if me.rank then rk[#rk + 1] = "Rank " .. me.rank end
+        local top = LB.TopText(me)
+        if top then rk[#rk + 1] = top end
+        best.rank:SetText(table.concat(rk, "  -  "))
+    else
+        best.value:SetText("-")
+        best.detail:SetText("No " .. bracket .. " team on this ladder")
+        best.bar:SetProgress(0)
+        best.rank:SetText(final and "Final standings" or "")
+    end
+end
+
+-- Open the Arena board, on a bracket (1, 2, 3 or 5) when given.
+function LB.OpenArena(bracket)
+    if not LB.Available("A") then
+        if ns.Arena then
+            ns.Arena.Notice("Arena seasons are not running on this realm.")
+        end
+        return
+    end
+    if bracket == 1 or bracket == 2 or bracket == 3 or bracket == 5 then
+        LB.bracket = bracket
+    end
+    LB.board = "A"
+    LB.page = 1
+    if win:IsShown() then
+        LB.Query()
+        LB.Refresh()
+    else
+        win:Show()
+    end
+end
+
 function win:OnOpen()
     LB.Query()
     Comm.Get("FIRSTS")
@@ -456,14 +643,16 @@ function win:OnOpen()
 end
 
 ns.On("STATE", function(topic)
-    if topic == "LB" or topic == "FIRSTS" or topic == "DEF" then
+    if topic == "LB" or topic == "FIRSTS" or topic == "DEF" or (topic == "ARENA" and LB.board == "A") then
         LB.Refresh()
     end
 end)
 
 ns.On("HELLO", function()
+    LB.LayoutTabs()
     if win:IsShown() then
         LB.Query()
+        LB.Refresh()
     end
 end)
 
@@ -486,5 +675,12 @@ end
 
 UI.RegisterOpener("leaderboards", function(toggle) open(nil, toggle) end)
 UI.RegisterOpener("leaderboards-rift", function(toggle) open("R", toggle) end)
+UI.RegisterOpener("leaderboards-arena", function(toggle)
+    if toggle and win:IsShown() and LB.board == "A" then
+        win:Hide()
+    else
+        LB.OpenArena()
+    end
+end)
 ns.AddCommand("leaderboards", "open Leaderboards", function() open(nil, true) end)
 ns.AddCommand("lb", "open Leaderboards", function() open(nil, true) end)

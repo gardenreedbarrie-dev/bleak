@@ -42,7 +42,7 @@ end)
 test("leaderboard columns fit the table on every board", function(M, ns)
     openAll(M, ns)
     local LB = ns.Leaderboards
-    for _, board in ipairs({ "K", "R", "E", "F" }) do
+    for _, board in ipairs({ "K", "R", "E", "F", "A" }) do
         LB.board = board
         LB.Refresh()
         local total = 10
@@ -54,10 +54,17 @@ test("leaderboard columns fit the table on every board", function(M, ns)
     end
 end)
 
-test("filter bar: dropdowns start right of the last tab", function(M, ns)
+test("filter bar: dropdowns start right of the last tab (all five tabs, Arena on)", function(M, ns)
     local LB = ns.Leaderboards
-    local lastTab = LB.tabs[4]
-    local tabRight = 16 + 3 * 124 + lastTab:GetWidth()
+    FX.connect(M, H, { [6] = 65536 })
+    LB.LayoutTabs()
+    local lastTab = LB.tabs[#LB.tabs]
+    H.eq(#LB.tabs, 5)
+    for _, t in ipairs(LB.tabs) do
+        H.ok(t:IsShown(), t.key .. " tab shown")
+    end
+    H.eq(select(4, lastTab:GetPoint(1)), 16 + 4 * LB.TAB_STEP)
+    local tabRight = 16 + 4 * LB.TAB_STEP + lastTab:GetWidth()
     local barW = ns.Leaderboards.frame:GetWidth() - 2
     local used = 16 + LB.filters.class:GetWidth() + 6 + 34 + 14 + LB.filters.dungeon:GetWidth() + 6 + 56
     H.ok(barW - used >= tabRight, "filters overlap the tabs: " .. (barW - used) .. " < " .. tabRight)

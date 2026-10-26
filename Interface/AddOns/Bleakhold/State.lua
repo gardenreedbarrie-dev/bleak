@@ -767,8 +767,9 @@ end)
 local ARENA_BRACKETS = { [1] = true, [2] = true, [3] = true, [5] = true }
 ns.ARENA_BRACKETS = ARENA_BRACKETS
 
+-- 1, 2, 3 or 5; anything else (9 too: U.Int would clamp it to 5) is no bracket
 local function arenaBracket(raw)
-    local b = U.Int(raw, nil, 1, 5)
+    local b = U.Int(raw, nil, 0, 99)
     return b and ARENA_BRACKETS[b] and b or nil
 end
 
@@ -776,7 +777,7 @@ Comm.MapOpToTopic("ARENA", "ARENA")
 Comm.Handle("ARENA", function(r)
     local f = r[1]
     local a = {
-        seasonId = U.Int(f[1], 0, 0, INT32), state = U.Int(f[2], 0, 0, 6), startEpoch = U.Int(f[3], nil, 0, INT32),
+        seasonId = U.Int(f[1], 0, 0, INT32), state = U.Int(f[2], 0, 0, 99), startEpoch = U.Int(f[3], nil, 0, INT32),
         endEpoch = U.Int(f[4], nil, 0, INT32), nextStartEpoch = U.Int(f[5], nil, 0, INT32), ratedOpen = U.Bool(f[6], false),
         teamCost = U.Int(f[7], nil, 0, INT32), seasonName = U.Str(f[8], nil, 48),
         seasons = {}, brackets = {}, cutoffs = {}, ladders = {}, matches = {}, finals = {}, recvAt = GetTime(),
@@ -785,8 +786,8 @@ Comm.Handle("ARENA", function(r)
         local e = r[i]
         local tag = U.Str(e[1], nil, 1)
         if tag == "S" and #a.seasons < 24 then
-            local id = U.Int(e[2], nil, 1, INT32)
-            if id then
+            local id = U.Int(e[2], nil, 0, INT32)
+            if id and id >= 1 then
                 a.seasons[#a.seasons + 1] = {
                     id = id, name = U.Str(e[3], nil, 48), state = U.Int(e[4], 0, 0, 2), startEpoch = U.Int(e[5], nil, 0, INT32),
                     endEpoch = U.Int(e[6], nil, 0, INT32),
@@ -838,6 +839,9 @@ Comm.Handle("ARENA", function(r)
                 }
             end
         end
+    end
+    if a.state > 6 then
+        a.state = 0           -- a state this client does not know: shown as none (ratedOpen still says it all)
     end
     S.arena = a
     changed("ARENA")
@@ -1278,7 +1282,7 @@ Comm.Handle("ROYE", function(r)
 end)
 
 local TOAST_TARGETS = { tasks = true, dungeons = true, keys = true, rift = true, collections = true, season = true,
-    leaderboards = true, royale = true }
+    leaderboards = true, royale = true, arena = true }
 Comm.Handle("TOAST", function(r)
     local f = r[1]
     local title = U.Str(f[2], nil, 60)
@@ -1286,7 +1290,8 @@ Comm.Handle("TOAST", function(r)
         return
     end
     local target = U.Str(f[4], nil, 16)
-    ns.Fire("TOAST", { kind = U.Str(f[1], "I", 1), title = title, sub = U.Str(f[3], nil, 100), target = TOAST_TARGETS[target or ""] and target or nil })
+    target = TOAST_TARGETS[target or ""] and target or nil
+    ns.Fire("TOAST", { kind = U.Str(f[1], "I", 1), title = title, sub = U.Str(f[3], nil, 100), target = target })
 end)
 
 ------------------------------------------------------------------------------------------------------
@@ -1315,5 +1320,10 @@ ns.On("HELLO", function(s)
     elseif S.camp then
         S.camp = nil
         changed("CAMPST")
+    end
+    -- the server pushes ARENA after HELLO while bit 65536 is on (section 20); without it the season is gone
+    if not Comm.HasFeature(F.ARENA) and S.arena then
+        S.arena = nil
+        changed("ARENA")
     end
 end)

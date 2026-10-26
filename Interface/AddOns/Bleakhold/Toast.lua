@@ -15,6 +15,10 @@ local KICKERS = {
     T = "TASK DONE", Q = "QUEUE", K = "KEYSTONE", R = "NEW RECORD", S = "SEASON", I = "BLEAKHOLD",
 }
 
+-- The glyph in the disc for toasts that open a given window (the check mark otherwise).
+local TARGET_GLYPHS = { arena = "shield" }
+Toast.TARGET_GLYPHS = TARGET_GLYPHS
+
 local queue = {}
 local current, shownAt
 
@@ -47,6 +51,8 @@ local function showNext()
         f:Hide()
         return
     end
+    f.glyph = current.glyph or TARGET_GLYPHS[current.target or ""] or "check"
+    UI.SetGlyph(f.check, f.glyph)
     UI.SetText(f.kicker, current.kicker or "BLEAKHOLD")
     UI.SetText(f.title, current.title or "")
     UI.SetText(f.sub, current.sub or "")
@@ -83,7 +89,7 @@ f:SetScript("OnClick", function()
     end
 end)
 
--- d = { kicker, title, sub, target }
+-- d = { kicker, title, sub, target, glyph }
 function Toast.Push(d)
     if type(d) ~= "table" or not d.title then
         return

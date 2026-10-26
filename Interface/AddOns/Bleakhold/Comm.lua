@@ -813,6 +813,8 @@ end)
 Comm.FEATURE = { RIFT_SCORE = 1, SHARDS = 2, DBM_BY_SERVER = 4, SEASON = 8, LEADERBOARDS = 16, COLLECTIONS = 32,
     EMOJI = 64, DANCE = 128, CASES = 256, CAMP = 512, GLIDE = 1024, FIELD_REPAIR = 2048, ROYALE = 4096,
     BG_ANNOUNCER = 8192 }
+-- arena seasons and the 1v1 ladder (section 20); World PvP has 16384 and 32768
+Comm.FEATURE.ARENA = 65536
 
 function Comm.HasFeature(bitValue)
     local f = Comm.server and Comm.server.features or 0

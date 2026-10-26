@@ -288,7 +288,14 @@ test("Leaderboards: podium, table, paging, tabs, your best, firsts, site", funct
     H.eq(H.lastIntent(M, "LBQ").payload, "R,1,0,0,1")
     LB.filters.class:SetValue(2)
     H.eq(H.lastIntent(M, "LBQ").payload, "R,1,0,2,1")
-    LB.tabs[4]:Click()
+    local firstsTab
+    for _, t in ipairs(LB.tabs) do
+        if t.key == "F" then firstsTab = t end
+    end
+    H.ok(firstsTab:IsShown(), "Server Firsts tab")
+    H.ok(not LB.tabs[4]:IsShown() and LB.tabs[4].key == "A", "no Arena tab without feature bit 65536")
+    H.eq(select(4, firstsTab:GetPoint(1)), 16 + 3 * LB.TAB_STEP, "Server Firsts takes the Arena tab's place")
+    firstsTab:Click()
     H.ok(texts(M, "WHAT") > 0, "server firsts table")
     LB.site:Click()
     local d = M.env.BleakholdDialog

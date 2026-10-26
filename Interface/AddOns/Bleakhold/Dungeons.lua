@@ -349,8 +349,11 @@ function P:RefreshQueue()
     UI.SetText(q.status, QUEUE_TEXT[st] or "")
     if qs and st ~= 0 then
         local what = qs.kind == "R" and "Eclipse Rift"
-            or (qs.kind == "B" and "Bleakhold Royale" or ns.DungeonName(qs.activityId))
-        UI.SetText(q.status, ((qs.kind == "B" and st == 3) and "In a match" or (QUEUE_TEXT[st] or "")) .. ": " .. what)
+            or (qs.kind == "B" and "Bleakhold Royale")
+            or (qs.kind == "A" and (qs.tier == 1 and "Rated 1v1 arena" or "1v1 arena skirmish"))
+            or ns.DungeonName(qs.activityId)
+        local match = (qs.kind == "B" or qs.kind == "A") and st == 3
+        UI.SetText(q.status, (match and "In a match" or (QUEUE_TEXT[st] or "")) .. ": " .. what)
     end
     if qs and qs.bandMin and qs.bandMax and st ~= 0 then
         q.band:SetText("Matching levels " .. qs.bandMin .. "-" .. qs.bandMax)
