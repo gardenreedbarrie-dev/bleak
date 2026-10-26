@@ -196,8 +196,9 @@ function WM.Block()
         return refusal(wm.block)
     end
     if not Comm.demo then
+        -- the level only refuses turning it on: a War Mode player below a MinLevel raised since can turn it off
         local level = UnitLevel and UnitLevel("player")
-        if wm.minLevel and type(level) == "number" and level > 0 and level < wm.minLevel then
+        if not wm.on and wm.minLevel and type(level) == "number" and level > 0 and level < wm.minLevel then
             return refusal("wm_level")
         end
         if UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") then

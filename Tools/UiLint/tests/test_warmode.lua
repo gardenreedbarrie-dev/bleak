@@ -85,6 +85,8 @@ local function withMap(extra)
         f:Hide()
         local b = M.New("Button", "WorldMapButton", f)
         b:SetSize(1002, 668)
+        local tip = M.New("GameTooltip", "WorldMapTooltip", f)
+        tip.__shown = false
         M.mapArea, M.myArea = 0, 511
         M.env.SetMapToCurrentZone = function() M.mapArea = M.myArea end
         M.env.GetCurrentMapAreaID = function() return M.mapArea end
@@ -279,12 +281,17 @@ test("warmode: the button greys itself (place, combat, dead, level, busy, the se
     M.env.UnitIsDeadOrGhost = function() return nil end
     M.playerLevel = 12
     H.eq(reason(), "You must be level 20 to use War Mode.")
+    -- the level only refuses turning it on: on below the level (MinLevel raised since), the button turns it off
+    wmst(M, { [1] = 1 })
+    r, on = reason()
+    H.eq(r, ""); H.ok(on, "War Mode on below the level: the button stays enabled")
+    wmst(M)
     M.playerLevel = 80
     M.inInstance = true
     H.eq(reason(), "You cannot change War Mode from where you are now.")
     M.inInstance = false
     wmst(M, { [3] = "wm_hardcore" })
-    H.eq(reason(), "Hardcore characters cannot use War Mode.", "the server's own block")
+    H.eq(reason(), "Hardcore and Iron Man characters cannot use War Mode.", "the server's own block")
     wmst(M, { [1] = 1, [13] = 1, [14] = 840, [15] = 248 })
     r, on = reason()
     H.eq(r, "You are Wanted: War Mode stays on until the hunt ends."); H.ok(not on)
@@ -320,7 +327,7 @@ test("warmode: one WARMODE per 2 s, ERR busy waits a full gap, and every ERR cod
     local texts = {
         wm_off = "War Mode is not available on this realm right now.",
         wm_level = "You must be level 20 to use War Mode.",
-        wm_hardcore = "Hardcore characters cannot use War Mode.",
+        wm_hardcore = "Hardcore and Iron Man characters cannot use War Mode.",
         wm_place = "War Mode can only be changed in an inn or a city.",
         wm_cooldown = "You can change War Mode again in 296 s.",
         wm_wanted = "You are Wanted: War Mode stays on until the hunt ends.",
@@ -548,6 +555,18 @@ test("map: pins for the outposts and the Wanted players only while the map shows
     H.ok(near(wx, 560 / 1000 * 1002) and near(wy, -402 / 1000 * 668))
     H.eq(wp.lines[1], "WANTED: Garrick Stormwind"); H.eq(wp.lines[2][1], "A bully")
     H.eq(wp.lines[3][1], "Bounty: 248 honor, 5 Shards")
+    -- the tooltips use the world map's own tooltip: the full-size map hides UIParent, and GameTooltip with it
+    M.Fire(pin, "OnEnter")
+    H.ok(M.env.WorldMapTooltip:IsShown(), "WorldMapTooltip shown")
+    H.eq(M.env.WorldMapTooltip.__lines[1], "Violet Stand")
+    H.eq(M.env.WorldMapTooltip.__owner, pin)
+    H.ok(not M.env.GameTooltip:IsShown(), "GameTooltip is not used on the map")
+    M.Fire(pin, "OnLeave")
+    H.ok(not M.env.WorldMapTooltip:IsShown())
+    M.Fire(wp, "OnEnter")
+    H.eq(M.env.WorldMapTooltip.__lines[1], "WANTED: Garrick Stormwind")
+    M.Fire(wp, "OnLeave")
+    H.ok(not M.env.WorldMapTooltip:IsShown() and not M.env.GameTooltip:IsShown())
     -- the ones without a position are listed
     H.ok(WF.mapList:IsShown())
     H.contains(WF.mapList.lines[1]:GetText(), "Sunreaver Rise")
@@ -566,6 +585,30 @@ test("map: pins for the outposts and the Wanted players only while the map shows
     H.eq(WF.myArea, nil, "never turns the map the player looks at")
     map:Hide()
     H.eq(WF.myArea, 520, "learnt once it closed")
+end, withMap())
+
+test("map: Wanted pins in plain zones while World PvP is live (a kind-less WPZ is not refreshed)", function(M, ns)
+    faction(M, "Alliance")
+    connect(M)   -- 16384 and 32768
+    wmst(M, { [1] = 1 })
+    local WF = ns.WarFront
+    H.send(M, "WPZ", { { 1519 } })   -- the login zone, Stormwind: no objectives
+    M.Advance(0.3)
+    H.eq(ns.S.wpZone.zoneId, 1519); H.eq(ns.S.wpZone.kind, nil)
+    -- into Elwynn Forest: the server sends no WPZ between two zones without objectives
+    M.FireEvent("ZONE_CHANGED_NEW_AREA")
+    H.send(M, "WANTED", { { 10 }, { "W", "Garrick Stormwind", 4, "H", 5, "S", 248, 5, 560, 402, 35 } })
+    M.Advance(0.3)
+    local w = WF.WantedNow()
+    H.ok(w ~= nil, "the Wanted list of the zone the player is in now")
+    H.eq(w and w.zoneId, 10)
+    H.eq(w and #w.list, 1)
+    -- a WPZ of a zone with objectives still says where the player is: another zone's WANTED is not shown there
+    wpz(M)
+    M.Advance(0.3)
+    H.send(M, "WANTED", { { 10 }, { "W", "Garrick Stormwind", 4, "H", 5, "S", 248, 5, 560, 402, 35 } })
+    M.Advance(0.3)
+    H.eq(WF.WantedNow(), nil, "in Crystalsong, Elwynn's list is not the zone's")
 end, withMap())
 
 test("minimap: arrows to the player's faction's outposts under attack", function(M, ns)

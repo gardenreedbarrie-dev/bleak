@@ -792,7 +792,7 @@ namespace Bleakhold
     {
         inline constexpr Refusal Off{ "wm_off", "War Mode is not available on this realm right now." };
         inline constexpr Refusal Level{ "wm_level", "You are not high enough level for War Mode yet." };
-        inline constexpr Refusal Hardcore{ "wm_hardcore", "Hardcore characters cannot use War Mode." };
+        inline constexpr Refusal Hardcore{ "wm_hardcore", "Hardcore and Iron Man characters cannot use War Mode." };
         inline constexpr Refusal Place{ "wm_place", "War Mode can only be changed in an inn or a city." };
         inline constexpr Refusal Cooldown{ "wm_cooldown", "You changed War Mode recently: wait a little." };
         inline constexpr Refusal Wanted{ "wm_wanted", "You are Wanted: War Mode stays on until the hunt ends." };

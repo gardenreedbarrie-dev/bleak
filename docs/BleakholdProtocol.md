@@ -596,7 +596,7 @@ lets each chat window hide a tag (`/bh chat`):
 | `[Record] ` | a new run record |
 | `[Case] ` | a rare reward from a case (section 15) |
 | `[Royale] ` | Bleakhold Royale: the queue filling up, a winner (section 17) |
-| `[War] ` | World PvP: a Front starts soon, starts, ends (section 19) |
+| `[War] ` | World PvP: a Front starts soon, starts, ends; to the players of a zone, its captures, Wanted players and bounties (section 19) |
 
 Without the addon the lines are still readable as plain text.
 
@@ -1342,8 +1342,8 @@ the same checks for players without the addon), in this order:
 | the player's `WARMODE` rate (section 8) | `ERR` `busy` |
 | War Mode is off on the realm (no feature bit 16384) | `ERR` `wm_off` |
 | the player already is in the state asked for | `WMST`; nothing changes (a repeated intent is never an error) |
-| below the minimum level (the server's `MinLevel`, 20) | `ERR` `wm_level` |
-| a hardcore challenge character (a PvP death would end it for good) | `ERR` `wm_hardcore` |
+| turning it on below the minimum level (the server's `MinLevel`, 20) | `ERR` `wm_level` |
+| turning it on as a hardcore or Iron Man challenge character (a PvP death would end it for good) | `ERR` `wm_hardcore` |
 | dead | `ERR` `dead` |
 | in combat, or in PvP combat | `ERR` `in_combat` |
 | in an instance, a battleground, an arena or Bleakhold Royale; on a taxi or flying; in GM mode | `ERR` `wm_busy` |
@@ -1351,11 +1351,12 @@ the same checks for players without the addon), in this order:
 | turning it off while Wanted | `ERR` `wm_wanted` |
 | less than 15 minutes (the server's `ToggleCooldownSec`, 900 s) since the last change | `ERR` `wm_cooldown` (the text gives the seconds left) |
 
-On success the server sends `WMST` and a `TOAST`. **On**: the PvP flag is set at once and kept on everywhere the
-core allows PvP (sanctuaries such as Dalaran and Shattrath still block it). **Off**: War Mode and its bonuses end at
-once; the PvP flag fades after the core's usual 5 minutes, so turning it off is never an escape from a fight. The
-choice is saved with the character. While War Mode is live the server ignores the game's own `/pvp` toggle and tells
-the player to use War Mode instead.
+The level and the hardcore checks never refuse turning War Mode off (a player below a `MinLevel` raised since, or a
+hardcore character, can always turn it off). On success the server sends `WMST` and a `TOAST`. **On**: the PvP flag is
+set at once and kept on everywhere the core allows PvP (sanctuaries such as Dalaran and Shattrath still block it).
+**Off**: War Mode and its bonuses end at once; the PvP flag fades after the core's usual 5 minutes, so turning it off is
+never an escape from a fight. The choice is saved with the character. While War Mode is live the server ignores the
+game's own `/pvp` toggle and tells the player to use War Mode instead.
 
 **Fights.** This is a PvE realm: a War Mode player can attack only players who are flagged for PvP. A player without
 War Mode who attacks or heals a War Mode player is flagged by the core for 5 minutes (an **aggressor**); the server
@@ -1385,28 +1386,32 @@ up and the total is capped at +40% (the server's `BonusCapPct`):
 
 **Kills that count** (for the streak, bounties, the XP and the War Mode honor bonus): the victim has had War Mode on
 for at least 10 minutes, is of the other faction, the kill is in the open world, the two players use different
-accounts and different IP addresses, the victim is less than 8 levels below the killer and not grey to them, and
-neither is grouped with a player of the other faction. A War Mode player who kills an aggressor gets the honor bonus
-only (no streak, no XP).
+accounts and different IP addresses, the victim is less than 8 levels below the killer and not grey to them, the
+victim is not under respawn protection (below), and neither is grouped with a player of the other faction. A War Mode
+player who kills an aggressor gets the honor bonus only (no streak, no XP).
 
 **Diminishing returns**: honor and XP for killing players of the same account fall with every kill on the same day:
 100%, 75%, 50%, 25%, then nothing. A kill worth nothing counts for nothing. A War Mode player killed by a player cannot
-be killed for honor again for 60 s after resurrecting (the core's Honorless Target).
+be killed for anything again for 60 s after resurrecting (the core's Honorless Target): no honor, streak, experience,
+bounty or War Chest credit, and no bully verdict.
 
 **Wanted**:
 
 - **Streak** (`S`): 5 counted kills without dying, against at least 3 different accounts.
-- **Bully** (`B`): killing a War Mode player 10 or more levels below, who did not attack first in the last 2 minutes.
-  The kill pays nothing, and the bully is Wanted at once.
+- **Bully** (`B`): killing a War Mode player 10 or more levels below who has had War Mode on for at least 10 minutes,
+  unless that player struck first (hit the bully before the bully hit them, within the last 2 minutes; hitting back
+  is not striking first). The kill pays nothing, and the bully is Wanted at once.
 - A Wanted player is hunted for 15 minutes of open-world time (paused in sanctuaries, capitals, instances,
-  battlegrounds and while logged out). Up to 3 Wanted players per zone are revealed to the enemy War Mode players of
-  that zone, highest streak first, with their place on the map every 5 s (`WANTED`). A Wanted player cannot turn War
-  Mode off.
+  battlegrounds, on a flight path and while logged out). Up to 3 Wanted players per zone are revealed to the enemy War
+  Mode players of that zone, highest streak first, with their place on the map every 5 s (`WANTED`). A Wanted player
+  cannot turn War Mode off.
 - **Killed by enemy War Mode players**: the player who dealt the killing blow and the other enemy War Mode players who
   hurt the Wanted player in the last 30 s and are within 100 yards claim the bounty, at most 5 in all (the most recent
-  first). Each gets the whole bounty: honor `min(2 + 0.4 * (streak - 5), 8)` times the honor of a kill at the Wanted
-  player's level (2 times for a bully below a streak of 5), and at the level cap `min(5 + (streak - 5), 15)` Shards
-  (5 for a bully below a streak of 5).
+  first). A bounty is a counted kill: the killing blow claims only when its kill counts (with diminishing returns left),
+  and every other claimant only when his own kill of the Wanted player would count (a bully, the same account or IP
+  address, a group with the other faction or the level gap claims nothing). Each gets the whole bounty: honor
+  `min(2 + 0.4 * (streak - 5), 8)` times the honor of a kill at the Wanted player's level (2 times for a bully below a
+  streak of 5), and at the level cap `min(5 + (streak - 5), 15)` Shards (5 for a bully below a streak of 5).
 - **Survived** the 15 minutes: a streak-Wanted player gets 2 times the honor of a kill and 5 Shards; a bully gets
   nothing. The streak starts again.
 - **Any other death** (a creature, a fall, a player without War Mode) ends the hunt with no bounty.
@@ -1467,10 +1472,11 @@ get it at their next login within 7 days.
 `on, cooldownSec, block, minLevel, xpPct, honorPct, shardPct, underdogPct, underdogTeam, wmAlliance, wmHorde, streak, wantedState, wantedSec, bountyHonor, todayBonusHonor, bonusHonorCap, todayShards, shardsCap, bestStreak, kills, deaths`
 
 - `on`: 1 War Mode on, 0 off. `cooldownSec`: until War Mode may be changed again (0: now).
-- `block`: a reason the server would refuse a change now that the client cannot see itself: `wm_level`,
-  `wm_hardcore`, `wm_wanted` or `wm_busy`; empty otherwise. The client greys its button itself while the player is not
-  resting (`IsResting()`) or is in combat.
-- `minLevel`: the level War Mode needs.
+- `block`: a reason the server would refuse a change now that the client cannot see itself: `wm_level` or `wm_hardcore`
+  (only while off), `wm_wanted` (while on) or `wm_busy`; empty otherwise. The client greys its button itself while the
+  player is not resting (`IsResting()`) or is in combat.
+- `minLevel`: the level War Mode needs to be turned on (the client greys its button below it only while War Mode
+  is off).
 - `xpPct`, `honorPct`, `shardPct`: the base War Mode bonuses (`xpPct` 0 at the level cap).
 - `underdogPct`, `underdogTeam`: the underdog bonus now and the faction that gets it (empty: none).
 - `wmAlliance`, `wmHorde`: the War Mode players the underdog bonus counted (blended, one per IP address).
@@ -1481,7 +1487,8 @@ get it at their next login within 7 days.
   time.
 
 Sent after `HELLO`, for `GET WMST`, after every `WARMODE`, and whenever one of its fields changes for another reason
-(a kill, a streak, Wanted, a reward, the underdog bonus, the daily reset), at most once a second.
+(a kill, a streak, Wanted, a reward, the underdog bonus, the daily reset, a new level, entering or leaving an instance,
+a battleground or a flight), at most once a second.
 
 ### WPZ (the zone the player is in)
 
@@ -1500,8 +1507,10 @@ Then one record per outpost (at most 16): `O, objId, name, u, v, owner, slider, 
 - `owner`: `A`, `H` or `N`. `slider`: the bar, -1000 Horde full .. 1000 Alliance full. `state`: the capture states
   above.
 
-Sent when the player enters a zone (the next second), when an outpost of the zone changes owner or state, when the
-Front's phase changes, every 30 s while the player is in a zone with objectives, and for `GET WPZ`.
+Sent when the player enters or leaves a zone with objectives (the next second), when an outpost of the zone changes
+owner or state, when the Front's phase changes (also when its turn ends: state 0 to the players still there), every
+30 s while the player is in a zone with objectives, and for `GET WPZ`. Nothing is sent for a move between two zones
+without objectives, so a `WPZ` without `kind` may be for a zone the player has left since.
 
 ### WPCAP (the capture bar)
 
@@ -1580,8 +1589,8 @@ and `WPMAP` at the end, `WPEV R` with the War Chest.
 | Code | Meaning |
 |---|---|
 | `wm_off` | War Mode is off on this realm (no feature bit 16384) |
-| `wm_level` | below the level War Mode needs |
-| `wm_hardcore` | a hardcore challenge character |
+| `wm_level` | turning War Mode on below the level it needs |
+| `wm_hardcore` | turning War Mode on as a hardcore or Iron Man challenge character |
 | `wm_place` | not resting in an inn or a city |
 | `wm_cooldown` | War Mode was changed less than 15 minutes ago (the text gives the seconds left) |
 | `wm_wanted` | turning War Mode off while Wanted |

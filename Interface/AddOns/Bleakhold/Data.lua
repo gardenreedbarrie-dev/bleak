@@ -306,7 +306,7 @@ Data.errorTexts = {
     -- War Mode (section 19); wm_cooldown keeps the server's sentence (the seconds left), wm_busy its reason
     wm_off = "War Mode is not available on this realm right now.",
     wm_level = warModeLevelText,
-    wm_hardcore = "Hardcore characters cannot use War Mode.",
+    wm_hardcore = "Hardcore and Iron Man characters cannot use War Mode.",
     wm_place = "War Mode can only be changed in an inn or a city.",
     wm_cooldown = function(e)
         if e and e.text then

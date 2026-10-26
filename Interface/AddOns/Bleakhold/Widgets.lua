@@ -377,24 +377,26 @@ end
 -- Tooltips
 ------------------------------------------------------------------------------------------------------
 -- lines: { title, { text, colorHex, wrap }, ... } (server text must already be passed through U.Safe)
-function UI.ShowTooltip(owner, lines)
-    if not GameTooltip or type(lines) ~= "table" then
+-- tip: the tooltip to fill, GameTooltip by default (the world map's pins pass WorldMapTooltip)
+function UI.ShowTooltip(owner, lines, tip)
+    tip = tip or GameTooltip
+    if not tip or type(lines) ~= "table" then
         return
     end
-    GameTooltip:SetOwner(owner, "ANCHOR_RIGHT")
+    tip:SetOwner(owner, "ANCHOR_RIGHT")
     for i, line in ipairs(lines) do
         if type(line) == "string" then
             if i == 1 then
-                GameTooltip:AddLine(line, UI.Rgb(C.goldPale))
+                tip:AddLine(line, UI.Rgb(C.goldPale))
             else
-                GameTooltip:AddLine(line, 0.85, 0.82, 0.76, true)
+                tip:AddLine(line, 0.85, 0.82, 0.76, true)
             end
         elseif type(line) == "table" then
             local r, g, b = UI.Rgb(line[2] or C.mid)
-            GameTooltip:AddLine(line[1] or "", r, g, b, line[3] and true or false)
+            tip:AddLine(line[1] or "", r, g, b, line[3] and true or false)
         end
     end
-    GameTooltip:Show()
+    tip:Show()
 end
 
 ------------------------------------------------------------------------------------------------------

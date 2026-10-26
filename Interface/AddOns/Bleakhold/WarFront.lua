@@ -555,7 +555,9 @@ function WF.WantedNow()
     if not w or not WM.Live() or #w.list == 0 or GetTime() - (w.recvAt or 0) > WF.WANTED_STALE then
         return nil
     end
-    if S.wpZone and S.wpZone.zoneId ~= w.zoneId then
+    -- only a WPZ of a zone with objectives says where the player is: the server sends none between two zones
+    -- without objectives (a kind-less WPZ can be the login zone's), and leaving an objective zone always brings one
+    if S.wpZone and S.wpZone.kind and S.wpZone.zoneId ~= w.zoneId then
         return nil
     end
     return w
@@ -565,17 +567,24 @@ local mapLayer, mapList
 local objPins, wantedPins = {}, {}
 WF.objPins, WF.wantedPins = objPins, wantedPins
 
+-- The pins' tooltip: the full-size world map hides UIParent and GameTooltip with it; FrameXML's WorldMapTooltip
+-- (parent WorldMapFrame) shows on both map sizes.
+function WF.MapTooltip()
+    return WorldMapTooltip or GameTooltip
+end
+
 local function newPin(glyph, fill)
     local b = UI.Badge(mapLayer, 18, glyph, fill, C.goldDark, C.text)
     b:EnableMouse(true)
     b:SetScript("OnEnter", function(self)
         if self.lines then
-            UI.ShowTooltip(self, self.lines)
+            UI.ShowTooltip(self, self.lines, WF.MapTooltip())
         end
     end)
     b:SetScript("OnLeave", function()
-        if GameTooltip then
-            GameTooltip:Hide()
+        local tip = WF.MapTooltip()
+        if tip then
+            tip:Hide()
         end
     end)
     return b
