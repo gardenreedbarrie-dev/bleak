@@ -275,6 +275,12 @@ USED_TABLES = (
     "SkillLineAbility",
     "SkillRaceClassInfo",
     "SoundFilter",
+    "Spell",
+    "SpellCastTimes",
+    "SpellDuration",
+    "SpellIcon",
+    "SpellRange",
+    "SpellVisual",
     "TalentTab",
     "VocalUISounds",
 )

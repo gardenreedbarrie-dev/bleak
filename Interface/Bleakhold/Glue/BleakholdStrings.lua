@@ -45,6 +45,14 @@ HIGHELF_DISABLED = HIGHELF_DISABLED or "Your account cannot create a High Elf."
 RACE_INFO_EREDAR = RACE_INFO_EREDAR or "Not every eredar who stayed on Argus bowed to Sargeras. Some broke from the Legion on their own terms, trusting neither the naaru nor their draenei kin. The Horde, which knows the price of fel power better than most, judges them by their deeds rather than their blood, and the exiles have repaid that trust with iron discipline and a hard-won mastery of their own strength."
 EREDAR_DISABLED = EREDAR_DISABLED or "Your account cannot create an Eredar."
 
+-- Their racials (the server's mod-bleakhold and Tools/RaceForge's races.json): CharacterCreate.lua lists every
+-- ABILITY_INFO_<FILE><n> from 1 up to the first missing one above the race's description.
+ABILITY_INFO_HIGHELF1 = ABILITY_INFO_HIGHELF1 or "- Wind Blessed: melee, ranged and spell haste increased by 3%."
+ABILITY_INFO_HIGHELF2 = ABILITY_INFO_HIGHELF2 or "- Walk on Air: a fall becomes a glide you steer by turning."
+ABILITY_INFO_EREDAR1 = ABILITY_INFO_EREDAR1 or "- Elemental Insight: damage dealt versus Elementals increased by 5%."
+ABILITY_INFO_EREDAR2 = ABILITY_INFO_EREDAR2
+    or "- Read Ley Line: health and mana regeneration increased by 100% for 30 sec, or 2 min while resting."
+
 -- Character creation: the name boxes (BleakholdNames.lua).
 BLEAKHOLD_FIRST_NAME = BLEAKHOLD_FIRST_NAME or "First Name"
 BLEAKHOLD_LAST_NAME = BLEAKHOLD_LAST_NAME or "Last Name"

@@ -12,6 +12,12 @@ in data/dbc carry most of the work. ObjectMgr::LoadPlayerInfo still needs, per r
 Totems (player_totem_model) and druid forms (player_shapeshift_model) are looked up by race too. Every statement
 copies the template race's rows from the server's own database, so nothing here depends on Blizzard data, and each
 block deletes what it adds first, so the file can be run again.
+
+A race can drop the template's racial skill lines (races.json racials.drop_template_skill_lines): their skills and
+spells are left out of the copies, and the start action bar buttons of those spells take the race's first active
+racial spell instead. The race's own racial spells (racial_spells) get their spell_dbc rows here, built from the same
+row as the Spell.dbc copy, and playercreateinfo_spell_custom rows (AzerothCore teaches those at creation only with
+PlayerStart.CustomSpells = 1; a server module can teach them too).
 """
 
 from __future__ import annotations
@@ -43,8 +49,15 @@ def _position_row(race: int, class_id: int, pos: Position) -> str:
     return f"({race}, {class_id}, {pos.map}, {pos.zone}, {_q(pos.x)}, {_q(pos.y)}, {_q(pos.z)}, {_q(pos.o)})"
 
 
+def _not_in(column: str, values: list[int]) -> str:
+    return f" AND `{column}` NOT IN ({', '.join(map(str, values))})" if values else ""
+
+
 def race_sql(race: RaceConfig, classes: list[int], masks: maskrules.FactionMasks, faction_wide: bool,
-             display_ids: tuple[int, int], template_display_ids: tuple[int, int]) -> str:
+             display_ids: tuple[int, int], template_display_ids: tuple[int, int], dropped_spells: list[int] | None = None,
+             racial_spells: list[tuple[int, str]] | None = None, action_spell: int = 0) -> str:
+    dropped_spells = dropped_spells or []
+    racial_spells = racial_spells or []
     t = race.template_race
     r = race.id
     class_list = ", ".join(str(c) for c in classes)
@@ -99,25 +112,45 @@ def race_sql(race: RaceConfig, classes: list[int], masks: maskrules.FactionMasks
     out.append("-- Action bars and extra start items of the template race")
     out.append(f"DELETE FROM `playercreateinfo_action` WHERE `race` = {r};")
     out.append("INSERT INTO `playercreateinfo_action` (`race`, `class`, `button`, `action`, `type`)")
-    out.append(f"SELECT {r}, `class`, `button`, `action`, `type` FROM `playercreateinfo_action` WHERE `race` = {t} AND `class` IN ({class_list});")
+
+    if dropped_spells:
+        spell_list = ", ".join(map(str, dropped_spells))
+        out.append(f"SELECT {r}, `class`, `button`, `action`, `type` FROM `playercreateinfo_action` WHERE `race` = {t} AND `class` IN ({class_list})"
+                   f" AND NOT (`type` = 0 AND `action` IN ({spell_list}));")
+
+        if action_spell:
+            out.append(f"-- The template's racial buttons take the race's own racial {action_spell}")
+            out.append("INSERT INTO `playercreateinfo_action` (`race`, `class`, `button`, `action`, `type`)")
+            out.append(f"SELECT {r}, `class`, `button`, {action_spell}, 0 FROM `playercreateinfo_action` WHERE `race` = {t} AND `class` IN ({class_list})"
+                       f" AND `type` = 0 AND `action` IN ({spell_list});")
+    else:
+        out.append(f"SELECT {r}, `class`, `button`, `action`, `type` FROM `playercreateinfo_action` WHERE `race` = {t} AND `class` IN ({class_list});")
     out.append(f"DELETE FROM `playercreateinfo_item` WHERE `race` = {r};")
     out.append("INSERT INTO `playercreateinfo_item` (`race`, `class`, `itemid`, `amount`, `Note`)")
     out.append(f"SELECT {r}, `class`, `itemid`, `amount`, `Note` FROM `playercreateinfo_item` WHERE `race` = {t} AND `class` IN ({class_list});")
 
     out.append("")
     out.append(f"-- Skills and spells by race mask, with the rule used for the DBC masks (bit {race.bit} = 1 << ({r} - 1))")
-    condition = maskrules.sql_condition("raceMask", race, masks, t, faction_wide)
+    if race.drop_skill_lines:
+        out.append(f"-- Left out: the template's racial skill lines {race.drop_skill_lines} and their spells")
+
+    condition = maskrules.sql_condition("raceMask", race, masks, t, faction_wide) + _not_in("skill", race.drop_skill_lines)
     out.append(f"DELETE FROM `playercreateinfo_skills` WHERE `raceMask` = {race.bit};")
     out.append("INSERT IGNORE INTO `playercreateinfo_skills` (`raceMask`, `classMask`, `skill`, `rank`, `comment`)")
     out.append(f"SELECT {race.bit}, `classMask`, `skill`, `rank`, LEFT(CONCAT({_sql_text(race.name + ': ')}, IFNULL(`comment`, '')), 255)")
     out.append(f"FROM `playercreateinfo_skills` WHERE {condition};")
 
-    condition = maskrules.sql_condition("racemask", race, masks, t, faction_wide)
+    condition = maskrules.sql_condition("racemask", race, masks, t, faction_wide) + _not_in("Spell", dropped_spells)
     out.append(f"DELETE FROM `playercreateinfo_spell_custom` WHERE `racemask` = {race.bit};")
     out.append("INSERT IGNORE INTO `playercreateinfo_spell_custom` (`racemask`, `classmask`, `Spell`, `Note`)")
     out.append(f"SELECT {race.bit}, `classmask`, `Spell`, `Note` FROM `playercreateinfo_spell_custom` WHERE {condition};")
 
-    condition = maskrules.sql_condition("raceMask", race, masks, t, faction_wide)
+    if racial_spells:
+        out.append(f"-- The race's own racials (taught at creation with PlayerStart.CustomSpells = 1, or by a server module)")
+        out.append("INSERT IGNORE INTO `playercreateinfo_spell_custom` (`racemask`, `classmask`, `Spell`, `Note`) VALUES")
+        out.append(",\n".join(f"({race.bit}, 0, {spell_id}, {_sql_text(race.name + ' - ' + name)})" for spell_id, name in racial_spells) + ";")
+
+    condition = maskrules.sql_condition("raceMask", race, masks, t, faction_wide) + _not_in("spell", dropped_spells)
     out.append(f"DELETE FROM `playercreateinfo_cast_spell` WHERE `raceMask` = {race.bit};")
     out.append("INSERT INTO `playercreateinfo_cast_spell` (`raceMask`, `classMask`, `spell`, `note`)")
     out.append(f"SELECT DISTINCT {race.bit}, `classMask`, `spell`, `note` FROM `playercreateinfo_cast_spell` WHERE {condition};")
@@ -150,13 +183,21 @@ def race_sql(race: RaceConfig, classes: list[int], masks: maskrules.FactionMasks
     return "\n".join(out)
 
 
-def world_sql(config: Config, summaries: dict, masks: maskrules.FactionMasks, template_displays: dict[int, tuple[int, int]]) -> str:
+def world_sql(config: Config, summaries: dict, masks: maskrules.FactionMasks, template_displays: dict[int, tuple[int, int]],
+              spell_rows_sql: str = "") -> str:
     parts = [HEADER]
+
+    if spell_rows_sql:
+        parts.append("-- ===== Spells: the same rows as the Spell.dbc copies (client/DBFilesClient, server/dbc) =====")
+        parts.append(spell_rows_sql)
+        parts.append("")
 
     for race in config.races:
         summary = summaries[race.id]
         parts.append(race_sql(race, summary.classes, masks, config.policy.faction_wide_masks,
-                              (summary.male_display, summary.female_display), template_displays[race.id]))
+                              (summary.male_display, summary.female_display), template_displays[race.id],
+                              summary.dropped_spells, [(s, config.spells[s].name) for s in race.racial_spells],
+                              config.action_bar_spell(race)))
 
     return "\n".join(parts)
 
@@ -221,6 +262,13 @@ def remove_sql(config: Config) -> str:
             ignore = "IGNORE " if table in ("spell_area", "mail_level_reward", "conditions") else ""
             out.append(f"UPDATE {ignore}`{table}` SET `{column}` = `{column}` & ~{bit} WHERE {extra}(`{column}` & {bit}) <> 0 AND `{column}` <> -1 AND `{column}` <> 4294967295;")
 
+        out.append("")
+
+    spell_ids = config.server_sql_spell_ids()
+
+    if spell_ids:
+        out.append("-- Spells")
+        out.append(f"DELETE FROM `spell_dbc` WHERE `ID` IN ({', '.join(map(str, spell_ids))});")
         out.append("")
 
     return "\n".join(out)

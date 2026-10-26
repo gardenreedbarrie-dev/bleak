@@ -3,6 +3,7 @@
 
     python3 -I raceforge.py build --dbc <your DBFilesClient folder> --out <output folder> [--mpq] [--customization <package>]
     python3 -I raceforge.py validate --dbc <same folder> --out <output folder>
+    python3 -I raceforge.py update --patches <the realm's patch folder> --dbc <stock DBCs> --out <output folder>
     python3 -I raceforge.py schemas --check
     python3 -I raceforge.py [<DBC folder> [<customization package>]]   (double-click or drop folders: builds next to it)
 
@@ -25,7 +26,7 @@ for path in (HERE, os.path.join(os.path.dirname(HERE), "MpqPack")):
         sys.path.insert(0, path)
 
 from rflib import config as configmod  # noqa: E402
-from rflib import customize, patchnames, recparse, schema_access, sqlgen, validate  # noqa: E402
+from rflib import customize, patchnames, recparse, schema_access, spells as spellmod, sqlgen, update, validate  # noqa: E402
 from rflib.dbc import DbcError, DbcTable  # noqa: E402
 from rflib.forge import OPTIONAL_TABLES, REQUIRED_TABLES, Forge, ForgeError, find_dbc  # noqa: E402
 
@@ -396,9 +397,15 @@ def cmd_build(args) -> int:
         template_displays[race.id] = (forge.tables["ChrRaces"].get(template, "maleDisplayID"), forge.tables["ChrRaces"].get(template, "femaleDisplayID"))
 
     sql_files = []
+    spell_rows_sql = ""
+
+    if config.server_sql_spell_ids():
+        spells = forge.tables["Spell"]
+        by_id = spells.by_id()
+        spell_rows_sql = spellmod.spell_sql(spells, [by_id[i] for i in config.server_sql_spell_ids()])
 
     for filename, text in (
-        ("bleakhold_races.sql", sqlgen.world_sql(config, forge.summaries, forge.faction_masks, template_displays)),
+        ("bleakhold_races.sql", sqlgen.world_sql(config, forge.summaries, forge.faction_masks, template_displays, spell_rows_sql)),
         ("bleakhold_races_content_masks.sql", sqlgen.content_sql(config, forge.summaries, forge.faction_masks)),
         ("bleakhold_races_remove.sql", sqlgen.remove_sql(config)),
     ):
@@ -458,6 +465,215 @@ def cmd_validate(args) -> int:
     return 1 if result.failed else 0
 
 
+def format_update_report(config: configmod.Config, patches_dir: str, plan: update.UpdatePlan, written: list, sql_path: str,
+                         server_files: list[str], result: validate.Validation, warnings: list[str]) -> str:
+    lines = ["RaceForge update report", "=======================", ""]
+    lines.append(f"Realm patches: {os.path.abspath(patches_dir)}")
+    lines.append(f"Config:        {os.path.abspath(config.path) if config.path else '(built in)'}")
+    lines.append(f"Pack combinations: {', '.join(plan.configurations)}")
+    lines.append("")
+    lines.append("Racials")
+    lines.append("-------")
+
+    for race in config.races:
+        spells = ", ".join(f"{s} {config.spells[s].name}" for s in race.racial_spells) or "none"
+        lines.append(f"{race.id} {race.name}: drops template skill lines {race.drop_skill_lines or 'none'}; racial spells {spells}")
+
+    lines.append("")
+    lines.append("Where each table goes")
+    lines.append("---------------------")
+
+    for name, sources in plan.sources.items():
+        for source in sources:
+            target = source.archive or plan.own
+            action = (f"merged into {target} (rebuilt)" if source.archive else f"stock copy + change, into {target}") if source.changed else "already up to date"
+            lines.append(f"{update.archive_file(name)}: the copy in {source.where()} for {', '.join(source.labels)}: {action}")
+
+            for note in source.notes:
+                lines.append(f"    {note}")
+
+    for note in plan.notes:
+        lines.append(f"  {note}")
+
+    if warnings:
+        lines.append("")
+        lines.append("Warnings")
+        lines.append("--------")
+        lines.extend(f"- {w}" for w in warnings)
+
+    lines.append("")
+    lines.append("Validation")
+    lines.append("----------")
+
+    for check in result.checks:
+        lines.append(f"[{check.status}] {check.name}" + (f" -- {check.detail}" if check.detail and check.status != "PASS" else ""))
+
+    lines.append("")
+    lines.append(f"{len(result.checks)} checks, {len(result.failed)} failed")
+    lines.append("")
+    lines.append("Output")
+    lines.append("------")
+
+    for target, path, files in written:
+        lines.append(f"Client archive: {path} ({', '.join(files)})")
+
+    if not written:
+        lines.append("Client archives: none (every copy is up to date)")
+
+    for path in server_files:
+        lines.append(f"Server DBC (optional, for data/dbc): {path}")
+
+    lines.append(f"Server SQL: {sql_path}")
+    lines.append("")
+    lines.append("Next steps")
+    lines.append("----------")
+    lines.append("1. Client: put every archive of client/ into the realm's patch folder, replacing the file of the same name")
+    lines.append("   (upload it under another name, then mv it into place), then publish it at once (the hourly run can come after")
+    lines.append("   step 2): bash /root/bleakserv/deploy/launcher/publish.sh, and wait for \"Published build ...\". Players need the")
+    lines.append("   new archives and a client restart: give them time before step 2.")
+    lines.append(f"2. Server: {SQL_NOTE}")
+    return "\n".join(lines) + "\n"
+
+
+SQL_NOTE = ("add server/sql/bleakhold_racials.sql to bleakserv as data/sql/updates/pending_db_world/rev_<timestamp>.sql (or compare it "
+            "with the one there: --server-sql), commit and push it with mod-bleakhold's bh_racials.cpp, then deploy both on the realm: "
+            "cd /root/bleakserv && git pull && bash deploy/update-bleakhold-ui.sh --check, then bash deploy/update-bleakhold-ui.sh "
+            "(it rebuilds the world server, and ac-db-import applies the SQL before it starts; a plain worldserver restart does "
+            "neither). data/dbc can stay as it is: the rows override it by id.")
+
+
+def cmd_update(args) -> int:
+    config = configmod.load(args.config)
+    tables = update.changed_tables(config)
+
+    if not tables:
+        raise ForgeError("races.json has no racials to put in (racials.drop_template_skill_lines, racials.spells)")
+
+    # build checks the spells' fields in Forge; update would only meet them in a copy, after --force cleared --out
+    spell_layout = DbcTable.empty(schema_access.get("Spell"))
+
+    for spell_id in config.spell_ids():
+        problems = spellmod.field_problems(spell_layout, config.spells[spell_id])
+
+        if problems:
+            raise ForgeError(f"spell {spell_id} ({config.spells[spell_id].name}): " + "; ".join(problems))
+
+    patches = update.patch_tools()
+
+    try:
+        patchset = patches.PatchSet.scan(args.patches, config.archives.optional_packs)
+    except patches.PatchError as e:
+        raise ForgeError(str(e)) from None
+
+    unreadable = [f"{a.name}: {a.error}" for a in patchset.unreadable()]
+
+    if unreadable:
+        patchset.close()
+        # An archive RaceForge cannot read might hold a later copy of a table, so the placement could be wrong.
+        raise ForgeError("cannot read every archive of the patch folder, so the winning copies are unknown: " + "; ".join(unreadable))
+
+    warnings = []
+
+    try:
+        out_dir = os.path.abspath(args.out)
+        update.clean_out_dir(out_dir, args.force)
+        plan = update.make_plan(config, patchset, args.dbc)
+        problems, skipped = update.check_spells(plan, config)
+
+        if problems:
+            raise ForgeError("; ".join(problems))
+
+        warnings += [f"not checked: {s}" for s in skipped]
+        written = update.write_archives(plan, patchset, out_dir)
+    except (update.UpdateError, patches.PatchError, spellmod.SpellError) as e:
+        patchset.close()
+        raise ForgeError(str(e)) from None
+
+    try:
+        server_dir = os.path.join(out_dir, "server", "dbc")
+        server_files = []
+
+        for name, table in plan.server.items():
+            if any(s.changed for s in plan.sources[name]):
+                path = os.path.join(server_dir, os.path.basename(schema_access.get(name).filename.replace("\\", "/")))
+                table.write(path)
+                server_files.append(path)
+
+        sql_dir = os.path.join(out_dir, "server", "sql")
+        os.makedirs(sql_dir, exist_ok=True)
+        sql_text = update.racials_sql(config, plan)
+        sql_path = os.path.join(sql_dir, update.SQL_FILE)
+
+        with open(sql_path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(sql_text)
+
+        result = validate.Validation()
+        import mpqpack
+
+        for name, sources in plan.sources.items():
+            for source in sources:
+                problems = update.copy_problems(name, source.forged, config)
+                result.expect(not problems, f"{update.archive_file(name)} for {', '.join(source.labels)} ({source.where()}): holds the racials", "; ".join(problems))
+
+        for target, path, files in written:
+            with mpqpack.MpqArchive(path) as archive:
+                report = archive.verify()
+                result.expect(not report.problems, f"{target}: passes the client reader's checks", "; ".join(report.problems))
+
+                for archive_name in files:
+                    result.expect(archive.read(archive_name) == plan.targets[target][archive_name], f"{target}: {archive_name} is the forged copy")
+
+                original = patchset.find(target)
+
+                if original is not None and original.reader is not None:
+                    before = {mpqpack.name_key(n) for n in original.reader.names()}
+                    after = {mpqpack.name_key(n) for n in archive.names()}
+                    result.expect(before <= after, f"{target}: every file of the realm's archive is still there ({len(before)} before, {len(after)} after)")
+
+        for name, sql_table, columns in (("Spell", "spell_dbc", spellmod.SERVER_SPELL_COLUMNS),
+                                         ("SkillRaceClassInfo", "skillraceclassinfo_dbc", spellmod.server_columns(spellmod.SERVER_SKILL_RACE_CLASS_COLUMNS)),
+                                         ("SkillLineAbility", "skilllineability_dbc", spellmod.server_columns(spellmod.SERVER_SKILL_LINE_ABILITY_COLUMNS))):
+            table = plan.server.get(name)
+            rows = spellmod.parse_sql_rows(sql_text, sql_table)
+
+            if table is None or not rows:
+                continue
+
+            by_id = table.by_id()
+            differences = []
+
+            for row_id, sql_row in rows.items():
+                differences += [f"{row_id} {d}" for d in spellmod.compare_row(table, by_id[row_id], sql_row, columns)]
+
+            result.expect(not differences, f"{sql_table}: {len(rows)} rows match {name}.dbc (the server copy) field for field ({len(columns)} columns)", "; ".join(differences[:5]))
+
+        server_spells = plan.server.get("Spell")
+
+        for spell_id in config.spell_ids():
+            spell = config.spells[spell_id]
+
+            if spell.server_row and server_spells is not None:
+                status, detail = spellmod.server_row_check(server_spells, server_spells.by_id()[spell_id], spell)
+                result.add(status, f"spell {spell_id} {spell.name}: the spell_dbc row of {spell.server_row} matches Spell.dbc field for field", detail)
+
+        if args.server_sql:
+            with open(args.server_sql, encoding="utf-8") as f:
+                other = f.read()
+
+            differences = update.compare_sql(sql_text, other)
+            result.expect(not differences, f"{args.server_sql}: holds the same spell_dbc, skillraceclassinfo_dbc and skilllineability_dbc rows", "; ".join(differences[:8]))
+    finally:
+        patchset.close()
+
+    report_text = format_update_report(config, args.patches, plan, written, sql_path, server_files, result, warnings)
+
+    with open(os.path.join(out_dir, "report.txt"), "w", encoding="utf-8") as f:
+        f.write(report_text)
+
+    print(report_text)
+    return 1 if result.failed else 0
+
+
 def cmd_schemas(args) -> int:
     rec_dir = args.rec_dir or recparse.default_rec_dir()
 
@@ -492,7 +708,7 @@ def cmd_schemas(args) -> int:
 
 
 EASY_OUT = "Bleakhold-RaceForge-Output"
-COMMANDS = ("build", "validate", "schemas", "-h", "--help")
+COMMANDS = ("build", "validate", "update", "schemas", "-h", "--help")
 
 
 def easy_mode(argv: list[str]) -> int:
@@ -596,6 +812,14 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--config", default=DEFAULT_CONFIG)
     p.add_argument("--mpq", help="archive to check as well")
 
+    p = sub.add_parser("update", help="put races.json's racials into a realm that already has the races (merges into the winning archives)")
+    p.add_argument("--patches", required=True, help="the realm's patch folder (patch-?.MPQ, <locale>/patch-<locale>-?.MPQ) or a client's Data folder")
+    p.add_argument("--dbc", required=True, help="stock DBCs (the server's data/dbc) for tables no patch holds")
+    p.add_argument("--out", required=True, help="output folder")
+    p.add_argument("--config", default=DEFAULT_CONFIG)
+    p.add_argument("--force", action="store_true", help="replace earlier output in --out")
+    p.add_argument("--server-sql", help="an SQL file to compare (the bleakserv pending_db_world file): its DBC rows must match field for field")
+
     p = sub.add_parser("schemas", help="check (or regenerate) rflib/schemas.py against the client's Rec classes")
     p.add_argument("--rec-dir", help="WoW/Source/DB/Rec of the decompilation (default: found next to Tools/)")
     p.add_argument("--write", action="store_true", help="regenerate rflib/schemas.py")
@@ -608,9 +832,11 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_build(args)
         if args.command == "validate":
             return cmd_validate(args)
+        if args.command == "update":
+            return cmd_update(args)
         if args.command == "schemas":
             return cmd_schemas(args)
-    except (configmod.ConfigError, ForgeError, DbcError, recparse.RecParseError, OSError) as e:
+    except (configmod.ConfigError, ForgeError, DbcError, recparse.RecParseError, spellmod.SpellError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
 

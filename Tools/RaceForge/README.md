@@ -2,14 +2,15 @@
 
 Adds the Bleakhold races to your own 3.3.5a game data:
 
-| Race | Id | Faction | Template race (models, sounds, racials, classes) | Faction race (language, reputation, start zone) |
-|---|---|---|---|---|
-| High Elf | 22 | Alliance | Blood Elf (10), helmet prefix `Be` | Human (1), starts in Northshire |
-| Eredar | 23 | Horde | Draenei (11), helmet prefix `Dr` | Orc (2), starts in the Valley of Trials |
+| Race | Id | Faction | Template race (models, sounds, classes) | Faction race (language, reputation, start zone) | Racials |
+|---|---|---|---|---|---|
+| High Elf | 22 | Alliance | Blood Elf (10), helmet prefix `Be` | Human (1), starts in Northshire | Wind Blessed (90500); not Blood Elf's |
+| Eredar | 23 | Horde | Draenei (11), helmet prefix `Dr` | Orc (2), starts in the Valley of Trials | Elemental Insight (90501), Read Ley Line (90502); not Draenei's |
 
 RaceForge reads the DBC files of your client and writes:
 
-- patched copies of every table it changes, once for the client and once (identical) for the server;
+- patched copies of every table it changes, once for the client and once (identical) for the server, including the
+  races' own racial spells and the server-cast spells of races.json as new Spell.dbc rows (see "Racials and spells");
 - an MPQ with the client copies (with `--mpq`), built with `Tools/MpqPack`;
 - the AzerothCore world-database SQL;
 - a report with every change and the result of its checks.
@@ -172,7 +173,8 @@ to it. Tables RaceForge does not change are not written.
 | ChrRaces | A new row from the template: flag 0x1 (not playable) cleared; FactionID = the faction race's faction template; BaseLanguage 7 (Alliance) or 1 (Horde); Alliance column 0 or 1; Name in every locale; ClientFileString `HighElf` / `Eredar`; the template's ClientPrefix, display ids and sounds; CinematicSequenceID 0; RequiredExpansion at most 2 |
 | CharBaseInfo | The template's race/class pairs (or the subset in `classes`) |
 | CharStartOutfit, CharSections, CharHairGeosets, CharacterFacialHairStyles, NameGen, BarberShopStyle, EmotesTextSound, VocalUISounds | The template race's rows. CharSections is kept sorted by race, sex, section, variation and color, because `BuildComponentArray` groups consecutive rows; NameGen rows stay one run per race and sex (`CNameGen::LoadNames`) |
-| SkillRaceClassInfo, SkillLineAbility, TalentTab, DanceMoves | Race bit `1 << (race - 1)` added by the mask rule below |
+| SkillRaceClassInfo, SkillLineAbility, TalentTab, DanceMoves | Race bit `1 << (race - 1)` added by the mask rule below, except on the rows of the template's racial skill lines the race drops (`racials.drop_template_skill_lines`) |
+| Spell | The rows of races.json's `spells` appended (the stock rows and the string block stay byte for byte) |
 | Faction | Reputation race masks: the bit is added wherever the faction race has one, so the race starts with that race's reputations |
 | HelmetGeosetVisData | Bit `1 << race` (this table, unlike the others, uses `1 << race`; `CCharacterComponent::AddHelm`) where the template's bit is set |
 
@@ -203,7 +205,15 @@ must agree.
 - `playercreateinfo_action`, `playercreateinfo_item`: the template's action bars and extra items;
 - `playercreateinfo_skills`, `_spell_custom`, `_cast_spell`: rows for the race's bit, chosen by the mask rule;
 - `player_totem_model`, `player_shapeshift_model`: the template's totem and form models;
-- `creature_model_info`: only for display ids the template race does not use.
+- `creature_model_info`: only for display ids the template race does not use;
+- `spell_dbc`: the rows of the racial spells, built from the same rows as the Spell.dbc copies (a spell whose
+  `server_row` names another SQL file gets none here), and `playercreateinfo_spell_custom` rows that give each race its
+  racials (AzerothCore teaches those at creation only with `PlayerStart.CustomSpells = 1`; the realm's mod-bleakhold
+  teaches them at login whatever that option says).
+
+A dropped template racial skill line is left out of `playercreateinfo_skills`, its spells out of `_spell_custom` and
+`_cast_spell`, and the template's start action bar buttons of those spells take the race's first active racial (Read
+Ley Line for the Eredar) or go.
 
 `bleakhold_races_content_masks.sql` is optional. It lets the new races take the quests and use the items of their
 faction race, whose start zone they share: `quest_template.AllowableRaces`, `item_template.AllowableRace`
@@ -227,7 +237,7 @@ Some race handling is in AzerothCore's code, not its data, and needs a module or
 | `name`, `names` | Name for every locale; `names` overrides single locales (`enUS`, `koKR`, `frFR`, `deDE`, `zhCN`, `zhTW`, `esES`, `esMX`, `ruRU`) |
 | `name_female`, `name_male` | Gendered names. `null`: the race's name wherever the template has a gendered name (German, French, ...), empty elsewhere |
 | `client_file_string` | 1-13 letters or digits; names portraits, corpse skeletons and Lua race tokens (`UnitRace`) |
-| `template_race` | The race cloned for looks, sounds, racials and classes |
+| `template_race` | The race cloned for looks, sounds and classes, and its racials unless `racials` drops them |
 | `faction`, `faction_race` | `alliance` or `horde`, and a playable race of that faction for the faction template, reputations and content masks |
 | `faction_template` | A FactionTemplate id instead of the faction race's |
 | `classes` | `null` for the template's classes, or a subset of them. Class 10 (Monk) is refused |
@@ -236,8 +246,98 @@ Some race handling is in AzerothCore's code, not its data, and needs a module or
 | `cinematic_sequence_id` | Intro cinematic, 0 for none |
 | `start`, `death_knight_start` | Start positions (`map`, `zone`, `x`, `y`, `z`, `o`) for `playercreateinfo` |
 | `stats` | `null` to copy the template's `player_race_stats`, or `strength` ... `spirit` |
+| `racials.drop_template_skill_lines` | SkillLine ids of the template's racial skill lines the race does not get (756 Racial - Blood Elf, 760 Racial - Draenei); each must give the template race a SkillRaceClassInfo row. Empty or missing: the template's racials |
+| `racials.spells` | Ids of the race's own racial spells, defined in `spells` |
+| `spells` | New Spell.dbc rows, see "Racials and spells" |
+| `archives.own`, `archives.optional_packs` | RaceForge's archive (`patch-R.MPQ`) and the launcher's optional packs, for `update` |
 | `policy.faction_wide_masks` | The mask rule above (`true`) or plain template copies (`false`) |
 | `policy.reputation_from`, `policy.content_masks_from` | `faction_race` (default) or `template_race` |
+
+## Racials and spells
+
+Each race can leave out the template race's racial skill lines and name its own racial spells (`racials`); `spells`
+defines every new Spell.dbc row. RaceForge builds each row once and writes the Spell.dbc copies and the `spell_dbc`
+SQL from that one row, so the client and the server read the same values; the checks read both back and compare
+them field for field (234 columns).
+
+| Key | Meaning |
+|---|---|
+| `id` | A free spell id (the build stops when the input Spell.dbc has it). Bleakhold: 90500-90509 the racials, 100800-100809 the camping spells of mod-bleakhold-ui; AzerothCore's own `spell_dbc` rows use 100001-100102, mod-transmog-plus 90170-90189 |
+| `name`, `subtext`, `description`, `aura_description` | The texts: name, rank text ("Racial", "Racial Passive"), tooltip and aura tooltip, with the client's `$s1`, `$d` tokens |
+| `icon`, `icon_name` | SpellIcon.dbc id; with `icon_name` the build checks the icon's texture name too |
+| `visual` | SpellVisual.dbc id (0 for none) |
+| `fields` | Every other column by its client name (`attributes`, `durationIndex`, `effect[0]`, `effectAura[0]`, `effectBasePoints[0]`, ...). Columns not given are 0, except procChance 101, equippedItemClass -1 and effectChainAmplitude 1.0, as in Blizzard's rows |
+| `cast_by` | `race` (default): a racial, which a race must list. `server`: a spell no race learns, which a server module casts (Walk on Air, the High Elf glide); it gets its Spell.dbc row only |
+| `server_row` | An SQL file of this repository (relative to its root) that holds the spell's `spell_dbc` row: RaceForge then writes none and checks that row against the Spell.dbc row field for field (columns the INSERT leaves out count as the table's defaults) |
+| `text_locales` | The locale slots that get the texts: all nine by default (like the race names), `["enUS"]` to match a row that fills only that one |
+
+The build checks that the icon, the visual, the duration, the range and the cast time exist (when those DBCs are in
+the input folder) and that no SkillLineAbility row teaches a spell of `spells`: racial spells show in the spellbook's
+General tab, and the server teaches them (mod-bleakhold in bleakserv). The Bleakhold racials:
+
+| Spell | Race | Effect (Spell.dbc) | Icon, visual |
+|---|---|---|---|
+| 90500 Wind Blessed, passive | High Elf | aura 193 (SPELL_AURA_MELEE_SLOW, Berserking's) +3: melee, ranged and cast speed 3% faster | 2837 Ability_Druid_GaleWinds |
+| 90501 Elemental Insight, passive | Eredar | aura 168 (SPELL_AURA_MOD_DAMAGE_DONE_VERSUS, Beast Slaying's) +5%, creature type mask 8 (Elemental) | 2016 Spell_Nature_ElementalAbsorption |
+| 90502 Read Ley Line | Eredar | instant, 2 min cooldown, off the global cooldown, castable while sitting; auras 88 and 110 (mana) +100% for 30 s; mod-bleakhold makes it 2 min when cast while resting | 2158 Spell_Arcane_StudentOfMagic; visual 4279 (Mana Tide's: a blue splash and glowing hands, then a mana swirl at the feet) |
+| 100800 Walk on Air (server-cast) | High Elf glide (mod-bleakhold-ui) | aura 105 feather fall, 10 s; its `spell_dbc` row is `Server/mod-bleakhold-ui/data/sql/db-world/02_bleakhold_walk_on_air.sql` | 1931 Spell_Nature_EyeOfTheStorm; visual 7370 (Magic Wings' wings) |
+
+## Updating a live realm (`raceforge.py update`)
+
+`build` starts from stock DBCs and refuses tables that already hold the new races. A realm that already runs them
+takes the racials (and any later change to `spells` or `racials`) with `update`, which works like Tools/MapForge's DBC
+placement and reuses its archive code (`Tools/MapForge/dbc/patches.py`):
+
+- for SkillRaceClassInfo, SkillLineAbility and Spell, and for every combination of the launcher's optional packs
+  (`archives.optional_packs`: with and without the HD pack), it finds the copy the client reads today: the archive that
+  sorts last among those holding the file;
+- it forges the change into that copy (clears the new races' bits on the dropped skill lines, adds the spells, or
+  replaces an earlier version of the same spell; an id that holds any other spell stops it) and rebuilds that archive
+  with every other file kept. Players with and without a pack each keep the copy they load today, plus the change;
+- where no patch holds a table, the stock copy from `--dbc` gets the change and goes into `archives.own` (patch-R, or
+  the realm's file of that name in another case, such as `Patch-R.MPQ`). Every player loads that archive, so when only
+  a pack archive holds the table and `archives.own` sorts after it (the HD pack's patch-A to patch-P sort before
+  patch-R), the update stops instead of hiding the pack's copy: add the table to a patch every player loads, or set
+  `archives.own` to a patch outside every pack that sorts below the pack archive. It also stops when `archives.own`
+  is itself in a pack, which the players without it would not load;
+- it never writes into the patch folder: the rebuilt archives go to `--out/client`. Running it again on the updated
+  patches changes nothing ("already up to date").
+
+On the VPS (the realm's patches in `/srv/bleakhold-launcher/patches`, bleak in `/root/bleak`, bleakserv in
+`/root/bleakserv`):
+
+```sh
+cd /root/bleak/Tools/RaceForge
+python3 -I raceforge.py update --patches /srv/bleakhold-launcher/patches --dbc <the server's data/dbc> \
+    --out /root/raceforge-racials \
+    --server-sql /root/bleakserv/data/sql/updates/pending_db_world/<the racials rev file>.sql
+```
+
+The exit code is 0 when every check passed; `report.txt` says, per table and pack combination, which archive was
+merged (that is the patch letter it goes in). Then:
+
+1. Client first: put every archive of `/root/raceforge-racials/client/` into the patch folder, replacing the file of
+   the same name (upload under another name, then `mv` it into place). Then publish at once (the hourly run at :17
+   can come after the server update) and wait for `Published build ...`:
+   ```sh
+   bash /root/bleakserv/deploy/launcher/publish.sh
+   ```
+   Players get the archives once their launcher has updated the game and they restart it: give them time before
+   step 2, as bleakserv's `deploy/README.md` release steps do.
+2. Server: the world rows are bleakserv's pending_db_world file (`server/sql/bleakhold_racials.sql` is the same SQL;
+   `--server-sql` compares them field for field) and the code is mod-bleakhold's `bh_racials.cpp`, committed and
+   pushed in bleakserv (its deploy script deploys the last commit). Check, then update:
+   ```sh
+   cd /root/bleakserv && git pull && bash deploy/update-bleakhold-ui.sh --check
+   bash deploy/update-bleakhold-ui.sh
+   ```
+   The check must list the racials `rev_*.sql` as `new`, mod-bleakhold's `bh_racials.cpp`, `bh_racials_rules.h` and
+   `mod_bleakhold_loader.cpp`, and the new settings `Bleakhold.Racials.Enable` and
+   `Bleakhold.Racials.ReadLeyLine.RestedSec` (`config: mod_bleakhold.conf: ... new setting(s)`). The update copies
+   them to the server, rebuilds the world server and `ac-db-import` images and restarts the world server, after
+   `ac-db-import` has applied the SQL. A plain `docker compose restart ac-worldserver` applies and builds none of it
+   (bleakserv's `deploy/README.md`). `data/dbc` can stay as it is (the rows override it by id); `server/dbc` holds
+   the merged copies if you want it in sync anyway.
 
 ## Checks
 
@@ -254,7 +354,9 @@ Some race handling is in AzerothCore's code, not its data, and needs a module or
   for both sexes;
 - the faction language, the mask rule in every mask, helmets and reputations;
 - CharSections sorted, NameGen contiguous, no Pandaren race and no Monk class anywhere;
-- with `--mpq`, the archive against the client reader's rules and its files against the written DBCs.
+- with `--mpq`, the archive against the client reader's rules and its files against the written DBCs;
+- no new race bit on a dropped template racial skill line; every spell row exactly as races.json describes it, what it
+  points at present, its `spell_dbc` row (RaceForge's SQL or its `server_row` file) equal field for field.
 
 ## Tests
 
@@ -268,6 +370,13 @@ They also re-derive `rflib/schemas.py` from `WoW/Source/DB/Rec` and parse every 
 `s_numColumns`/`s_rowSize`. They check that the mask rule gives the same answer in Python and in the generated SQL,
 and run the SQL against a model of the world database in SQLite. `test_art_names.py` checks the art archive names:
 the default against `taken_patches.json` and the client's order, the refusal, `--patches-dir`, `--art-letters` and
-`--force-letters`.
+`--force-letters`. `test_racials.py` covers `racials` and `spells` (the config, the rows and their SQL, the refusals,
+a tampered SQL row) and `update` on made-up realms: RaceForge's earlier patch-R only, Spell.dbc in a later realm patch
+with a custom row, an optional pack with its own copy, a pack archive below patch-R as the only holder (refused) and
+one above it, the realm's archive spelled `Patch-R.MPQ`, a bad spell field, a taken id, a realm without the races,
+the SQL on a model of the world database (run twice) and against bleakserv's linter. With a bleakserv checkout next
+to this repository it
+also compares the server's `spell_dbc` columns, the pending world-database file and mod-bleakhold's racial table with
+races.json.
 
 After a change to the Rec classes, regenerate the layouts with `py -3 -I Tools\RaceForge\raceforge.py schemas --write`.

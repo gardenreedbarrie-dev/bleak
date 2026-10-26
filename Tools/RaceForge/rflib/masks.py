@@ -5,10 +5,10 @@ FactionHasReputationForPlayer, TalentInfo, DanceStudio; RaceMgr on the server); 
 left alone. HelmetGeosetVisData is the exception: CCharacterComponent::AddHelm tests 1 << race.
 
 A new race normally gets its bit wherever its template race has one (Blood Elf for High Elf, Draenei for Eredar), so
-it keeps the template's racials, its own language and its class skills. When the new race sits on the other faction
-than its template, masks that list exactly every playable race of one faction (Language: Common, faction mounts,
-faction-wide spells) follow the new race's faction instead: High Elf gets Common, not Orcish. Masks that list every
-playable race get the bit in any case.
+it keeps the template's language and class skills (and its racials, unless races.json drops the template's racial
+skill lines: forge.is_dropped_row). When the new race sits on the other faction than its template, masks that list
+exactly every playable race of one faction (Language: Common, faction mounts, faction-wide spells) follow the new
+race's faction instead: High Elf gets Common, not Orcish. Masks that list every playable race get the bit in any case.
 """
 
 from __future__ import annotations

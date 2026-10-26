@@ -18,7 +18,7 @@ for path in (TOOL_DIR, MPQPACK_DIR):
     if path not in sys.path:
         sys.path.insert(0, path)
 
-from rflib import schema_access  # noqa: E402
+from rflib import schema_access, spells as spellmod  # noqa: E402
 from rflib.dbc import DbcTable, to_signed  # noqa: E402
 from tests import synth  # noqa: E402
 
@@ -122,8 +122,11 @@ class PipelineTests(unittest.TestCase):
         self.assertFalse(has(synth.SKILL_ORCISH, HIGH_ELF_BIT))
         self.assertTrue(has(synth.SKILL_THALASSIAN, HIGH_ELF_BIT))
         self.assertTrue(has(synth.SKILL_DRAENEI_LANGUAGE, EREDAR_BIT))
-        self.assertTrue(has(synth.SKILL_RACIAL_BLOODELF, HIGH_ELF_BIT))
-        self.assertTrue(has(synth.SKILL_RACIAL_DRAENEI, EREDAR_BIT))
+        # races.json drops the template racials: no bit in Racial - Blood Elf (756) or Racial - Draenei (760)
+        self.assertFalse(has(synth.SKILL_RACIAL_BLOODELF, HIGH_ELF_BIT))
+        self.assertFalse(has(synth.SKILL_RACIAL_DRAENEI, EREDAR_BIT))
+        self.assertEqual(by_skill[synth.SKILL_RACIAL_BLOODELF], 1 << 9)
+        self.assertEqual(by_skill[synth.SKILL_RACIAL_DRAENEI], 1 << 10)
         self.assertTrue(has(synth.SKILL_SWORDS, HIGH_ELF_BIT) and has(synth.SKILL_SWORDS, EREDAR_BIT))
         self.assertTrue(has(synth.SKILL_CROSSBOWS, EREDAR_BIT) and not has(synth.SKILL_CROSSBOWS, HIGH_ELF_BIT))
         self.assertTrue(has(synth.SKILL_SHAMAN, EREDAR_BIT))
@@ -137,6 +140,8 @@ class PipelineTests(unittest.TestCase):
         self.assertTrue(by_spell[2825] & EREDAR_BIT and not by_spell[2825] & HIGH_ELF_BIT)  # Horde-wide spell
         self.assertTrue(by_spell[50000] & EREDAR_BIT and not by_spell[50000] & HIGH_ELF_BIT)  # excluded for the Horde
         self.assertEqual(by_spell[50001], 0)
+        self.assertEqual(by_spell[28730], 1 << 9)  # the Blood Elf racial stays the Blood Elf's
+        self.assertEqual(by_spell[28880], 1 << 10)
 
         factions = read(self.out, "Faction")
         rows = factions.by_id()
@@ -248,6 +253,8 @@ class PipelineTests(unittest.TestCase):
             INSERT INTO mail_level_reward VALUES (20, 1101, 1, 1), (20, 690, 2, 2);
             INSERT INTO conditions VALUES (1, 16, 1101), (1, 16, 690), (2, 15, 1101);
         """)
+        types = {"s": "TEXT", "f": "REAL"}
+        db.execute("CREATE TABLE spell_dbc (" + ", ".join(f"{n} {types.get(k, 'INT')}" for n, k in spellmod.SERVER_SPELL_COLUMNS) + ", PRIMARY KEY (ID))")
 
         def run(filename):
             with open(os.path.join(self.out, "server", "sql", filename), encoding="utf-8") as f:
@@ -269,12 +276,23 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(starts[2], (0, 12))  # Northshire
             self.assertEqual(starts[6], (609, 4298))  # Ebon Hold
             self.assertEqual(db.execute("SELECT map, zone FROM playercreateinfo WHERE race = 23 AND class = 7").fetchone(), (1, 14))  # Valley of Trials
-            self.assertEqual(sorted(db.execute("SELECT class, button, action FROM playercreateinfo_action WHERE race = 22")), [(2, 0, 6603), (2, 1, 28730)])
+            # the template's racial button goes for the High Elf, and takes Read Ley Line for the Eredar
+            self.assertEqual(sorted(db.execute("SELECT class, button, action FROM playercreateinfo_action WHERE race = 22")), [(2, 0, 6603)])
+            self.assertEqual(sorted(db.execute("SELECT class, button, action, type FROM playercreateinfo_action WHERE race = 23")), [(7, 0, 6603, 0), (7, 3, 90502, 0)])
 
-            self.assertEqual(skills(HIGH_ELF_BIT), [98, 137, 594, 756])  # Common, Thalassian, all-race Holy, racial
-            self.assertEqual(skills(EREDAR_BIT), [109, 226, 594, 759, 760])  # Orcish, Crossbows, Holy, Draenei, racial
+            self.assertEqual(skills(HIGH_ELF_BIT), [98, 137, 594])  # Common, Thalassian, all-race Holy; no Blood Elf racial
+            self.assertEqual(skills(EREDAR_BIT), [109, 226, 594, 759])  # Orcish, Crossbows, Holy, Draenei; no Draenei racial
             self.assertEqual(sorted(db.execute("SELECT TotemID, ModelID FROM player_totem_model WHERE RaceID = 23")), [(1, 19074), (2, 19073)])
-            self.assertEqual(db.execute("SELECT COUNT(*) FROM playercreateinfo_skills").fetchone()[0], 9 + 4 + 5)
+            self.assertEqual(db.execute("SELECT COUNT(*) FROM playercreateinfo_skills").fetchone()[0], 9 + 3 + 4)
+            self.assertEqual(sorted(db.execute("SELECT racemask, classmask, Spell FROM playercreateinfo_spell_custom")),
+                             [(HIGH_ELF_BIT, 0, 90500), (EREDAR_BIT, 0, 90501), (EREDAR_BIT, 0, 90502)])
+            # the racials' spell_dbc rows; Walk on Air's belongs to mod-bleakhold-ui's own SQL
+            rows = {r[0]: r for r in db.execute("SELECT ID, Name_Lang_enUS, NameSubtext_Lang_enUS, EffectAura_1, EffectBasePoints_1, EffectMiscValue_1, "
+                                                "EffectAura_2, DurationIndex, RecoveryTime, SpellIconID, SpellVisualID_1, EffectChainAmplitude_1 FROM spell_dbc")}
+            self.assertEqual(sorted(rows), [90500, 90501, 90502])
+            self.assertEqual(rows[90500][1:7], ("Wind Blessed", "Racial Passive", 193, 2, 0, 0))
+            self.assertEqual(rows[90501][1:7], ("Elemental Insight", "Racial Passive", 168, 4, 8, 0))
+            self.assertEqual(rows[90502][1:], ("Read Ley Line", "Racial", 88, 99, 0, 110, 9, 120000, 2158, 4279, 1.0))
 
         run("bleakhold_races_content_masks.sql")
         quests = dict(db.execute("SELECT ID, AllowableRaces FROM quest_template"))
@@ -300,6 +318,7 @@ class PipelineTests(unittest.TestCase):
 
         run("bleakhold_races_remove.sql")
         self.assertEqual(skills(HIGH_ELF_BIT), [])
+        self.assertEqual(db.execute("SELECT COUNT(*) FROM spell_dbc").fetchone()[0], 0)
         self.assertEqual(db.execute("SELECT COUNT(*) FROM playercreateinfo WHERE race IN (22, 23)").fetchone()[0], 0)
         self.assertEqual(dict(db.execute("SELECT ID, AllowableRaces FROM quest_template")), {1: 0, 2: 1101, 3: 690, 4: 1, 5: 2, 6: 512, 7: 1791})
         self.assertEqual(dict(db.execute("SELECT entry, AllowableRace FROM item_template"))[1], -1)

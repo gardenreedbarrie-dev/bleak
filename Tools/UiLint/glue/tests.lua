@@ -330,6 +330,10 @@ local function racesScenario(count, female)
             local c = CharacterCreateRaceIcon._coords
             check(c[1] == RACE_ICON_TCOORDS[proxy .. "_" .. sexName][1] and c[3] == RACE_ICON_TCOORDS[proxy .. "_" .. sexName][3], r.name .. " portrait icon")
             check(MOCK.races.background:find(r.file == "HighElf" and "UI_BloodElf" or "UI_Draenei") ~= nil, r.name .. " background scene")
+            local abilities = CharacterCreateRaceAbilityText:GetText() or ""
+            local own = r.file == "HighElf" and { "Wind Blessed", "Walk on Air" } or { "Elemental Insight", "Read Ley Line" }
+            check(abilities:find(own[1], 1, true) and abilities:find(own[2], 1, true), r.name .. " racials listed: " .. abilities)
+            check(not abilities:find("Stock racial", 1, true), r.name .. " lists none of the template race's racials")
         end
     end
     if count >= 13 then

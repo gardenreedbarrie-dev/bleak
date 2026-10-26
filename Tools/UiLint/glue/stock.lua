@@ -296,6 +296,7 @@ end
 CharacterCreateRaceIcon = CharacterCreate:CreateTexture("CharacterCreateRaceIcon")
 CharacterCreateRaceLabel = CharacterCreate:CreateFontString("CharacterCreateRaceLabel")
 CharacterCreateRaceText = CharacterCreate:CreateFontString("CharacterCreateRaceText")
+CharacterCreateRaceAbilityText = CharacterCreate:CreateFontString("CharacterCreateRaceAbilityText")
 RACE_ICON_TCOORDS = {
     HUMAN_MALE = { 0, 0.125, 0, 0.25 }, DWARF_MALE = { 0.125, 0.25, 0, 0.25 }, GNOME_MALE = { 0.25, 0.375, 0, 0.25 }, NIGHTELF_MALE = { 0.375, 0.5, 0, 0.25 },
     TAUREN_MALE = { 0, 0.125, 0.25, 0.5 }, SCOURGE_MALE = { 0.125, 0.25, 0.25, 0.5 }, TROLL_MALE = { 0.25, 0.375, 0.25, 0.5 }, ORC_MALE = { 0.375, 0.5, 0.25, 0.5 },
@@ -306,6 +307,7 @@ RACE_ICON_TCOORDS = {
 }
 for _, f in ipairs({ "HUMAN", "DWARF", "GNOME", "NIGHTELF", "TAUREN", "SCOURGE", "TROLL", "ORC", "BLOODELF", "DRAENEI" }) do
     _G["RACE_INFO_" .. f] = "Stock text for " .. f
+    _G["ABILITY_INFO_" .. f .. "1"] = "Stock racial of " .. f
 end
 function SetButtonDesaturated(button, desaturated) if not button then return end local icon = button:GetNormalTexture(); if icon then icon:SetDesaturated(desaturated) end end
 function GetFlavorText(tag, sex)
@@ -348,6 +350,10 @@ function SetCharacterRace(id)
     local coords = RACE_ICON_TCOORDS[fileString .. "_" .. gender]
     CharacterCreateRaceIcon:SetTexCoord(coords[1], coords[2], coords[3], coords[4])
     CharacterCreateRaceText:SetText(GetFlavorText("RACE_INFO_" .. string.upper(fileString), GetSelectedSex()) .. "|n|n")
+    -- the racial abilities: ABILITY_INFO_<FILE>1, 2, ... up to the first missing one, above the description
+    local abilities, n = {}, 1
+    while _G["ABILITY_INFO_" .. fileString .. n] do abilities[#abilities + 1] = _G["ABILITY_INFO_" .. fileString .. n]; n = n + 1 end
+    CharacterCreateRaceAbilityText:SetText(#abilities > 0 and table.concat(abilities, "\n\n") .. "\n\n" or "")
     local backdropColor = FACTION_BACKDROP_COLOR_TABLE[faction]
     for _, value in pairs(FRAMES_TO_BACKDROP_COLOR) do _G[value]:SetBackdropColor(backdropColor[4], backdropColor[5], backdropColor[6]) end
     SetBackgroundModel(CharacterCreate, GetCreateBackgroundModel())

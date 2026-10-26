@@ -7,12 +7,15 @@ from dataclasses import dataclass, field
 
 from . import masks as maskrules
 from . import schema_access
+from . import spells as spellmod
 from .config import ALLIANCE_COLUMN, LOCALES, MONK_CLASS_ID, PANDAREN_RACE_IDS, TEAM_LANGUAGE, Config
 from .dbc import DbcError, DbcTable, to_signed
-from .forge import CHAR_SECTIONS_KEY, RACE_COLUMN, RACE_ROW_TABLES, READ_ONLY_TABLES, SMART_MASKS, find_dbc
+from .forge import (CHAR_SECTIONS_KEY, RACE_COLUMN, RACE_ROW_TABLES, READ_ONLY_TABLES, SKILL_LINE_COLUMN, SMART_MASKS, SPELL_TABLES,
+                    find_dbc, is_dropped_row, spell_reference_problems)
 
 LANGUAGE_COMMON = 98
 LANGUAGE_ORCISH = 109
+SKILL_FLAG_UNLEARNABLE = 0x20
 
 
 @dataclass
@@ -37,11 +40,14 @@ class Validation:
         return [c for c in self.checks if c.status == "FAIL"]
 
 
-def load_output(out_dir: str, stock_dir: str) -> tuple[dict[str, DbcTable], dict[str, DbcTable], list[str]]:
+def load_output(out_dir: str, stock_dir: str, skip: tuple[str, ...] = ()) -> tuple[dict[str, DbcTable], dict[str, DbcTable], list[str]]:
     """(stock tables, result tables, names written): result = the written file, else the stock one."""
     stock, result, written = {}, {}, []
 
     for name in schema_access.names():
+        if name in skip:
+            continue
+
         schema = schema_access.get(name)
         stock_path = find_dbc(stock_dir, name)
 
@@ -65,7 +71,7 @@ def validate(out_dir: str, stock_dir: str, config: Config, mpq_path: str | None 
 
     # --- every written file loads with the client's layout, and the server copy is identical ---
     try:
-        stock, result, written = load_output(out_dir, stock_dir)
+        stock, result, written = load_output(out_dir, stock_dir, () if config.spell_ids() else SPELL_TABLES)
     except DbcError as e:
         v.add("FAIL", "written DBCs load with the client's column count and row size", str(e))
         return v
@@ -194,6 +200,7 @@ def validate(out_dir: str, stock_dir: str, config: Config, mpq_path: str | None 
         v.expect(contiguous(result["NameGen"], ("raceID", "sex")), "NameGen rows are contiguous per race and sex")
 
     check_no_pandaren_or_monk(v, result)
+    check_racial_spells(v, result, config, out_dir)
 
     for name in written:
         if name in READ_ONLY_TABLES:
@@ -302,12 +309,14 @@ def check_masks(v: Validation, label: str, race, result: dict[str, DbcTable], st
     skills = result["SkillRaceClassInfo"]
 
     def has_skill(skill_id: int) -> bool | None:
+        # Rows with SKILL_FLAG_UNLEARNABLE (0x20) let a race learn the other faction's language later (stock 3.3.5a
+        # has one for Orcish with every Alliance race, for instance); the race speaks the languages of the others.
         rows = [r for r in skills.rows if skills.get(r, "skillID") == skill_id]
 
         if not rows:
             return None
 
-        return any(not skills.get(r, "raceMask") or skills.get(r, "raceMask") & race.bit for r in rows)
+        return any(not skills.get(r, "raceMask") or skills.get(r, "raceMask") & race.bit for r in rows if not skills.get(r, "flags") & SKILL_FLAG_UNLEARNABLE)
 
     v.expect(any(skills.get(r, "raceMask") & race.bit for r in skills.rows), f"{label}: SkillRaceClassInfo has rows for the race")
     common, orcish = has_skill(LANGUAGE_COMMON), has_skill(LANGUAGE_ORCISH)
@@ -331,12 +340,23 @@ def check_masks(v: Validation, label: str, race, result: dict[str, DbcTable], st
         for row in table.rows:
             mask = row[column]
             before = mask & ~race.bit
-            expected = maskrules.wants_bit(before, race, stock_masks, race.template_race, config.policy.faction_wide_masks) or (mask == 0xFFFFFFFF)
+            expected = (maskrules.wants_bit(before, race, stock_masks, race.template_race, config.policy.faction_wide_masks)
+                        and not is_dropped_row(name, table, row, race)) or (mask == 0xFFFFFFFF)
 
             if bool(mask & race.bit) != expected and mask:
                 wrong += 1
 
         v.expect(wrong == 0, f"{label}: {name}.{field_name} bits follow the mask rule", f"{wrong} masks differ")
+
+    for skill in race.drop_skill_lines:
+        holders = []
+
+        for name in SKILL_LINE_COLUMN:
+            table = result[name]
+            holders += [f"{name} row {to_signed(r[0])}" for r in table.rows
+                        if table.get(r, SKILL_LINE_COLUMN[name]) == skill and table.get(r, "raceMask") & race.bit and table.get(r, "raceMask") != 0xFFFFFFFF]
+
+        v.expect(not holders, f"{label}: no bit in the template racial skill line {skill} (SkillRaceClassInfo, SkillLineAbility)", ", ".join(holders[:5]))
 
     helmets = result.get("HelmetGeosetVisData")
 
@@ -351,6 +371,92 @@ def check_masks(v: Validation, label: str, race, result: dict[str, DbcTable], st
     mismatched = sum(1 for row in faction.rows for c in columns
                      if row[c] not in (0, 0xFFFFFFFF) and bool(row[c] & race.bit) != bool(row[c] & maskrules.race_bit(source)))
     v.expect(mismatched == 0, f"{label}: starting reputations are those of race {source}", f"{mismatched} masks differ")
+
+
+def spell_row_differences(spell_table: DbcTable, row: list[int], expected: list[int], expected_table: DbcTable) -> list[str]:
+    """Columns where a written Spell.dbc row differs from the row RaceForge builds from races.json."""
+    differences = []
+
+    for i, column in enumerate(spell_table.schema.columns):
+        if column.is_string:
+            a, b = spell_table.string_at(row[i]), expected_table.string_at(expected[i])
+        else:
+            a, b = row[i], expected[i]
+
+        if a != b:
+            differences.append(f"{column.name}: {a!r} instead of {b!r}")
+
+    return differences
+
+
+def check_racial_spells(v: Validation, result: dict[str, DbcTable], config: Config, out_dir: str):
+    """The spells of races.json: Spell.dbc holds exactly the rows races.json describes, what they point at exists, and
+    the server SQL (RaceForge's, or the file of a spell's server_row) holds the same rows field for field."""
+    spell_ids = config.spell_ids()
+
+    if not spell_ids:
+        return
+
+    spells = result.get("Spell")
+
+    if spells is None:
+        v.add("FAIL", "Spell.dbc holds the racial spells", "Spell.dbc not found")
+        return
+
+    by_id = spells.by_id()
+    scratch = DbcTable.empty(spells.schema)
+    sql_text = None
+    sql_path = os.path.join(out_dir, "server", "sql", "bleakhold_races.sql")
+
+    if os.path.isfile(sql_path):
+        with open(sql_path, encoding="utf-8") as f:
+            sql_text = f.read()
+
+    sql_rows = spellmod.parse_sql_rows(sql_text, "spell_dbc") if sql_text is not None else {}
+
+    for spell_id in spell_ids:
+        spell = config.spells[spell_id]
+        label = f"{'racial' if spell.cast_by == 'race' else 'server-cast'} spell {spell_id} {spell.name}"
+        row = by_id.get(spell_id)
+
+        if row is None:
+            v.add("FAIL", f"{label}: in Spell.dbc")
+            continue
+
+        expected = spellmod.build_row(scratch, spell)
+        differences = spell_row_differences(spells, row, expected, scratch)
+        v.expect(not differences, f"{label}: the Spell.dbc row is the one races.json describes ({'passive' if spell.passive else 'active'})", "; ".join(differences[:5]))
+        problems, skipped = spell_reference_problems(spell, row, result)
+        v.expect(not problems, f"{label}: icon, visual, duration, range and cast time exist", "; ".join(problems))
+
+        for item in skipped:
+            v.add("SKIP", item)
+
+        if spell.server_row:
+            status, detail = spellmod.server_row_check(spells, row, spell)
+            v.add(status, f"{label}: the spell_dbc row of {spell.server_row} matches Spell.dbc field for field", detail)
+
+            if sql_text is not None:
+                v.expect(spell_id not in sql_rows, f"{label}: no spell_dbc row in bleakhold_races.sql ({spell.server_row} owns it)")
+        elif sql_text is not None:
+            sql_row = sql_rows.get(spell_id)
+
+            if sql_row is None:
+                v.add("FAIL", f"{label}: spell_dbc row in bleakhold_races.sql")
+            else:
+                differences = spellmod.compare_row(spells, row, sql_row)
+                v.expect(not differences, f"{label}: spell_dbc row matches Spell.dbc field for field ({len(spellmod.SERVER_SPELL_COLUMNS)} columns)", "; ".join(differences[:5]))
+
+        owners = [r for r in config.races if spell_id in r.racial_spells]
+
+        if spell.cast_by == "race":
+            v.expect(bool(owners), f"{label}: belongs to a race")
+        else:
+            v.expect(not owners, f"{label}: no race learns it (the server casts it)")
+
+    abilities = result["SkillLineAbility"]
+    taught = sorted({abilities.get(r, "spell") for r in abilities.rows} & set(spell_ids))
+    v.expect(not taught, "the spells of races.json are in no SkillLineAbility row (racials show under General; the server teaches them)", f"{taught}")
 
 
 def contiguous(table: DbcTable, key_fields: tuple[str, ...]) -> bool:

@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 
 from . import masks as maskrules
 from . import schema_access
-from .config import ALLIANCE_COLUMN, TEAM_LANGUAGE, Config, RaceConfig
+from . import spells as spellmod
+from .config import ALLIANCE_COLUMN, TEAM_LANGUAGE, Config, RaceConfig, SpellDef
 from .dbc import DbcError, DbcTable, to_signed
 
 # Without these the new races cannot be created or drawn: refuse to run when one is missing.
@@ -41,7 +42,21 @@ OPTIONAL_TABLES = (
     "SoundFilter",
 )
 
-READ_ONLY_TABLES = ("FactionTemplate", "FactionGroup", "ChrClasses", "CreatureDisplayInfo", "CreatureModelData", "ItemDisplayInfo", "SoundFilter")
+# Read only when races.json defines racial spells: Spell.dbc gets their rows, the others check what the rows point at.
+SPELL_TABLES = ("Spell", "SpellIcon", "SpellVisual", "SpellDuration", "SpellRange", "SpellCastTimes")
+
+READ_ONLY_TABLES = ("FactionTemplate", "FactionGroup", "ChrClasses", "CreatureDisplayInfo", "CreatureModelData", "ItemDisplayInfo", "SoundFilter",
+                    "SpellIcon", "SpellVisual", "SpellDuration", "SpellRange", "SpellCastTimes")
+
+# The racial skill line column of the mask tables: a race's dropped template skill lines get no bit there.
+SKILL_LINE_COLUMN = {"SkillRaceClassInfo": "skillID", "SkillLineAbility": "skillLine"}
+
+# Spell.dbc columns a racial spell points at, and the table that must hold the id (when it is given).
+SPELL_REFERENCES = (
+    ("durationIndex", "SpellDuration"),
+    ("rangeIndex", "SpellRange"),
+    ("castingTimeIndex", "SpellCastTimes"),
+)
 
 # Tables keyed by race (column in RACE_COLUMN): each new race gets a copy of its template race's rows.
 RACE_ROW_TABLES = (
@@ -90,6 +105,89 @@ class RaceSummary:
     female_display: int = 0
     faction_template: int = 0
     start_outfit_items: list[int] = field(default_factory=list)
+    # Spells of the template's racial skill lines the race does not get (SkillLineAbility), for the SQL.
+    dropped_spells: list[int] = field(default_factory=list)
+
+
+def is_dropped_row(table_name: str, table: DbcTable, row: list[int], race: RaceConfig) -> bool:
+    """Whether a SkillRaceClassInfo / SkillLineAbility row belongs to a template racial skill line the race drops."""
+    column = SKILL_LINE_COLUMN.get(table_name)
+    return bool(column and race.drop_skill_lines and table.get(row, column) in race.drop_skill_lines)
+
+
+def dropped_spells(skill_line_ability: DbcTable, race: RaceConfig) -> list[int]:
+    """Every spell of the race's dropped skill lines (whatever the row's race mask: a mask of 0 means anyone with the
+    skill line, and the race no longer has it)."""
+    return sorted({skill_line_ability.get(r, "spell") for r in skill_line_ability.rows if is_dropped_row("SkillLineAbility", skill_line_ability, r, race)})
+
+
+def drop_problems(tables: dict[str, DbcTable], race: RaceConfig) -> list[str]:
+    """A dropped skill line must be one of the template race's: SkillRaceClassInfo gives it to the template race."""
+    skills = tables["SkillRaceClassInfo"]
+    template_bit = maskrules.race_bit(race.template_race)
+    problems = []
+
+    for skill in race.drop_skill_lines:
+        rows = [r for r in skills.rows if skills.get(r, "skillID") == skill]
+
+        if not any(skills.get(r, "raceMask") & template_bit for r in rows):
+            problems.append(f"{race.name} ({race.id}): racials.drop_template_skill_lines {skill} is not a skill line of template race "
+                            f"{race.template_race} in SkillRaceClassInfo")
+
+    return problems
+
+
+def build_spell_rows(config: Config, spell_table: DbcTable) -> list[list[int]]:
+    """The Spell.dbc rows of every spell of races.json, in id order (their strings go into spell_table's string block)."""
+    return [spellmod.build_row(spell_table, config.spells[spell_id]) for spell_id in config.spell_ids()]
+
+
+def spell_reference_problems(spell: SpellDef, row: list[int], tables: dict[str, DbcTable]) -> tuple[list[str], list[str]]:
+    """(problems, skipped checks) for what a racial spell row points at: its icon (and the icon's texture name), its
+    visual, duration, range and cast time."""
+    problems, skipped = [], []
+    spell_table = tables["Spell"]
+    label = f"spell {spell.id} ({spell.name})"
+    icons = tables.get("SpellIcon")
+
+    if spell.icon:
+        if icons is None:
+            skipped.append(f"{label}: icon {spell.icon} (SpellIcon.dbc not given)")
+        else:
+            icon_row = icons.by_id().get(spell.icon)
+
+            if icon_row is None:
+                problems.append(f"{label}: SpellIcon.dbc has no icon {spell.icon}")
+            elif spell.icon_name:
+                texture = icons.get_str(icon_row, "textureFilename").replace("/", "\\").split("\\")[-1]
+
+                if texture.lower() != spell.icon_name.lower():
+                    problems.append(f"{label}: icon {spell.icon} is {texture} in SpellIcon.dbc, races.json says {spell.icon_name}")
+    else:
+        problems.append(f"{label}: no icon (the client draws an empty square)")
+
+    if spell.visual:
+        visuals = tables.get("SpellVisual")
+
+        if visuals is None:
+            skipped.append(f"{label}: visual {spell.visual} (SpellVisual.dbc not given)")
+        elif spell.visual not in visuals.ids():
+            problems.append(f"{label}: SpellVisual.dbc has no visual {spell.visual}")
+
+    for column, table_name in SPELL_REFERENCES:
+        value = spell_table.get(row, column)
+
+        if not value:
+            continue
+
+        table = tables.get(table_name)
+
+        if table is None:
+            skipped.append(f"{label}: {column} {value} ({table_name}.dbc not given)")
+        elif value not in table.ids():
+            problems.append(f"{label}: {table_name}.dbc has no row {value} ({column})")
+
+    return problems, skipped
 
 
 @dataclass
@@ -131,7 +229,10 @@ class Forge:
     # --- loading ---
 
     def load(self):
-        for name in REQUIRED_TABLES + OPTIONAL_TABLES:
+        # Spell.dbc is large: read the spell tables only when there are racial spells to add.
+        spell_tables = SPELL_TABLES if self.config.spell_ids() else ()
+
+        for name in REQUIRED_TABLES + OPTIONAL_TABLES + spell_tables:
             if name in self.overrides:
                 self.tables[name] = self.overrides[name]
                 continue
@@ -155,7 +256,10 @@ class Forge:
         if missing_required:
             raise ForgeError(f"{self.input_dir}: missing {', '.join(n + '.dbc' for n in missing_required)} (point --dbc at the DBFilesClient folder of your 3.3.5a client)")
 
-        for name in OPTIONAL_TABLES:
+        if spell_tables and "Spell" in self.missing:
+            raise ForgeError(f"{self.input_dir}: missing Spell.dbc, which races.json's spells need")
+
+        for name in OPTIONAL_TABLES + spell_tables:
             if name in self.missing:
                 self.warnings.append(f"{name}.dbc not found: {'not patched' if name not in READ_ONLY_TABLES else 'checks that need it are skipped'}")
 
@@ -210,6 +314,25 @@ class Forge:
                 if extra:
                     raise ForgeError(f"{label}: classes {extra} are not playable by template race {race.template_race} (it has {template_classes}); RaceForge can only keep or drop the template's classes")
 
+            problems = drop_problems(self.tables, race)
+
+            if problems:
+                raise ForgeError("; ".join(problems))
+
+        spell_table = self.tables.get("Spell")
+
+        for spell_id in self.config.spell_ids():
+            existing = spell_table.by_id().get(spell_id) if spell_table is not None else None
+
+            if existing is not None:
+                raise ForgeError(f"spell {spell_id} ({self.config.spells[spell_id].name}): Spell.dbc already has spell {spell_id} "
+                                 f"({spell_table.get_str(existing, 'name[0]')}); give the spell a free id in races.json")
+
+            problems = spellmod.field_problems(spell_table, self.config.spells[spell_id])
+
+            if problems:
+                raise ForgeError(f"spell {spell_id} ({self.config.spells[spell_id].name}): " + "; ".join(problems))
+
     def template_classes(self, template_race: int) -> list[int]:
         base = self.tables["CharBaseInfo"]
         return [base.get(row, "classID") for row in base.rows if base.get(row, "raceID") == template_race]
@@ -234,6 +357,32 @@ class Forge:
 
         for race in self.config.races:
             self.add_mask_bits(race)
+            self.summaries[race.id].dropped_spells = dropped_spells(self.tables["SkillLineAbility"], race)
+
+        self.add_spells()
+
+    def add_spells(self):
+        spell_ids = self.config.spell_ids()
+
+        if not spell_ids:
+            return
+
+        spells = self.tables["Spell"]
+        rows = build_spell_rows(self.config, spells)
+        spells.rows.extend(rows)
+        change = self.change("Spell")
+        change.rows_added += len(rows)
+
+        for spell_id, row in zip(spell_ids, rows):
+            spell = self.config.spells[spell_id]
+            owners = ", ".join(f"{r.name} ({r.id})" for r in self.config.races if spell_id in r.racial_spells) or "the server (cast_by server)"
+            change.notes.append(f"spell {spell_id} {spell.name} ({'passive' if spell.passive else 'active'}, icon {spell.icon}, visual {spell.visual}) for {owners}")
+            problems, skipped = spell_reference_problems(spell, row, self.tables)
+
+            if problems:
+                raise ForgeError("; ".join(problems))
+
+            self.warnings.extend(f"not checked: {s}" for s in skipped)
 
     def add_chr_race(self, race: RaceConfig, summary: RaceSummary):
         races = self.tables["ChrRaces"]
@@ -372,15 +521,20 @@ class Forge:
                 continue
 
             column = table.col(field_name)
-            changed = 0
+            changed = dropped = 0
 
             for row in table.rows:
                 if maskrules.wants_bit(row[column], race, self.faction_masks, race.template_race, policy.faction_wide_masks):
+                    if is_dropped_row(name, table, row, race):
+                        dropped += 1
+                        continue
+
                     row[column] |= race.bit
                     changed += 1
 
             self.change(name).values_changed += changed
-            self.change(name).notes.append(f"race {race.id}: bit 0x{race.bit:X} added to {changed} {field_name} masks")
+            self.change(name).notes.append(f"race {race.id}: bit 0x{race.bit:X} added to {changed} {field_name} masks"
+                                           + (f", left out of {dropped} rows of the dropped racial skill lines {race.drop_skill_lines}" if dropped else ""))
 
         # Reputation: the new race starts with the reputations of the race named by the policy.
         faction = self.tables["Faction"]

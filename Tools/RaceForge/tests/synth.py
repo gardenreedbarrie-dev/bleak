@@ -348,6 +348,41 @@ def build_tables() -> dict[str, bytes]:
         factions.add(id=fid, reputationIndex=fid % 100, **values, **loc("name", f"Faction {fid}"), **loc("description", ""))
     tables["Faction"] = factions.pack()
 
+    # --- spells (racial spells: Spell.dbc rows and what they point at) ---
+    spells = Packer("Spell")
+    for spell_id, name, subtext in ((668, "Language Common", ""), (669, "Language Orcish", ""), (28730, "Synthetic Torrent", "Racial"),
+                                    (28880, "Synthetic Gift", "Racial"), (32182, "Synthetic Alliance Spell", ""), (2825, "Synthetic Horde Spell", ""),
+                                    (50000, "Synthetic Excluded", ""), (50001, "Synthetic Swords", ""), (80000, "Synthetic Last", "")):
+        spells.add(id=spell_id, attributes=0x40 if subtext.endswith("Passive") else 0, castingTimeIndex=1, durationIndex=21, rangeIndex=1,
+                   procChance=101, equippedItemClass=-1, spellIconID=1, schoolMask=1, **{"effect[0]": 6, "effectAura[0]": 4, "effectDieSides[0]": 1},
+                   **loc("name", name, flags=0xFF01FE), **loc("nameSubtext", subtext, flags=0xFF01FE if subtext else 0xFF01FC),
+                   **loc("description", f"Synthetic description {spell_id}.", flags=0xFF01FE), **loc("auraDescription", "", flags=0xFF01FC))
+    tables["Spell"] = spells.pack()
+
+    icons = Packer("SpellIcon")
+    for icon_id, name in ((1, "Synthetic"), (1931, "Spell_Nature_EyeOfTheStorm"), (2016, "Spell_Nature_ElementalAbsorption"), (2158, "Spell_Arcane_StudentOfMagic"),
+                          (2837, "Ability_Druid_GaleWinds")):
+        icons.add(id=icon_id, textureFilename=f"Interface\\Icons\\{name}")
+    tables["SpellIcon"] = icons.pack()
+
+    visuals = Packer("SpellVisual")
+    for visual_id in (1, 4279, 7370):
+        visuals.add(id=visual_id, castKit=visual_id + 1, stateKit=visual_id + 2)
+    tables["SpellVisual"] = visuals.pack()
+
+    durations = Packer("SpellDuration")
+    for duration_id, ms in ((1, 10000), (4, 120000), (9, 30000), (21, -1)):
+        durations.add(id=duration_id, duration=ms, maxDuration=ms)
+    tables["SpellDuration"] = durations.pack()
+
+    ranges = Packer("SpellRange")
+    ranges.add(id=1, **loc("displayName", "Synthetic Self"), **loc("displayNameShort", "Self"))
+    tables["SpellRange"] = ranges.pack()
+
+    cast_times = Packer("SpellCastTimes")
+    cast_times.add(id=1)
+    tables["SpellCastTimes"] = cast_times.pack()
+
     helmets = Packer("HelmetGeosetVisData")
     for i, masks in enumerate((
         (1 << 10, 0, 0, 0, 0, 0, 0),  # hides hair for Blood Elves only
