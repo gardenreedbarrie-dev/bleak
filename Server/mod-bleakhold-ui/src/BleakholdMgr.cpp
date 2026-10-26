@@ -33,7 +33,7 @@ namespace Bleakhold
     namespace
     {
         constexpr char const* TagNames[] = {
-            "Raid Legacy", "Server First", "Season", "Queue", "Record", "Case", "Royale",
+            "Raid Legacy", "Server First", "Season", "Queue", "Record", "Case", "Royale", "War",
         };
         constexpr std::size_t TagCount = sizeof(TagNames) / sizeof(TagNames[0]);
         constexpr uint64_t RunMaxAgeMs = 6ull * 3600 * 1000;
@@ -182,10 +182,12 @@ namespace Bleakhold
         l.royaleIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.RoyaleIntervalMs", 500);
         l.royaleDeployIntervalMs =
             sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.RoyaleDeployIntervalMs", 1000);
+        l.warModeIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.WarModeIntervalMs", 2000);
 
         c.heartbeatMs = 1000 * std::max<uint32_t>(1, sConfigMgr->GetOption<uint32_t>("BleakholdUi.KeyRun.HeartbeatSec", 15));
         c.colorTagsWithoutAddon = sConfigMgr->GetOption<bool>("BleakholdUi.Announce.ColorTagsWithoutAddon", true);
-        char const* const colorKeys[] = { "RaidLegacy", "ServerFirst", "Season", "Queue", "Record", "Case", "Royale" };
+        char const* const colorKeys[] = { "RaidLegacy", "ServerFirst", "Season", "Queue", "Record", "Case", "Royale",
+            "War" };
         static_assert(sizeof(colorKeys) / sizeof(colorKeys[0]) == TagCount, "one colour per tag");
         static_assert(std::tuple_size_v<decltype(c.tagColors)> == TagCount, "one default colour per tag");
         for (std::size_t i = 0; i < c.tagColors.size(); ++i)
@@ -359,12 +361,12 @@ namespace Bleakhold
                 // the camping state follows HELLO when a camping feature is on (section 16)
                 if (_cfg.featureBits & (FeatureCamp | FeatureGlide | FeatureFieldRepair))
                     Refresh(player, Topic::CampState);
-                std::function<void(Player*, Intent const&)> observer;
+                std::vector<std::function<void(Player*, Intent const&)>> observers;
                 {
                     std::lock_guard<std::recursive_mutex> guard(_lock);
-                    observer = _helloObserver;
+                    observers = _helloObservers;
                 }
-                if (observer)
+                for (auto const& observer : observers)
                     observer(player, intent);
                 return;
             }
@@ -456,6 +458,14 @@ namespace Bleakhold
         {
             if (intent.type != IntentType::RoyaleDeploy)
                 Refuse(player, intent, RoyaleErr::Off.code, RoyaleErr::Off.text);
+            return;
+        }
+
+        // War Mode (section 19) is open only while its system has turned feature bit 16384 on (Ui::SetFeature): WARMODE
+        // gets ERR wm_off, whoever handles it.
+        if (intent.type == IntentType::WarMode && !FeatureOn(FeatureWarMode))
+        {
+            Refuse(player, intent, WarModeErr::Off.code, WarModeErr::Off.text);
             return;
         }
 

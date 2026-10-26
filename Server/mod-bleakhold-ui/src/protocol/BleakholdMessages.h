@@ -63,6 +63,8 @@ namespace Bleakhold
         FeatureFieldRepair = 2048,    // blacksmiths repair anywhere (REPAIR, section 16)
         FeatureRoyale = 4096,         // Bleakhold Royale is live (section 17); set at runtime with Ui::SetFeature
         FeatureBgAnnouncer = 8192,    // the battleground kill announcer is live (BGANN, section 18); Ui::SetFeature
+        FeatureWarMode = 16384,       // War Mode is live (WARMODE, WMST, WANTED, section 19); Ui::SetFeature
+        FeatureWorldPvp = 32768,      // World PvP objectives are live (WPZ, WPCAP, WPMAP, section 19); Ui::SetFeature
     };
 
     // One reward line of MPE / RIFTE.
@@ -617,6 +619,189 @@ namespace Bleakhold
     }
 
     // ---------------------------------------------------------------------------------------------
+    // World PvP and War Mode (section 19): WMST WPZ WPCAP WPMAP WANTED WPEV, all unrevisioned. The server decides
+    // everything (who may toggle, every kill verdict, every capture and reward); these are views of its state.
+    // Permille values: control and slider shares are of 1000; u and v are the position on the zone's world map
+    // (0 left / top .. 1000 right / bottom), empty when the zone has no world map of its own. BLEAKHOLD_UI_WORLD_PVP
+    // tells a server module that this API exists.
+    // ---------------------------------------------------------------------------------------------
+#define BLEAKHOLD_UI_WORLD_PVP 1
+    // A faction letter: A Alliance, H Horde, N neutral (objectives only); None is an empty field.
+    enum class WarTeam : char { None = 0, Alliance = 'A', Horde = 'H', Neutral = 'N' };
+    // WMST wantedState and WANTED reason
+    enum class WantedStateId : uint8_t { None = 0, Streak = 1, Bully = 2 };
+    enum class WantedReason : char { Streak = 'S', Bully = 'B' };
+    // WPZ / WPMAP kind of a zone: F Bleak Front (endgame), L Levelling Front, S stock outdoor PvP, W Wintergrasp
+    enum class WarZoneKind : char { None = 0, Front = 'F', Levelling = 'L', Stock = 'S', Wintergrasp = 'W' };
+    // WPZ / WPMAP state of a zone or a Front: 0 dormant, 1 active, 2 ceasefire
+    enum class WarZoneState : uint8_t { Dormant = 0, Active = 1, Ceasefire = 2 };
+    // WPZ O / WPCAP / WPMAP P state of an objective: AzerothCore's ObjectiveStates (OutdoorPvP.h)
+    enum class WarObjectiveState : uint8_t
+    {
+        Neutral = 0, Alliance = 1, Horde = 2, NeutralAllianceChallenge = 3, NeutralHordeChallenge = 4,
+        AllianceHordeChallenge = 5, HordeAllianceChallenge = 6
+    };
+    // WPEV kind
+    enum class WarEventKind : char
+    {
+        Captured = 'C', Neutralised = 'N', UnderAttack = 'A', FrontStart = 'F', FrontEnd = 'E', FrontWarning = 'X',
+        Wanted = 'W', BountyClaimed = 'B', Survived = 'S', Reward = 'R'
+    };
+    // WPEV R why: a counted kill, a capture, a hold tick, a bounty claimed, survived while Wanted, the War Chest
+    enum class WarRewardWhy : char { Kill = 'K', Capture = 'C', Hold = 'H', Bounty = 'B', Survived = 'S', Victory = 'V' };
+    inline constexpr std::size_t WarNameBytes = 48;        // character names (two-word names fit)
+    inline constexpr std::size_t WarPlaceBytes = 40;       // objective and zone names
+    inline constexpr std::size_t MaxWarObjectives = 16;    // WPZ O records
+    inline constexpr std::size_t MaxWarZones = 32;         // WPMAP Z records
+    inline constexpr std::size_t MaxWarPoints = 96;        // WPMAP P records
+    inline constexpr std::size_t MaxWanted = 8;            // WANTED W records
+    inline constexpr std::size_t WarBlockBytes = 24;       // WMST block (a machine code)
+
+    struct WarModeState  // WMST: the player's War Mode
+    {
+        bool on = false;
+        uint32_t cooldownSec = 0;            // until War Mode may be changed again (0: now)
+        std::string block;                   // a server-side reason the toggle is refused now: wm_level, wm_hardcore,
+                                             // wm_wanted, wm_busy, or empty
+        uint32_t minLevel = 0;
+        uint32_t xpPct = 0;                  // the base War Mode bonuses (0 for XP at the level cap)
+        uint32_t honorPct = 0;
+        uint32_t shardPct = 0;
+        uint32_t underdogPct = 0;            // the underdog bonus now and the faction that gets it
+        WarTeam underdogTeam = WarTeam::None;
+        uint32_t wmAlliance = 0;             // War Mode players counted for the underdog bonus (blended)
+        uint32_t wmHorde = 0;
+        uint32_t streak = 0;                 // counted kills since the player's last death
+        WantedStateId wantedState = WantedStateId::None;
+        uint32_t wantedSec = 0;              // hunt time left while Wanted
+        uint32_t bountyHonor = 0;            // the bounty on the player's head
+        uint32_t todayBonusHonor = 0;        // today's War Mode bonus honor and its cap
+        uint32_t bonusHonorCap = 0;
+        uint32_t todayShards = 0;            // today's War Mode Shards and their cap
+        uint32_t shardsCap = 0;
+        uint32_t bestStreak = 0;
+        uint32_t kills = 0;                  // counted kills and War Mode deaths, all time
+        uint32_t deaths = 0;
+    };
+
+    struct WarObjective  // a WPZ O record
+    {
+        uint32_t objId = 0;
+        std::string name;                    // at most WarPlaceBytes
+        Opt<uint32_t> u, v;                  // permille on the zone's world map (empty: no map)
+        WarTeam owner = WarTeam::Neutral;    // A, H or N
+        int32_t slider = 0;                  // -1000 (Horde) .. 1000 (Alliance), permille of the bar
+        WarObjectiveState state = WarObjectiveState::Neutral;
+    };
+    struct WarZone       // WPZ: the zone the player is in
+    {
+        uint32_t zoneId = 0;
+        WarZoneKind kind = WarZoneKind::None;   // None: a zone without objectives (the HUD hides)
+        WarZoneState state = WarZoneState::Dormant;
+        uint32_t secondsLeft = 0;            // until the active phase or the ceasefire ends (Fronts)
+        Opt<uint32_t> controlA, controlH;    // the Front's time-weighted control, permille of the total so far
+        WarTeam dominionTeam = WarTeam::None;   // the player's faction while it holds Dominion here
+        uint32_t dominionStacks = 0;         // outposts the player's faction holds here (0..3)
+        Opt<uint32_t> levelMin, levelMax;    // who may capture here
+        std::vector<WarObjective> objectives;
+    };
+
+    struct WarCapture    // WPCAP: the capture bar of the objective the player stands at (objId 0: left it)
+    {
+        uint32_t objId = 0;
+        int32_t slider = 0;                  // -1000 .. 1000
+        uint32_t neutralPct = 0;             // the neutral band: |slider| below neutralPct * 10 is neutral
+        WarObjectiveState state = WarObjectiveState::Neutral;
+        uint32_t countA = 0, countH = 0;     // eligible capturers inside now
+        uint32_t maxNet = 0;                 // the speed cap (net capturers that still count)
+    };
+
+    struct WarMapZone    // a WPMAP Z record
+    {
+        uint32_t zoneId = 0;
+        WarZoneKind kind = WarZoneKind::Front;
+        uint32_t heldA = 0, heldH = 0, neutral = 0;
+        Opt<uint32_t> levelMin, levelMax;
+        WarZoneState state = WarZoneState::Dormant;
+    };
+    struct WarMapPoint   // a WPMAP P record
+    {
+        uint32_t zoneId = 0;
+        uint32_t objId = 0;
+        WarTeam owner = WarTeam::Neutral;
+        WarObjectiveState state = WarObjectiveState::Neutral;
+    };
+    struct WarMap        // WPMAP: every Front and objective of the realm
+    {
+        uint32_t frontZone = 0;              // the endgame Front now (0: none fits the level cap)
+        WarZoneState frontState = WarZoneState::Dormant;
+        uint32_t secondsLeft = 0;            // until its active phase or ceasefire ends
+        uint32_t nextZone = 0;               // the next endgame Front and when it starts
+        uint32_t nextStartsSec = 0;
+        uint32_t levelZone = 0;              // the Levelling Front now
+        WarZoneState levelState = WarZoneState::Dormant;
+        uint32_t levelSecondsLeft = 0;
+        std::vector<WarMapZone> zones;
+        std::vector<WarMapPoint> points;
+    };
+
+    struct WantedEntry   // a WANTED W record
+    {
+        std::string name;
+        uint32_t classId = 0;
+        WarTeam team = WarTeam::None;
+        uint32_t streak = 0;
+        WantedReason reason = WantedReason::Streak;
+        uint32_t bountyHonor = 0;
+        uint32_t bountyShards = 0;
+        Opt<uint32_t> u, v;                  // permille on the zone's world map
+        uint32_t ageSec = 0;                 // since the player became Wanted
+    };
+    struct WantedList    // WANTED: the Wanted players revealed in the zone (empty list: the last one cleared)
+    {
+        uint32_t zoneId = 0;
+        std::vector<WantedEntry> entries;
+    };
+
+    struct WarEvent      // WPEV: one event; the fields after the kind depend on it (section 19)
+    {
+        WarEventKind kind = WarEventKind::Captured;
+        uint32_t zoneId = 0;                 // C N A F E X
+        uint32_t objId = 0;                  // C N A
+        WarTeam team = WarTeam::None;        // C N A: the faction that did it; E: the winner (None: a draw); W
+        std::string name;                    // C N A: objective; F X: zone; W S: the player; B: the killer
+        std::string victim;                  // B: the Wanted player
+        uint32_t classId = 0;                // W
+        uint32_t seconds = 0;                // F: duration; X: starts in
+        uint32_t controlA = 0, controlH = 0; // E (permille)
+        uint32_t streak = 0;                 // W
+        WantedReason reason = WantedReason::Streak;   // W
+        uint32_t honor = 0, xp = 0, shards = 0;       // B S R (B S: honor and shards only)
+        WarRewardWhy why = WarRewardWhy::Kill;        // R
+        uint32_t drPermille = 1000;          // R: the diminishing-return factor applied
+    };
+
+    // The letters as written (0, an empty field, for None and anything undocumented).
+    char WarTeamLetter(WarTeam team);
+    char WarZoneKindLetter(WarZoneKind kind);
+
+    // ERR codes of War Mode (section 19) with a default sentence; Ui::Refuse(player, intent, refusal) sends one.
+    // wm_cooldown should carry the seconds left: Ui::Refuse(player, intent, WarModeErr::Cooldown.code, "<sentence>").
+    // `dead`, `in_combat` and `busy` are the generic codes.
+    namespace WarModeErr
+    {
+        inline constexpr Refusal Off{ "wm_off", "War Mode is not available on this realm right now." };
+        inline constexpr Refusal Level{ "wm_level", "You are not high enough level for War Mode yet." };
+        inline constexpr Refusal Hardcore{ "wm_hardcore", "Hardcore characters cannot use War Mode." };
+        inline constexpr Refusal Place{ "wm_place", "War Mode can only be changed in an inn or a city." };
+        inline constexpr Refusal Cooldown{ "wm_cooldown", "You changed War Mode recently: wait a little." };
+        inline constexpr Refusal Wanted{ "wm_wanted", "You are Wanted: War Mode stays on until the hunt ends." };
+        inline constexpr Refusal Busy{ "wm_busy", "You cannot change War Mode from where you are now." };
+        inline constexpr Refusal Dead{ "dead", "You cannot do that while dead." };
+        inline constexpr Refusal InCombat{ "in_combat", "You cannot do that while in combat." };
+    }
+
+    // ---------------------------------------------------------------------------------------------
     // Encoders: payload of each op (without frame header). `rev` is the revision of the topic.
     // ---------------------------------------------------------------------------------------------
     std::string EncodeHello(HelloReply const& m);
@@ -654,6 +839,12 @@ namespace Bleakhold
     std::string EncodeRoyaleEvent(RoyaleEvent const& m);     // ROYV
     std::string EncodeRoyaleResult(RoyaleResult const& m);   // ROYE
     std::string EncodeBgAnnounce(BgAnnounce const& m);       // BGANN
+    std::string EncodeWarModeState(WarModeState const& m);   // WMST
+    std::string EncodeWarZone(WarZone const& m);             // WPZ
+    std::string EncodeWarCapture(WarCapture const& m);       // WPCAP
+    std::string EncodeWarMap(WarMap const& m);               // WPMAP
+    std::string EncodeWanted(WantedList const& m);           // WANTED
+    std::string EncodeWarEvent(WarEvent const& m);           // WPEV
 
     // DEF: one payload per non-empty kind, in a fixed order, followed by "Z,<dataVer>".
     std::vector<std::string> EncodeDefinitions(Definitions const& d, uint32_t dataVer);

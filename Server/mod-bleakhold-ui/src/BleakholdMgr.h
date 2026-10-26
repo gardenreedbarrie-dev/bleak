@@ -46,8 +46,8 @@ namespace Bleakhold
         uint32_t heartbeatMs = 15000;
         bool serverPullTimer = false;
         bool colorTagsWithoutAddon = true;
-        std::array<std::string, 7> tagColors{
-            { "E5C07B", "FF9D3B", "6CC6D9", "9FD8E5", "F1D9A0", "C9A2F5", "B98CFF" } };
+        std::array<std::string, 8> tagColors{
+            { "E5C07B", "FF9D3B", "6CC6D9", "9FD8E5", "F1D9A0", "C9A2F5", "B98CFF", "E0604A" } };
         uint32_t tokenItemId = 0;
         uint32_t pointsPerToken = 0;
         uint32_t tokenPart = 1;
@@ -132,10 +132,12 @@ namespace Bleakhold
         void SetProvider(Topic topic, Ui::TopicProvider p);
         void SetDefaultHandler(IntentType type, Ui::IntentHandler h);
         void SetDefaultProvider(Topic topic, Ui::TopicProvider p);
-        void SetHelloObserver(std::function<void(Player*, Intent const&)> f)
+        // Ui::OnHello: every observer added runs after each valid HELLO, in the order added.
+        void AddHelloObserver(std::function<void(Player*, Intent const&)> f)
         {
             std::lock_guard<std::recursive_mutex> guard(_lock);
-            _helloObserver = std::move(f);
+            if (f)
+                _helloObservers.push_back(std::move(f));
         }
         void Refresh(Player* player, Topic topic);
         void Refuse(Player* player, Intent const& intent, std::string_view code, std::string_view text);
@@ -228,7 +230,7 @@ namespace Bleakhold
         std::array<Ui::IntentHandler, static_cast<std::size_t>(IntentType::Count)> _defaultHandlers{};
         std::array<Ui::TopicProvider, static_cast<std::size_t>(Topic::Count)> _providers{};
         std::array<Ui::TopicProvider, static_cast<std::size_t>(Topic::Count)> _defaultProviders{};
-        std::function<void(Player*, Intent const&)> _helloObserver;
+        std::vector<std::function<void(Player*, Intent const&)>> _helloObservers;
 
         std::vector<std::pair<uint64_t, std::function<void()>>> _timers;
         std::thread::id _worldThread;

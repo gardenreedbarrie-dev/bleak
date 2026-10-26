@@ -160,8 +160,8 @@ These topics are revisioned. The first field of the first record of every messag
   ignored as a duplicate. A gap, or a delta before any snapshot, makes the client send `GET <topic>`;
   answer with a snapshot.
 - Unrevisioned ops (`MPS`, `MP`, `MPE`, `RIFT`, `RIFTE`, `SET`, `LB`, `LBME`, `FIRSTS`, `DEF`, `TOAST`,
-  `ERR`, `HELLO`, `PONG`, `CASES`, `CASE`, `UNBOX`, `CAMPST`, `ROYS`, `ROYM`, `ROYO`, `ROYK`, `ROYV`, `ROYE`) are
-  full states or events; each one stands alone.
+  `ERR`, `HELLO`, `PONG`, `CASES`, `CASE`, `UNBOX`, `CAMPST`, `ROYS`, `ROYM`, `ROYO`, `ROYK`, `ROYV`, `ROYE`, `BGANN`,
+  `WMST`, `WPZ`, `WPCAP`, `WPMAP`, `WANTED`, `WPEV`) are full states or events; each one stands alone.
 
 Push a new snapshot or delta whenever something changes (task progress, queue state, keystone, run
 events). The client also asks with `GET` when a window opens; answer every `GET` with the current
@@ -198,6 +198,7 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `RDROP` | `x, y` | Bleakhold Royale: set the landing pin (section 17). Integer world yards, -17067..17067 each (they may be negative) |
 | `RDEPLOY` | | Bleakhold Royale: open the parachute now (section 17) |
 | `RSPEC` | `dir` | Bleakhold Royale spectators: watch another player (section 17). `dir`: 0 the killer (or the first player alive), 1 the next, 2 the previous |
+| `WARMODE` | `on` | turn War Mode on (1) or off (0) (section 19) |
 
 `GET` topics and what to send back:
 
@@ -213,6 +214,10 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `CAMPST` | | `CAMPST` (section 16) |
 | `ROYS` | | `ROYS` then a full `ROYO` while the player is in a Bleakhold Royale match; nothing otherwise (section 17) |
 | `ROYM` | | `ROYM` while the player is in a Bleakhold Royale match; nothing otherwise (section 17) |
+| `WMST` | | `WMST`; nothing while War Mode is off on the realm (section 19) |
+| `WPZ` | | `WPZ` for the zone the player is in; nothing while World PvP is off (section 19) |
+| `WPMAP` | | `WPMAP`; nothing while World PvP is off (section 19) |
+| `WANTED` | | `WANTED` for the player's zone, to a War Mode player; nothing otherwise (section 19) |
 
 Examples:
 
@@ -249,6 +254,8 @@ C> 1 QJOIN t 1/1 B,901,0,4,1
 C> 1 RDROP u 1/1 -412,96
 C> 1 RDEPLOY v 1/1
 C> 1 RSPEC w 1/1 2
+C> 1 GET x 1/1 WMST;WPZ;WPMAP;WANTED
+C> 1 WARMODE y 1/1 1
 ```
 
 ## 7. Server to client
@@ -272,9 +279,11 @@ may define more with `DEF X`), item ids are item template entries.
   128 dances live (section 14), 256 cases live (section 15), 512 camping live (campfires, camp objects, warmth,
   the food XP bonus, repair at a camp anvil; section 16), 1024 the High Elf glide live, 2048 blacksmiths repair
   anywhere (section 16), 4096 Bleakhold Royale live (section 17), 8192 the battleground kill announcer live
-  (section 18).
+  (section 18), 16384 War Mode live, 32768 World PvP objectives live (section 19; 32768 is only ever on together
+  with 16384).
 - The server may send `HELLO` again at any time, without a client `HELLO`, when its feature bits change (Bleakhold
-  Royale turns 4096 on or off at runtime). The client reads it like an answer to its own.
+  Royale, War Mode and World PvP turn their bits on or off at runtime). The client reads it like an answer to its
+  own.
 - `dailyResetEpoch`/`weeklyResetEpoch`: the next resets (Unix time).
 - `siteUrl`: shown for copying under the leaderboards (there is no web browser in game).
 
@@ -295,7 +304,7 @@ S> 1 PONG 2 1/1 12345,1792648730
 `op, seq, code, text` - the refused op, the client `SEQ` of that message, a machine code, a sentence for
 the player (shown in the window and in the error frame). `busy` (over an op's rate limit, section 8) can answer
 any action intent except `RDEPLOY`, which is never answered; the other codes are listed with each feature (sections
-13 to 17).
+13 to 19).
 
 ```
 S> 1 ERR 3 1/1 TCLAIM,4,not_claimable,That task cannot be claimed yet.
@@ -551,6 +560,7 @@ does not throttle addon messages for you (AzerothCore's addon flood check is not
 | `REPAIR` | 1 per `BleakholdUi.RateLimit.RepairIntervalMs` (2 s) |
 | `RDROP`, `RSPEC` | 1 each per `BleakholdUi.RateLimit.RoyaleIntervalMs` (0.5 s, so 2 per second); the addon waits 0.5 s itself |
 | `RDEPLOY` | 1 per `BleakholdUi.RateLimit.RoyaleDeployIntervalMs` (1 s); over it, dropped silently (no `busy`) |
+| `WARMODE` | 1 per `BleakholdUi.RateLimit.WarModeIntervalMs` (2 s); War Mode itself can only change once per 15 minutes (`ERR wm_cooldown`) |
 
 The server drops an action intent that repeats the player's last accepted one of the same op (same fields) within
 `BleakholdUi.RateLimit.DuplicateWindowMs` (1 s), except `RSPEC`: "next" twice is two steps.
@@ -586,6 +596,7 @@ lets each chat window hide a tag (`/bh chat`):
 | `[Record] ` | a new run record |
 | `[Case] ` | a rare reward from a case (section 15) |
 | `[Royale] ` | Bleakhold Royale: the queue filling up, a winner (section 17) |
+| `[War] ` | World PvP: a Front starts soon, starts, ends (section 19) |
 
 Without the addon the lines are still readable as plain text.
 
@@ -609,6 +620,10 @@ when the timer starts, then `MP` on every change -> end: `MP state 2/3`, `MPE`, 
 
 **Bleakhold Royale.** `QJOIN B` -> `QUEUE` state 1 -> ready check (`QUEUE` state 2, `QREPLY`) -> the match: `ROYM`,
 `ROYS`, `ROYO`, `ROYK`, `ROYV` -> `ROYE` -> `QUEUE` state 0. The whole flow is in section 17 ("A match").
+
+**War Mode and World PvP.** `HELLO` (bits 16384, 32768) -> `WMST` -> `WARMODE 1` in an inn or a city -> `WMST` ->
+entering a Front zone: `WPZ` -> at an outpost: `WPCAP` every second -> `WPEV` for captures, Wanted players, bounties
+and rewards. The whole flow is in section 19 ("A Front").
 
 ## 12. Versioning
 
@@ -1288,3 +1303,324 @@ The first is first blood, the second Aldric's second kill within 18 s (a double 
 third a triple kill that is also his third kill without dying (killing spree). Then Garrick Stormwind ends Aldric's
 streak with his fourth kill since he last died (dominating), and Eamon's fifth kill in one chain is a rampage on his
 tenth or later kill without dying.
+
+## 19. World PvP and War Mode
+
+**War Mode** is each character's own choice to fight other players in the open world. A character with War Mode on
+is flagged for PvP everywhere except sanctuaries, earns more experience and honor there, can capture World PvP
+objectives, and can become **Wanted**. **World PvP objectives** are outposts in a few open-world zones that the
+factions capture and hold: rotating **Fronts** (an endgame Bleak Front at the level cap and a Levelling Front for a
+level band), plus extra War Mode rewards on the stock objectives of Hellfire Peninsula, Nagrand, Terokkar Forest,
+Zangarmarsh, the Eastern Plaguelands and Grizzly Hills (their native capture bars keep working).
+
+The server decides everything: who may turn War Mode on or off, every kill and its reward, every capture, who is
+Wanted, who may claim a bounty, and when a Front starts and ends. The client only asks: `WARMODE` (turn War Mode on or
+off) and `GET` (`WMST`, `WPZ`, `WPMAP`, `WANTED`). Everything else it shows comes from the six server ops of this
+section, all unrevisioned (section 5).
+
+`HELLO` feature bit 16384 is on while War Mode is live, and bit 32768 while the objectives are live. The server turns
+them on at runtime once its own checks pass and off when the feature is switched off; clients already connected get a
+new `HELLO` (section 7). Bit 32768 is only ever on together with 16384 (only War Mode players capture). While bit
+16384 is off the server answers `WARMODE` with `ERR` `wm_off` and sends none of these messages.
+
+**Names** of characters are at most 48 bytes, names of objectives and zones at most 40. **Positions** on a map are
+`u`, `v` in permille of the zone's world map: 0 left / top, 1000 right / bottom, the same frame as the client's
+`GetPlayerMapPosition` (times 1000). They are empty for a zone without a world map of its own (old Mount Hyjal); the
+client then lists the objectives without pins. **Times** count from the moment the message arrives; the client counts
+them down itself. **Factions** are letters: `A` Alliance, `H` Horde, `N` neutral (objectives only); an empty field is
+nobody.
+
+### War Mode
+
+**Turning it on or off** (`WARMODE on`: 1 on, 0 off; the War Board NPC's gossip and the `.warmode on|off` command run
+the same checks for players without the addon), in this order:
+
+| Check | Answer |
+|---|---|
+| malformed (`on` not 0 or 1) | dropped silently (section 1) |
+| the same `on` as the player's last accepted `WARMODE`, within 1 s | dropped silently (section 8) |
+| the player's `WARMODE` rate (section 8) | `ERR` `busy` |
+| War Mode is off on the realm (no feature bit 16384) | `ERR` `wm_off` |
+| the player already is in the state asked for | `WMST`; nothing changes (a repeated intent is never an error) |
+| below the minimum level (the server's `MinLevel`, 20) | `ERR` `wm_level` |
+| a hardcore challenge character (a PvP death would end it for good) | `ERR` `wm_hardcore` |
+| dead | `ERR` `dead` |
+| in combat, or in PvP combat | `ERR` `in_combat` |
+| in an instance, a battleground, an arena or Bleakhold Royale; on a taxi or flying; in GM mode | `ERR` `wm_busy` |
+| not resting in an inn or a city | `ERR` `wm_place` |
+| turning it off while Wanted | `ERR` `wm_wanted` |
+| less than 15 minutes (the server's `ToggleCooldownSec`, 900 s) since the last change | `ERR` `wm_cooldown` (the text gives the seconds left) |
+
+On success the server sends `WMST` and a `TOAST`. **On**: the PvP flag is set at once and kept on everywhere the
+core allows PvP (sanctuaries such as Dalaran and Shattrath still block it). **Off**: War Mode and its bonuses end at
+once; the PvP flag fades after the core's usual 5 minutes, so turning it off is never an escape from a fight. The
+choice is saved with the character. While War Mode is live the server ignores the game's own `/pvp` toggle and tells
+the player to use War Mode instead.
+
+**Fights.** This is a PvE realm: a War Mode player can attack only players who are flagged for PvP. A player without
+War Mode who attacks or heals a War Mode player is flagged by the core for 5 minutes (an **aggressor**); the server
+counts aggressors for nothing but honor.
+
+**Bonuses** (open world only: Eastern Kingdoms, Kalimdor, Outland and Northrend, outside instances, battlegrounds and
+arenas and outside the server's excluded zones, Wintergrasp and GM Island by default). All bonuses of this section add
+up and the total is capped at +40% (the server's `BonusCapPct`):
+
+| Bonus | Who | Default |
+|---|---|---|
+| War Mode | War Mode players: kill and quest XP (below the level cap) and honor from player kills | +10% XP, +10% honor; +0% Shards |
+| Underdog | War Mode players of the outnumbered faction: the same, and Shards from War Mode sources | 0 to +20% |
+| Dominion | every player of the faction that holds outposts of a Front zone, in that zone (War Mode or not), per outpost held | +3% XP, +3% reputation, +5% honor |
+| Victor's Resolve | the War Mode players of the faction that won the last Front, for 2 hours, in the open world | +5% XP, +10% honor |
+
+- **Underdog**: every minute the server counts the War Mode players in the open world (level 20 and up, not away, by
+  their own faction, one per IP address), keeps hourly averages for 24 hours and blends them half and half with the
+  count now. With `big` and `small` the two counts, the outnumbered faction gets `round(20 * (big + 2) / (small + 2) -
+  20)` percent, at most 20, and nothing while fewer than 6 are counted in all. It is recalculated every 15 minutes.
+- **Player kills** give experience below the level cap: twice the experience of a creature of the victim's level, to
+  the player who dealt the killing blow (a pet's, a totem's or a damage over time's killing blow counts for its owner).
+- **Shards** (at the level cap, while the Dungeon Journey is on) come from bounties, captures and Front victories.
+- **Daily caps** (the day of the Dungeon Journey, which resets at the server's `DailyResetHour`): bonus honor at most
+  30 times the honor of a same-level kill (3,720 at level 80), and 60 War Mode Shards. The honor the core gives on its
+  own is never capped.
+
+**Kills that count** (for the streak, bounties, the XP and the War Mode honor bonus): the victim has had War Mode on
+for at least 10 minutes, is of the other faction, the kill is in the open world, the two players use different
+accounts and different IP addresses, the victim is less than 8 levels below the killer and not grey to them, and
+neither is grouped with a player of the other faction. A War Mode player who kills an aggressor gets the honor bonus
+only (no streak, no XP).
+
+**Diminishing returns**: honor and XP for killing players of the same account fall with every kill on the same day:
+100%, 75%, 50%, 25%, then nothing. A kill worth nothing counts for nothing. A War Mode player killed by a player cannot
+be killed for honor again for 60 s after resurrecting (the core's Honorless Target).
+
+**Wanted**:
+
+- **Streak** (`S`): 5 counted kills without dying, against at least 3 different accounts.
+- **Bully** (`B`): killing a War Mode player 10 or more levels below, who did not attack first in the last 2 minutes.
+  The kill pays nothing, and the bully is Wanted at once.
+- A Wanted player is hunted for 15 minutes of open-world time (paused in sanctuaries, capitals, instances,
+  battlegrounds and while logged out). Up to 3 Wanted players per zone are revealed to the enemy War Mode players of
+  that zone, highest streak first, with their place on the map every 5 s (`WANTED`). A Wanted player cannot turn War
+  Mode off.
+- **Killed by enemy War Mode players**: the player who dealt the killing blow and the other enemy War Mode players who
+  hurt the Wanted player in the last 30 s and are within 100 yards claim the bounty, at most 5 in all (the most recent
+  first). Each gets the whole bounty: honor `min(2 + 0.4 * (streak - 5), 8)` times the honor of a kill at the Wanted
+  player's level (2 times for a bully below a streak of 5), and at the level cap `min(5 + (streak - 5), 15)` Shards
+  (5 for a bully below a streak of 5).
+- **Survived** the 15 minutes: a streak-Wanted player gets 2 times the honor of a kill and 5 Shards; a bully gets
+  nothing. The streak starts again.
+- **Any other death** (a creature, a fall, a player without War Mode) ends the hunt with no bounty.
+
+### World PvP objectives
+
+**Zones** (`kind`): `F` the endgame Bleak Front, `L` a Levelling Front, `S` a stock outdoor PvP zone, `W` Wintergrasp
+(status only). The server's zones and outposts are data (its `bh_wpvp_zone` and `bh_wpvp_objective` tables); a
+Front zone has up to 3 outposts.
+
+**The schedule.** One endgame Front and one Levelling Front run at a time, each in its own rotation: 120 minutes
+active, then 10 minutes of ceasefire, then the next zone of the rotation. The rotation takes only the zones that fit
+the realm's level cap (a Front for level 80 waits until the cap is 80). A restart resumes the Front that should be
+running. 15 minutes before a Front starts, when it starts and when it ends, every player with the addon gets `WPEV`
+(`X`, `F`, `E`) and the realm a `[War]` line (section 10). During the ceasefire the outposts are frozen and neutral,
+and nobody has Dominion.
+
+**Capturing.** A player counts at an outpost while: War Mode has been on for at least 60 s, alive, not stealthed or
+invisible, not flying or on a taxi, not away and not a GM, in the normal phase, within the zone's level band
+(`levelMin`..`levelMax`) and within the outpost's radius (60 yards by default); at most 2 players per IP address count
+at one outpost. Every second the bar moves by the difference between the two factions' counts, at most 5 (the server's
+`MaxNet`): the side with more players pushes it. The bar runs from Horde full (-300) to Alliance full (+300) and the
+outpost belongs to the side whose end it is in, beyond the neutral band (20%: 60 of 300). A lone player takes a
+neutral outpost in 60 s and an enemy one in 6 minutes; 5 players or more take them in 12 s and 72 s.
+
+`state` of an outpost (AzerothCore's own capture states): 0 neutral, 1 Alliance, 2 Horde, 3 neutral and the Alliance
+is taking it, 4 neutral and the Horde is taking it, 5 the Alliance's but the Horde is taking it, 6 the Horde's but the
+Alliance is taking it. Events (`WPEV`): `C` captured, `N` neutralised, `A` under attack (the holder's bar fell 10%
+below full while the other side pushes; at most once a minute per outpost).
+
+**Holding** (Fronts only):
+
+- **Dominion**: one stack per outpost held, for every player of the holding faction in the zone (the bonuses above).
+- **Supremacy**: holding every outpost of the zone adds +5% damage to creatures and -5% damage taken from creatures
+  there. It never changes damage between players.
+- Every 5 minutes the War Mode players of a holding faction in the zone (alive, not away, War Mode on for at least 5
+  minutes) get a hold reward for each stack.
+
+**Victory.** Each outpost held gives its faction 1 point per second. At the end of the Front the faction with more
+points wins when its lead is at least 10% of all points; otherwise it is a draw. The winners' War Mode players get
+Victor's Resolve for 2 hours. Every War Mode player who spent at least 10 minutes in the zone and took part (was at a
+capture, made a counted kill there, or got 3 hold rewards) gets the **War Chest**; players who are offline at the end
+get it at their next login within 7 days.
+
+**Rewards** (HK is the honor of a kill at the player's level, 124 at level 80; honor follows the realm's honor rate):
+
+| Source | Below the level cap | At the level cap | Limit |
+|---|---|---|---|
+| a capture (Front or stock objective; only for players who stood at the outpost for 20 of the last 60 s) | 4% of the level's XP and 0.5 HK | 1.5 HK and 2 Shards | once per outpost per player every 30 minutes |
+| the first capture of the day | +10% of the level's XP | +2 HK and 10 Shards | once a day |
+| a hold reward | 0.5% of the level's XP per stack | 0.2 HK per stack | the daily caps |
+| a counted kill at an outpost the killer's faction holds | the kill's reward +50% | the same | diminishing returns |
+| the War Chest of the winners | 10% of the level's XP | 4 HK and 10 Shards | once per Front |
+| the War Chest of the losers or of a draw | half of that | half of that | once per Front |
+
+### WMST (the player's War Mode)
+
+`on, cooldownSec, block, minLevel, xpPct, honorPct, shardPct, underdogPct, underdogTeam, wmAlliance, wmHorde, streak, wantedState, wantedSec, bountyHonor, todayBonusHonor, bonusHonorCap, todayShards, shardsCap, bestStreak, kills, deaths`
+
+- `on`: 1 War Mode on, 0 off. `cooldownSec`: until War Mode may be changed again (0: now).
+- `block`: a reason the server would refuse a change now that the client cannot see itself: `wm_level`,
+  `wm_hardcore`, `wm_wanted` or `wm_busy`; empty otherwise. The client greys its button itself while the player is not
+  resting (`IsResting()`) or is in combat.
+- `minLevel`: the level War Mode needs.
+- `xpPct`, `honorPct`, `shardPct`: the base War Mode bonuses (`xpPct` 0 at the level cap).
+- `underdogPct`, `underdogTeam`: the underdog bonus now and the faction that gets it (empty: none).
+- `wmAlliance`, `wmHorde`: the War Mode players the underdog bonus counted (blended, one per IP address).
+- `streak`: counted kills since the player last died. `wantedState`: 0 not Wanted, 1 Wanted for a streak, 2 Wanted as
+  a bully. `wantedSec`: hunt time left. `bountyHonor`: the honor the player's bounty pays each claimant.
+- `todayBonusHonor` of `bonusHonorCap`, `todayShards` of `shardsCap`: today's War Mode bonus honor and Shards.
+- `bestStreak`, `kills`, `deaths`: the best streak, the counted kills and the deaths to players while in War Mode, all
+  time.
+
+Sent after `HELLO`, for `GET WMST`, after every `WARMODE`, and whenever one of its fields changes for another reason
+(a kill, a streak, Wanted, a reward, the underdog bonus, the daily reset), at most once a second.
+
+### WPZ (the zone the player is in)
+
+First record: `zoneId, kind, state, secondsLeft, controlA, controlH, dominionTeam, dominionStacks, levelMin, levelMax`.
+Then one record per outpost (at most 16): `O, objId, name, u, v, owner, slider, state`.
+
+- `kind`: `F`, `L` or `S`; empty for a zone without objectives of its own (Wintergrasp too: it is only in `WPMAP`),
+  and then nothing else follows `zoneId`; the client hides its Front display.
+- `state`: 0 dormant (a Front zone whose turn it is not), 1 active, 2 ceasefire. `secondsLeft`: until the active phase
+  or the ceasefire ends (0 for stock zones).
+- `controlA`, `controlH`: the Front's points so far, in permille of all points (they add up to 1000 once anyone
+  scored; empty outside a running Front).
+- `dominionTeam`, `dominionStacks`: the player's faction and its Dominion stacks here (empty and 0 when it holds
+  nothing).
+- `levelMin`, `levelMax`: who may capture here (empty: anyone in War Mode).
+- `owner`: `A`, `H` or `N`. `slider`: the bar, -1000 Horde full .. 1000 Alliance full. `state`: the capture states
+  above.
+
+Sent when the player enters a zone (the next second), when an outpost of the zone changes owner or state, when the
+Front's phase changes, every 30 s while the player is in a zone with objectives, and for `GET WPZ`.
+
+### WPCAP (the capture bar)
+
+`objId, slider, neutralPct, state, countA, countH, maxNet`
+
+- `objId`: the outpost the player stands at; 0 when the player has just left it (the client hides the bar).
+- `slider`: -1000 .. 1000 as in `WPZ`. `neutralPct`: the neutral band, a share of each half of the bar (20: the
+  middle 20% of each side, -200 .. 200, is neutral).
+- `countA`, `countH`: the players who count at the outpost now; `maxNet`: the most the difference can push.
+
+Sent every second to the players inside an outpost's radius (only while World PvP is live), and once with `objId` 0
+when they leave it.
+
+### WPMAP (every Front and objective)
+
+First record: `frontZone, frontState, secondsLeft, nextZone, nextStartsSec, levelZone, levelState, levelSecondsLeft`.
+Then one record per zone (at most 32): `Z, zoneId, kind, heldA, heldH, neutral, levelMin, levelMax, state`, and one per
+objective (at most 96): `P, zoneId, objId, owner, state`.
+
+- `frontZone`, `frontState`, `secondsLeft`: the endgame Front now (0 when none fits the level cap), its state (0 1 2
+  as in `WPZ`) and the seconds until its active phase or ceasefire ends. `nextZone`, `nextStartsSec`: the next
+  endgame Front and the seconds until it starts.
+- `levelZone`, `levelState`, `levelSecondsLeft`: the same for the Levelling Front.
+- `Z`: `heldA`, `heldH`, `neutral`: outposts by owner (Wintergrasp: 1 for the defending faction); `state`: 1 a
+  running Front, a stock zone or a Wintergrasp battle, 2 a Front in ceasefire, 0 otherwise.
+- `P`: `owner` and `state` as in `WPZ`.
+
+Sent for `GET WPMAP` and to every player with the addon when a Front starts, ends or goes into ceasefire.
+
+### WANTED (Wanted players in the zone)
+
+First record: `zoneId`. Then one record per revealed Wanted player (at most 3 per zone, at most 8 in the message):
+`W, name, classId, team, streak, reason, bountyHonor, bountyShards, u, v, ageSec`.
+
+- `reason`: `S` a streak, `B` a bully. `bountyHonor`, `bountyShards`: what each claimant gets.
+- `u`, `v`: where the Wanted player is (the map pin). `ageSec`: since the player became Wanted.
+
+Sent every 5 s to the enemy War Mode players in a zone while it has a revealed Wanted player, once with no `W` records
+when the last one there stops being Wanted, and for `GET WANTED` (to War Mode players).
+
+### WPEV (World PvP events)
+
+The first field is the kind; the fields after it depend on it:
+
+| `kind` | Fields | Meaning | Sent to |
+|---|---|---|---|
+| `C` | `zoneId, objId, team, name` | `team` captured the outpost `name` | the players in the zone |
+| `N` | `zoneId, objId, team, name` | `team` neutralised it | the players in the zone |
+| `A` | `zoneId, objId, team, name` | `team` is attacking it | the players in the zone |
+| `F` | `zoneId, durationSec, name` | the Front in zone `name` started; it lasts `durationSec` | every player with the addon |
+| `E` | `zoneId, winner, controlA, controlH` | the Front ended; `winner` empty for a draw; the points in permille | every player with the addon |
+| `X` | `zoneId, startsInSec, name` | the next Front starts in `startsInSec` | every player with the addon |
+| `W` | `name, classId, team, streak, reason` | `name` became Wanted (`reason` `S` or `B`) | the War Mode players in the zone |
+| `B` | `killer, victim, honor, shards` | `killer` claimed the bounty on `victim` | the War Mode players in the zone |
+| `S` | `name, honor, shards` | `name` survived the hunt | the War Mode players in the zone |
+| `R` | `why, honor, xp, shards, drPermille` | the player's own reward: `why` `K` a kill, `C` a capture, `H` a hold reward, `B` a bounty, `S` surviving the hunt, `V` the War Chest; `drPermille` the diminishing-return factor applied (1000 full) | the player |
+
+`R` shows what was paid, after the realm's honor rate, the daily caps and diminishing returns.
+
+### Without the addon
+
+`.warmode` shows the player's War Mode and `.warmode on|off` changes it; the War Board NPC offers the same in its
+gossip. Captures, Wanted players, bounties and Front starts are also told in chat. The stock zones keep their native
+capture bars.
+
+### A Front
+
+`HELLO` with bits 16384 and 32768 -> `WMST` -> `GET WMST;WPZ;WPMAP;WANTED` -> `WARMODE 1` (answered by `WMST`) ->
+`WPEV X`, then `WPEV F` and `WPMAP` -> the player enters the Front zone: `WPZ` -> at an outpost: `WPCAP` every second,
+`WPEV A`, `C` or `N` and a new `WPZ` when it changes hands, `WPEV R` for the capture reward -> kills: `WMST` with the
+streak, `WPEV W` and `WANTED` every 5 s when someone becomes Wanted, `WPEV B` or `S` when the hunt ends -> `WPEV E`
+and `WPMAP` at the end, `WPEV R` with the War Chest.
+
+### Error codes
+
+| Code | Meaning |
+|---|---|
+| `wm_off` | War Mode is off on this realm (no feature bit 16384) |
+| `wm_level` | below the level War Mode needs |
+| `wm_hardcore` | a hardcore challenge character |
+| `wm_place` | not resting in an inn or a city |
+| `wm_cooldown` | War Mode was changed less than 15 minutes ago (the text gives the seconds left) |
+| `wm_wanted` | turning War Mode off while Wanted |
+| `wm_busy` | in an instance, a battleground, an arena or Bleakhold Royale; on a taxi or flying; in GM mode |
+| `dead`, `in_combat`, `busy` | the generic codes (dead; in combat; over the `WARMODE` rate, section 8) |
+
+```
+C> 1 GET 2a 1/1 WMST;WPZ;WPMAP;WANTED
+S> 1 WMST 2b 1/1 0,0,,20,0,10,0,8,H,31,22,0,0,0,0,0,3720,0,60,7,118,96
+C> 1 WARMODE 2c 1/1 1
+S> 1 ERR 2d 1/1 WARMODE,2c,wm_place,War Mode can only be changed in an inn or a city.
+C> 1 WARMODE 2e 1/1 1
+S> 1 WMST 2f 1/1 1,900,,20,0,10,0,8,H,31,22,0,0,0,0,0,3720,0,60,7,118,96
+S> 1 WPEV 2g 1/1 X,2817,900,Crystalsong Forest
+S> 1 WPEV 2h 1/1 F,2817,7200,Crystalsong Forest
+S> 1 WPMAP 2i 1/1 2817,1,4320,66,4920,267,1,4320;Z,2817,F,2,0,1,80,80,1;Z,267,L,1,1,1,20,35,1;Z,3483,S,2,1,0,,,1;Z,4197,W,0,1,0,,,0;P,2817,1,A,1;P,2817,2,N,6;P,2817,3,A,1;P,267,11,A,1;P,267,12,H,2;P,267,13,N,0
+S> 1 WPZ 2j 1/1 2817,F,1,4320,620,380,A,2,80,80;O,1,Violet Stand,512,388,A,1000,1;O,2,Forlorn Woods,604,455,N,-120,6;O,3,Sunreaver Rise,701,512,A,800,1
+S> 1 WPCAP 2k 1/1 2,-120,20,6,2,3,5
+S> 1 WPEV 2l 1/1 A,2817,3,H,Sunreaver Rise
+S> 1 WPEV 2m 1/1 C,2817,2,A,Forlorn Woods
+S> 1 WPEV 2n 1/1 R,C,186,0,2,1000
+S> 1 WMST 2o 1/1 1,512,,20,0,10,0,8,H,31,22,3,0,0,0,412,3720,6,60,7,121,96
+S> 1 WPEV 2p 1/1 W,Garrick Stormwind,4,H,5,S
+S> 1 WANTED 2q 1/1 2817;W,Garrick Stormwind,4,H,5,S,248,5,560,402,35
+S> 1 WPEV 2r 1/1 B,Aldric,Garrick Stormwind,248,5
+S> 1 WANTED 2s 1/1 2817
+S> 1 WPEV 2t 1/1 S,Brenna,248,5
+S> 1 WPEV 2u 1/1 N,2817,1,H,Violet Stand
+S> 1 WPEV 2v 1/1 E,2817,A,640,360
+S> 1 WPEV 2w 1/1 R,V,496,0,10,1000
+S> 1 WPZ 2x 1/1 4395
+C> 1 WARMODE 2y 1/1 0
+S> 1 ERR 2z 1/1 WARMODE,2y,wm_cooldown,You can change War Mode again in 296 s.
+```
+
+The player looks at War Mode (off), turns it on outside an inn (refused), then inside one. A Front is announced in
+Crystalsong Forest and starts. The player's faction holds two of its three outposts; at the third the Alliance pushes
+the Horde's bar back through the neutral band (state 6) and captures it, paying the player 186 honor and 2 Shards.
+After three counted kills, a Horde rogue becomes Wanted with a streak of 5 and a bounty of 248 honor and 5 Shards,
+which Aldric claims; later another Wanted player survives the hunt. The Horde neutralises an outpost, the Alliance
+wins the Front with 64% of the points and the player gets the War Chest. In Dalaran (no objectives) the Front display
+hides, and turning War Mode off there is refused for another 296 s.

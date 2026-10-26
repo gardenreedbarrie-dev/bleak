@@ -8,7 +8,8 @@
 //
 // A second session, `royale`, holds a Bleakhold Royale match (section 17: QUEUE kind B, ROYS ROYM ROYO ROYK ROYV
 // ROYE, and the battleground kill announcer's BGANN of section 18) from its own Endpoint, so the main frames stay what
-// the existing checks expect.
+// the existing checks expect. A third, `wpvp`, holds a World PvP Front with War Mode (section 19: WMST WPZ WPCAP
+// WPMAP WANTED WPEV and ERR wm_*), with names full of separators and UTF-8.
 //
 // SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -31,6 +32,8 @@ namespace
     std::vector<std::string> g_frames;
     Endpoint g_royaleEp;
     std::vector<std::string> g_royaleFrames;
+    Endpoint g_wpvpEp;
+    std::vector<std::string> g_wpvpFrames;
 
     void SendOn(Endpoint& ep, std::vector<std::string>& out, char const* op, std::string const& payload)
     {
@@ -143,6 +146,131 @@ namespace
         d.extraClasses = { { 12, "Gravewarden", "GRAVEWARDEN", "7FBF7F", "GRV" } };
         d.riftBosses = { { 3, "Echo of Nefarian" } };
         return d;
+    }
+
+    // World PvP and War Mode (section 19): a Front as one level-80 Alliance player sees it. The last message of each op
+    // is the state test_server_frames.lua checks.
+    void WarSession()
+    {
+        Intent hello;
+        if (g_wpvpEp.Receive("BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUS", 1000, hello).verdict != Verdict::Accepted)
+        {
+            std::fprintf(stderr, "bh_gen: wpvp HELLO not accepted\n");
+            std::exit(1);
+        }
+        auto send = [](char const* op, std::string const& payload) { SendOn(g_wpvpEp, g_wpvpFrames, op, payload); };
+
+        HelloReply h;
+        h.proto = 1; h.minProto = 1; h.serverEpoch = 1792648725; h.dataVer = 4242;
+        h.featureBits = FeatureSeason | FeatureWarMode | FeatureWorldPvp; h.realmName = "Bleakhold";
+        send("HELLO", EncodeHello(h));
+
+        WarModeState st;
+        st.on = false; st.block = "wm_busy"; st.minLevel = 20; st.honorPct = 10; st.underdogPct = 8;
+        st.underdogTeam = WarTeam::Horde; st.wmAlliance = 31; st.wmHorde = 22; st.bonusHonorCap = 3720; st.shardsCap = 60;
+        st.bestStreak = 7; st.kills = 118; st.deaths = 96;
+        send("WMST", EncodeWarModeState(st));
+        ErrorReply e;
+        e.op = IntentType::WarMode; e.seq = 3; e.code = WarModeErr::Place.code; e.text = WarModeErr::Place.text;
+        send("ERR", EncodeError(e));
+        st.on = true; st.block.clear(); st.cooldownSec = 900;
+        send("WMST", EncodeWarModeState(st));
+
+        WarEvent x;
+        x.kind = WarEventKind::FrontWarning; x.zoneId = 2817; x.seconds = 900; x.name = "Crystalsong Forest";
+        send("WPEV", EncodeWarEvent(x));
+        x.kind = WarEventKind::FrontStart; x.seconds = 7200;
+        send("WPEV", EncodeWarEvent(x));
+
+        WarMap map;
+        map.frontZone = 2817; map.frontState = WarZoneState::Active; map.secondsLeft = 7200; map.nextZone = 66;
+        map.nextStartsSec = 7800; map.levelZone = 267; map.levelState = WarZoneState::Ceasefire; map.levelSecondsLeft = 300;
+        map.zones = { { 2817, WarZoneKind::Front, 2, 0, 1, 80u, 80u, WarZoneState::Active },
+            { 267, WarZoneKind::Levelling, 0, 0, 3, 20u, 35u, WarZoneState::Ceasefire },
+            { 3483, WarZoneKind::Stock, 2, 1, 0, std::nullopt, std::nullopt, WarZoneState::Active },
+            { 4197, WarZoneKind::Wintergrasp, 0, 1, 0, std::nullopt, std::nullopt, WarZoneState::Active } };
+        for (uint32_t i = 1; i <= 3; ++i)
+            map.points.push_back({ 2817, i, i == 2 ? WarTeam::Neutral : WarTeam::Alliance,
+                i == 2 ? WarObjectiveState::HordeAllianceChallenge : WarObjectiveState::Alliance });
+        for (uint32_t i = 1; i <= 3; ++i)
+            map.points.push_back({ 3483, 100 + i, i == 3 ? WarTeam::Horde : WarTeam::Alliance,
+                i == 3 ? WarObjectiveState::Horde : WarObjectiveState::Alliance });
+        send("WPMAP", EncodeWarMap(map));
+
+        WarZone z;
+        z.zoneId = 2817; z.kind = WarZoneKind::Front; z.state = WarZoneState::Active; z.secondsLeft = 4320;
+        z.controlA = 620u; z.controlH = 380u; z.dominionTeam = WarTeam::Alliance; z.dominionStacks = 2;
+        z.levelMin = 80u; z.levelMax = 80u;
+        z.objectives = { { 1, "Violet Stand", 512u, 388u, WarTeam::Alliance, 1000, WarObjectiveState::Alliance },
+            { 2, "Forlorn Woods; the \"old\" one, %20|cffff0000red|r", 604u, 455u, WarTeam::Neutral, -120,
+                WarObjectiveState::HordeAllianceChallenge },
+            { 3, "Sunreaver Rise", std::nullopt, std::nullopt, WarTeam::Alliance, 800, WarObjectiveState::Alliance } };
+        send("WPZ", EncodeWarZone(z));
+
+        WarCapture cap;
+        cap.objId = 2; cap.slider = -120; cap.neutralPct = 20; cap.state = WarObjectiveState::HordeAllianceChallenge;
+        cap.countA = 2; cap.countH = 3; cap.maxNet = 5;
+        send("WPCAP", EncodeWarCapture(cap));
+        cap.slider = 260; cap.state = WarObjectiveState::Alliance; cap.countA = 4; cap.countH = 1;
+        send("WPCAP", EncodeWarCapture(cap));
+
+        WarEvent a;
+        a.kind = WarEventKind::UnderAttack; a.zoneId = 2817; a.objId = 3; a.team = WarTeam::Horde; a.name = "Sunreaver Rise";
+        send("WPEV", EncodeWarEvent(a));
+        a.kind = WarEventKind::Captured; a.objId = 2; a.team = WarTeam::Alliance; a.name = "Forlorn Woods";
+        send("WPEV", EncodeWarEvent(a));
+        WarEvent r;
+        r.kind = WarEventKind::Reward; r.why = WarRewardWhy::Capture; r.honor = 186; r.shards = 2; r.drPermille = 1000;
+        send("WPEV", EncodeWarEvent(r));
+        z.controlA = 700u; z.controlH = 300u; z.dominionStacks = 3; z.secondsLeft = 4100;
+        z.objectives[1].owner = WarTeam::Alliance; z.objectives[1].slider = 260;
+        z.objectives[1].state = WarObjectiveState::Alliance;
+        send("WPZ", EncodeWarZone(z));
+
+        st.cooldownSec = 512; st.streak = 5; st.wantedState = WantedStateId::Streak; st.wantedSec = 900;
+        st.bountyHonor = 248; st.todayBonusHonor = 412; st.todayShards = 6; st.kills = 123;
+        send("WMST", EncodeWarModeState(st));
+        WarEvent wanted;
+        wanted.kind = WarEventKind::Wanted; wanted.name = "Garrick Stormwind, the; bold|one~of:many"; wanted.classId = 4;
+        wanted.team = WarTeam::Horde; wanted.streak = 5; wanted.reason = WantedReason::Bully;
+        send("WPEV", EncodeWarEvent(wanted));
+        WantedList list;
+        list.zoneId = 2817;
+        WantedEntry we;
+        we.name = "Garrick Stormwind, the; bold|one~of:many"; we.classId = 4; we.team = WarTeam::Horde; we.streak = 5;
+        we.reason = WantedReason::Bully; we.bountyHonor = 248; we.bountyShards = 5; we.u = 560u; we.v = 402u;
+        we.ageSec = 35;
+        WantedEntry we2 = we;
+        we2.name = "Br\xC3\xA9nna"; we2.classId = 8; we2.streak = 9; we2.reason = WantedReason::Streak; we2.u.reset();
+        we2.v.reset(); we2.bountyHonor = 446; we2.bountyShards = 9;
+        list.entries = { we, we2 };
+        send("WANTED", EncodeWanted(list));
+        WarEvent b;
+        b.kind = WarEventKind::BountyClaimed; b.name = "Aldric"; b.victim = we.name; b.honor = 248; b.shards = 5;
+        send("WPEV", EncodeWarEvent(b));
+        list.entries = { we2 };
+        send("WANTED", EncodeWanted(list));
+        WarEvent sv;
+        sv.kind = WarEventKind::Survived; sv.name = "Br\xC3\xA9nna"; sv.honor = 248; sv.shards = 5;
+        send("WPEV", EncodeWarEvent(sv));
+        list.entries.clear();
+        send("WANTED", EncodeWanted(list));
+
+        WarEvent end;
+        end.kind = WarEventKind::FrontEnd; end.zoneId = 2817; end.team = WarTeam::Alliance; end.controlA = 640;
+        end.controlH = 360;
+        send("WPEV", EncodeWarEvent(end));
+        WarEvent chest;
+        chest.kind = WarEventKind::Reward; chest.why = WarRewardWhy::Victory; chest.honor = 496; chest.shards = 10;
+        chest.drPermille = 1000;
+        send("WPEV", EncodeWarEvent(chest));
+        map.frontState = WarZoneState::Ceasefire; map.secondsLeft = 600; map.nextStartsSec = 600;
+        send("WPMAP", EncodeWarMap(map));
+        WarZone dal;
+        dal.zoneId = 4395;
+        send("WPZ", EncodeWarZone(dal));
+        WarCapture left;
+        send("WPCAP", EncodeWarCapture(left));
     }
 
     // Bleakhold Royale (section 17): a whole match as one player sees it
@@ -519,6 +647,7 @@ int main(int argc, char** argv)
     }
 
     RoyaleSession();
+    WarSession();
 
     std::ofstream out(argv[2], std::ios::binary);
     out << "-- generated by Server/mod-bleakhold-ui/tests/cpp/bh_gen.cpp (maxBody " << g_maxBody << "). Do not edit.\n";
@@ -532,9 +661,13 @@ int main(int argc, char** argv)
         << g_royaleEp.Stats().messagesOut << ",\n    frames = {\n";
     for (std::string const& f : g_royaleFrames)
         out << "      " << LuaString(f) << ",\n";
+    out << "    },\n  },\n  wpvp = {\n    messages = " << g_wpvpEp.Stats().messagesOut << ",\n    frames = {\n";
+    for (std::string const& f : g_wpvpFrames)
+        out << "      " << LuaString(f) << ",\n";
     out << "    },\n  },\n}\n";
-    std::printf("bh_gen: %zu frames for %llu messages (max body %zu), Royale %zu frames for %llu messages -> %s\n",
-        g_frames.size(), static_cast<unsigned long long>(g_ep.Stats().messagesOut), g_maxBody, g_royaleFrames.size(),
-        static_cast<unsigned long long>(g_royaleEp.Stats().messagesOut), argv[2]);
+    std::printf("bh_gen: %zu frames for %llu messages (max body %zu), Royale %zu frames for %llu messages, World PvP %zu "
+        "frames for %llu messages -> %s\n", g_frames.size(), static_cast<unsigned long long>(g_ep.Stats().messagesOut),
+        g_maxBody, g_royaleFrames.size(), static_cast<unsigned long long>(g_royaleEp.Stats().messagesOut),
+        g_wpvpFrames.size(), static_cast<unsigned long long>(g_wpvpEp.Stats().messagesOut), argv[2]);
     return 0;
 }

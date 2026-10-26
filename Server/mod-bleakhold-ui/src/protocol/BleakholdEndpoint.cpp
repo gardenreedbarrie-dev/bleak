@@ -64,6 +64,7 @@ namespace Bleakhold::Proto
         _royaleDrop.Configure(1, perInterval(l.royaleIntervalMs));
         _royaleDeploy.Configure(1, perInterval(l.royaleDeployIntervalMs));
         _royaleSpectate.Configure(1, perInterval(l.royaleIntervalMs));
+        _warMode.Configure(1, perInterval(l.warModeIntervalMs));
     }
 
     void Endpoint::CountDrop(uint64_t nowMs, ReceiveResult& r)
@@ -103,6 +104,7 @@ namespace Bleakhold::Proto
             case IntentType::RoyaleDrop: return _royaleDrop.Take(nowMs);
             case IntentType::RoyaleDeploy: return _royaleDeploy.Take(nowMs);
             case IntentType::RoyaleSpectate: return _royaleSpectate.Take(nowMs);
+            case IntentType::WarMode: return _warMode.Take(nowMs);
             case IntentType::TaskClaim:
             case IntentType::TaskReroll:
             case IntentType::BountyClaim:

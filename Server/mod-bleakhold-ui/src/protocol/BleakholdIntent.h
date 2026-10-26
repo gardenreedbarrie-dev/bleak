@@ -45,6 +45,7 @@ namespace Bleakhold
         RoyaleDrop,       // RDROP    x, y (section 17)
         RoyaleDeploy,     // RDEPLOY
         RoyaleSpectate,   // RSPEC    dir
+        WarMode,          // WARMODE  on (section 19)
         Count
     };
 
@@ -54,6 +55,7 @@ namespace Bleakhold
         Week, Era, Tasks, Key, Board, Queue, Coll, Lidx, Season,   // revisioned
         Firsts, Mplus, Rift, Set, Def, Cases, Case, CampState,
         RoyaleState, RoyaleMap,                                    // ROYS, ROYM (section 17)
+        WarModeState, WarZone, WarMap, Wanted,                     // WMST, WPZ, WPMAP, WANTED (section 19)
         Count
     };
     inline constexpr uint8_t RevisionedTopicCount = 9;
@@ -150,6 +152,9 @@ namespace Bleakhold
 
         // RSPEC
         SpectateDir spectateDir = SpectateDir::Killer;
+
+        // WARMODE: the state the player asks for (1 on, 0 off; section 19)
+        bool warModeOn = false;
     };
 
     // Why a message was not accepted.

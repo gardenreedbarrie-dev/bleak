@@ -7,8 +7,8 @@
 //   * the Endpoint (rate limits, handshake, duplicates) gets the input at a time taken from the input
 //     and may never accept more than its token bucket allows;
 //   * EscapeText/BuildFrames/PayloadWriter keep their invariants for the input used as server text;
-//   * the Bleakhold Royale encoders (section 17) and BGANN (section 18) keep their field and record counts with the
-//     input as every name.
+//   * the Bleakhold Royale encoders (section 17), BGANN (section 18) and the World PvP encoders (section 19) keep their
+//     field and record counts with the input as every name.
 //
 // Standalone (mutation driver):  bh_fuzz [iterations] [seed] [corpus files...]
 // libFuzzer:                     build with -DBH_LIBFUZZER -fsanitize=fuzzer (see run_tests.sh)
@@ -98,7 +98,8 @@ namespace
             if (recs.size() > 8)
                 return false;
             static std::regex const plain(
-                "WEEK|ERA|TASKS|KEY|BOARD|QUEUE|COLL|LIDX|SEASON|FIRSTS|MPLUS|RIFT|CASES|CAMPST|ROYS|ROYM");
+                "WEEK|ERA|TASKS|KEY|BOARD|QUEUE|COLL|LIDX|SEASON|FIRSTS|MPLUS|RIFT|CASES|CAMPST|ROYS|ROYM|WMST|WPZ|WPMAP|"
+                "WANTED");
             for (std::string const& r : recs)
             {
                 std::vector<std::string> f = Split(r, ',');
@@ -141,6 +142,8 @@ namespace
             return n(2) && RefInt(f[0], -17067, 17067) && RefInt(f[1], -17067, 17067);
         if (op == "RSPEC")
             return n(1) && RefInt(f[0], 0, 2);
+        if (op == "WARMODE")   // 1 on, 0 off (section 19)
+            return n(1) && RefInt(f[0], 0, 1);
         if (op == "QREPLY")
             return n(2) && RefInt(f[0], 1, I32) && RefInt(f[1], 0, 1);
         if (op == "KMODE")
@@ -381,6 +384,60 @@ namespace
             Die("ROYE: wrong reward record", text);
     }
 
+    // The input as every name of the World PvP messages (section 19): it may never add or remove a field or a record,
+    // and each name decodes to the input cleaned and cut to the encoder's limit.
+    void CheckWarEncoders(std::string const& text, unsigned char k)
+    {
+        auto name = [&](std::string const& field, std::size_t maxBytes, char const* what) {
+            std::optional<std::string> back = Unescape(field);
+            if (!back || *back != CleanText(text, maxBytes))
+                Die(std::string(what) + ": the name does not decode to the cleaned input", text);
+        };
+        auto split = [&](std::string const& payload, std::size_t records, std::size_t fieldsInLast, char const* what) {
+            std::vector<std::string> r = Split(payload, ';');
+            if (r.size() != records)
+                Die(std::string(what) + ": wrong record count", text);
+            std::vector<std::string> f = Split(r.back(), ',');
+            if (f.size() != fieldsInLast)
+                Die(std::string(what) + ": wrong field count", text);
+            return f;
+        };
+
+        WarModeState st;
+        st.block = text; st.deaths = 1u + k;
+        std::vector<std::string> f = split(EncodeWarModeState(st), 1, 22, "WMST");
+        name(f[2], WarBlockBytes, "WMST block");
+
+        WarZone z;
+        z.zoneId = k; z.kind = WarZoneKind::Front; z.levelMax = 80u;
+        WarObjective o;
+        o.objId = k; o.name = text; o.slider = int32_t(k) * 37 - 4000; o.state = WarObjectiveState(k % 9);
+        z.objectives = { o, o };
+        f = split(EncodeWarZone(z), 3, 8, "WPZ");
+        name(f[2], WarPlaceBytes, "WPZ objective name");
+
+        WantedList w;
+        w.zoneId = k;
+        WantedEntry e;
+        e.name = text; e.ageSec = 1u + k;
+        w.entries = { e };
+        f = split(EncodeWanted(w), 2, 11, "WANTED");
+        name(f[1], WarNameBytes, "WANTED name");
+
+        WarEvent ev;
+        ev.kind = WarEventKind::BountyClaimed; ev.name = text; ev.victim = text; ev.shards = 1u + k;
+        f = split(EncodeWarEvent(ev), 1, 5, "WPEV B");
+        name(f[1], WarNameBytes, "WPEV killer");
+        name(f[2], WarNameBytes, "WPEV victim");
+        ev.kind = WarEventKind::Captured; ev.zoneId = 1; ev.team = WarTeam::Horde;
+        std::vector<std::string> r = Split(EncodeWarEvent(ev), ';');
+        f = Split(r[0], ',');
+        if (r.size() != 1 || (f.size() != 5 && !(f.size() == 4 && CleanText(text, WarPlaceBytes).empty())))
+            Die("WPEV C: wrong field count", text);
+        if (f.size() == 5)
+            name(f[4], WarPlaceBytes, "WPEV objective");
+    }
+
     void FuzzOne(uint8_t const* data, std::size_t size)
     {
         std::string const raw(reinterpret_cast<char const*>(data), size);
@@ -391,6 +448,7 @@ namespace
         CheckEndpoint(raw, static_cast<unsigned char>(k >> 3));
         CheckEncoders(raw, k);
         CheckRoyaleEncoders(raw, k);
+        CheckWarEncoders(raw, k);
     }
 
 #ifndef BH_LIBFUZZER
@@ -408,6 +466,7 @@ namespace
             "1 GET m 1/1 CAMPST", "1 CAMP n 1/1 M", "1 CAMP o 1/1 O,164", "1 CAMP p 1/1 P", "1 GLIDE q 1/1", "1 REPAIR r 1/1",
             "1 GET s 1/1 ROYS;ROYM", "1 QJOIN t 1/1 B,901,0,4,1", "1 RDROP u 1/1 -412,96", "1 RDEPLOY v 1/1",
             "1 RSPEC w 1/1 2", "1 RDROP x 1/1 -17067,17067", "2 HELLO 1 1/1 2,2.0,7,deDE",
+            "1 GET x 1/1 WMST;WPZ;WPMAP;WANTED", "1 WARMODE y 1/1 1", "1 WARMODE z 1/1 0",
         };
     }
 
@@ -417,7 +476,8 @@ namespace
             static_cast<char>(0x80), static_cast<char>(0xC3), static_cast<char>(0xFF), '\n', 'E', 'x' };
         static char const* const words[] = { "2147483647", "2147483648", "-1", "0", "00000000000000000001", "999", "1000", "SET", "DEF", "WEEK", "CASE", "CASES", "CAMPST", "CAMP", "GLIDE", "REPAIR", "O,", "M", "P", "O",
             "HELLO", "GET", "BHc\t", "BHs\t", "1/1", "1/2", "99/99", "zzzzzz", "%00", "%2C", "\xC3\xA9", ";;", ",,",
-            "R,0", "D,0", "B,", "B,901", "RDROP", "RDEPLOY", "RSPEC", "ROYS", "ROYM", "-17067", "17068", "-0", "--1" };
+            "R,0", "D,0", "B,", "B,901", "RDROP", "RDEPLOY", "RSPEC", "ROYS", "ROYM", "-17067", "17068", "-0", "--1",
+            "WARMODE", "WMST", "WPZ", "WPMAP", "WANTED", "WPCAP", "WPEV" };
         int const steps = 1 + static_cast<int>(rng() % 4);
         for (int i = 0; i < steps; ++i)
         {

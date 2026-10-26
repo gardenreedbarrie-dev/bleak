@@ -62,7 +62,10 @@ end
 -- Section 17's S> example frames: { op, payload }.
 local function docExamples()
     local text = assert(host_readfile(repo .. "/docs/BleakholdProtocol.md"))
-    local sec = assert(text:match("\n## 17%. Bleakhold Royale(.*)$"), "section 17")
+    -- up to the next section: the later sections' ops have their own tests
+    local sec = text:match("\n## 17%. Bleakhold Royale(.-)\n## %d")
+        or text:match("\n## 17%. Bleakhold Royale(.*)$")
+    assert(sec, "section 17")
     local out = {}
     for line in sec:gmatch("[^\n]+") do
         local body = line:match("^S> (.+)$")

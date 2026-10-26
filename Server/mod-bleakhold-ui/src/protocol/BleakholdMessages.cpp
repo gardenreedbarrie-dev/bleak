@@ -376,6 +376,171 @@ namespace Bleakhold
         return w.Take();
     }
 
+    // ---- World PvP and War Mode (section 19) ----
+    namespace
+    {
+        int64_t Permille(uint32_t v) { return static_cast<int64_t>(std::min<uint32_t>(v, 1000)); }
+        int64_t Slider(int32_t v) { return static_cast<int64_t>(std::clamp<int32_t>(v, -1000, 1000)); }
+        int64_t ObjState(WarObjectiveState s) { return static_cast<int64_t>(std::min<uint8_t>(static_cast<uint8_t>(s), 6)); }
+        int64_t ZoneState(WarZoneState s) { return static_cast<int64_t>(std::min<uint8_t>(static_cast<uint8_t>(s), 2)); }
+
+        PayloadWriter& OptPermille(PayloadWriter& w, Opt<uint32_t> const& v)
+        {
+            return v ? w.Int(Permille(*v)) : w.Empty();
+        }
+
+        char ReasonLetter(WantedReason r) { return r == WantedReason::Bully ? 'B' : 'S'; }
+
+        char WhyLetter(WarRewardWhy why)
+        {
+            char const c = static_cast<char>(why);
+            return std::string_view("KCHBSV").find(c) != std::string_view::npos ? c : 'K';
+        }
+    }
+
+    char WarTeamLetter(WarTeam team)
+    {
+        char const c = static_cast<char>(team);
+        return c != 0 && std::string_view("AHN").find(c) != std::string_view::npos ? c : 0;
+    }
+
+    char WarZoneKindLetter(WarZoneKind kind)
+    {
+        char const c = static_cast<char>(kind);
+        return c != 0 && std::string_view("FLSW").find(c) != std::string_view::npos ? c : 0;
+    }
+
+    std::string EncodeWarModeState(WarModeState const& m)
+    {
+        PayloadWriter w;
+        w.Bool(m.on).Int(m.cooldownSec).Text(m.block, WarBlockBytes).Int(m.minLevel).Int(m.xpPct).Int(m.honorPct)
+            .Int(m.shardPct).Int(m.underdogPct).Char(WarTeamLetter(m.underdogTeam)).Int(m.wmAlliance).Int(m.wmHorde)
+            .Int(m.streak).Int(std::min<uint8_t>(static_cast<uint8_t>(m.wantedState), 2)).Int(m.wantedSec)
+            .Int(m.bountyHonor).Int(m.todayBonusHonor).Int(m.bonusHonorCap).Int(m.todayShards).Int(m.shardsCap)
+            .Int(m.bestStreak).Int(m.kills).Int(m.deaths);
+        return w.Take();
+    }
+
+    std::string EncodeWarZone(WarZone const& m)
+    {
+        PayloadWriter w;
+        // a zone without objectives of its own (Wintergrasp included: it is only in WPMAP) is its id alone
+        char const kind = WarZoneKindLetter(m.kind);
+        if (!kind || kind == 'W')
+        {
+            w.Int(m.zoneId);
+            return w.Take();
+        }
+        w.Int(m.zoneId).Char(kind).Int(ZoneState(m.state)).Int(m.secondsLeft);
+        OptPermille(w, m.controlA);
+        OptPermille(w, m.controlH);
+        w.Char(WarTeamLetter(m.dominionTeam)).Int(std::min<uint32_t>(m.dominionStacks, 9)).Opt(m.levelMin)
+            .Opt(m.levelMax);
+        std::size_t n = 0;
+        for (WarObjective const& o : m.objectives)
+        {
+            if (n++ >= MaxWarObjectives)
+                break;
+            w.Record().Char('O').Int(o.objId).Text(o.name, WarPlaceBytes);
+            OptPermille(w, o.u);
+            OptPermille(w, o.v);
+            char const owner = WarTeamLetter(o.owner);
+            w.Char(owner ? owner : 'N').Int(Slider(o.slider)).Int(ObjState(o.state));
+        }
+        return w.Take();
+    }
+
+    std::string EncodeWarCapture(WarCapture const& m)
+    {
+        PayloadWriter w;
+        w.Int(m.objId).Int(Slider(m.slider)).Int(std::min<uint32_t>(m.neutralPct, 100)).Int(ObjState(m.state))
+            .Int(m.countA).Int(m.countH).Int(m.maxNet);
+        return w.Take();
+    }
+
+    std::string EncodeWarMap(WarMap const& m)
+    {
+        PayloadWriter w;
+        w.Int(m.frontZone).Int(ZoneState(m.frontState)).Int(m.secondsLeft).Int(m.nextZone).Int(m.nextStartsSec)
+            .Int(m.levelZone).Int(ZoneState(m.levelState)).Int(m.levelSecondsLeft);
+        std::size_t n = 0;
+        for (WarMapZone const& z : m.zones)
+        {
+            if (n++ >= MaxWarZones)
+                break;
+            char const kind = WarZoneKindLetter(z.kind);
+            w.Record().Char('Z').Int(z.zoneId).Char(kind ? kind : 'F').Int(z.heldA).Int(z.heldH).Int(z.neutral)
+                .Opt(z.levelMin).Opt(z.levelMax).Int(ZoneState(z.state));
+        }
+        n = 0;
+        for (WarMapPoint const& p : m.points)
+        {
+            if (n++ >= MaxWarPoints)
+                break;
+            char const owner = WarTeamLetter(p.owner);
+            w.Record().Char('P').Int(p.zoneId).Int(p.objId).Char(owner ? owner : 'N').Int(ObjState(p.state));
+        }
+        return w.Take();
+    }
+
+    std::string EncodeWanted(WantedList const& m)
+    {
+        PayloadWriter w;
+        w.Int(m.zoneId);
+        std::size_t n = 0;
+        for (WantedEntry const& e : m.entries)
+        {
+            if (n++ >= MaxWanted)
+                break;
+            w.Record().Char('W').Text(e.name, WarNameBytes).Int(e.classId).Char(WarTeamLetter(e.team)).Int(e.streak)
+                .Char(ReasonLetter(e.reason)).Int(e.bountyHonor).Int(e.bountyShards);
+            OptPermille(w, e.u);
+            OptPermille(w, e.v);
+            w.Int(e.ageSec);
+        }
+        return w.Take();
+    }
+
+    std::string EncodeWarEvent(WarEvent const& m)
+    {
+        PayloadWriter w;
+        switch (m.kind)
+        {
+            case WarEventKind::Captured:
+            case WarEventKind::Neutralised:
+            case WarEventKind::UnderAttack:
+                w.Char(Letter(m.kind)).Int(m.zoneId).Int(m.objId).Char(WarTeamLetter(m.team)).Text(m.name, WarPlaceBytes);
+                break;
+            case WarEventKind::FrontStart:
+            case WarEventKind::FrontWarning:
+                w.Char(Letter(m.kind)).Int(m.zoneId).Int(m.seconds).Text(m.name, WarPlaceBytes);
+                break;
+            case WarEventKind::FrontEnd:
+            {
+                char const winner = WarTeamLetter(m.team);
+                w.Char('E').Int(m.zoneId).Char(winner == 'N' ? 0 : winner).Int(Permille(m.controlA))
+                    .Int(Permille(m.controlH));
+                break;
+            }
+            case WarEventKind::Wanted:
+                w.Char('W').Text(m.name, WarNameBytes).Int(m.classId).Char(WarTeamLetter(m.team)).Int(m.streak)
+                    .Char(ReasonLetter(m.reason));
+                break;
+            case WarEventKind::BountyClaimed:
+                w.Char('B').Text(m.name, WarNameBytes).Text(m.victim, WarNameBytes).Int(m.honor).Int(m.shards);
+                break;
+            case WarEventKind::Survived:
+                w.Char('S').Text(m.name, WarNameBytes).Int(m.honor).Int(m.shards);
+                break;
+            case WarEventKind::Reward:
+                w.Char('R').Char(WhyLetter(m.why)).Int(m.honor).Int(m.xp).Int(m.shards).Int(Permille(m.drPermille));
+                break;
+            default:
+                break;
+        }
+        return w.Take();
+    }
+
     std::string EncodeSeason(uint32_t rev, SeasonState const& m)
     {
         PayloadWriter w;
