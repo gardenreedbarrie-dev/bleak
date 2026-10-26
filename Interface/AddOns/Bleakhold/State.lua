@@ -36,6 +36,14 @@ local function reset()
     S.royaleKills = {}
     S.royaleEvent = nil
     S.royaleResult = nil
+    S.warMode = nil
+    S.wpZone = nil
+    S.wpCap = nil
+    S.wpMap = nil
+    S.wanted = nil
+    S.warEvent = nil
+    S.warZoneNames = {}
+    S.warObjNames = {}
 end
 reset()
 ns.ResetState = reset
@@ -1172,6 +1180,351 @@ Comm.Handle("ROYE", function(r)
     S.royaleResult = res
     ns.Fire("ROYALE_RESULT", res, first)
     changed("ROYE")
+end)
+
+------------------------------------------------------------------------------------------------------
+-- World PvP and War Mode (section 19): WMST WPZ WPCAP WPMAP WANTED WPEV, unrevisioned full states and events. Times
+-- (cooldownSec, wantedSec, secondsLeft, nextStartsSec, ...) count from the moment the message arrived (recvAt);
+-- ns.WarLeft counts them down. Factions are letters (A, H; N for objectives only), an empty field is nobody;
+-- positions u, v are permille of the zone's world map, a pair or nothing. Letters and states the client does not
+-- know are not clamped into known ones: an unknown objective state reads as neutral, an unknown zone kind as none.
+------------------------------------------------------------------------------------------------------
+local WAR_NAME = 48               -- character names
+local WAR_PLACE = 40              -- objective and zone names
+local WAR_TIME = 864000           -- 10 days: any longer time is clamped
+local WAR_BIG = 999999            -- counts (players, kills, streaks)
+local WAR_TEAMS = { A = true, H = true }
+local WAR_OWNERS = { A = true, H = true, N = true }
+local WAR_ZONE_KINDS = { F = true, L = true, S = true, W = true }
+local WAR_EVENTS = { C = true, N = true, A = true, F = true, E = true, X = true, W = true, B = true, S = true,
+    R = true }
+local WAR_WHY = { K = true, C = true, H = true, B = true, S = true, V = true }
+local WAR_REASONS = { S = true, B = true }
+local WAR_TAG_O, WAR_TAG_W, WAR_TAG_ZP = { O = true }, { W = true }, { Z = true, P = true }
+-- the owner an objective state means (AzerothCore's ObjectiveStates: 1 the Alliance's, 2 the Horde's; 3 to 6 are in the
+-- neutral band, 5 and 6 on the side of the faction that held it last)
+local WAR_STATE_OWNER = { [0] = "N", [1] = "A", [2] = "H", [3] = "N", [4] = "N", [5] = "N", [6] = "N" }
+ns.WAR_MAX_OBJECTIVES = 16
+ns.WAR_MAX_ZONES = 32
+ns.WAR_MAX_POINTS = 96
+ns.WAR_MAX_WANTED = 8
+ns.WAR_STATE_OWNER = WAR_STATE_OWNER
+
+-- A one-letter field from a set (2 bytes read: "AH" is no letter, not "A"), or nil.
+local function warLetter(raw, set)
+    local v = U.Str(raw, nil, 2)
+    if v and set[v] then
+        return v
+    end
+    return nil
+end
+
+local function warPermille(raw)
+    return U.Int(raw, nil, 0, 1000)
+end
+
+-- A pair of permille map positions, or nothing.
+local function warPos(rawU, rawV)
+    local u, v = warPermille(rawU), warPermille(rawV)
+    if u and v then
+        return u, v
+    end
+    return nil, nil
+end
+
+local function warTime(raw)
+    return U.Int(raw, 0, 0, WAR_TIME)
+end
+
+-- Seconds left of a section 19 time that counted from recvAt; 0 once it ran out, nil for a missing one.
+function ns.WarLeft(sec, recvAt)
+    if type(sec) ~= "number" then
+        return nil
+    end
+    return max(0, sec - (GetTime() - (recvAt or GetTime())))
+end
+
+-- The name of a zone: what WPEV F or X said, the built-in list, the client's own name for the zone the player is in
+-- (WPZ is always that zone), else "Zone <id>".
+function ns.WarZoneName(zoneId)
+    if not zoneId then
+        return "Unknown zone"
+    end
+    local n = S.warZoneNames[zoneId] or Data.warZones[zoneId]
+    if n then
+        return n
+    end
+    if S.wpZone and S.wpZone.zoneId == zoneId and GetRealZoneText then
+        local z = GetRealZoneText()
+        if type(z) == "string" and z ~= "" then
+            return U.CutUtf8(U.CleanUtf8(z), WAR_PLACE)
+        end
+    end
+    return "Zone " .. zoneId
+end
+
+-- The name of an objective (WPZ, WPEV C N A), else "Outpost <id>".
+function ns.WarObjectiveName(zoneId, objId)
+    return S.warObjNames[tostring(zoneId) .. ":" .. tostring(objId)] or ("Outpost " .. tostring(objId))
+end
+
+local function rememberObjective(zoneId, objId, name)
+    if zoneId and objId and name then
+        S.warObjNames[tostring(zoneId) .. ":" .. tostring(objId)] = name
+    end
+end
+
+Comm.MapOpToTopic("WMST", "WMST")
+Comm.Handle("WMST", function(r)
+    local f = r[1]
+    local on = U.Bool(f[1], nil)
+    if on == nil then
+        return    -- without its first field the message says nothing
+    end
+    local block = U.Str(f[3], nil, 24)
+    if block and not block:find("^[%w_]+$") then
+        block = nil
+    end
+    local wanted = U.Int(f[13], nil)
+    local wm = {
+        on = on, cooldownSec = warTime(f[2]), block = block, minLevel = U.Int(f[4], nil, 1, 255),
+        xpPct = U.Int(f[5], 0, 0, 1000), honorPct = U.Int(f[6], 0, 0, 1000), shardPct = U.Int(f[7], 0, 0, 1000),
+        underdogPct = U.Int(f[8], 0, 0, 1000), underdogTeam = warLetter(f[9], WAR_TEAMS),
+        wmAlliance = U.Int(f[10], 0, 0, WAR_BIG), wmHorde = U.Int(f[11], 0, 0, WAR_BIG),
+        streak = U.Int(f[12], 0, 0, WAR_BIG), wantedState = (wanted and wanted >= 0 and wanted <= 2) and wanted or 0,
+        wantedSec = warTime(f[14]), bountyHonor = U.Int(f[15], 0, 0, INT32),
+        todayBonusHonor = U.Int(f[16], 0, 0, INT32), bonusHonorCap = U.Int(f[17], 0, 0, INT32),
+        todayShards = U.Int(f[18], 0, 0, INT32), shardsCap = U.Int(f[19], 0, 0, INT32),
+        bestStreak = U.Int(f[20], 0, 0, WAR_BIG), kills = U.Int(f[21], 0, 0, INT32), deaths = U.Int(f[22], 0, 0, INT32),
+        recvAt = GetTime(),
+    }
+    if wm.underdogPct == 0 then
+        wm.underdogTeam = nil
+    end
+    local old = S.warMode
+    S.warMode = wm
+    if not old or old.on ~= wm.on then
+        ns.Fire("WARMODE_CHANGED", wm, old and old.on)
+    end
+    if (old and old.wantedState or 0) ~= wm.wantedState then
+        ns.Fire("WARMODE_WANTED", wm, old and old.wantedState or 0)
+    end
+    changed("WMST")
+end)
+
+Comm.MapOpToTopic("WPZ", "WPZ")
+Comm.Handle("WPZ", function(r)
+    local f = r[1]
+    local zoneId = U.Int(f[1], nil, 0, INT32)
+    if not zoneId then
+        return
+    end
+    local kind = warLetter(f[2], WAR_ZONE_KINDS)
+    if kind == "W" then
+        kind = nil    -- Wintergrasp is only in WPMAP
+    end
+    local z = { zoneId = zoneId, kind = kind, objectives = {}, byId = {}, recvAt = GetTime() }
+    if kind then
+        local state = U.Int(f[3], nil)
+        z.state = (state and state >= 0 and state <= 2) and state or 0
+        z.secondsLeft = warTime(f[4])
+        z.controlA, z.controlH = warPermille(f[5]), warPermille(f[6])
+        z.dominionTeam = warLetter(f[7], WAR_TEAMS)
+        z.dominionStacks = z.dominionTeam and U.Int(f[8], 0, 0, 9) or 0
+        if z.dominionStacks == 0 then
+            z.dominionTeam = nil
+        end
+        z.levelMin, z.levelMax = U.Int(f[9], nil, 0, 255), U.Int(f[10], nil, 0, 255)
+        for i = 2, #r do
+            local o = r[i]
+            if #z.objectives >= ns.WAR_MAX_OBJECTIVES then
+                break
+            end
+            local id = warLetter(o[1], WAR_TAG_O) and U.Int(o[2], nil, 0, INT32)
+            if id and not z.byId[id] then
+                local st = U.Int(o[8], nil)
+                local e = { objId = id, name = U.Str(o[3], nil, WAR_PLACE), owner = warLetter(o[6], WAR_OWNERS) or "N",
+                    slider = U.Int(o[7], 0, -1000, 1000), state = (st and WAR_STATE_OWNER[st]) and st or 0 }
+                e.u, e.v = warPos(o[4], o[5])
+                rememberObjective(zoneId, id, e.name)
+                z.byId[id] = e
+                z.objectives[#z.objectives + 1] = e
+            end
+        end
+    end
+    local old = S.wpZone
+    S.wpZone = z
+    if not old or old.zoneId ~= zoneId then
+        -- another zone: its Wanted players and the bar of the last outpost are gone
+        if S.wanted and S.wanted.zoneId ~= zoneId then
+            S.wanted = nil
+            changed("WANTED")
+        end
+        if S.wpCap then
+            S.wpCap = nil
+            changed("WPCAP")
+        end
+        ns.Fire("WAR_ZONE", z, old)
+    end
+    changed("WPZ")
+end)
+
+Comm.MapOpToTopic("WPCAP", "WPZ")
+Comm.Handle("WPCAP", function(r)
+    local f = r[1]
+    local objId = U.Int(f[1], nil, 0, INT32)
+    if not objId then
+        return
+    end
+    if objId == 0 then
+        S.wpCap = nil    -- the player left the outpost
+        changed("WPCAP")
+        return
+    end
+    local st = U.Int(f[4], nil)
+    local cap = { objId = objId, slider = U.Int(f[2], 0, -1000, 1000), neutralPct = U.Int(f[3], 0, 0, 100),
+        state = (st and WAR_STATE_OWNER[st]) and st or 0, countA = U.Int(f[5], 0, 0, WAR_BIG),
+        countH = U.Int(f[6], 0, 0, WAR_BIG), maxNet = U.Int(f[7], 0, 0, WAR_BIG), recvAt = GetTime() }
+    S.wpCap = cap
+    -- the outpost's bar in WPZ follows the capture bar between two WPZ
+    local o = S.wpZone and S.wpZone.byId[objId]
+    if o then
+        o.slider, o.state, o.owner = cap.slider, cap.state, WAR_STATE_OWNER[cap.state]
+    end
+    changed("WPCAP")
+end)
+
+Comm.MapOpToTopic("WPMAP", "WPMAP")
+Comm.Handle("WPMAP", function(r)
+    local f = r[1]
+    local function zoneState(raw)
+        local v = U.Int(raw, nil)
+        return (v and v >= 0 and v <= 2) and v or 0
+    end
+    local m = {
+        frontZone = U.Int(f[1], 0, 0, INT32), frontState = zoneState(f[2]), secondsLeft = warTime(f[3]),
+        nextZone = U.Int(f[4], 0, 0, INT32), nextStartsSec = warTime(f[5]), levelZone = U.Int(f[6], 0, 0, INT32),
+        levelState = zoneState(f[7]), levelSecondsLeft = warTime(f[8]), zones = {}, zoneById = {}, points = {},
+        recvAt = GetTime(),
+    }
+    for i = 2, #r do
+        local e = r[i]
+        local tag = warLetter(e[1], WAR_TAG_ZP)
+        if tag == "Z" and #m.zones < ns.WAR_MAX_ZONES then
+            local id, kind = U.Int(e[2], nil, 0, INT32), warLetter(e[3], WAR_ZONE_KINDS)
+            if id and kind and not m.zoneById[id] then
+                local z = { zoneId = id, kind = kind, heldA = U.Int(e[4], 0, 0, 999), heldH = U.Int(e[5], 0, 0, 999),
+                    neutral = U.Int(e[6], 0, 0, 999), levelMin = U.Int(e[7], nil, 0, 255),
+                    levelMax = U.Int(e[8], nil, 0, 255), state = zoneState(e[9]), points = {} }
+                m.zoneById[id] = z
+                m.zones[#m.zones + 1] = z
+            end
+        elseif tag == "P" and #m.points < ns.WAR_MAX_POINTS then
+            local zid, oid = U.Int(e[2], nil, 0, INT32), U.Int(e[3], nil, 0, INT32)
+            if zid and oid then
+                local st = U.Int(e[5], nil)
+                m.points[#m.points + 1] = { zoneId = zid, objId = oid, owner = warLetter(e[4], WAR_OWNERS) or "N",
+                    state = (st and WAR_STATE_OWNER[st]) and st or 0 }
+            end
+        end
+    end
+    for _, p in ipairs(m.points) do
+        local z = m.zoneById[p.zoneId]
+        if z then
+            z.points[#z.points + 1] = p
+        end
+    end
+    S.wpMap = m
+    changed("WPMAP")
+end)
+
+Comm.MapOpToTopic("WANTED", "WANTED")
+Comm.Handle("WANTED", function(r)
+    local zoneId = U.Int(r[1][1], nil, 0, INT32)
+    if not zoneId then
+        return
+    end
+    local w = { zoneId = zoneId, list = {}, recvAt = GetTime() }
+    for i = 2, #r do
+        local e = r[i]
+        if #w.list >= ns.WAR_MAX_WANTED then
+            break
+        end
+        local name = warLetter(e[1], WAR_TAG_W) and U.Str(e[2], nil, WAR_NAME)
+        if name then
+            local x = { name = name, classId = U.Int(e[3], 0, 0, 255), team = warLetter(e[4], WAR_TEAMS),
+                streak = U.Int(e[5], 0, 0, WAR_BIG), reason = warLetter(e[6], WAR_REASONS),
+                bountyHonor = U.Int(e[7], 0, 0, INT32), bountyShards = U.Int(e[8], 0, 0, INT32),
+                ageSec = warTime(e[11]) }
+            x.u, x.v = warPos(e[9], e[10])
+            w.list[#w.list + 1] = x
+        end
+    end
+    S.wanted = w
+    changed("WANTED")
+end)
+
+-- WPEV: one event, never stored but the last (S.warEvent); WAR_EVENT carries it to the banners and toasts.
+Comm.Handle("WPEV", function(r)
+    local f = r[1]
+    local kind = warLetter(f[1], WAR_EVENTS)
+    if not kind then
+        return
+    end
+    local e = { kind = kind, at = GetTime() }
+    if kind == "C" or kind == "N" or kind == "A" then
+        e.zoneId, e.objId = U.Int(f[2], nil, 0, INT32), U.Int(f[3], nil, 0, INT32)
+        e.team, e.name = warLetter(f[4], WAR_TEAMS), U.Str(f[5], nil, WAR_PLACE)
+        if not (e.zoneId and e.objId) then
+            return
+        end
+        rememberObjective(e.zoneId, e.objId, e.name)
+        e.name = e.name or ns.WarObjectiveName(e.zoneId, e.objId)
+    elseif kind == "F" or kind == "X" then
+        e.zoneId, e.seconds, e.name = U.Int(f[2], nil, 0, INT32), warTime(f[3]), U.Str(f[4], nil, WAR_PLACE)
+        if not e.zoneId then
+            return
+        end
+        if e.name then
+            S.warZoneNames[e.zoneId] = e.name
+        end
+        e.name = ns.WarZoneName(e.zoneId)
+    elseif kind == "E" then
+        e.zoneId, e.winner = U.Int(f[2], nil, 0, INT32), warLetter(f[3], WAR_TEAMS)
+        e.controlA, e.controlH = warPermille(f[4]) or 0, warPermille(f[5]) or 0
+        if not e.zoneId then
+            return
+        end
+        e.name = ns.WarZoneName(e.zoneId)
+    elseif kind == "W" then
+        e.name, e.classId = U.Str(f[2], nil, WAR_NAME), U.Int(f[3], 0, 0, 255)
+        e.team, e.streak = warLetter(f[4], WAR_TEAMS), U.Int(f[5], 0, 0, WAR_BIG)
+        e.reason = warLetter(f[6], WAR_REASONS)
+        if not e.name then
+            return
+        end
+    elseif kind == "B" then
+        e.killer, e.victim = U.Str(f[2], nil, WAR_NAME), U.Str(f[3], nil, WAR_NAME)
+        e.honor, e.shards = U.Int(f[4], 0, 0, INT32), U.Int(f[5], 0, 0, INT32)
+        if not (e.killer and e.victim) then
+            return
+        end
+    elseif kind == "S" then
+        e.name, e.honor, e.shards = U.Str(f[2], nil, WAR_NAME), U.Int(f[3], 0, 0, INT32), U.Int(f[4], 0, 0, INT32)
+        if not e.name then
+            return
+        end
+    else -- R
+        e.why = warLetter(f[2], WAR_WHY)
+        e.honor, e.xp, e.shards = U.Int(f[3], 0, 0, INT32), U.Int(f[4], 0, 0, INT32), U.Int(f[5], 0, 0, INT32)
+        e.drPermille = U.Int(f[6], 1000, 0, 1000)
+        if not e.why then
+            return
+        end
+    end
+    S.warEvent = e
+    ns.Fire("WAR_EVENT", e)
+    changed("WPEV")
 end)
 
 local TOAST_TARGETS = { tasks = true, dungeons = true, keys = true, rift = true, collections = true, season = true,

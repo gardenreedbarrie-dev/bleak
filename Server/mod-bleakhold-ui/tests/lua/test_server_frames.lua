@@ -444,3 +444,140 @@ for _, size in ipairs({ 1000, 251, 64 }) do
         H.eq(r.rewards[3].line, "5 Shards")
     end)
 end
+
+------------------------------------------------------------------------------------------------------
+-- World PvP and War Mode (section 19): the C++ module's War session (bh_gen.cpp `wpvp`: HELLO with bits 16384 and
+-- 32768, WMST, ERR wm_place, WPEV of every kind, WPMAP, WPZ, WPCAP, WANTED) through the addon's transport and State at
+-- every frame size. Every value bh_gen.cpp sets is checked; the states between are caught as they arrive.
+------------------------------------------------------------------------------------------------------
+for _, size in ipairs({ 1000, 251, 64 }) do
+    test("C++ World PvP frames (max body " .. size .. ") reach the addon's War Mode state", function(M, ns)
+        local data = loadFrames(size).wpvp
+        H.ok(data and #data.frames >= data.messages and data.messages >= 26, "bh_gen wrote the World PvP session")
+        local C, S = ns.Comm, ns.S
+        local seen = { WMST = {}, WPZ = {}, WPCAP = {}, WANTED = {}, WPMAP = {} }
+        local owners = {}    -- the outposts' owners as each WPZ brought them (a WPCAP moves them on afterwards)
+        ns.On("STATE", function(topic)
+            local now = ({ WMST = S.warMode, WPZ = S.wpZone, WPCAP = S.wpCap, WANTED = S.wanted,
+                WPMAP = S.wpMap })[topic]
+            if seen[topic] and now then
+                local list = seen[topic]
+                if list[#list] ~= now then
+                    list[#list + 1] = now
+                    if topic == "WPZ" then
+                        local o = {}
+                        for i, obj in ipairs(now.objectives) do o[i] = obj.owner .. obj.state end
+                        owners[#list] = table.concat(o, " ")
+                    end
+                end
+            end
+        end)
+        local events = {}
+        ns.On("WAR_EVENT", function(e) events[#events + 1] = e end)
+        feed(M, data)
+        M.Advance(1)
+        local drops = {}
+        for k, v in pairs(C.stats.dropped) do drops[#drops + 1] = k .. "=" .. v end
+        H.eq(#drops, 0, "dropped frames: " .. table.concat(drops, " "))
+        H.eq(C.stats.framesIn, #data.frames, "frames in")
+        H.eq(C.stats.unknown, 0, "the addon handles every section 19 op")
+        H.eq(C.PendingChunks(), 0, "unfinished chunk buffers")
+        if size == 64 then
+            H.ok(#data.frames > data.messages, "small frames: messages were chunked")
+        end
+        H.ok(C.ready and C.HasFeature(16384) and C.HasFeature(32768) and C.HasFeature(8), "HELLO bits 8, 16384, 32768")
+        H.ok(ns.WarMode.Live() and ns.WarMode.ObjectivesLive())
+        -- WMST: off and blocked, on, then the streak and the hunt
+        H.eq(#seen.WMST, 3)
+        local w1, w2, w3 = seen.WMST[1], seen.WMST[2], seen.WMST[3]
+        H.eq(w1.on, false); H.eq(w1.block, "wm_busy"); H.eq(w1.minLevel, 20); H.eq(w1.xpPct, 0); H.eq(w1.honorPct, 10)
+        H.eq(w1.shardPct, 0); H.eq(w1.underdogPct, 8); H.eq(w1.underdogTeam, "H"); H.eq(w1.wmAlliance, 31)
+        H.eq(w1.wmHorde, 22); H.eq(w1.bonusHonorCap, 3720); H.eq(w1.shardsCap, 60); H.eq(w1.bestStreak, 7)
+        H.eq(w1.kills, 118); H.eq(w1.deaths, 96); H.eq(w1.cooldownSec, 0); H.eq(w1.wantedState, 0)
+        H.eq(w2.on, true); H.eq(w2.block, nil); H.eq(w2.cooldownSec, 900)
+        H.eq(w3.on, true); H.eq(w3.cooldownSec, 512); H.eq(w3.streak, 5); H.eq(w3.wantedState, 1)
+        H.eq(w3.wantedSec, 900)
+        H.eq(w3.bountyHonor, 248); H.eq(w3.todayBonusHonor, 412); H.eq(w3.todayShards, 6); H.eq(w3.kills, 123)
+        H.eq(w3.deaths, 96); H.eq(S.warMode, w3)
+        -- ERR wm_place for WARMODE
+        H.eq(S.err.op, "WARMODE"); H.eq(S.err.seq, "3"); H.eq(S.err.code, "wm_place")
+        H.eq(S.err.shown, "War Mode can only be changed in an inn or a city.")
+        -- WPMAP: the Front running, then its ceasefire
+        H.eq(#seen.WPMAP, 2)
+        local m = seen.WPMAP[1]
+        H.eq(m.frontZone, 2817); H.eq(m.frontState, 1); H.eq(m.secondsLeft, 7200); H.eq(m.nextZone, 66)
+        H.eq(m.nextStartsSec, 7800); H.eq(m.levelZone, 267); H.eq(m.levelState, 2); H.eq(m.levelSecondsLeft, 300)
+        H.eq(#m.zones, 4); H.eq(#m.points, 6)
+        local z1, z2, z3, z4 = m.zones[1], m.zones[2], m.zones[3], m.zones[4]
+        H.eq(z1.zoneId, 2817); H.eq(z1.kind, "F"); H.eq(z1.heldA, 2); H.eq(z1.heldH, 0); H.eq(z1.neutral, 1)
+        H.eq(z1.levelMin, 80); H.eq(z1.levelMax, 80); H.eq(z1.state, 1); H.eq(#z1.points, 3)
+        H.eq(z2.zoneId, 267); H.eq(z2.kind, "L"); H.eq(z2.neutral, 3); H.eq(z2.levelMin, 20); H.eq(z2.levelMax, 35)
+        H.eq(z2.state, 2)
+        H.eq(z3.zoneId, 3483); H.eq(z3.kind, "S"); H.eq(z3.heldA, 2); H.eq(z3.heldH, 1); H.eq(z3.levelMin, nil)
+        H.eq(z3.state, 1); H.eq(#z3.points, 3)
+        H.eq(z4.zoneId, 4197); H.eq(z4.kind, "W"); H.eq(z4.heldH, 1); H.eq(z4.levelMax, nil)
+        H.eq(m.points[2].objId, 2); H.eq(m.points[2].owner, "N"); H.eq(m.points[2].state, 6)
+        H.eq(m.points[4].objId, 101); H.eq(m.points[6].owner, "H"); H.eq(m.points[6].state, 2)
+        H.eq(S.wpMap.frontState, 2); H.eq(S.wpMap.secondsLeft, 600); H.eq(S.wpMap.nextStartsSec, 600)
+        -- WPZ: the Front, the Front after the capture, then Dalaran (no objectives)
+        H.eq(#seen.WPZ, 3)
+        local a, b = seen.WPZ[1], seen.WPZ[2]
+        H.eq(a.zoneId, 2817); H.eq(a.kind, "F"); H.eq(a.state, 1); H.eq(a.secondsLeft, 4320); H.eq(a.controlA, 620)
+        H.eq(a.controlH, 380); H.eq(a.dominionTeam, "A"); H.eq(a.dominionStacks, 2); H.eq(a.levelMin, 80)
+        H.eq(a.levelMax, 80); H.eq(#a.objectives, 3)
+        H.eq(a.objectives[1].name, "Violet Stand"); H.eq(a.objectives[1].u, 512); H.eq(a.objectives[1].v, 388)
+        H.eq(owners[1], "A1 N6 A1", "owners and states as the first WPZ sent them")
+        H.eq(a.objectives[1].slider, 1000)
+        local long = "Forlorn Woods; the \"old\" one, %20|cffff0000red|r"
+        H.eq(a.objectives[2].name, long:sub(1, 40), "separators unescaped, cut at 40 bytes by the server")
+        H.eq(a.objectives[2].u, 604); H.eq(a.objectives[2].v, 455)
+        H.eq(a.objectives[2].slider, 260, "the capture bar moved the outpost's bar on")
+        H.eq(a.objectives[3].name, "Sunreaver Rise"); H.eq(a.objectives[3].u, nil); H.eq(a.objectives[3].v, nil)
+        H.eq(a.objectives[3].slider, 800)
+        H.eq(b.controlA, 700); H.eq(b.controlH, 300); H.eq(b.dominionStacks, 3); H.eq(b.secondsLeft, 4100)
+        H.eq(owners[2], "A1 A1 A1"); H.eq(b.byId[2].slider, 260)
+        H.eq(S.wpZone.zoneId, 4395); H.eq(S.wpZone.kind, nil); H.eq(#S.wpZone.objectives, 0)
+        -- WPCAP: two bars, then 0 (left it)
+        H.eq(#seen.WPCAP, 2)
+        local c1, c2 = seen.WPCAP[1], seen.WPCAP[2]
+        H.eq(c1.objId, 2); H.eq(c1.slider, -120); H.eq(c1.neutralPct, 20); H.eq(c1.state, 6); H.eq(c1.countA, 2)
+        H.eq(c1.countH, 3); H.eq(c1.maxNet, 5)
+        H.eq(c2.slider, 260); H.eq(c2.state, 1); H.eq(c2.countA, 4); H.eq(c2.countH, 1)
+        H.eq(S.wpCap, nil)
+        -- WANTED: two (the second without a position), one, none; Dalaran forgets the list
+        H.eq(#seen.WANTED, 3)
+        local l1 = seen.WANTED[1]
+        H.eq(l1.zoneId, 2817); H.eq(#l1.list, 2)
+        local g = l1.list[1]
+        H.eq(g.name, "Garrick Stormwind, the; bold|one~of:many"); H.eq(g.classId, 4); H.eq(g.team, "H")
+        H.eq(g.streak, 5); H.eq(g.reason, "B"); H.eq(g.bountyHonor, 248); H.eq(g.bountyShards, 5); H.eq(g.u, 560)
+        H.eq(g.v, 402); H.eq(g.ageSec, 35)
+        local br = l1.list[2]
+        H.eq(br.name, "Br\195\169nna"); H.eq(br.classId, 8); H.eq(br.streak, 9); H.eq(br.reason, "S")
+        H.eq(br.bountyHonor, 446); H.eq(br.bountyShards, 9); H.eq(br.u, nil); H.eq(br.v, nil)
+        H.eq(#seen.WANTED[2].list, 1); H.eq(seen.WANTED[2].list[1].name, "Br\195\169nna")
+        H.eq(#seen.WANTED[3].list, 0)
+        H.eq(S.wanted, nil, "another zone: the Wanted list is gone")
+        -- WPEV: every kind bh_gen sends, in order
+        local kinds = {}
+        for i, e in ipairs(events) do kinds[i] = e.kind end
+        H.eq(table.concat(kinds, ""), "XFACRWBSER")
+        H.eq(events[1].zoneId, 2817); H.eq(events[1].seconds, 900); H.eq(events[1].name, "Crystalsong Forest")
+        H.eq(events[2].seconds, 7200)
+        H.eq(events[3].objId, 3); H.eq(events[3].team, "H"); H.eq(events[3].name, "Sunreaver Rise")
+        H.eq(events[4].objId, 2); H.eq(events[4].team, "A"); H.eq(events[4].name, "Forlorn Woods")
+        H.eq(events[5].why, "C"); H.eq(events[5].honor, 186); H.eq(events[5].xp, 0); H.eq(events[5].shards, 2)
+        H.eq(events[5].drPermille, 1000)
+        H.eq(events[6].name, "Garrick Stormwind, the; bold|one~of:many"); H.eq(events[6].classId, 4)
+        H.eq(events[6].team, "H"); H.eq(events[6].streak, 5); H.eq(events[6].reason, "B")
+        H.eq(events[7].killer, "Aldric"); H.eq(events[7].victim, "Garrick Stormwind, the; bold|one~of:many")
+        H.eq(events[7].honor, 248); H.eq(events[7].shards, 5)
+        H.eq(events[8].name, "Br\195\169nna"); H.eq(events[8].honor, 248); H.eq(events[8].shards, 5)
+        H.eq(events[9].zoneId, 2817); H.eq(events[9].winner, "A"); H.eq(events[9].controlA, 640)
+        H.eq(events[9].controlH, 360)
+        H.eq(events[10].why, "V"); H.eq(events[10].honor, 496); H.eq(events[10].shards, 10)
+        H.eq(ns.WarZoneName(2817), "Crystalsong Forest")
+        -- the screen: in Dalaran no HUD and no bar
+        H.ok(not ns.WarFront.hud:IsShown() and not ns.WarFront.cap:IsShown())
+    end)
+end

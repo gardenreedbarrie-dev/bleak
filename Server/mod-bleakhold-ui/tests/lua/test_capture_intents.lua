@@ -30,7 +30,8 @@ end
 
 test("every intent the addon can send, captured for the C++ parser", function(M, ns)
     local C = ns.Comm
-    FX.connect(M, H, { [6] = 512 + 1024 + 2048 + 4096 })   -- camping, glide, field repair, Bleakhold Royale
+    -- camping, glide, field repair, Bleakhold Royale, War Mode and World PvP
+    FX.connect(M, H, { [6] = 512 + 1024 + 2048 + 4096 + 16384 + 32768 })
     FX.all(M, H)
 
     -- the windows' own buttons (the paths players use)
@@ -174,6 +175,35 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
     end
     H.eq(table.concat(royale, "|"), "RDROP -92,221|RDROP 502,-1029|RDEPLOY |RSPEC 0|RSPEC 2|RSPEC 1|RSPEC 1|"
         .. "RDROP -17067,17067|RDROP 17067,-17067|RSPEC 2|RDEPLOY ", "the Royale intents the UI sent")
+    -- War Mode (section 19) from the real UI, as the addon spaces it: one WARMODE per 2.1 s (the server allows one per
+    -- 2 s and drops the same `on` within a second); the page's button asks for a confirmation first
+    M.env.IsResting = function() return 1 end
+    local function wmst(on)
+        H.send(M, "WMST", { { on, 0, "", 20, 0, 10, 0, 8, "H", 31, 22, 0, 0, 0, 0, 0, 3720, 0, 60, 7, 118, 96 } })
+    end
+    wmst(0)
+    ns.UI.Open("warmode")
+    M.Advance(0.3)
+    ns.WarMode.page.toggle:Click()                                         -- Turn War Mode on: WARMODE 1
+    M.env.BleakholdDialog.ok:Click()
+    M.Advance(2.2)
+    wmst(1)
+    M.Advance(0.3)
+    ns.WarMode.page.toggle:Click()                                         -- Turn War Mode off: WARMODE 0
+    M.env.BleakholdDialog.ok:Click()
+    M.Advance(2.2)
+    M.env.SlashCmdList.BLEAKHOLD("warmode on")                             -- /bh warmode on: WARMODE 1
+    M.Advance(2.2)
+    H.eq(C.Send("WARMODE", 2), false, "on is 0 or 1")
+    H.eq(C.Send("WARMODE"), false, "WARMODE needs its field")
+    H.eq(C.Send("WARMODE", 1, 1), false, "one field only")
+    H.eq(table.concat((function()
+        local out = {}
+        for _, it in ipairs(H.intents(M)) do
+            if it.op == "WARMODE" then out[#out + 1] = it.payload end
+        end
+        return out
+    end)(), " "), "1 0 1", "the WARMODE intents the UI sent")
     -- GET of every topic; the client batches one frame's requests (8 records at most per GET)
     for _, topic in ipairs({ "WEEK", "ERA", "TASKS", "KEY", "BOARD", "QUEUE", "COLL", "LIDX", "SEASON", "FIRSTS", "MPLUS", "RIFT" }) do
         C.Refresh(topic)
@@ -186,6 +216,10 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
     C.Refresh("CAMPST")
     C.Refresh("ROYS")
     C.Refresh("ROYM")
+    C.Refresh("WMST")
+    C.Refresh("WPZ")
+    C.Refresh("WPMAP")
+    C.Refresh("WANTED")
     M.Advance(10)
 
     local ops, topics, n = {}, {}, 0

@@ -1,9 +1,10 @@
--- Bleakhold: Activities window. Nav rail (Dungeons, Keys, Rift, Royale, Tasks, Legacies, Season), header with
--- the daily and weekly reset, and the Tasks page: era banner with affixes, daily task cards with
+-- Bleakhold: Activities window. Nav rail (Dungeons, Keys, Rift, Royale, War Mode, Tasks, Legacies, Season), header
+-- with the daily and weekly reset, and the Tasks page: era banner with affixes, daily task cards with
 -- progress rings and Claim, weekly tasks, "your week" aside and Find a group, and the battleground kill
 -- announcer's settings (Announcer.lua) while the realm runs it (HELLO feature bit 8192), Royale on or off.
--- Dungeons.lua, Keys.lua, Rift.lua and Royale.lua add their pages through Activities.AddPage. A nav entry with an
--- available() test (Royale: HELLO feature bit 4096) is left out of the rail while it says no (A.LayoutNav).
+-- Dungeons.lua, Keys.lua, Rift.lua, Royale.lua and WarMode.lua add their pages through Activities.AddPage. A nav entry
+-- with an available() test (Royale: HELLO feature bit 4096, War Mode: 16384) is left out of the rail while it says no
+-- (A.LayoutNav).
 local ADDON, ns = ...
 local U, UI, Comm, Data = ns.U, ns.UI, ns.Comm, ns.Data
 local C = UI.C
@@ -104,6 +105,9 @@ local navDefs = {
     { key = "rift", glyph = "rift", label = "Rift" },
     { key = "royale", glyph = "sword", label = "Royale", available = function()
         return ns.Royale ~= nil and ns.Royale.Live()
+    end },
+    { key = "warmode", glyph = "shield", label = "War Mode", available = function()
+        return ns.WarMode ~= nil and ns.WarMode.Live()
     end },
     { key = "tasks", glyph = "tasks", label = "Tasks" },
     { key = "legacies", glyph = "legacy", label = "Legacies" },

@@ -184,7 +184,8 @@ See `Tools/RaceForge/README.md` for the race settings (`races.json`) and what th
 ## Bleakhold UI
 
 The in-game Bleakhold interface is a built-in addon in `Interface/AddOns/Bleakhold`:
-- Activities: daily and weekly tasks, the Dungeon Journey board and queue, keystones, Eclipse Rift, Bleakhold Royale.
+- Activities: daily and weekly tasks, the Dungeon Journey board and queue, keystones, Eclipse Rift, Bleakhold Royale,
+  War Mode.
 - Collections, Season and Leaderboards windows; Collections > Transmog is the transmog window (below).
 - Minimap buttons, the Mythic+ tracker and keystone countdown (with a DBM pull bar), task toasts, item tooltip
   lines and coloured server announcements.
@@ -381,6 +382,27 @@ addon (`Announcer.lua`) shows a big banner ("Aldric: DOUBLE KILL") and plays the
   16-bit PCM, our own recordings made with Kokoro-82M, see `CREDITS.txt` there). After replacing them, run
   `python3 -I Tools/Announcer/import_sounds.py [--from DIR]`: it copies the sets from `DIR/<set>/<line>.wav` and
   regenerates `AnnouncerData.lua`, the length of every line, which the addon uses to keep lines apart.
+
+## War Mode and World PvP
+
+War Mode is each character's own choice to fight the other faction in the open world, for more experience and honor;
+World PvP objectives are outposts in rotating Front zones that the factions capture and hold. The server module
+decides everything (`docs/BleakholdProtocol.md` section 19, HELLO feature bits 16384 War Mode and 32768 the
+objectives); the addon (`WarMode.lua`, `WarFront.lua`) shows its state and sends one intent, `WARMODE`.
+
+- War Mode: Activities > War Mode, the shield orb on the minimap ring (red while it is on, pulsing while you are
+  Wanted) or `/bh warmode` (`/bh warmode on|off` asks the server at once). The page has the toggle, which asks first
+  and is grey with the reason while it cannot be used (not in an inn or a city, in combat, dead, below the level, in
+  an instance, Wanted, on cooldown), the bonuses with the underdog faction, today's bonus honor and Shards against
+  their caps, your streak, kills and deaths, and the Fronts with their countdowns.
+- Fronts: in a running Front zone the Front HUD at the top (time left, a pip per outpost that pulses while contested,
+  the factions' points, your Dominion) and, at an outpost, the capture bar (the neutral band, the marker, the way it
+  moves, both counts); banners for captures, attacks, Wanted players and bounties, toasts when a Front is near,
+  starts and ends, and the reward of each kill or capture under the HUD. Stock outdoor PvP zones keep their own bars.
+- The world map shows the outposts and the Wanted players while it shows your zone (a list where a zone has no map
+  of its own), and arrows at the minimap's edge point to your faction's outposts under attack.
+- The HUD and the capture bar can be dragged or placed in AddicatUI's editor mode; `[War]` chat lines can be hidden
+  per window with `/bh chat war off`. With bit 16384 off nothing of this shows; with 32768 off, no Fronts.
 
 ## Graphics (BleakFx)
 

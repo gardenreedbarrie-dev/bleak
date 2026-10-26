@@ -16,9 +16,10 @@ local SCHEMA = {
     PING = { INT },
     EMOJI = { "^%d%d?%d?$" },
     RDROP = { "^%-?%d+$", "^%-?%d+$" }, RDEPLOY = {}, RSPEC = { "^[012]$" },
+    WARMODE = { "^[01]$" },
 }
 local TOPICS = { WEEK = 0, ERA = 0, TASKS = 0, KEY = 0, BOARD = 0, QUEUE = 0, MPLUS = 0, RIFT = 0, COLL = 0, SET = 2,
-    LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1, ROYS = 0, ROYM = 0 }
+    LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1, ROYS = 0, ROYM = 0, WMST = 0, WPZ = 0, WPMAP = 0, WANTED = 0 }
 
 local function checkBody(body)
     H.ok(#body <= 251, "body over 251 bytes: " .. #body)
@@ -205,4 +206,32 @@ test("intent fields are ids the server gave us, never values we computed", funct
     H.eq(it.payload, "103", "TCLAIM carries only the server's task uid")
     H.eq(ns.S.tasks.byUid[103].state, 1, "claiming does not change local state; the server answers")
     H.eq(ns.S.week.coins, 2140, "coins unchanged until the server says so")
+end)
+
+test("War Mode (section 19): the page, the orb and the confirmation send only WARMODE 0 or 1 and GETs", function(M, ns)
+    M.env.IsResting = function() return 1 end
+    FX.connect(M, H, { [6] = 16384 + 32768 })
+    local start = #M.sent
+    H.send(M, "WMST", { { 0, 0, "", 20, 0, 10, 0, 0, "", 0, 0, 0, 0, 0, 0, 0, 3720, 0, 60, 0, 0, 0 } })
+    ns.UI.Open("warmode")
+    M.Advance(0.3)
+    clickAll(M, ns.WarMode.page)
+    M.Advance(2.2)
+    H.send(M, "WMST", { { 1, 0, "", 20, 0, 10, 0, 0, "", 0, 0, 0, 0, 0, 0, 0, 3720, 0, 60, 0, 0, 0 } })
+    clickAll(M, ns.WarMode.page)
+    M.env.BleakholdOrb_warmode:Click()
+    M.Advance(10)
+    local ops = {}
+    for i = start + 1, #M.sent do
+        local s = M.sent[i]
+        if s.prefix == "BHc" then
+            local op = checkBody(s.msg)
+            ops[#ops + 1] = op == "WARMODE" and s.msg:match(" (%d)$") or op
+        end
+    end
+    H.contains(table.concat(ops, " "), "1", "WARMODE 1 from the button")
+    H.contains(table.concat(ops, " "), "0", "WARMODE 0 from the button")
+    for _, op in ipairs(ops) do
+        H.ok(op == "GET" or op == "0" or op == "1", "only WARMODE and GET: " .. op)
+    end
 end)

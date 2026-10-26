@@ -14,6 +14,8 @@ ShoppingTooltip1
 ShoppingTooltip2
 UIErrorsFrame
 WorldMapFrame
+# the world map's map area (FrameXML WorldMapFrame.xml): War Mode's pins sit on it (tests create it)
+WorldMapButton
 WatchFrame
 DEFAULT_CHAT_FRAME
 NUM_CHAT_WINDOWS

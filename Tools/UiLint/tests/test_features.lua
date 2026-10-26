@@ -14,6 +14,14 @@ test("chat: tags are coloured, links kept, other lines untouched", function(M, n
     H.eq(M.FilterChat("CHAT_MSG_SYSTEM", f, "[Unknown Tag] hello"), "[Unknown Tag] hello")
 end)
 
+test("chat: the [War] tag of World PvP (section 10) is coloured and can be hidden", function(M, ns)
+    local f = M.env.ChatFrame1
+    H.eq(M.FilterChat("CHAT_MSG_SYSTEM", f, "[War] A Front starts in Crystalsong Forest in 15 minutes."),
+        "|cffE0604A[War]|r A Front starts in Crystalsong Forest in 15 minutes.")
+    M.env.SlashCmdList.BLEAKHOLD("chat war off 1")
+    H.eq(M.FilterChat("CHAT_MSG_SYSTEM", f, "[War] The Alliance wins Crystalsong Forest."), nil)
+end)
+
 test("chat: a tag can be hidden per chat window", function(M, ns)
     M.env.SlashCmdList.BLEAKHOLD("chat season off 2")
     H.eq(M.FilterChat("CHAT_MSG_SYSTEM", M.env.ChatFrame2, "[Season] hidden here"), nil)
@@ -203,6 +211,22 @@ test("orbs: click opens, badge shows claimable tasks, right-drag saves the angle
     M.Advance(0.2)
     M.Fire(orb, "OnDragStop")
     H.eq(type(M.env.BleakholdCharDB.orbs.season), "number", "angle saved")
+end)
+
+test("orbs: the War Mode orb only with HELLO bit 16384 (32768 alone is not War Mode)", function(M, ns)
+    local orb = M.env.BleakholdOrb_warmode
+    H.ok(not orb:IsShown(), "hidden before HELLO")
+    FX.connect(M, H, { [6] = 32768 })
+    H.ok(not orb:IsShown(), "World PvP alone: no War Mode")
+    H.hello(M, { [6] = 16384 })
+    H.ok(orb:IsShown(), "War Mode live")
+    H.hello(M, { [6] = 16384 + 32768 })
+    H.ok(orb:IsShown())
+    H.hello(M, { [6] = 0 })
+    H.ok(not orb:IsShown(), "switched off at runtime")
+    for _, o in ipairs(ns.Orbs.list) do
+        if o.key == "warmode" then H.eq(o.angle, 70, "its own place on the ring") end
+    end
 end)
 
 test("orbs: square minimap puts orbs on the edge", function(M, ns)

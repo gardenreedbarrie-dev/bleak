@@ -1,6 +1,6 @@
 ## Interface: 30300
 ## Title: Bleakhold
-## Notes: Bleakhold server interface: activities, dungeon board, keys, Eclipse Rift, Bleakhold Royale, the battleground kill announcer, collections, season and leaderboards.
+## Notes: Bleakhold server interface: activities, dungeon board, keys, Eclipse Rift, Bleakhold Royale, the battleground kill announcer, War Mode and World PvP, collections, season and leaderboards.
 ## Author: Bleakhold
 ## Version: 1.0.0
 ## OptionalDeps: AddicatUI, DragonUI, DBM-Core
@@ -34,6 +34,8 @@ RoyaleMap.lua
 RoyaleHud.lua
 AnnouncerData.lua
 Announcer.lua
+WarMode.lua
+WarFront.lua
 Season.lua
 Leaderboards.lua
 Graphics.lua
