@@ -4,7 +4,7 @@
  *
  * Hooks: the self-whisper that carries client messages (section 2), the prefix guard on every other
  * addon channel, login/logout, configuration and the world tick; for camping (section 16) the XP bonus,
- * the end of camp rest when combat starts, and the campfires that enter the world.
+ * the end of camp rest when combat starts, the campfires that enter the world and the glide's movement.
  */
 
 #include "BleakholdCamp.h"
@@ -151,6 +151,19 @@ namespace
         }
     };
 
+    // The glide (section 16): every movement packet, after the core handled the fall (Player::HandleFall) and before it
+    // moves the player there. Map threads; one atomic load while nobody glides.
+    class BleakholdGlideScript : public MovementHandlerScript
+    {
+    public:
+        BleakholdGlideScript() : MovementHandlerScript("BleakholdGlideScript", { MOVEMENTHOOK_ON_PLAYER_MOVE }) { }
+
+        void OnPlayerMove(Player* player, MovementInfo movementInfo, uint32 opcode) override
+        {
+            Camp::Instance().OnPlayerMove(player, movementInfo, opcode);
+        }
+    };
+
     // Camping (section 16): notes the Basic Campfires players light and the fires of BleakholdUi.Camp.ExtraFireEntries as
     // they enter the world (map threads; the check is a few integer compares for any other object).
     class BleakholdCampFireScript : public AllGameObjectScript
@@ -171,4 +184,5 @@ void AddBleakholdScripts()
     new BleakholdPlayerScript();
     new BleakholdWorldScript();
     new BleakholdCampFireScript();
+    new BleakholdGlideScript();
 }

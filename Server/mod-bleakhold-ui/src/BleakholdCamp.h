@@ -4,13 +4,23 @@
  *
  * Camping (section 16): campfires (CAMP M), camp objects of the professions (CAMP O), packing up (CAMP P), rest at a
  * fire, settling (camp object buffs and Campfire Warmth), the XP bonus of warmth and Well Fed food, field repair
- * (REPAIR), the High Elf glide (GLIDE) and the CAMPST state.
+ * (REPAIR), the High Elf glide Walk on Air (GLIDE) and the CAMPST state.
  *
- * Threads: everything runs on the world thread (the chat hook, the world tick, login and logout) except three hooks
- * that come from map threads: XpBonusPct (OnPlayerGiveXP), OnEnterCombat and OnGameObjectAdded. Those touch only the
- * player they are given, the timers (under their own lock) and a queue of new fires. Game objects and players are kept
- * as guids and found again on every use, so a fire that despawns, a grid that unloads or a player who logs out leaves
- * nothing dangling.
+ * Threads: everything runs on the world thread (the chat hook, the world tick, login and logout) except four hooks
+ * that come from map threads: XpBonusPct (OnPlayerGiveXP), OnEnterCombat, OnGameObjectAdded and OnPlayerMove (the
+ * glide). Those touch only the player they are given, the timers and the glides (under their own locks) and a queue of
+ * new fires. Game objects and players are kept as guids and found again on every use, so a fire that despawns, a grid
+ * that unloads or a player who logs out leaves nothing dangling.
+ *
+ * Glide (Walk on Air): GLIDE puts the feather fall aura (BleakholdUi.Glide.Spell) on the player. A fall at least
+ * CampRules::GlideMinHeight above the ground becomes a glide: the server pushes the player forward along their facing
+ * (Unit::KnockbackFrom from a point behind them, BleakholdUi.Glide.ForwardSpeed, no vertical speed: never up), and
+ * again whenever they turn (OnPlayerMove: the client reports its facing while falling, and keeps the direction a fall
+ * started with otherwise), never close to the ground. Landing or water ends the glide and takes the aura away (a
+ * landing with a push still on its way waits for its ack: the push throws the player off again); a GLIDE on the
+ * ground waits for a ledge until the aura runs out, and a map without the glide ends it (a battleground or an arena;
+ * a dungeon or a raid unless BleakholdUi.Glide.Instances: CampRules::NoGlideMap). CampRules.h holds the rules, and
+ * docs/BleakholdProtocol.md section 16 why mod-anticheat accepts it.
  *
  * Rest: a player at a fire gets the core's REST_FLAG_IN_FACTION_AREA bit (the core has no camp bit); outside an area that
  * has the faction rest flag that bit can only be the camp's. The core's rest mask keeps inn and city rest when the bit
@@ -37,6 +47,7 @@
 class GameObject;
 class Map;
 class Player;
+struct MovementInfo;
 
 namespace Bleakhold
 {
@@ -64,9 +75,14 @@ namespace Bleakhold
         uint32_t repairMinSkill = 75;
         uint32_t repairDiscountPct = 10;
         std::vector<uint32_t> glideRaces{ 22 };
-        uint32_t glideCooldownSec = 120;
+        uint32_t glideCooldownSec = 90;
         uint32_t glideSec = 10;
-        uint32_t glideSpell = 130;
+        uint32_t glideSpell = CampRules::WalkOnAirSpell;   // falls back to CampRules::SlowFallSpell when missing
+        float glideForwardSpeed = 12.0f;     // yd/s (0: no push, a plain slow fall)
+        bool glideSteer = true;              // push again when the player turns
+        bool glideRequireFalling = false;    // GLIDE only in the air
+        bool glideInstances = false;         // GLIDE in dungeons and raids
+        uint32_t glideStartKit = 13709;      // SpellVisualKit played when a glide starts (0: none)
     };
 
     class Camp
@@ -92,7 +108,9 @@ namespace Bleakhold
 
         // ---- hooks ----
         void OnLogin(Player* player);                 // world thread: clears a RESTING flag left by a camp logout
-        void OnLogout(Player* player);                // world thread: forgets the player's camp state
+        void OnLogout(Player* player);                // world thread: forgets the player's camp state and glide
+        // map thread (every movement packet of every player; a single atomic load while nobody glides)
+        void OnPlayerMove(Player* player, MovementInfo const& movementInfo, uint32_t opcode);
         static void OnEnterCombat(Player* player);    // map thread: camp rest ends at once (rest allows logout in combat)
         uint32_t XpBonusPct(Player* player);          // map thread: warmth + Well Fed, capped; 0 at the level cap
         void OnGameObjectAdded(GameObject* go);       // map threads: notes Basic Campfires and Camp.ExtraFireEntries
@@ -153,6 +171,15 @@ namespace Bleakhold
         CampRules::Profession const* ProfessionOf(uint32_t skill) const;
         uint8_t PlaceableTier(Player* player, CampRules::Profession const& prof) const;
         bool CanGlide(Player* player) const;
+        // the glide's push (map thread or world thread, for the player given): along `facing`, `fallSpeed` yd/s down
+        static void GlidePush(Player* player, float facing, float forwardSpeed, float fallSpeed);
+        static bool CanPush(Player* player);
+        static float HeightAboveGround(Player* player, float x, float y, float z);
+        // on a map without the glide: a battleground or an arena (Royale's included), a dungeon or a raid unless
+        // `instancesOn` (CampRules::NoGlideMap)
+        static bool NoGlideHere(Player* player, bool instancesOn);
+        void EndGlide(uint64_t rawGuid);              // forget a glide (the aura is the caller's business)
+        Opt<uint32_t> GlidingSec(uint64_t rawGuid);   // CAMPST gliding
         static bool AnvilAt(Fire const& fire);
         static bool InFactionRestArea(Player* player);
         static void EndCampRest(Player* player);
@@ -176,6 +203,24 @@ namespace Bleakhold
 
         std::mutex _newLock;                         // fires noted by OnGameObjectAdded, taken in by the next tick
         std::vector<NewFire> _newFires;
+
+        // the glides running now, by raw player guid (map threads: OnPlayerMove; world thread: GLIDE, the tick); never
+        // held while another of the module's locks is taken
+        struct GlideRun
+        {
+            CampRules::Glide glide;
+            uint32_t spell = 0;          // the aura it put on (the config may change mid-glide)
+            float forwardSpeed = 0;
+            bool steer = true;
+            bool instances = false;      // BleakholdUi.Glide.Instances as GLIDE read it
+            uint32_t startKit = 0;
+            int32_t auraMaxMs = 0;       // the aura's max duration as GLIDE set it (0: it rode on a mage's Slow Fall)
+        };
+        // the end of a glide takes its aura off (not a mage's own Slow Fall: CampRules::GlideTakesAura)
+        static void TakeGlideAura(Player* player, GlideRun const& run, uint64_t nowMs);
+        std::mutex _glideLock;
+        std::unordered_map<uint64_t, GlideRun> _glides;
+        std::atomic<uint32_t> _glideCount{ 0 };       // _glides.size(), read without the lock by OnPlayerMove
 
         // read by the map-thread hooks without a lock
         static constexpr std::size_t MaxHookEntries = 16;

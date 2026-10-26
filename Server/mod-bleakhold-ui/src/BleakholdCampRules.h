@@ -262,8 +262,208 @@ namespace Bleakhold::CampRules
     inline constexpr uint32_t SkillBlacksmithing = 164;
     inline constexpr uint8_t AnvilTier = 2;   // a blacksmithing object of this tier or higher is an anvil (REPAIR)
 
+    // ---- the High Elf glide, Walk on Air (GLIDE) ----
+    //
+    // The 3.3.5a client gives a falling player no air control: CMovementShared::StartMove, CalcDirection and
+    // SetFacing keep the direction and speed a fall started with (WoW/Source/Object/MovementShared.cpp), and a feather
+    // fall aura (MOVEMENTFLAG_SAFE_FALL) only caps the descent at s_safeFallTerminalVelocity. So the glide is the
+    // feather fall aura plus a server push: SMSG_MOVE_KNOCK_BACK (Unit::KnockbackFrom), which the client turns into a
+    // new fall (CMovement_C::Launch -> StartFalling(verticalSpeed)) with the given horizontal direction and speed, even
+    // when it arrives after a landing. The push is sent again when the player turns (the client reports its facing
+    // while falling), which is the steering.
+    inline constexpr uint32_t WalkOnAirSpell = 100800;   // the Bleakhold spell (spell_dbc row, client Spell.dbc row)
+    inline constexpr uint32_t SlowFallSpell = 130;       // the fallback when the realm lacks Walk on Air
+    inline constexpr float SafeFallTerminal = 7.0f;      // yd/s, CMovementShared::s_safeFallTerminalVelocity
+    inline constexpr float FallGravity = 19.291105f;     // yd/s^2, the client's fall acceleration
+    inline constexpr float GlideMinHeight = 2.5f;        // yd above the ground: a fall that becomes a glide
+    inline constexpr float GlideSteerAngle = 0.0873f;    // rad (5 degrees): a turn that re-aims the glide
+    inline constexpr uint64_t GlideSteerGapMs = 200;     // at most five steering pushes a second
+    inline constexpr uint32_t GlideMaxPushes = 64;       // pushes per glide (a hard cap; 10 s of steering needs ~50)
+    inline constexpr float GlideMaxForwardSpeed = 30.0f; // BleakholdUi.Glide.ForwardSpeed is clamped to 0..this
+    inline constexpr uint64_t GlideAckWaitMs = 1500;     // a landing waits this long for the ack of a push on its way
+
+    // The descent speed of a feather-falling client (CMovementShared::GetFeatherFallVelocity): the fall's start
+    // velocity (positive = down) plus gravity over the fall time, capped at the safe-fall terminal velocity, and never
+    // upward (a jump's rising part counts as 0).
+    inline float FeatherFallSpeed(float zspeed, uint32_t fallTimeMs)
+    {
+        if (!std::isfinite(zspeed))
+            return SafeFallTerminal;
+        float v = std::min(zspeed, SafeFallTerminal) + FallGravity * static_cast<float>(fallTimeMs) / 1000.0f;
+        return std::clamp(v, 0.0f, SafeFallTerminal);
+    }
+
+    // The smallest angle between two facings, 0..pi.
+    inline float AngleBetween(float a, float b)
+    {
+        float const tau = 6.28318530718f;
+        if (!std::isfinite(a) || !std::isfinite(b))
+            return 0.0f;
+        float d = std::fmod(std::fabs(a - b), tau);
+        return d > tau / 2.0f ? tau - d : d;
+    }
+
+    // Unit::KnockbackFrom pushes away from a point: the point one yard behind the player pushes them along `facing`.
+    struct Point2 { float x = 0, y = 0; };
+    inline Point2 PushOrigin(float x, float y, float facing)
+    {
+        return { x - std::cos(facing), y - std::sin(facing) };
+    }
+
+    // The maps without the glide: a battleground or an arena (the Royale map included) always; a dungeon or a raid
+    // (Map::IsDungeon) unless BleakholdUi.Glide.Instances, since the steerable push skips jump shortcuts (Mythic+
+    // routes and timers) and undoes drop-off mechanics (knockbacks off a platform, the Lich King's edge), which Slow
+    // Fall, with no forward control, never could. GLIDE there is refused (glide_here), and a glide carried in (a
+    // teleport, a summon, an instance portal) ends on arrival with its aura.
+    inline bool NoGlideMap(bool pvpMap, bool instanceMap, bool instancesOn)
+    {
+        return pvpMap || (instanceMap && !instancesOn);
+    }
+
+    // GLIDE refusals, checked in this order (BleakholdCamp.cpp fills the facts; section 16 lists the codes).
+    struct GlideFacts
+    {
+        bool raceOk = false;       // the real race is in BleakholdUi.Glide.Races
+        bool noGlideMap = false;   // NoGlideMap: a battleground or an arena, or a dungeon or a raid (Instances off)
+        bool alive = false;
+        bool mounted = false;      // mounted, on a vehicle or on a flight path
+        bool flying = false;       // flying, or able to fly (a flight form or a flying mount's aura)
+        bool inWater = false;      // swimming or standing in water
+        bool held = false;         // rooted, stunned, feared, confused, charmed or controlling another unit
+        bool inAir = false;        // falling or jumping
+        bool requireFalling = false;
+        uint32_t cooldownLeft = 0; // seconds
+    };
+    enum class GlideRefusal : uint8_t { None, Race, Here, Dead, Mounted, Flying, Water, Held, Ground, Cooldown };
+    inline GlideRefusal CheckGlide(GlideFacts const& f)
+    {
+        if (!f.raceOk)
+            return GlideRefusal::Race;
+        if (f.noGlideMap)
+            return GlideRefusal::Here;
+        if (!f.alive)
+            return GlideRefusal::Dead;
+        if (f.mounted)
+            return GlideRefusal::Mounted;
+        if (f.flying)
+            return GlideRefusal::Flying;
+        if (f.inWater)
+            return GlideRefusal::Water;
+        if (f.held)
+            return GlideRefusal::Held;
+        if (f.requireFalling && !f.inAir)
+            return GlideRefusal::Ground;
+        if (f.cooldownLeft > 0)
+            return GlideRefusal::Cooldown;
+        return GlideRefusal::None;
+    }
+
+    // One glide, from GLIDE until it ends. `airborne`: the fall has become a glide (falling at least GlideMinHeight
+    // above the ground); before that the aura only waits for a ledge (GLIDE while standing) and a small hop does not
+    // use it up.
+    struct Glide
+    {
+        uint64_t endMs = 0;         // the aura's end
+        bool airborne = false;
+        uint32_t pushes = 0;
+        uint32_t acked = 0;         // pushes the client acked (CMSG_MOVE_KNOCK_BACK_ACK)
+        uint64_t lastPushMs = 0;
+        float pushFacing = 0;       // the facing of the last push
+        float pushDown = 0;         // the descent the last push sent, yd/s (0: the start's)
+        bool closing = false;       // landed with a push on its way (GlideStep::Hold): no more pushes
+        float lastX = 0, lastY = 0, lastZ = 0;   // the last movement packet's position
+        bool hasLast = false;
+    };
+
+    // What a movement packet of a gliding player tells.
+    struct GlideMove
+    {
+        uint64_t nowMs = 0;
+        bool landed = false;        // MSG_MOVE_FALL_LAND
+        bool water = false;         // MSG_MOVE_START_SWIM or swimming
+        bool falling = false;       // MOVEMENTFLAG_FALLING or MOVEMENTFLAG_FALLING_FAR
+        bool auraOn = true;         // the glide's aura is still on (not cancelled, not dispelled, not dead)
+        bool noGlideMap = false;    // on a map without the glide (NoGlideMap; a GLIDE just before the port): it ends
+        float height = 1e9f;        // yd above the ground or the water (filled only while falling)
+        bool canPush = false;       // client-controlled, not rooted or stunned, not on a transport
+        bool moved = false;         // this packet's position is not the last one's (never push a player stuck in place)
+        float facing = 0;
+    };
+
+    enum class GlideStep : uint8_t
+    {
+        None,
+        Start,     // the fall becomes a glide: mark it airborne, play the start, push (no fall speed) if allowed
+        Push,      // push forward along the new facing, keeping the descent speed (a turn, or the first push)
+        Hold,      // landed with a push the client has not acked: it throws them off again, so the glide (and its
+                   // feather fall) stays without more pushes, and the landing after the ack ends it
+        End,       // landed, in water or over: the glide and its aura end
+    };
+
+    inline GlideStep NextGlideStep(Glide const& g, GlideMove const& m, bool pushOn, bool steerOn)
+    {
+        if (m.nowMs >= g.endMs || !m.auraOn || m.noGlideMap)
+            return GlideStep::End;
+        if (m.water)
+            return GlideStep::End;
+        if (m.landed || !m.falling)
+        {
+            if (!g.airborne)
+                return GlideStep::None;   // a hop on the ground keeps a waiting glide
+            if (g.acked < g.pushes && m.nowMs < g.lastPushMs + GlideAckWaitMs)
+                return GlideStep::Hold;   // (a push that is never acked holds it GlideAckWaitMs at most)
+            return GlideStep::End;
+        }
+        if (!g.airborne)
+            return m.height >= GlideMinHeight ? GlideStep::Start : GlideStep::None;
+        // no push after a landing, nor close to the ground (it could reach the client after it lands)
+        if (g.closing || !pushOn || !m.canPush || !m.moved || g.pushes >= GlideMaxPushes || m.height < GlideMinHeight)
+            return GlideStep::None;
+        if (g.pushes == 0)
+            return GlideStep::Push;   // the start could not push (held, on a transport): push once it can
+        if (!steerOn || m.nowMs < g.lastPushMs + GlideSteerGapMs)
+            return GlideStep::None;
+        if (AngleBetween(m.facing, g.pushFacing) < GlideSteerAngle)
+            return GlideStep::None;
+        return GlideStep::Push;
+    }
+
+    // The client acks every push (CMSG_MOVE_KNOCK_BACK_ACK); an ack that is not the glide's (a spell's knockback)
+    // counts no further than the pushes sent.
+    inline void CountAck(Glide& g)
+    {
+        g.acked = std::min(g.acked + 1, g.pushes);
+    }
+
+    // The descent a steering push keeps: the fall the last push started (at its own descent), over the time since it.
+    // Both pushes reach the client with the same delay, so latency drops out; the triggering packet's zspeed and fall
+    // time are a round trip old (and the client's to write), and would flatten the glide. A first push that comes late
+    // (the start could not push) takes the terminal speed. Turning never slows the descent.
+    inline float PushFallSpeed(Glide const& g, uint64_t nowMs)
+    {
+        if (g.pushes == 0)
+            return SafeFallTerminal;
+        uint64_t const since = nowMs > g.lastPushMs ? nowMs - g.lastPushMs : 0;
+        return FeatherFallSpeed(g.pushDown, static_cast<uint32_t>(std::min<uint64_t>(since, 60000)));
+    }
+
+    // Slow Fall, the fallback spell, may be a mage's own. GLIDE does not shorten one with more time left than a glide
+    // (the glide rides on it), and the glide's end takes it off only while it is still the one GLIDE put on: the max
+    // duration GLIDE gave it (`setMaxMs`; 0: GLIDE rode on the mage's) and no more time left than the glide plus a
+    // second (a recast gives it its full 30 s again). Walk on Air is the glide's alone.
+    inline bool GlideRidesAura(uint32_t spell, int32_t leftMs, int32_t glideMs)
+    {
+        return spell == SlowFallSpell && leftMs > glideMs;
+    }
+    inline bool GlideTakesAura(uint32_t spell, int32_t setMaxMs, int32_t maxMs, int32_t leftMs, uint64_t glideLeftMs)
+    {
+        if (spell != SlowFallSpell)
+            return true;
+        return setMaxMs > 0 && maxMs == setMaxMs && leftMs >= 0 && static_cast<uint64_t>(leftMs) <= glideLeftMs + 1000;
+    }
+
     // Whether a new CAMPST must go out: anything but the counting-down timers changed (a timer that starts or
-    // ends counts: cooldown started, warmth started or ended, the fire went out, glide used).
+    // ends counts: cooldown started, warmth started or ended, the fire went out, glide used, a glide began or ended).
     inline bool Changed(CampState const& a, CampState const& b)
     {
         auto sameObjects = [](std::vector<CampObjectInfo> const& x, std::vector<CampObjectInfo> const& y) {
@@ -284,9 +484,11 @@ namespace Bleakhold::CampRules
         };
         auto on = [](uint32_t t) { return t > 0; };
         auto glide = [](Opt<uint32_t> const& g) { return g ? (*g > 0 ? 2 : 1) : 0; };
+        auto gliding = [](Opt<uint32_t> const& g) { return g && *g > 0; };
         return a.state != b.state || a.mine != b.mine || a.xpPct != b.xpPct || a.repair != b.repair || a.fed != b.fed ||
             on(a.fireSec) != on(b.fireSec) || on(a.cooldownSec) != on(b.cooldownSec) || on(a.warmthSec) != on(b.warmthSec) ||
-            glide(a.glideSec) != glide(b.glideSec) || !sameObjects(a.objects, b.objects) || !samePlaces(a.place, b.place);
+            glide(a.glideSec) != glide(b.glideSec) || gliding(a.glidingSec) != gliding(b.glidingSec) ||
+            !sameObjects(a.objects, b.objects) || !samePlaces(a.place, b.place);
     }
 }
 

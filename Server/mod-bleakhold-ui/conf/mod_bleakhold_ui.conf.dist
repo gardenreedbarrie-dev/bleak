@@ -335,7 +335,13 @@ BleakholdUi.Case.CooldownMs = 1000
 #        Default:     10
 #
 #    BleakholdUi.Glide.Enable
-#        Description: GLIDE, a slow fall for the races in BleakholdUi.Glide.Races (feature bit 1024).
+#        Description: GLIDE, Walk on Air, for the races in BleakholdUi.Glide.Races (feature bit 1024): a fall
+#                     becomes a glide the player steers by turning. It slows the fall and pushes the player
+#                     forward along their facing (again whenever they turn); it never lifts them. Landing or
+#                     water ends it; a GLIDE on the ground waits for a ledge until the aura runs out. No
+#                     glide in battlegrounds, arenas and Bleakhold Royale, in dungeons and raids (unless
+#                     BleakholdUi.Glide.Instances), mounted, on a vehicle or flight path, flying, in water,
+#                     rooted, stunned or not in control.
 #        Default:     1 - Enabled
 #                     0 - Disabled
 #
@@ -344,17 +350,60 @@ BleakholdUi.Case.CooldownMs = 1000
 #        Default:     "22"
 #
 #    BleakholdUi.Glide.Cooldown
-#        Description: Seconds between two glides of one player.
-#        Default:     120
+#        Description: Seconds between two glides of one player (a relog does not reset it).
+#        Default:     90
 #
 #    BleakholdUi.Glide.Duration
-#        Description: Seconds the glide aura lasts (1..600).
+#        Description: Seconds the glide aura lasts (1..600), from GLIDE on (a wait for a ledge counts). The
+#                     glide bar follows it; Walk on Air's buff tooltip says the duration of its Spell.dbc row
+#                     (10 s, DurationIndex 1 in the client row and in 02_bleakhold_walk_on_air.sql): change
+#                     them together.
 #        Default:     10
 #
 #    BleakholdUi.Glide.Spell
-#        Description: The slow fall aura of the glide, cast triggered (no reagent, no cooldown). 130 is Slow
-#                     Fall; 44795 (the parachute) shows a parachute but may end at the first landing.
-#        Default:     130
+#        Description: The glide's aura, cast triggered (no reagent, no cooldown): a spell with a feather fall
+#                     aura (SPELL_AURA_FEATHER_FALL) on the caster only. 100800 is Walk on Air, the module's
+#                     own spell: its server row is data/sql/db-world/02_bleakhold_walk_on_air.sql, and the
+#                     client needs the same row in its Spell.dbc (patch MPQ) for the buff's name, icon and
+#                     wings. A spell the server lacks or that has no feather fall falls back to 130 (Slow
+#                     Fall). The aura ends with the glide (landing, water, its duration), except a Slow Fall
+#                     the player cast again (a mage's own).
+#        Default:     100800 - Walk on Air
+#                     130    - Slow Fall
+#
+#    BleakholdUi.Glide.ForwardSpeed
+#        Description: Yards per second the glide carries the player forward (0..30; their run speed is 7).
+#                     0: no push at all, the aura alone (a slow fall the player cannot steer).
+#        Default:     12
+#
+#    BleakholdUi.Glide.Steer
+#        Description: Push again whenever the gliding player turns (5 degrees or more, at most five times a
+#                     second, not within 2.5 yd of the ground), so the glide follows their facing. The 3.3.5a
+#                     client keeps a fall's direction by itself. 0: one push when the glide starts, straight
+#                     ahead.
+#        Default:     1 - Enabled
+#                     0 - Disabled
+#
+#    BleakholdUi.Glide.RequireFalling
+#        Description: GLIDE only in the air (falling or jumping; else ERR glide_ground). With 0 a GLIDE on the
+#                     ground waits for a ledge.
+#        Default:     0 - Disabled
+#                     1 - Enabled
+#
+#    BleakholdUi.Glide.Instances
+#        Description: GLIDE in dungeons and raids. Off, its steerable forward push cannot skip a dungeon's
+#                     jump shortcuts (Mythic+ routes and timers) or undo a boss's drop-off mechanics
+#                     (knockbacks off a platform, the Lich King's edge): GLIDE there is ERR glide_here, and a
+#                     glide taken in (a teleport, a summon, an instance portal) ends on arrival with its aura.
+#                     Slow Fall, with no forward push, never had this problem. Battlegrounds, arenas and
+#                     Bleakhold Royale never allow the glide.
+#        Default:     0 - Disabled
+#                     1 - Enabled
+#
+#    BleakholdUi.Glide.StartVisualKit
+#        Description: SpellVisualKit.dbc id shown on the player (with its sound) when a fall becomes a glide.
+#                     13709 is Wind Shear's gust of wind and whoosh. 0: none.
+#        Default:     13709
 
 BleakholdUi.Camp.Enable = 1
 BleakholdUi.Camp.MinLevel = 5
@@ -391,9 +440,14 @@ BleakholdUi.Repair.MinSkill = 75
 BleakholdUi.Repair.BlacksmithDiscountPct = 10
 BleakholdUi.Glide.Enable = 1
 BleakholdUi.Glide.Races = "22"
-BleakholdUi.Glide.Cooldown = 120
+BleakholdUi.Glide.Cooldown = 90
 BleakholdUi.Glide.Duration = 10
-BleakholdUi.Glide.Spell = 130
+BleakholdUi.Glide.Spell = 100800
+BleakholdUi.Glide.ForwardSpeed = 12
+BleakholdUi.Glide.Steer = 1
+BleakholdUi.Glide.RequireFalling = 0
+BleakholdUi.Glide.Instances = 0
+BleakholdUi.Glide.StartVisualKit = 13709
 
 ###################################################################################################
 # KEYSTONE RUNS

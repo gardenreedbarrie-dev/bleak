@@ -442,7 +442,7 @@ test("camp: the Glide button shows for gliders only, counts its cooldown and gli
     campst(M, { [10] = 90 })
     M.Advance(0.3)
     H.ok(gb:IsShown(), "a glider gets the button")
-    H.eq(gb.icon:GetTexture(), "Interface\\Icons\\Spell_Magic_FeatherFall")
+    H.eq(gb.icon:GetTexture(), "Interface\\Icons\\Spell_Nature_EyeOfTheStorm", "Walk on Air's icon")
     H.ok(gb.cd:IsShown(), "cooldown on the button")
     H.eq(gb.cd:GetText(), "01:30")
     M.Advance(40)
@@ -458,8 +458,120 @@ test("camp: the Glide button shows for gliders only, counts its cooldown and gli
     M.Advance(0.3)
     H.eq(H.countIntents(M, "GLIDE"), n + 1, "GLIDE when ready")
     M.Fire(gb, "OnEnter")
-    H.contains(table.concat(M.env.GameTooltip.__lines or {}, "\n"), "Bind a key", "binding hint")
+    local tip = table.concat(M.env.GameTooltip.__lines or {}, "\n")
+    H.contains(tip, "Bind a key", "binding hint")
+    H.contains(tip, "Walk on Air", "the spell's name")
+    H.contains(tip, "Glide through the air, steering your descent. Does not gain altitude.", "Forever's tooltip")
+    H.ok(not tip:find("10 sec", 1, true), "no fixed seconds (BleakholdUi.Glide.Duration may differ)")
+    H.contains(tip, "its time runs from the moment you use it", "the wait for a ledge counts")
+    H.contains(tip, "Ready", "the cooldown line")
     M.Fire(gb, "OnLeave")
+end)
+
+test("camp: Walk on Air: the glide bar shows the server's glide, counts down and goes when it lands", function(M, ns)
+    FX.connect(M, H, ALL_BITS)
+    local bar = ns.Camp.glideBar
+    campst(M, { [10] = 0 })
+    M.Advance(0.3)
+    H.ok(M.env.BleakholdGlideButton:IsShown() and not bar:IsShown(), "no glide running: no bar")
+    -- GLIDE accepted while falling: cooldown 90 and a glide of 10 s
+    M.falling = true
+    campst(M, { [10] = 90, [13] = 10 })
+    M.Advance(0.3)
+    H.ok(bar:IsShown(), "the bar while gliding")
+    H.contains(bar.text:GetText(), "Walk on Air", "named")
+    H.contains(bar.text:GetText(), "9.", "about 9.7 s left")
+    M.Fire(M.env.BleakholdGlideButton, "OnEnter")
+    H.contains(table.concat(M.env.GameTooltip.__lines or {}, "\n"), "Gliding: 10 sec left", "the tooltip tells the glide")
+    M.Fire(M.env.BleakholdGlideButton, "OnLeave")
+    M.Advance(3)
+    H.contains(bar.text:GetText(), "6.", "counts down locally")
+    local v = bar:GetValue()
+    H.ok(v > 0.6 and v < 0.75, "progress about 0.67, got " .. tostring(v))
+    -- lands: the bar goes at once, before the server's CAMPST
+    M.falling = false
+    M.Advance(0.2)
+    H.ok(not bar:IsShown(), "landed: no bar")
+    campst(M, { [10] = 86, [13] = 6 })   -- a CAMPST sent before the server saw the landing
+    M.Advance(0.3)
+    H.ok(not bar:IsShown(), "still landed")
+    campst(M, { [10] = 86 })              -- the server ended the glide
+    M.Advance(0.3)
+    H.ok(not bar:IsShown(), "no glide")
+    H.eq(M.env.BleakholdGlideButton.cd:GetText(), "01:26", "the cooldown on the button")
+end)
+
+test("camp: Walk on Air: a hop keeps the bar of a glide waiting for a ledge; it runs out by itself", function(M, ns)
+    FX.connect(M, H, ALL_BITS)
+    local bar = ns.Camp.glideBar
+    campst(M, { [10] = 90, [13] = 10 })   -- GLIDE on the ground: the glide waits for a ledge
+    M.Advance(0.3)
+    H.ok(bar:IsShown(), "waiting glide shown")
+    M.falling = true                       -- a hop: shorter than a second in the air
+    M.Advance(0.6)
+    M.falling = false
+    M.Advance(0.3)
+    H.ok(bar:IsShown(), "a hop does not end it (the server keeps it too)")
+    M.falling = true                       -- over a ledge: a real glide
+    M.Advance(2)
+    H.ok(bar:IsShown(), "gliding")
+    M.Advance(7.5)
+    H.ok(not bar:IsShown(), "ran out")
+    -- a new glide starts the bar over (the next GLIDE after a game master's reset)
+    M.falling = false
+    campst(M, { [10] = 90, [13] = 10 })
+    M.Advance(0.3)
+    H.ok(bar:IsShown(), "a new glide")
+    H.contains(bar.text:GetText(), "9.")
+end)
+
+test("camp: Walk on Air: a jump the server did not count keeps the glide; the next fall shows the bar", function(M, ns)
+    FX.connect(M, H, ALL_BITS)
+    local bar = ns.Camp.glideBar
+    local gb = M.env.BleakholdGlideButton
+    campst(M, { [10] = 90, [13] = 10 })   -- GLIDE on the ground: the glide waits for a ledge
+    M.Advance(0.3)
+    H.ok(bar:IsShown(), "waiting glide shown")
+    M.falling = true                       -- a running jump down a slope: over a second in the air, under 2.5 yd
+    M.Advance(1.2)
+    M.falling = false
+    M.Advance(0.3)
+    H.ok(not bar:IsShown(), "the client guesses a landing")
+    campst(M, { [10] = 88, [13] = 8 })     -- the server still holds the waiting glide
+    M.Advance(0.3)
+    H.ok(not bar:IsShown(), "still guessed landed on the ground")
+    M.falling = true                       -- over a real ledge: the server's glide starts
+    M.Advance(0.5)
+    H.ok(bar:IsShown(), "a new fall brings the bar back (the hidden bar has no OnUpdate of its own)")
+    H.contains(bar.text:GetText(), "Walk on Air")
+    M.Fire(gb, "OnEnter")
+    H.contains(table.concat(M.env.GameTooltip.__lines or {}, "\n"), "Gliding: ", "the tooltip's Gliding line")
+    M.Fire(gb, "OnLeave")
+    M.Advance(2)
+    H.ok(bar:IsShown(), "gliding")
+    M.falling = false
+    M.Advance(0.3)
+    H.ok(not bar:IsShown(), "landed")
+    campst(M, { [10] = 85 })               -- the server ended it
+    M.Advance(0.3)
+    M.falling = true
+    M.Advance(0.5)
+    H.ok(not bar:IsShown(), "no glide: a fall shows nothing")
+end)
+
+test("camp: the Glide key works in mid-air, and the new GLIDE refusals read as sentences", function(M, ns)
+    FX.connect(M, H, ALL_BITS)
+    campst(M, { [10] = 0 })
+    M.Advance(0.3)
+    M.falling = true
+    M.env.BleakholdGlide()
+    M.Advance(0.3)
+    H.ok(H.lastIntent(M, "GLIDE"), "GLIDE sent while falling")
+    for code, text in pairs({ glide_mounted = "while mounted", glide_flying = "already flying", glide_water = "in water",
+        glide_rooted = "rooted, stunned", glide_ground = "only glide while falling" }) do
+        H.send(M, "ERR", { { "GLIDE", "c", code, "" } })
+        H.ok(errorsShown(M, text) >= 1, code)
+    end
 end)
 
 test("camp: no Glide button while the realm has glide off", function(M, ns)

@@ -238,7 +238,7 @@ local function noDrops(C, what)
 end
 
 local CAMP_RESTING = { "R", 45, 870, 1, 880, 0, 0, { { 164, 2, 1 }, { 171, 1, 0 } }, { { 185, 1 }, { 356, 3 }, { 773, 2 } }, "", 0, 0 }
-local CAMP_SETTLED = { "C", 30, 600, 0, 0, 1500, 15, { { 164, 3, 0 }, { 197, 2, 1 }, { 999, 1, 0 } }, {}, 120, 1, 1 }
+local CAMP_SETTLED = { "C", 30, 600, 0, 0, 1500, 15, { { 164, 3, 0 }, { 197, 2, 1 }, { 999, 1, 0 } }, {}, 120, 1, 1, 9 }
 local CAMP_LONG = { "C", 0, 600, 1, 0, 1500, 25, {}, {}, 0, 0, 1 }
 for i = 1, 8 do CAMP_LONG[8][i] = { 100 + i, (i - 1) % 3 + 1, i % 2 } end
 for i = 1, 16 do CAMP_LONG[9][i] = { 200 + i, (i - 1) % 3 + 1 } end
@@ -261,6 +261,7 @@ for _, size in ipairs({ 1000, 251, 64 }) do
         local c = S.camp
         H.eq(c.state, "R"); H.eq(c.settle, 45); H.eq(c.fire, 870); H.eq(c.mine, true); H.eq(c.cd, 880)
         H.eq(c.warmth, 0); H.eq(c.xp, 0); H.eq(c.glide, nil, "empty glide: cannot glide"); H.eq(c.repair, false); H.eq(c.fed, false)
+        H.eq(c.gliding, 0, "no 13th field: no glide running")
         H.eq(#c.objs, 2); H.eq(c.objs[1].skill, 164); H.eq(c.objs[1].tier, 2); H.eq(c.objs[1].mine, true); H.eq(c.objs[2].mine, false)
         H.eq(#c.place, 3); H.eq(c.place[2].skill, 356); H.eq(c.place[2].tier, 3); H.eq(c.place[3].skill, 773)
         H.ok(f:IsShown(), "camp frame at the fire"); H.eq(f.state:GetText(), "Resting")
@@ -277,6 +278,7 @@ for _, size in ipairs({ 1000, 251, 64 }) do
         c = S.camp
         H.eq(c.state, "C"); H.eq(c.settle, 0, "settle only with R"); H.eq(c.mine, false); H.eq(c.warmth, 1500); H.eq(c.xp, 15)
         H.eq(c.glide, 120); H.eq(c.repair, true); H.eq(c.fed, true); H.eq(#c.place, 0); H.eq(c.objs[3].skill, 999)
+        H.eq(c.gliding, 9, "gliding (Walk on Air) in the 13th field")
         H.eq(settled, 1, "settled once")
         H.eq(f.state:GetText(), "Camping"); H.ok(f.repairBtn:IsShown() and not f.packBtn:IsShown())
         H.ok(not f.place[1]:IsShown(), "nothing to place"); H.ok(f.objs[3]:IsShown(), "unknown profession still drawn")
@@ -352,6 +354,7 @@ test("CAMPST frames produced by the C++ module (bh_gen) parse into a camp state"
     -- the last CAMPST of bh_gen.cpp: settled (settle is sent as 0 outside R), three objects, nothing to place
     H.eq(c.state, "C"); H.eq(c.settle, 0); H.eq(c.fire, 700); H.eq(c.mine, true); H.eq(c.cd, 880); H.eq(c.warmth, 1800)
     H.eq(c.xp, 15); H.eq(#c.objs, 3); H.eq(#c.place, 0); H.eq(c.glide, 95); H.eq(c.repair, true); H.eq(c.fed, true)
+    H.eq(c.gliding, 7, "the glide that runs now")
     H.eq(c.objs[1].skill, 164); H.eq(c.objs[1].tier, 2); H.eq(c.objs[1].mine, true)
     H.eq(c.objs[3].skill, 197); H.eq(c.objs[3].tier, 3); H.eq(c.objs[3].mine, false)
 end)

@@ -521,6 +521,8 @@ return function(opts)
     env.GetInstanceInfo = function() return M.zone, M.instanceType, 1, "Normal", 5, 0, nil end
     env.InCombatLockdown = function() return M.combat and 1 or nil end
     env.IsShiftKeyDown = function() return M.shift and 1 or nil end
+    -- the player's movement (Script_IsFalling: 1 while falling or jumping); tests set M.falling
+    env.IsFalling = function() return M.falling and 1 or nil end
     env.IsControlKeyDown = function() return nil end
     env.IsAltKeyDown = function() return nil end
     env.IsModifiedClick = function() return nil end

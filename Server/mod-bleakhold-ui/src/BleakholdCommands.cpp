@@ -229,6 +229,7 @@ namespace
         CampState c;
         c.state = CampStateId::Resting; c.settleSec = 42; c.fireSec = 812; c.mine = true; c.cooldownSec = 840; c.warmthSec = 0; c.xpPct = 5;
         c.objects = { { 171, 1, false } }; c.place = { { 164, 2 }, { 197, 3 } }; c.glideSec = 0u; c.repair = false; c.fed = true;
+        c.glidingSec = 8u;   // the glide bar (Walk on Air)
         Ui::SendCampState(p, c);
     }
 

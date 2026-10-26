@@ -14,7 +14,7 @@ The client and the server talk with small hidden addon messages (the protocol is
 - it has its own tables for the parts that need no custom system (definitions, week schedule, season
   and war effort, legacy sets, leaderboards, server firsts) and a GM command to test everything;
 - it runs a few features entirely on its own: emoji bubbles, dances, cases and camping (campfires, camp
-  objects, the warmth and food XP bonus, field repair and the High Elf glide).
+  objects, the warmth and food XP bonus, field repair and the High Elf glide, Walk on Air).
 
 It never invents game rules: what a key scores, what the war effort counts, what a task pays, how the
 Rift scales is decided by your systems or by rows you write.
@@ -64,7 +64,7 @@ You should see `mod-bleakhold-ui` in CMake's list of modules.
 
 | Folder | Database | What it creates |
 |---|---|---|
-| `data/sql/db-world/` | world (`acore_world`) | the definition tables, with the UI's own names and texts filled in, and the case tables (empty) |
+| `data/sql/db-world/` | world (`acore_world`) | the definition tables, with the UI's own names and texts filled in, the case tables (empty) and the glide's spell Walk on Air (a `spell_dbc` row, id 100800) |
 | `data/sql/db-characters/` | characters (`acore_characters`) | leaderboards, server firsts, war effort points |
 
 Nothing to do if your `worldserver.conf` has `Updates.EnableDatabases = 7` (the default): the
@@ -118,7 +118,7 @@ To change names, texts, the week schedule or seasons later: edit the `bleakhold_
 | Collections counts | | `SendCollections` |
 | Emoji bubbles (Animations tab, emote wheel, `/bh emoji`) | everything: the module checks `EMOJI` and shows the emoji over the player's head to everyone nearby; config `BleakholdUi.Emoji.*` | nothing (players need the Bleakhold client to see the bubbles) |
 | Dances (Animations tab, emote wheel, `/bh dance`, each dance's own command) | everything: the module checks `DANCE`, starts the stock dance (emote state) and tells everyone nearby which Bleakhold dance it is, again at every loop; config `BleakholdUi.Dance.*` | nothing (players need the Bleakhold client to see the dances; stock clients see the stock dance) |
-| Camping (Make camp button and `/camp`, the Camp frame at a fire, camp objects, Pack up, Repair and `/repair`, the High Elf glide) | everything: the module lights the camp fire (`CAMP M`, a script-free bonfire that goes out by itself), counts every lit fire (camp fires, Basic Campfires players light, `BleakholdUi.Camp.ExtraFireEntries`), lets players rest there like at an inn, settles them after a minute (camp object buffs, Campfire Warmth), places and removes camp objects (`CAMP O`, `CAMP P`), adds the warmth and Well Fed XP bonus, repairs (`REPAIR`), glides (`GLIDE`) and keeps the client's `CAMPST` up to date; config `BleakholdUi.Camp.*`, `Glide.*`, `Repair.*` | nothing. Check the default buff spells in game once (`BleakholdUi.Camp.Profession.*`, `Glide.Spell`: they were chosen without the client's Spell.dbc) |
+| Camping (Make camp button and `/camp`, the Camp frame at a fire, camp objects, Pack up, Repair and `/repair`, the High Elf glide Walk on Air with its Glide button, glide bar, key and `/glide`) | everything: the module lights the camp fire (`CAMP M`, a script-free bonfire that goes out by itself), counts every lit fire (camp fires, Basic Campfires players light, `BleakholdUi.Camp.ExtraFireEntries`), lets players rest there like at an inn, settles them after a minute (camp object buffs, Campfire Warmth), places and removes camp objects (`CAMP O`, `CAMP P`), adds the warmth and Well Fed XP bonus, repairs (`REPAIR`), glides (`GLIDE`: the feather fall aura, the forward push along the player's facing, again when they turn, the end on landing; never in battlegrounds and arenas, nor in dungeons and raids unless `BleakholdUi.Glide.Instances`) and keeps the client's `CAMPST` up to date; config `BleakholdUi.Camp.*`, `Glide.*`, `Repair.*` | the client's `Spell.dbc` row of Walk on Air (spell 100800, the same values as `data/sql/db-world/02_bleakhold_walk_on_air.sql`) in a patch MPQ, for its buff name, icon and wings; without it the glide works with no buff shown. Check the default buff spells in game once (`BleakholdUi.Camp.Profession.*`: they were chosen without the client's Spell.dbc) |
 | Cases (right-click a case item: the case window with its rewards and chances, Unlock and the reel) | everything: the module answers `GET CASES` / `GET CASE`, checks `CASEOPEN` (the case, its key, bag room), rolls the reward by weight, swaps the case for it, answers `UNBOX` and announces rare rewards (`[Case]`); config `BleakholdUi.Case.*` | the cases: rows in `bleakhold_case` and `bleakhold_case_reward` (see `data/sql/db-world/02_bleakhold_case_tables.sql`), and the case items themselves (any item, no spell needed) |
 
 Buttons whose system is not connected yet answer the player with "This is not available on this realm

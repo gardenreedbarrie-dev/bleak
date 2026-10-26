@@ -429,6 +429,7 @@ namespace Bleakhold
         Opt<uint32_t> glideSec;                  // glide cooldown; empty: the player cannot glide
         bool repair = false;                     // REPAIR is allowed right now
         bool fed = false;                        // a Well Fed buff (the food XP bonus) is active
+        Opt<uint32_t> glidingSec;                // the glide (Walk on Air) running now: seconds left; empty: none
     };
 
     // ---------------------------------------------------------------------------------------------
@@ -614,6 +615,19 @@ namespace Bleakhold
         inline constexpr Refusal Phase{ "royale_phase", "You cannot do that now." };
         inline constexpr Refusal Nobody{ "royale_nobody", "There is nobody left to watch." };
         inline constexpr Refusal GlideHere{ "glide_here", "You cannot glide here." };
+    }
+
+    // ERR codes of GLIDE (section 16; glide_here is above, glide_cooldown carries the seconds left).
+    namespace GlideErr
+    {
+        inline constexpr Refusal Off{ "glide_off", "Gliding is turned off on this realm." };
+        inline constexpr Refusal Race{ "glide_race", "Your people cannot glide." };
+        inline constexpr Refusal Mounted{ "glide_mounted",
+            "You cannot glide while mounted, on a vehicle or on a flight path." };
+        inline constexpr Refusal Flying{ "glide_flying", "You are already flying." };
+        inline constexpr Refusal Water{ "glide_water", "You cannot glide in water." };
+        inline constexpr Refusal Rooted{ "glide_rooted", "You cannot glide while rooted, stunned or not in control." };
+        inline constexpr Refusal Ground{ "glide_ground", "You can only glide while falling." };
     }
 
     // ---------------------------------------------------------------------------------------------

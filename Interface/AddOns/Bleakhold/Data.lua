@@ -266,6 +266,11 @@ Data.errorTexts = {
     camp_skill = "Your skill in that profession is too low.",
     glide_off = "Gliding is turned off on this realm.",
     glide_race = "Only High Elves can glide.",
+    glide_mounted = "You cannot glide while mounted, on a vehicle or on a flight path.",
+    glide_flying = "You are already flying.",
+    glide_water = "You cannot glide in water.",
+    glide_rooted = "You cannot glide while rooted, stunned or not in control.",
+    glide_ground = "You can only glide while falling.",
     glide_cooldown = function()
         return campTimer("glide", "Glide is not ready yet.", "Glide is not ready yet (%s).")
     end,

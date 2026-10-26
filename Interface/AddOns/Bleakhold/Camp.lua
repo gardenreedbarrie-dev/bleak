@@ -4,15 +4,16 @@
 -- The pieces: a Make camp orb on the minimap ring (with the cooldown under it), the movable Camp frame
 -- shown while the player is at a campfire (state, settle and fire timers, warmth and XP bonus, the camp
 -- objects with tooltips, Place/Repair/Pack up buttons), a small Warmth/Food indicator away from the fire,
--- the Glide button (cooldown on it) and key binding (BleakholdGlide, Bindings.xml), /makecamp (/campfire), /glide,
--- /repair.
+-- the Glide button for Walk on Air (cooldown on it, a glide bar over it while a glide runs) and its key binding
+-- (BleakholdGlide, Bindings.xml), /makecamp (/campfire), /glide, /repair.
 -- Features: 512 camping, 1024 glide, 2048 field repair; everything of a feature the realm has off hides.
 local ADDON, ns = ...
 local U, UI, Comm, Data = ns.U, ns.UI, ns.Comm, ns.Data
 local C = UI.C
 local S = ns.S
 
-local floor, ceil = math.floor, math.ceil
+local floor, ceil, max = math.floor, math.ceil, math.max
+local strformat = string.format
 
 local CP = {}
 ns.Camp = CP
@@ -24,7 +25,12 @@ CP.MAX_OBJECTS = 8       -- icons drawn (the server sends at most 8; a fire hold
 CP.MAX_PLACE = 6         -- place buttons drawn
 CP.ICONS = "Interface\\Icons\\"
 CP.UNKNOWN_ICON = "INV_Misc_QuestionMark"
-CP.GLIDE_ICON = "Spell_Magic_FeatherFall"
+CP.GLIDE_ICON = "Spell_Nature_EyeOfTheStorm"   -- Walk on Air's own icon (SpellIcon 1931)
+CP.GLIDE_NAME = "Walk on Air"
+-- (no seconds here: BleakholdUi.Glide.Duration may differ; the glide bar and the tooltip's Gliding line show them)
+CP.GLIDE_TEXT = "Glide through the air, steering your descent. Does not gain altitude."
+CP.GLIDE_HOW = "Use it while you fall, or just before you step off a ledge: its time runs from the moment you use it. "
+    .. "Turn to steer; landing ends it."
 
 local function featureCamp()
     return Comm.HasFeature(Comm.FEATURE.CAMP)
@@ -225,7 +231,7 @@ local function orbLines()
     end
     local g = leftOf("glide")
     if g then
-        lines[#lines + 1] = { g >= 1 and ("Glide ready in " .. U.Clock(g)) or "Glide ready", C.mid }
+        lines[#lines + 1] = { g >= 1 and (CP.GLIDE_NAME .. " ready in " .. U.Clock(g)) or (CP.GLIDE_NAME .. " ready"), C.mid }
     end
     local cd = leftOf("cd")
     if cd and cd >= 1 then
@@ -634,8 +640,9 @@ ind:SetScript("OnUpdate", function(self, elapsed)
 end)
 
 ------------------------------------------------------------------------------------------------------
--- The Glide button: shown while the realm has glide on and the player can glide (CAMPST glide not empty),
--- with the cooldown on it. The key binding (Bindings.xml) does the same.
+-- The Glide button (Walk on Air): shown while the realm has glide on and the player can glide (CAMPST glide
+-- not empty), with the cooldown on it and, while a glide runs (CAMPST gliding), a glide bar over it. The key
+-- binding (Bindings.xml) does the same as a click, also in mid-air.
 ------------------------------------------------------------------------------------------------------
 local gb = CreateFrame("Button", "BleakholdGlideButton", UIParent)
 gb:SetSize(36, 36)
@@ -659,11 +666,15 @@ gb:SetScript("OnClick", function()
     CP.Glide()
 end)
 gb:SetScript("OnEnter", function(self)
-    local lines = { "Glide", { "Float down slowly instead of falling (High Elves).", C.mid, true } }
+    local lines = { CP.GLIDE_NAME, { "High Elf racial", C.dim }, { CP.GLIDE_TEXT, C.mid, true }, { CP.GLIDE_HOW, C.mute, true } }
+    local gliding = CP.GlideLeft()
     local left = leftOf("glide")
+    if gliding then
+        lines[#lines + 1] = { "Gliding: " .. ceil(gliding) .. " sec left", C.teal }
+    end
     lines[#lines + 1] = { (left and left >= 1) and ("Ready in " .. U.Clock(ceil(left))) or "Ready", C.goldLight }
     local key = GetBindingKey and GetBindingKey("BLEAKHOLD_GLIDE")
-    lines[#lines + 1] = { key and ("Key: " .. key) or "Bind a key: Key Bindings, Bleakhold, Glide", C.mute }
+    lines[#lines + 1] = { key and ("Key: " .. key) or "Bind a key: Key Bindings, Bleakhold, Walk on Air", C.mute }
     UI.ShowTooltip(self, lines)
 end)
 gb:SetScript("OnLeave", function()
@@ -675,6 +686,91 @@ end)
 local function glideLive()
     local c = S.camp
     return (featureGlide() and c and c.glide ~= nil) and c or nil
+end
+
+-- The glide bar: Walk on Air's time left, over the button, from CAMPST gliding (the server's glide, which also
+-- waits there for a ledge). The server says when it ends (a landing) within a second; the bar goes at once when the
+-- client sees the landing itself: a second in the air (IsFalling; a hop is shorter and does not use the glide up),
+-- then on the ground again. That is a guess (the server starts a glide only 2.5 yd above the ground, and holds one
+-- whose last push is still on its way): a new fall while the server still says gliding brings the bar back.
+CP.GLIDE_BAR_W = 150
+CP.GLIDE_AIR_SEC = 1.0
+local bar = UI.Bar(gb, CP.GLIDE_BAR_W, 14, C.teal)
+bar:SetPoint("BOTTOM", gb, "TOP", 0, 6)
+UI.Backdrop(bar, C.chip, C.chipBorder)
+bar.text = UI.Text(bar, 11, C.text, "body", "CENTER", "OVERLAY")
+bar.text:SetPoint("CENTER")
+bar:Hide()
+CP.glideBar = bar
+CP.glide = { recvAt = nil, last = 0, total = 0, fallSince = nil, air = false, landed = false }
+
+local function falling()
+    return (IsFalling and IsFalling()) and true or false
+end
+
+-- Seconds left of the glide that runs now, or nil (none, or it landed).
+function CP.GlideLeft()
+    local c = S.camp
+    if not (featureGlide() and c) or CP.glide.landed then
+        return nil
+    end
+    local left = leftOf("gliding", c)
+    if not left or left <= 0 then
+        return nil
+    end
+    return left
+end
+
+-- A new CAMPST: a glide that starts (or starts over: more time than the one running has left) resets the bar; one
+-- the server ended clears it.
+function CP.OnGlideState(c)
+    local g = CP.glide
+    local gliding = c and c.gliding or 0
+    local now = GetTime()
+    if gliding <= 0 then
+        g.recvAt, g.last, g.total, g.fallSince, g.air, g.landed = nil, 0, 0, nil, false, false
+        return
+    end
+    if not g.recvAt or gliding > g.last - (now - g.recvAt) + 1.5 then
+        g.total, g.fallSince, g.air, g.landed = gliding, nil, false, false
+    end
+    g.recvAt, g.last = now, gliding
+end
+
+function CP.UpdateGlideBar()
+    local g = CP.glide
+    if g.landed and falling() then
+        g.landed, g.air, g.fallSince = false, false, nil
+    end
+    local left = CP.GlideLeft()
+    if CP.glidePreview and not left then
+        bar:SetProgress(0.6)
+        bar.text:SetText(CP.GLIDE_NAME .. "  6.0")
+        bar:Show()
+        return
+    end
+    if left then
+        local now = GetTime()
+        if falling() then
+            g.fallSince = g.fallSince or now
+            if now - g.fallSince >= CP.GLIDE_AIR_SEC then
+                g.air = true
+            end
+        else
+            g.fallSince = nil
+            if g.air then
+                g.landed = true   -- landed: the server ends the glide too, its CAMPST follows
+                left = nil
+            end
+        end
+    end
+    if not left then
+        bar:Hide()
+        return
+    end
+    bar:SetProgress(left / max(g.total, 1))
+    bar.text:SetText(CP.GLIDE_NAME .. "  " .. strformat("%.1f", left))
+    bar:Show()
 end
 
 function CP.UpdateGlide()
@@ -697,6 +793,7 @@ function CP.RefreshGlide()
         return
     end
     CP.UpdateGlide()
+    CP.UpdateGlideBar()
     if not gb:IsShown() then
         gpos.Anchor()
         gb:Show()
@@ -712,7 +809,17 @@ gb:SetScript("OnUpdate", function(self, elapsed)
             gb:Hide()
         else
             CP.UpdateGlide()
+            CP.UpdateGlideBar()   -- the bar's own OnUpdate stops while it is hidden
         end
+    end
+end)
+
+local bacc = 0
+bar:SetScript("OnUpdate", function(self, elapsed)
+    bacc = bacc + (elapsed or 0)
+    if bacc >= 0.05 then
+        bacc = 0
+        CP.UpdateGlideBar()
     end
 end)
 
@@ -729,6 +836,7 @@ end
 
 ns.On("STATE", function(topic)
     if topic == "CAMPST" then
+        CP.OnGlideState(S.camp)
         CP.RefreshAll()
     end
 end)
@@ -757,7 +865,7 @@ ns.AddCommand("camp", "make camp here (/bh camp pack packs it up)", function(arg
     CP.CampCommand(args)
 end)
 
-ns.AddCommand("glide", "glide down slowly instead of falling (High Elves)", function()
+ns.AddCommand("glide", "Walk on Air: turn a fall into a glide you steer (High Elves)", function()
     CP.Glide()
 end)
 

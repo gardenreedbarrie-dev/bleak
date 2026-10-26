@@ -514,7 +514,7 @@ int main(int argc, char** argv)
         CampState c;
         c.state = CampStateId::Camping; c.settleSec = 30; c.fireSec = 700; c.mine = true; c.cooldownSec = 880; c.warmthSec = 1800;
         c.xpPct = 15; c.objects = { { 164, 2, true }, { 171, 1, false }, { 197, 3, false } }; c.glideSec = 95u; c.repair = true;
-        c.fed = true;
+        c.fed = true; c.glidingSec = 7u;   // and gliding (Walk on Air): the 13th field
         Send("CAMPST", EncodeCampState(c));
     }
 

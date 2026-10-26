@@ -281,7 +281,7 @@ namespace Bleakhold
         PayloadWriter w;
         w.Char(Letter(m.state)).Int(m.state == CampStateId::Resting ? m.settleSec : 0).Int(m.fireSec).Bool(m.mine).Int(m.cooldownSec)
             .Int(m.warmthSec).Int(m.xpPct).Tuples(objects, MaxCampObjects).Tuples(place, MaxCampPlaces).Opt(m.glideSec).Bool(m.repair)
-            .Bool(m.fed);
+            .Bool(m.fed).Opt(m.glidingSec);
         return w.Take();
     }
 

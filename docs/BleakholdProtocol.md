@@ -193,7 +193,7 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `DANCE` | `danceId` | dance Bleakhold dance `danceId` until the player moves (section 14). `danceId`: 0..1023, an index into the dance catalogue, `Tools/DanceForge/dances.json` |
 | `CASEOPEN` | `caseItemId, nonce` | open one case `caseItemId` from the player's bags (section 15); `nonce` (0..2147483647) comes back in `UNBOX` |
 | `CAMP` | `act[, skill]` | camping (section 16). `act`: `M` make camp here, `O` place a camp object at the fire the player is at, `P` pack up the player's fire. `skill` (1..2147483647, a SkillLine id from `CAMPST` `place`) is sent with `O` and only with `O`: `CAMP M`, `CAMP O,164`, `CAMP P` |
-| `GLIDE` | | start the glide, a short slow fall (High Elves; section 16) |
+| `GLIDE` | | Walk on Air, the High Elf glide: the player's fall becomes a glide they steer (section 16) |
 | `REPAIR` | | repair everything the player wears and carries in the bags, for the normal cost (section 16) |
 | `RDROP` | `x, y` | Bleakhold Royale: set the landing pin (section 17). Integer world yards, -17067..17067 each (they may be negative) |
 | `RDEPLOY` | | Bleakhold Royale: open the parachute now (section 17) |
@@ -547,7 +547,7 @@ does not throttle addon messages for you (AzerothCore's addon flood check is not
 | `DANCE` | 1 per `BleakholdUi.Dance.CooldownMs` (1 s); the addon waits 1.25 s itself |
 | `CASEOPEN` | 1 per `BleakholdUi.Case.CooldownMs` (1 s); the addon waits for `UNBOX` or `ERR` (at most 5 s) |
 | `CAMP` | 1 per `BleakholdUi.RateLimit.CampIntervalMs` (1 s), every `act` together |
-| `GLIDE` | 1 per `BleakholdUi.RateLimit.GlideIntervalMs` (1 s); the glide itself has a 120 s cooldown (`ERR glide_cooldown`) |
+| `GLIDE` | 1 per `BleakholdUi.RateLimit.GlideIntervalMs` (1 s); the glide itself has a 90 s cooldown (`ERR glide_cooldown`) |
 | `REPAIR` | 1 per `BleakholdUi.RateLimit.RepairIntervalMs` (2 s) |
 | `RDROP`, `RSPEC` | 1 each per `BleakholdUi.RateLimit.RoyaleIntervalMs` (0.5 s, so 2 per second); the addon waits 0.5 s itself |
 | `RDEPLOY` | 1 per `BleakholdUi.RateLimit.RoyaleDeployIntervalMs` (1 s); over it, dropped silently (no `busy`) |
@@ -823,14 +823,63 @@ less). It is allowed for a blacksmith with at least `BleakholdUi.Repair.MinSkill
 and for anyone at a fire with a camp anvil (feature 512). It is all or nothing: a player who cannot pay for all of it
 pays nothing. The result is a `TOAST` (kind `I`).
 
-**Glide.** `GLIDE` gives a player of a race in `BleakholdUi.Glide.Races` (22, the High Elf) a slow fall for
-`BleakholdUi.Glide.Duration` (10 s), every `BleakholdUi.Glide.Cooldown` (120 s), standing or falling. It is a triggered
-cast of `BleakholdUi.Glide.Spell` (Slow Fall): no reagent and no spell cooldown on the client. There is no glide in a
-battleground or an arena, the Bleakhold Royale map included (section 17).
+**Glide (Walk on Air).** `GLIDE` lets a player of a race in `BleakholdUi.Glide.Races` (22, the High Elf) turn a fall
+into a glide they steer, every `BleakholdUi.Glide.Cooldown` (90 s; a relog does not reset it). It never flies and never
+gains altitude:
+
+- The server puts Walk on Air on the player (`BleakholdUi.Glide.Spell`, spell 100800: a feather fall aura for
+  `BleakholdUi.Glide.Duration`, 10 s), a triggered cast: no reagent, no cost and no spell cooldown on the client.
+- A fall at least 2.5 yd above the ground or the water becomes the glide: at once when the player is already falling,
+  else the moment they go over a ledge (a `GLIDE` on the ground waits for one, and the wait counts toward the aura's
+  10 s; a small hop does not use it up). The descent slows to the feather fall's 7 yd/s at most, and the server pushes
+  the player forward along their facing at `BleakholdUi.Glide.ForwardSpeed` (12 yd/s; running is 7). The push has no
+  upward part: when the glide starts the fall starts over from rest, later pushes keep the descent the player has
+  built up since the push before (the server counts it from its own pushes, so latency never flattens the glide).
+- Turning steers. A 3.3.5a client keeps the direction a fall started with, so the server pushes again along the new
+  facing whenever the player turns 5 degrees or more (`BleakholdUi.Glide.Steer`; at most five pushes a second and 64
+  per glide, never while rooted, stunned, feared, charmed or on a transport, and never less than 2.5 yd above the
+  ground, where a push could reach the client after it lands).
+- Landing, water, the end of the aura and coming onto a map without the glide (below; also after a `GLIDE` just
+  before the port) end the glide.
+  A landing takes no fall damage (the aura is still on when the server checks the fall), and the aura goes at once so
+  it cannot soften a later fall. A landing before the client acked the last push (`CMSG_MOVE_KNOCK_BACK_ACK`) waits
+  for it: the client carries out a push even after it landed, so the glide and its aura stay, with no more pushes,
+  until the landing after the ack (1.5 s at most when no ack comes). When the aura runs out in the air, the player
+  falls normally from there.
+- With Slow Fall (130, the fallback below) a mage's own Slow Fall stays: `GLIDE` does not shorten one with more time
+  left than a glide, and the end of a glide takes off only the Slow Fall `GLIDE` put on (not one the mage cast again).
+- A gust of wind with a whoosh (`BleakholdUi.Glide.StartVisualKit`, SpellVisualKit 13709) plays when the glide starts;
+  Walk on Air's own wings (spell visual 7370, the one of Magic Wings: wings at the head, no sound, no forced
+  animation) show while it lasts, so the player keeps their own run, jump and fall animations.
+
+There is no glide in a battleground or an arena, the Bleakhold Royale map included (section 17), nor in a dungeon or a
+raid unless `BleakholdUi.Glide.Instances` is on (0 by default): there the steerable push would skip jump shortcuts
+(Mythic+ routes and timers) and undo drop-off boss mechanics (knockbacks off a platform, the Lich King's edge), which
+Slow Fall, with no control over the direction, never could. A glide running or waiting when the player comes onto
+such a map (a teleport, a summon, an instance portal) ends there, and its aura goes with it. `CAMPST` `glide` is the
+cooldown and `gliding` the glide that runs now.
+
+Walk on Air is the module's own spell. The server has it from `data/sql/db-world/02_bleakhold_walk_on_air.sql`
+(`spell_dbc`); the client needs the same row in its `Spell.dbc` (a patch MPQ) for the buff's name, icon
+(Spell_Nature_EyeOfTheStorm), tooltip ("Glide through the air for 10 sec, steering your descent. Does not gain
+altitude.": its `$d` is the row's duration) and wings. Without the client row the glide works the same, with no buff
+shown; without the server row the server glides with Slow Fall (130) and logs it.
+
+**mod-anticheat.** A glide is movement mod-anticheat (AnticheatMgr) accepts: the push only happens while the player
+falls, its speed check skips a packet that follows a falling one and its teleport check a falling player (a glide
+covers 6 yd between two packets, the check wants 50); there is no fly flag (the client's knockback even clears
+`MOVEMENTFLAG_CAN_FLY`); the push never goes up, while the jump, gravity and ignore-z checks look for rising or level
+movement in the air (and the jump and gravity checks skip a feather fall aura); the no-fall-damage check skips a
+feather fall aura, and under it two packets never lie 14.57 yd apart in height; the climb, teleport-to-plane,
+ignore-control and anti-swim checks skip falling packets. Its anti-knockback check reports a knockback whose ack
+stands where the packet before it did, and the client acks a push at the same spot when it acks it in the same
+millisecond as a facing change or the feather fall ack sent just before it: the push therefore leaves
+`Player::CanKnockback` as it was (a client that ignored a glide's push would gain nothing). Its order-ack check is not
+wired in.
 
 ### CAMPST (the player's camping state)
 
-`state, settle, fire, mine, cd, warmth, xp, objs, place, glide, repair, fed`
+`state, settle, fire, mine, cd, warmth, xp, objs, place, glide, repair, fed, gliding`
 
 - `state`: `N` not at a fire, `R` at a fire (resting; the settle time runs), `C` camping (settled).
 - `settle`: seconds until the player settles (only with `R`, else 0).
@@ -848,10 +897,13 @@ battleground or an arena, the Bleakhold Royale map included (section 17).
 - `repair`: `1` when the player qualifies for `REPAIR` (a blacksmith anywhere, or at a fire with a camp anvil), else
   `0`. `REPAIR` still refuses a dead player or one in combat.
 - `fed`: `1` while the player has a Well Fed buff (the food XP bonus), else `0`.
+- `gliding`: seconds left of the glide that runs now (Walk on Air, from `GLIDE` until it lands or runs out; also
+  while it waits for a ledge); empty (left out) when there is none. Older clients read the fields before it.
 
 The server sends `CAMPST` after `HELLO` when one of the three feature bits is on, for `GET CAMPST`, and whenever a
 field changes other than by counting down: the player comes to a fire or leaves it, settles, an object is placed or
-taken away, a fire goes out, a cooldown starts, the warmth starts or ends, `fed` or `xp` changes, the glide is used.
+taken away, a fire goes out, a cooldown starts, the warmth starts or ends, `fed` or `xp` changes, the glide is used,
+a glide starts or ends.
 It sends at most one `CAMPST` per second to a player (a later change waits for the second to pass).
 
 ### Checks
@@ -909,10 +961,17 @@ Then `CAMP M`, in this order:
 | the player's `GLIDE` rate (`BleakholdUi.RateLimit.GlideIntervalMs`, section 8) | `ERR` `busy` |
 | gliding is off on the realm (`BleakholdUi.Glide.Enable = 0`, no feature bit 1024) | `ERR` `glide_off` |
 | the player is not in the world | dropped silently |
+| the player is between maps | dropped silently |
 | the player's race (the real one, also in a battleground) is not in `BleakholdUi.Glide.Races` | `ERR` `glide_race` |
 | the player is in a battleground or an arena, or on a battleground map (Bleakhold Royale's included) | `ERR` `glide_here` |
+| the player is in a dungeon or a raid and `BleakholdUi.Glide.Instances` is off (the default) | `ERR` `glide_here` |
 | the player is dead | `ERR` `dead` |
-| the player glided less than `BleakholdUi.Glide.Cooldown` (120 s) ago | `ERR` `glide_cooldown` |
+| the player is mounted, on a vehicle or on a flight path | `ERR` `glide_mounted` |
+| the player flies, can fly (a flight form, a flying mount's aura) or hovers | `ERR` `glide_flying` |
+| the player swims or stands in water | `ERR` `glide_water` |
+| the player is rooted, stunned, feared, confused, charmed or controls another unit | `ERR` `glide_rooted` |
+| `BleakholdUi.Glide.RequireFalling` is on and the player is not in the air (falling or jumping) | `ERR` `glide_ground` |
+| the player glided less than `BleakholdUi.Glide.Cooldown` (90 s) ago | `ERR` `glide_cooldown` |
 | the aura did not land (logged) | `ERR` `failed` |
 
 `REPAIR`:
@@ -955,7 +1014,12 @@ Error codes of this section:
 | `camp_skill` | not a profession with camp objects, or the skill is too low |
 | `glide_off` | gliding is off on the realm |
 | `glide_race` | the player's race cannot glide |
-| `glide_here` | in a battleground or an arena (Bleakhold Royale's map included) |
+| `glide_here` | in a battleground or an arena (Bleakhold Royale's map included), or in a dungeon or a raid (`BleakholdUi.Glide.Instances` off) |
+| `glide_mounted` | mounted, on a vehicle or on a flight path |
+| `glide_flying` | flying, able to fly or hovering |
+| `glide_water` | in water |
+| `glide_rooted` | rooted, stunned or not in control |
+| `glide_ground` | not in the air while `BleakholdUi.Glide.RequireFalling` is on |
 | `glide_cooldown` | glided not long ago |
 | `repair_off` | field repair (and camping) is off on the realm |
 | `repair_skill` | neither a blacksmith with enough skill nor at a camp anvil |
@@ -975,6 +1039,8 @@ C> 1 GLIDE q 1/1
 S> 1 ERR s 1/1 GLIDE,q,glide_cooldown,You can glide again in 95 s.
 C> 1 REPAIR r 1/1
 S> 1 ERR t 1/1 REPAIR,r,repair_gold,You cannot pay for the repair (2g 10s 0c).
+C> 1 GLIDE s 1/1
+S> 1 CAMPST u 1/1 N,0,0,0,640,1500,15,,,90,0,1,10
 ```
 
 ## 17. Bleakhold Royale

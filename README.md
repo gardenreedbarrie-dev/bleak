@@ -331,7 +331,12 @@ timers down between messages.
   profession, tier and buff); a Place button for each object your professions can set down (one per player per
   fire, three per fire); Repair while repairing is allowed there; Pack up at your own fire.
 - Away from a fire, a small indicator shows Warmth time left, Well Fed and the XP bonus while they last.
-- High Elves glide: the Glide button (with its cooldown) or a key (Key Bindings, Bleakhold, Glide), or `/glide`.
+- High Elves glide with Walk on Air: the Glide button (with its cooldown, and a glide bar over it while a glide
+  runs), a key that works in mid-air (Key Bindings, Bleakhold, Walk on Air) or `/glide`. Use it while you fall or
+  just before you step off a ledge: Walk on Air lasts 10 seconds from the moment you use it, and a fall in that time
+  becomes a glide that carries you forward and follows your facing (turn to steer). It never gains altitude; landing
+  ends it without fall damage. 90 second cooldown. Not in battlegrounds, arenas, dungeons or raids (a realm may allow
+  dungeons and raids).
 - Field repair: `/repair` (`/bh repair`) or the Repair button, for blacksmiths anywhere or anyone at a fire with a
   blacksmith's anvil.
 - Refusals show as short sentences in the error frame (not outdoors, in combat, cooldown, skill too low, ...).

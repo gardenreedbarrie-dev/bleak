@@ -17,6 +17,7 @@
 #include "../../src/BleakholdEmoji.h"
 
 #include <cmath>
+#include <limits>
 #include <map>
 #include <set>
 
@@ -993,6 +994,16 @@ TEST("camping: CAMPST is sent again only when more than a timer changed")
     CHECK(changedBy([](CampState& c) { c.glideSec.reset(); }));       // cannot glide any more
     CHECK(changedBy([](CampState& c) { c.repair = true; }));
     CHECK(changedBy([](CampState& c) { c.fed = false; }));
+    CHECK(changedBy([](CampState& c) { c.glidingSec = 10u; }));     // a glide began
+    CampState gliding = a;
+    gliding.glidingSec = 10u;
+    CampState later = gliding;
+    later.glidingSec = 4u;
+    CHECK(!Changed(gliding, later));                                 // its seconds count down on the client
+    later.glidingSec.reset();
+    CHECK(Changed(gliding, later));                                  // it ended (landed)
+    later.glidingSec = 0u;
+    CHECK(Changed(gliding, later) && !Changed(a, later));            // 0 is no glide, like an empty field
 }
 
 TEST("camping: the CAMPST encoder keeps to the document")
@@ -1016,6 +1027,395 @@ TEST("camping: the CAMPST encoder keeps to the document")
     std::vector<std::string> f = SplitStr(big, ',');
     CHECK(f.size() == 12);
     CHECK(SplitStr(f[7], ':').size() == MaxCampObjects && SplitStr(f[8], ':').size() == MaxCampPlaces);
+    // gliding: a 13th field while a glide runs, left out (trailing empty) otherwise, so older clients read the rest
+    CampState g;
+    g.glideSec = 90u;
+    g.glidingSec = 10u;
+    CHECK_EQ(EncodeCampState(g), "N,0,0,0,0,0,0,,,90,0,0,10");
+    g.glidingSec.reset();
+    CHECK_EQ(EncodeCampState(g), "N,0,0,0,0,0,0,,,90,0,0");
+}
+
+TEST("camping: the glide pushes along the facing and never lifts the player")
+{
+    using namespace Bleakhold::CampRules;
+    CHECK(WalkOnAirSpell == 100800 && SlowFallSpell == 130);
+    // the descent of a feather-falling client (CMovementShared::GetFeatherFallVelocity), positive = down
+    CHECK(FeatherFallSpeed(0.0f, 0) == 0.0f);
+    CHECK(std::fabs(FeatherFallSpeed(3.0f, 100) - (3.0f + FallGravity * 0.1f)) < 0.001f);
+    CHECK(FeatherFallSpeed(30.0f, 0) == SafeFallTerminal);           // a fast fall is caught at the terminal speed
+    CHECK(FeatherFallSpeed(2.0f, 60000) == SafeFallTerminal);
+    CHECK(FeatherFallSpeed(-7.955547f, 0) == 0.0f);                   // the rising part of a jump: never up
+    CHECK(FeatherFallSpeed(-7.955547f, 200) == 0.0f);
+    CHECK(FeatherFallSpeed(-7.955547f, 1000) == SafeFallTerminal);
+    CHECK(FeatherFallSpeed(std::nanf(""), 0) == SafeFallTerminal);
+    CHECK(FeatherFallSpeed(-std::numeric_limits<float>::infinity(), 0) == SafeFallTerminal);
+    for (uint32_t ms : { 0u, 1u, 50u, 360u, 999u, 0xFFFFFFFFu })
+        for (float z : { -100.0f, -7.9f, -1.0f, 0.0f, 0.5f, 6.99f, 7.0f, 60.0f, 1e30f })
+        {
+            float const v = FeatherFallSpeed(z, ms);
+            CHECK_MSG(v >= 0.0f && v <= SafeFallTerminal, "descent in 0..terminal");
+        }
+    // turning
+    CHECK(AngleBetween(1.0f, 1.0f) == 0.0f);
+    CHECK(std::fabs(AngleBetween(0.0f, 3.14159265f) - 3.14159265f) < 0.0001f);
+    CHECK(std::fabs(AngleBetween(0.05f, 6.28318530718f - 0.05f) - 0.1f) < 0.0001f);   // across north: 0.1, not 2 pi
+    CHECK(std::fabs(AngleBetween(-1.0f, 1.0f) - 2.0f) < 0.0001f);
+    CHECK(std::fabs(AngleBetween(20.0f, 20.0f + 6.28318530718f * 3.0f)) < 0.001f);
+    CHECK(AngleBetween(std::nanf(""), 1.0f) == 0.0f);
+    // KnockbackFrom pushes away from the point: the point behind sends the player along the facing
+    for (float o : { 0.0f, 0.7f, 1.5707963f, 3.1415926f, 4.0f, 6.2f })
+    {
+        Point2 const from = PushOrigin(100.0f, -50.0f, o);
+        float const dx = 100.0f - from.x, dy = -50.0f - from.y;
+        CHECK(std::fabs(std::sqrt(dx * dx + dy * dy) - 1.0f) < 0.001f);
+        CHECK(std::fabs(dx - std::cos(o)) < 0.001f && std::fabs(dy - std::sin(o)) < 0.001f);
+    }
+    CHECK(GlideMinHeight > 0.0f && GlideSteerAngle > 0.0f && GlideSteerGapMs >= 100 && GlideMaxPushes >= 50);
+    CHECK(GlideMaxForwardSpeed <= 30.0f);
+}
+
+TEST("camping: GLIDE refusals come in their order")
+{
+    using namespace Bleakhold::CampRules;
+    GlideFacts ok;
+    ok.raceOk = true;
+    ok.alive = true;
+    CHECK(CheckGlide(ok) == GlideRefusal::None);   // on the ground: allowed, the glide waits for a ledge
+    auto with = [&](auto edit) { GlideFacts f = ok; edit(f); return CheckGlide(f); };
+    CHECK(with([](GlideFacts& f) { f.raceOk = false; }) == GlideRefusal::Race);
+    CHECK(with([](GlideFacts& f) { f.noGlideMap = true; }) == GlideRefusal::Here);
+    CHECK(with([](GlideFacts& f) { f.alive = false; }) == GlideRefusal::Dead);
+    CHECK(with([](GlideFacts& f) { f.mounted = true; }) == GlideRefusal::Mounted);
+    CHECK(with([](GlideFacts& f) { f.flying = true; }) == GlideRefusal::Flying);
+    CHECK(with([](GlideFacts& f) { f.inWater = true; }) == GlideRefusal::Water);
+    CHECK(with([](GlideFacts& f) { f.held = true; }) == GlideRefusal::Held);
+    CHECK(with([](GlideFacts& f) { f.cooldownLeft = 1; }) == GlideRefusal::Cooldown);
+    CHECK(with([](GlideFacts& f) { f.requireFalling = true; }) == GlideRefusal::Ground);
+    CHECK(with([](GlideFacts& f) { f.requireFalling = true; f.inAir = true; }) == GlideRefusal::None);
+    CHECK(with([](GlideFacts& f) { f.inAir = true; }) == GlideRefusal::None);
+    // the first problem wins: the race before the map, the map before death, ..., the cooldown last
+    CHECK(with([](GlideFacts& f) { f.raceOk = false; f.noGlideMap = true; f.alive = false; }) == GlideRefusal::Race);
+    CHECK(with([](GlideFacts& f) { f.noGlideMap = true; f.alive = false; f.mounted = true; }) == GlideRefusal::Here);
+    CHECK(with([](GlideFacts& f) { f.alive = false; f.mounted = true; }) == GlideRefusal::Dead);
+    CHECK(with([](GlideFacts& f) { f.mounted = true; f.flying = true; f.inWater = true; }) == GlideRefusal::Mounted);
+    CHECK(with([](GlideFacts& f) { f.flying = true; f.inWater = true; f.held = true; }) == GlideRefusal::Flying);
+    CHECK(with([](GlideFacts& f) { f.inWater = true; f.held = true; f.cooldownLeft = 5; }) == GlideRefusal::Water);
+    CHECK(with([](GlideFacts& f) { f.held = true; f.requireFalling = true; f.cooldownLeft = 5; }) ==
+        GlideRefusal::Held);
+    CHECK(with([](GlideFacts& f) { f.requireFalling = true; f.cooldownLeft = 5; }) == GlideRefusal::Ground);
+    // every GLIDE code is a short machine code with a sentence, in the document's error table
+    std::string const doc = bhtest::ReadFile(g_repo + "/docs/BleakholdProtocol.md");
+    for (Refusal const& r : { GlideErr::Off, GlideErr::Race, GlideErr::Mounted, GlideErr::Flying, GlideErr::Water,
+             GlideErr::Rooted, GlideErr::Ground, RoyaleErr::GlideHere })
+    {
+        std::string const code = r.code;
+        bool good = !code.empty() && code.size() <= 24;
+        for (char c : code)
+            good = good && ((c >= 'a' && c <= 'z') || c == '_');
+        CHECK_MSG(good, "code [" + code + "]");
+        CHECK_MSG(doc.find("| `" + code + "` |") != std::string::npos, code + " is in an error table of the document");
+        CHECK_MSG(!std::string(r.text).empty() && std::string(r.text).size() <= 160, code + " has a sentence");
+    }
+    for (char const* code : { "glide_cooldown", "glide_ground", "glide_rooted", "glide_water" })
+        CHECK_MSG(doc.find("`" + std::string(code) + "`") != std::string::npos, std::string(code) + " is documented");
+}
+
+TEST("camping: a glide waits for a ledge, starts over a drop, steers by turning and ends on landing")
+{
+    using namespace Bleakhold::CampRules;
+    Glide g;
+    g.endMs = 10000;
+    auto move = [](uint64_t now, bool falling, float height, float facing) {
+        GlideMove m;
+        m.nowMs = now;
+        m.falling = falling;
+        m.height = height;
+        m.facing = facing;
+        m.canPush = true;
+        m.moved = true;
+        return m;
+    };
+    float const high = 30.0f;   // well above the ground
+    // GLIDE on the ground: standing, a small hop and its landing keep the glide waiting
+    CHECK(NextGlideStep(g, move(100, false, 0.0f, 0.0f), true, true) == GlideStep::None);
+    CHECK(NextGlideStep(g, move(200, true, 0.8f, 0.0f), true, true) == GlideStep::None);
+    GlideMove land = move(300, false, 0.0f, 0.0f);
+    land.landed = true;
+    CHECK(NextGlideStep(g, land, true, true) == GlideStep::None);
+    // a fall from a ledge becomes the glide (also with the push turned off: it still ends on landing)
+    CHECK(NextGlideStep(g, move(400, true, GlideMinHeight, 0.0f), true, true) == GlideStep::Start);
+    CHECK(NextGlideStep(g, move(400, true, 40.0f, 0.0f), false, false) == GlideStep::Start);
+    CHECK(NextGlideStep(g, move(400, true, 1.0e9f, 0.0f), true, true) == GlideStep::Start);   // nothing below
+    // water ends it, waiting or not
+    GlideMove swim = move(450, false, 0.0f, 0.0f);
+    swim.water = true;
+    CHECK(NextGlideStep(g, swim, true, true) == GlideStep::End);
+    // in the air
+    g.airborne = true;
+    g.pushes = 1;
+    g.acked = 1;
+    g.lastPushMs = 400;
+    g.pushFacing = 1.0f;
+    CHECK(NextGlideStep(g, move(700, true, high, 1.0f), true, true) == GlideStep::None);           // straight on
+    CHECK(NextGlideStep(g, move(700, true, high, 1.0f + 0.05f), true, true) == GlideStep::None);   // under 5 degrees
+    CHECK(NextGlideStep(g, move(700, true, high, 1.3f), true, true) == GlideStep::Push);           // a turn
+    CHECK(NextGlideStep(g, move(700, true, high, 0.7f), true, true) == GlideStep::Push);           // the other way
+    CHECK(NextGlideStep(g, move(599, true, high, 1.3f), true, true) == GlideStep::None);           // within 200 ms
+    CHECK(NextGlideStep(g, move(600, true, high, 1.3f), true, true) == GlideStep::Push);
+    CHECK(NextGlideStep(g, move(700, true, high, 1.3f), true, false) == GlideStep::None);          // steering off
+    CHECK(NextGlideStep(g, move(700, true, high, 1.3f), false, true) == GlideStep::None);          // ForwardSpeed 0
+    // no push close to the ground: it could reach the client after it lands
+    CHECK(NextGlideStep(g, move(700, true, GlideMinHeight - 0.1f, 1.3f), true, true) == GlideStep::None);
+    CHECK(NextGlideStep(g, move(700, true, 0.0f, 1.3f), true, true) == GlideStep::None);
+    CHECK(NextGlideStep(g, move(700, true, GlideMinHeight, 1.3f), true, true) == GlideStep::Push);
+    CHECK(NextGlideStep(g, move(700, true, 1.0e9f, 1.3f), true, true) == GlideStep::Push);        // nothing below
+    GlideMove held = move(700, true, high, 1.3f);
+    held.canPush = false;                                                                           // rooted, feared
+    CHECK(NextGlideStep(g, held, true, true) == GlideStep::None);
+    GlideMove stuck = move(700, true, high, 1.3f);
+    stuck.moved = false;                                                                            // against a wall
+    CHECK(NextGlideStep(g, stuck, true, true) == GlideStep::None);
+    Glide many = g;
+    many.pushes = GlideMaxPushes;
+    many.acked = GlideMaxPushes;
+    CHECK(NextGlideStep(many, move(700, true, high, 1.3f), true, true) == GlideStep::None);        // capped
+    // a glide that could not push at its start (held, on a transport) pushes once it can, whatever the facing
+    Glide late = g;
+    late.pushes = 0;
+    late.acked = 0;
+    late.lastPushMs = 0;
+    CHECK(NextGlideStep(late, move(410, true, high, 1.0f), true, true) == GlideStep::Push);
+    CHECK(NextGlideStep(late, held, true, true) == GlideStep::None);
+    CHECK(NextGlideStep(late, move(410, true, high, 1.0f), true, false) == GlideStep::Push);       // steering off
+    CHECK(NextGlideStep(late, move(410, true, 1.0f, 1.0f), true, true) == GlideStep::None);        // near the ground
+    // the end: landing (with or without MSG_MOVE_FALL_LAND), water, the aura gone, time up, a battleground
+    CHECK(NextGlideStep(g, land, true, true) == GlideStep::End);
+    CHECK(NextGlideStep(g, move(800, false, 0.0f, 1.0f), true, true) == GlideStep::End);
+    CHECK(NextGlideStep(g, swim, true, true) == GlideStep::End);
+    GlideMove cancelled = move(800, true, high, 1.0f);
+    cancelled.auraOn = false;
+    CHECK(NextGlideStep(g, cancelled, true, true) == GlideStep::End);
+    CHECK(NextGlideStep(g, move(10000, true, high, 1.0f), true, true) == GlideStep::End);
+    GlideMove pvp = move(800, true, high, 1.3f);
+    pvp.noGlideMap = true;                                   // a GLIDE just before the port to a battleground
+    CHECK(NextGlideStep(g, pvp, true, true) == GlideStep::End);
+    Glide waiting;
+    waiting.endMs = 10000;
+    CHECK(NextGlideStep(waiting, move(10000, false, 0.0f, 0.0f), true, true) == GlideStep::End);  // ran out unused
+    CHECK(NextGlideStep(waiting, cancelled, true, true) == GlideStep::End);
+    CHECK(NextGlideStep(waiting, pvp, true, true) == GlideStep::End);
+    GlideMove pvpGround = move(500, false, 0.0f, 0.0f);
+    pvpGround.noGlideMap = true;
+    CHECK(NextGlideStep(waiting, pvpGround, true, true) == GlideStep::End);
+}
+
+TEST("camping: no glide in battlegrounds and arenas, nor in dungeons and raids unless BleakholdUi.Glide.Instances")
+{
+    using namespace Bleakhold::CampRules;
+    // each map as the core tells it: a battleground or an arena (InBattleground, Map::IsBattlegroundOrArena; the
+    // Royale map is a battleground map), a dungeon or a raid (Map::IsDungeon holds for both)
+    struct Where
+    {
+        char const* name;
+        bool pvp, instance;
+        bool refused, refusedWithInstances;   // BleakholdUi.Glide.Instances 0, 1
+    };
+    Where const maps[] = {
+        { "the open world", false, false, false, false },
+        { "a dungeon", false, true, true, false },
+        { "a raid", false, true, true, false },
+        { "a battleground", true, false, true, true },
+        { "an arena", true, false, true, true },
+        { "Bleakhold Royale", true, false, true, true },
+    };
+    GlideFacts ok;
+    ok.raceOk = true;
+    ok.alive = true;
+    Glide running;   // in the air, its first push acked
+    running.endMs = 10000;
+    running.airborne = true;
+    running.pushes = 1;
+    running.acked = 1;
+    running.lastPushMs = 400;
+    running.pushFacing = 1.0f;
+    Glide waiting;   // a GLIDE on the ground, waiting for a ledge
+    waiting.endMs = 10000;
+    GlideMove turn;  // a turn in the air: a steering push where gliding is allowed
+    turn.nowMs = 700;
+    turn.falling = true;
+    turn.height = 30.0f;
+    turn.facing = 1.3f;
+    turn.canPush = true;
+    turn.moved = true;
+    GlideMove stand = turn;
+    stand.falling = false;
+    stand.height = 0.0f;
+    for (Where const& w : maps)
+        for (bool instancesOn : { false, true })
+        {
+            bool const refused = instancesOn ? w.refusedWithInstances : w.refused;
+            std::string const what = std::string(w.name) + (instancesOn ? ", Instances 1" : ", Instances 0");
+            bool const no = NoGlideMap(w.pvp, w.instance, instancesOn);
+            CHECK_MSG(no == refused, what);
+            GlideFacts f = ok;
+            f.noGlideMap = no;
+            CHECK_MSG(CheckGlide(f) == (refused ? GlideRefusal::Here : GlideRefusal::None), what + ": GLIDE");
+            // a glide carried in (a teleport, a summon, an instance portal) ends on arrival, running or waiting
+            GlideMove m = turn;
+            m.noGlideMap = no;
+            CHECK_MSG(NextGlideStep(running, m, true, true) == (refused ? GlideStep::End : GlideStep::Push),
+                what + ": a running glide");
+            m = stand;
+            m.noGlideMap = no;
+            CHECK_MSG(NextGlideStep(waiting, m, true, true) == (refused ? GlideStep::End : GlideStep::None),
+                what + ": a waiting glide");
+        }
+    // in a dungeon the refusal keeps its place: after the race, before death and the cooldown
+    GlideFacts dungeon = ok;
+    dungeon.noGlideMap = NoGlideMap(false, true, false);
+    dungeon.alive = false;
+    dungeon.cooldownLeft = 5;
+    CHECK(CheckGlide(dungeon) == GlideRefusal::Here);
+    dungeon.raceOk = false;
+    CHECK(CheckGlide(dungeon) == GlideRefusal::Race);
+    // allowed there (Instances 1), the other checks still hold
+    dungeon = ok;
+    dungeon.noGlideMap = NoGlideMap(false, true, true);
+    dungeon.cooldownLeft = 5;
+    CHECK(CheckGlide(dungeon) == GlideRefusal::Cooldown);
+}
+
+TEST("camping: a landing with a push on its way holds the glide until the push is acked")
+{
+    using namespace Bleakhold::CampRules;
+    Glide g;
+    g.endMs = 10000;
+    g.airborne = true;
+    g.pushes = 3;
+    g.acked = 2;           // the third push is still on its way
+    g.lastPushMs = 2000;
+    g.pushFacing = 1.0f;
+    auto move = [](uint64_t now, bool falling, bool landed, float facing) {
+        GlideMove m;
+        m.nowMs = now;
+        m.falling = falling;
+        m.landed = landed;
+        m.height = falling ? 30.0f : 0.0f;
+        m.facing = facing;
+        m.canPush = true;
+        m.moved = true;
+        return m;
+    };
+    // landed before the push arrived: it will throw the player off again, so the glide and its aura stay
+    CHECK(NextGlideStep(g, move(2100, false, true, 1.0f), true, true) == GlideStep::Hold);
+    CHECK(NextGlideStep(g, move(2150, false, false, 1.0f), true, true) == GlideStep::Hold);   // standing, no ack
+    g.closing = true;
+    // the ack: the client falls again from the push; no more pushes, whatever it turns
+    CountAck(g);
+    CHECK(g.acked == 3);
+    CHECK(NextGlideStep(g, move(2200, true, false, 1.0f), true, true) == GlideStep::None);
+    CHECK(NextGlideStep(g, move(2500, true, false, 2.5f), true, true) == GlideStep::None);
+    // the landing after it ends the glide
+    CHECK(NextGlideStep(g, move(2700, false, true, 2.5f), true, true) == GlideStep::End);
+    // a push that is never acked holds it GlideAckWaitMs at most
+    Glide lost = g;
+    lost.acked = 2;
+    lost.closing = false;
+    CHECK(NextGlideStep(lost, move(2000 + GlideAckWaitMs - 1, false, true, 1.0f), true, true) == GlideStep::Hold);
+    CHECK(NextGlideStep(lost, move(2000 + GlideAckWaitMs, false, true, 1.0f), true, true) == GlideStep::End);
+    // every push acked: a landing ends it at once; water and time end a held glide too
+    Glide acked = lost;
+    acked.acked = 3;
+    CHECK(NextGlideStep(acked, move(2100, false, true, 1.0f), true, true) == GlideStep::End);
+    GlideMove swim = move(2100, false, false, 1.0f);
+    swim.water = true;
+    CHECK(NextGlideStep(lost, swim, true, true) == GlideStep::End);
+    CHECK(NextGlideStep(lost, move(10000, false, true, 1.0f), true, true) == GlideStep::End);
+    // the start's own push (GLIDE in the air) is counted the same way
+    Glide start;
+    start.endMs = 10000;
+    start.airborne = true;
+    start.pushes = 1;
+    start.lastPushMs = 100;
+    CHECK(NextGlideStep(start, move(150, false, true, 0.0f), true, true) == GlideStep::Hold);
+    CountAck(start);
+    CHECK(NextGlideStep(start, move(300, false, true, 0.0f), true, true) == GlideStep::End);
+    // a waiting glide has sent nothing: a hop keeps it waiting as before
+    Glide waiting;
+    waiting.endMs = 10000;
+    CHECK(NextGlideStep(waiting, move(150, false, true, 0.0f), true, true) == GlideStep::None);
+    // an ack that is not the glide's (a spell's knockback) counts no further than the pushes sent
+    Glide none;
+    CountAck(none);
+    CHECK(none.acked == 0);
+    CountAck(start);
+    CHECK(start.acked == 1);
+}
+
+TEST("camping: a steering push keeps the descent the server counted, whatever the packet says")
+{
+    using namespace Bleakhold::CampRules;
+    Glide g;
+    g.airborne = true;
+    // a first push that comes late (the start could not push): the terminal speed, never slower
+    CHECK(PushFallSpeed(g, 5000) == SafeFallTerminal);
+    // after the start's push (no fall speed) the client falls from rest: gravity over the time since that push
+    g.pushes = 1;
+    g.lastPushMs = 1000;
+    g.pushDown = 0.0f;
+    CHECK(PushFallSpeed(g, 1000) == 0.0f);
+    CHECK(std::fabs(PushFallSpeed(g, 1200) - FallGravity * 0.2f) < 0.001f);
+    CHECK(PushFallSpeed(g, 1400) == SafeFallTerminal);                        // caught at the terminal speed
+    CHECK(PushFallSpeed(g, 900) == 0.0f);                                     // a clock that went back
+    // a later push starts from the descent the last one sent: turning every 200 ms never slows the fall
+    g.pushDown = FeatherFallSpeed(0.0f, 100);
+    g.lastPushMs = 1100;
+    float const second = PushFallSpeed(g, 1200);
+    CHECK(std::fabs(second - FallGravity * 0.2f) < 0.001f);
+    CHECK(std::fabs(second - FeatherFallSpeed(0.0f, 200)) < 0.001f);         // as if never pushed again
+    g.pushDown = SafeFallTerminal;
+    CHECK(PushFallSpeed(g, 1300) == SafeFallTerminal);
+    // a very long gap (a stalled server) stays in range
+    g.lastPushMs = 0;
+    g.pushDown = 0.0f;
+    CHECK(PushFallSpeed(g, 0xFFFFFFFFFFFFull) == SafeFallTerminal);
+    // a whole steered glide, pushed every 200 ms: the descent only grows, to the terminal speed, at any latency
+    Glide run;
+    run.pushes = 1;
+    run.lastPushMs = 0;
+    float last = 0.0f;
+    for (uint64_t t = 200; t <= 10000; t += 200)
+    {
+        float const v = PushFallSpeed(run, t);
+        CHECK_MSG(v >= last && v <= SafeFallTerminal, "descent never slows");
+        last = v;
+        ++run.pushes;
+        run.lastPushMs = t;
+        run.pushDown = v;
+    }
+    CHECK(last == SafeFallTerminal);
+}
+
+TEST("camping: Slow Fall (the fallback) stays when it is a mage's own")
+{
+    using namespace Bleakhold::CampRules;
+    int32_t const glide = 10000;
+    // GLIDE rides on a mage's own Slow Fall with more time left, and never on Walk on Air
+    CHECK(GlideRidesAura(SlowFallSpell, 25000, glide));
+    CHECK(!GlideRidesAura(SlowFallSpell, 10000, glide));    // a glide's own (a game master's reset): cast again
+    CHECK(!GlideRidesAura(SlowFallSpell, 4000, glide));
+    CHECK(!GlideRidesAura(SlowFallSpell, -1, glide));       // permanent
+    CHECK(!GlideRidesAura(WalkOnAirSpell, 25000, glide));
+    // the end takes Walk on Air off always, a Slow Fall only while it is still the glide's
+    CHECK(GlideTakesAura(WalkOnAirSpell, 0, 30000, 25000, 0));
+    CHECK(GlideTakesAura(SlowFallSpell, glide, glide, 6000, 6000));          // the glide's own, landed early
+    CHECK(GlideTakesAura(SlowFallSpell, glide, glide, 6800, 6000));          // the aura's clock a little behind
+    CHECK(GlideTakesAura(SlowFallSpell, glide, glide, 0, 0));
+    CHECK(!GlideTakesAura(SlowFallSpell, glide, 30000, 29000, 6000));        // recast by the mage mid-glide
+    CHECK(!GlideTakesAura(SlowFallSpell, 30000, 30000, 29000, 6000));        // Duration 30: the recast's time
+    CHECK(!GlideTakesAura(SlowFallSpell, 0, 30000, 20000, 0));               // the glide rode on the mage's
+    CHECK(!GlideTakesAura(SlowFallSpell, 0, 0, 0, 0));
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -1438,6 +1838,9 @@ static std::map<std::string, std::string> BuiltExamples()
         ErrorReply rp;
         rp.op = IntentType::Repair; rp.seq = 27; rp.code = "repair_gold"; rp.text = "You cannot pay for the repair (2g 10s 0c).";
         m["ERR t"] = EncodeError(rp);
+        CampState gl = n;   // 95 s later: GLIDE accepted, the cooldown starts and the glide runs
+        gl.glideSec = 90u; gl.glidingSec = 10u;
+        m["CAMPST u"] = EncodeCampState(gl);
     }
     {
         // Bleakhold Royale (section 17)

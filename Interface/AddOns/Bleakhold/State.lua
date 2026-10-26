@@ -851,7 +851,7 @@ Comm.Handle("CAMPST", function(r)
         state = state, settle = state == "R" and U.Int(f[2], 0, 0, CAMP_MAX_TIME) or 0, fire = U.Int(f[3], 0, 0, CAMP_MAX_TIME),
         mine = U.Bool(f[4], false), cd = U.Int(f[5], 0, 0, CAMP_MAX_TIME), warmth = U.Int(f[6], 0, 0, CAMP_MAX_TIME),
         xp = U.Int(f[7], 0, 0, 1000), objs = {}, place = {}, glide = U.Int(f[10], nil, 0, CAMP_MAX_TIME),
-        repair = U.Bool(f[11], false), fed = U.Bool(f[12], false), recvAt = GetTime(),
+        repair = U.Bool(f[11], false), fed = U.Bool(f[12], false), gliding = U.Int(f[13], 0, 0, 600), recvAt = GetTime(),
     }
     for _, item in ipairs(U.List(f[8], CAMP_MAX_OBJECTS)) do
         local t = U.Tuple(item, 3)
@@ -878,8 +878,8 @@ Comm.Handle("CAMPST", function(r)
     changed("CAMPST")
 end)
 
--- Seconds left on a CAMPST timer (settle, fire, cd, warmth, glide) now; nil when the field is missing (glide:
--- the player cannot glide) or there is no camp state.
+-- Seconds left on a CAMPST timer (settle, fire, cd, warmth, glide, gliding) now; nil when the field is missing
+-- (glide: the player cannot glide) or there is no camp state.
 function ns.CampLeft(key, c)
     c = c or S.camp
     local v = c and c[key]
