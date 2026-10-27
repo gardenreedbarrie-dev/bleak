@@ -38,6 +38,14 @@
  *          Ui::SetFeature(FeatureBgAnnouncer, true);            // while it is enabled (HELLO bit 8192)
  *          Ui::SendBgAnnounce(bg_players, { killer, killerClass, victim, victimClass, BgMultiKill::Double, ... });
  *
+ *   5. World PvP and War Mode (section 19): your system owns every rule and pushes views of its state:
+ *          Ui::SetFeature(FeatureWarMode, true);                // War Mode is live (HELLO bit 16384)
+ *          Ui::SetFeature(FeatureWorldPvp, true);               // the objectives passed their checks (bit 32768)
+ *          Ui::OnIntent(IntentType::WarMode, [](Player* p, Intent const& in) { ... in.warModeOn ... });
+ *          Ui::OnRequest(Topic::WarModeState, [](Player* p, TopicRequest const&) { Ui::SendWarModeState(p, ...); });
+ *          Ui::SendWarZone(p, zone); Ui::SendWarCapture(p, bar); Ui::SendWarEvent(zonePlayers, event); ...
+ *      While bit 16384 is off the module answers WARMODE with ERR wm_off, whoever handles it.
+ *
  * Threading: every function here may be called from any thread (map update threads included). The
  * module queues the frames and sends them from the world thread. Your handlers and providers are
  * always called on the world thread, never while the module holds a lock.
@@ -77,6 +85,7 @@ namespace Bleakhold::Ui
     //   RDROP RSPEC -> ERR "unavailable"; RDEPLOY -> nothing (it is never answered, not even with ERR busy over its
     //   rate limit). While FeatureRoyale is off (SetFeature below) QJOIN with kind B, RDROP and RSPEC get
     //   ERR royale_off and RDEPLOY is dropped, also with your handler.
+    //   WARMODE -> ERR "unavailable"; while FeatureWarMode is off it gets ERR wm_off, also with your handler.
     //   HELLO, GET and PING are handled by the module.
     using IntentHandler = std::function<void(Player* player, Intent const& intent)>;
     void OnIntent(IntentType type, IntentHandler handler);
@@ -98,7 +107,8 @@ namespace Bleakhold::Ui
         Refuse(player, intent, refusal.code, refusal.text);
     }
 
-    // Called after every valid HELLO (login or /reload), after the module answered it. Optional.
+    // Called after every valid HELLO (login or /reload), after the module answered it. Optional. Every call adds an
+    // observer; they run in the order they were added (world thread).
     void OnHello(std::function<void(Player* player, Intent const& hello)> observer);
 
     // True when this player's client completed the handshake (has the Bleakhold addon running).
@@ -121,7 +131,8 @@ namespace Bleakhold::Ui
     //   WEEK TASKS KEY BOARD QUEUE COLL RIFT -> the last state you pushed;
     //   ERA -> bleakhold_week_schedule; SEASON -> bleakhold_season + war effort tables;
     //   SET, LIDX -> bleakhold_legacy_set; FIRSTS -> bleakhold_server_first; MPLUS -> the run tracker;
-    //   DEF -> the definition tables; CAMPST -> the module's camping state; ROYS ROYM -> nothing. Example:
+    //   DEF -> the definition tables; CAMPST -> the module's camping state; ROYS ROYM WMST WPZ WPMAP WANTED ->
+    //   nothing. Example:
     //     Ui::OnRequest(Topic::Week, [](Player* p, TopicRequest const&) { Ui::SendWeek(p, MySeason::Week(p)); });
     using TopicProvider = std::function<void(Player* player, TopicRequest const& request)>;
     void OnRequest(Topic topic, TopicProvider provider);
@@ -183,6 +194,18 @@ namespace Bleakhold::Ui
     // announcer is enabled: the addon plays BGANN only with that bit, inside a battleground and never in an arena.
     void SendBgAnnounce(Player* player, BgAnnounce const& announce);
     void SendBgAnnounce(std::vector<Player*> const& players, BgAnnounce const& announce);
+    // World PvP and War Mode (section 19), all unrevisioned and never remembered: answer GET WMST, WPZ, WPMAP and
+    // WANTED from your own state. The list versions send the same message to every player given (encoded once).
+    void SendWarModeState(Player* player, WarModeState const& state); // WMST (the player's War Mode)
+    void SendWarZone(Player* player, WarZone const& zone);            // WPZ (the zone the player is in)
+    void SendWarZone(std::vector<Player*> const& players, WarZone const& zone);
+    void SendWarCapture(Player* player, WarCapture const& capture);   // WPCAP (only to players at the objective)
+    void SendWarMap(Player* player, WarMap const& map);               // WPMAP
+    void SendWarMap(std::vector<Player*> const& players, WarMap const& map);
+    void SendWanted(Player* player, WantedList const& wanted);        // WANTED
+    void SendWanted(std::vector<Player*> const& players, WantedList const& wanted);
+    void SendWarEvent(Player* player, WarEvent const& event);         // WPEV
+    void SendWarEvent(std::vector<Player*> const& players, WarEvent const& event);
     // Low-level keystone run messages for one player. Prefer the run tracker below.
     void SendKeyRunStart(Player* player, Bleakhold::KeyRunStart const& start);   // MPS
     void SendKeyRunState(Player* player, KeyRunState const& state);   // MP
@@ -224,7 +247,8 @@ namespace Bleakhold::Ui
     // =============================================================================================
     // Server-wide chat announcements (CHAT_MSG_SYSTEM with a tag the addon colours and can hide)
     // =============================================================================================
-    enum class AnnounceTag : uint8_t { RaidLegacy, ServerFirst, Season, Queue, Record, Case, Royale };
+    // War: World PvP Fronts (start, end, the warning before one; section 19).
+    enum class AnnounceTag : uint8_t { RaidLegacy, ServerFirst, Season, Queue, Record, Case, Royale, War };
     // To every online player. `text` is server text and may contain real |Hitem:...|h links.
     void Announce(AnnounceTag tag, std::string_view text);
     void AnnounceTo(Player* player, AnnounceTag tag, std::string_view text);

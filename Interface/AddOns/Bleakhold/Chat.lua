@@ -1,6 +1,7 @@
 -- Bleakhold: colour the server's announcement tags in chat ([Raid Legacy], [Server First], [Season],
--- [Queue], [Record], [Case]) and let each chat window hide a tag. The server sends these as plain system text
--- that reads fine without the addon; links in the message are left exactly as the server sent them.
+-- [Queue], [Record], [Case], [Royale], [War]) and let each chat window hide a tag. The server sends these as
+-- plain system text that reads fine without the addon; links in the message are left exactly as the server sent
+-- them.
 -- Also /w2 for whispers to two-word character names (the server's mod-two-names), quoted names in /w,
 -- two-word names in /friend and name boxes long enough for them.
 local ADDON, ns = ...
@@ -70,7 +71,7 @@ ns.AddCommand("chat", "chat tags: /bh chat [tag on|off [window]]", function(args
     end
     local def = byKey[key:lower()]
     if not def or (state ~= "on" and state ~= "off") then
-        ns.Print("usage: /bh chat <legacy|first|season|queue|record|case|royale> <on|off> [chat window number]")
+        ns.Print("usage: /bh chat <legacy|first|season|queue|record|case|royale|war> <on|off> [chat window number]")
         return
     end
     local n = tonumber(win) or 1

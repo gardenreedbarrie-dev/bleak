@@ -21,7 +21,7 @@ namespace Bleakhold::Ui
     // ---- intents ----
     void OnIntent(IntentType type, IntentHandler handler) { M().SetHandler(type, std::move(handler)); }
     void Refuse(Player* player, Intent const& intent, std::string_view code, std::string_view text) { M().Refuse(player, intent, code, text); }
-    void OnHello(std::function<void(Player*, Intent const&)> observer) { M().SetHelloObserver(std::move(observer)); }
+    void OnHello(std::function<void(Player*, Intent const&)> observer) { M().AddHelloObserver(std::move(observer)); }
     bool HasAddon(Player* player) { return M().HasAddon(player); }
     void SetFeature(uint32_t feature, bool on) { M().SetFeature(feature, on); }
     bool FeatureOn(uint32_t feature) { return M().FeatureOn(feature); }
@@ -178,6 +178,57 @@ namespace Bleakhold::Ui
     {
         if (BgAnnounceSendable(m))
             PushAll(players, "BGANN", EncodeBgAnnounce(m));
+    }
+
+    // ---- World PvP and War Mode (section 19) ----
+    void SendWarModeState(Player* player, WarModeState const& m)
+    {
+        M().Push(player, "WMST", Topic::Count, nullptr, [&](uint32_t) { return EncodeWarModeState(m); });
+    }
+
+    void SendWarZone(Player* player, WarZone const& m)
+    {
+        M().Push(player, "WPZ", Topic::Count, nullptr, [&](uint32_t) { return EncodeWarZone(m); });
+    }
+
+    void SendWarZone(std::vector<Player*> const& players, WarZone const& m)
+    {
+        PushAll(players, "WPZ", EncodeWarZone(m));
+    }
+
+    void SendWarCapture(Player* player, WarCapture const& m)
+    {
+        M().Push(player, "WPCAP", Topic::Count, nullptr, [&](uint32_t) { return EncodeWarCapture(m); });
+    }
+
+    void SendWarMap(Player* player, WarMap const& m)
+    {
+        M().Push(player, "WPMAP", Topic::Count, nullptr, [&](uint32_t) { return EncodeWarMap(m); });
+    }
+
+    void SendWarMap(std::vector<Player*> const& players, WarMap const& m)
+    {
+        PushAll(players, "WPMAP", EncodeWarMap(m));
+    }
+
+    void SendWanted(Player* player, WantedList const& m)
+    {
+        M().Push(player, "WANTED", Topic::Count, nullptr, [&](uint32_t) { return EncodeWanted(m); });
+    }
+
+    void SendWanted(std::vector<Player*> const& players, WantedList const& m)
+    {
+        PushAll(players, "WANTED", EncodeWanted(m));
+    }
+
+    void SendWarEvent(Player* player, WarEvent const& m)
+    {
+        M().Push(player, "WPEV", Topic::Count, nullptr, [&](uint32_t) { return EncodeWarEvent(m); });
+    }
+
+    void SendWarEvent(std::vector<Player*> const& players, WarEvent const& m)
+    {
+        PushAll(players, "WPEV", EncodeWarEvent(m));
     }
 
     void RiftStatus(Player* player, RiftState const& m)

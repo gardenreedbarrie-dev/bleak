@@ -95,6 +95,15 @@ function FX.examples(M)
         ROYE = { { 7001, 12, 24, 1, 18400, 0, 214, "Dalia", 11, 7, 1 }, { "H", 70, "", "Placement" }, { "S", 5 } },
         -- the battleground kill announcer (section 18), unrevisioned
         BGANN = { { "Aldric", 1, "Brenna", 8, "D", "S" } },
+        -- World PvP and War Mode (section 19), unrevisioned
+        WMST = { { 1, 512, "", 20, 0, 10, 0, 8, "H", 31, 22, 3, 1, 840, 248, 412, 3720, 6, 60, 7, 121, 96 } },
+        WPZ = { { 2817, "F", 1, 4320, 620, 380, "A", 2, 80, 80 }, { "O", 1, "Violet Stand", 512, 388, "A", 1000, 1 },
+            { "O", 2, "Forlorn Woods", 604, 455, "N", -120, 6 }, { "O", 3, "Sunreaver Rise", "", "", "A", 800, 5 } },
+        WPCAP = { { 2, -120, 20, 6, 2, 3, 5 } },
+        WPMAP = { { 2817, 1, 4320, 66, 4920, 267, 1, 4320 }, { "Z", 2817, "F", 2, 0, 1, 80, 80, 1 },
+            { "Z", 4197, "W", 0, 1, 0, "", "", 0 }, { "P", 2817, 1, "A", 1 }, { "P", 2817, 2, "N", 6 } },
+        WANTED = { { 2817 }, { "W", "Garrick Stormwind", 4, "H", 5, "S", 248, 5, 560, 402, 35 } },
+        WPEV = { { "C", 2817, 1, "A", "Violet Stand" } },
     }
 end
 
@@ -114,6 +123,13 @@ function FX.openEverything(M, ns)
     M.Advance(0.3)
     ns.UI.Open("royalemap")
     M.Advance(0.3)
+    -- War Mode (section 19): its page while the realm runs it; the HUD, the bar and the map pins redraw either way
+    if ns.WarMode.Live() then
+        ns.UI.Open("warmode")
+        M.Advance(0.3)
+    end
+    ns.WarFront.Tick()
+    ns.WarFront.UpdateMap()
     ns.UI.Open("season")
     ns.UI.Open("leaderboards")
     for _, b in ipairs({ "K", "R", "E", "F" }) do

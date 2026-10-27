@@ -292,6 +292,19 @@ TEST("every C> example of the document is accepted and re-encodes byte for byte"
     CHECK(!IsRevisioned(Topic::RoyaleState) && !IsRevisioned(Topic::RoyaleMap));
     CHECK(IsActionIntent(IntentType::RoyaleDrop) && IsActionIntent(IntentType::RoyaleDeploy) &&
         IsActionIntent(IntentType::RoyaleSpectate));
+    // World PvP and War Mode (section 19)
+    CHECK(Parse("1 GET x 1/1 WMST;WPZ;WPMAP;WANTED", &in) == DropReason::None);
+    CHECK(in.topics.size() == 4 && in.topics[0].topic == Topic::WarModeState && in.topics[1].topic == Topic::WarZone &&
+        in.topics[2].topic == Topic::WarMap && in.topics[3].topic == Topic::Wanted && in.seq == 33);
+    CHECK(Parse("1 WARMODE y 1/1 1", &in) == DropReason::None);
+    CHECK(in.type == IntentType::WarMode && in.warModeOn && in.seq == 34);
+    CHECK(Parse("1 WARMODE y 1/1 0", &in) == DropReason::None && in.type == IntentType::WarMode && !in.warModeOn);
+    CHECK_EQ(EncodeIntentBody(in), "1 WARMODE y 1/1 0");
+    CHECK_EQ(IntentOpName(IntentType::WarMode), "WARMODE");
+    CHECK_EQ(TopicName(Topic::Wanted), "WANTED");
+    CHECK(!IsRevisioned(Topic::WarModeState) && !IsRevisioned(Topic::WarZone) && !IsRevisioned(Topic::WarMap) &&
+        !IsRevisioned(Topic::Wanted));
+    CHECK(IsActionIntent(IntentType::WarMode));
 }
 
 TEST("cases: chances add up to 10000 and the roll follows the weights")
@@ -526,6 +539,17 @@ TEST("malformed client messages are dropped with the right reason")
         { "BHc\t1 GET 1 1/1 ROYM,0", DropReason::BadTopic },
         { "BHc\t1 GET 1 1/1 ROYO", DropReason::BadTopic },
         { "BHc\t1 GET 1 1/1 ROYE", DropReason::BadTopic },
+        { "BHc\t1 WARMODE 1 1/1", DropReason::FieldCount },
+        { "BHc\t1 WARMODE 1 1/1 1,1", DropReason::FieldCount },
+        { "BHc\t1 WARMODE 1 1/1 1;1", DropReason::FieldCount },
+        { "BHc\t1 WARMODE 1 1/1 2", DropReason::OutOfRange },
+        { "BHc\t1 WARMODE 1 1/1 -1", DropReason::OutOfRange },
+        { "BHc\t1 WARMODE 1 1/1 on", DropReason::BadField },
+        { "BHc\t1 WARMODES 1 1/1 1", DropReason::UnknownOp },
+        { "BHc\t1 GET 1 1/1 WMST,1", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 WPZ,2817", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 WPCAP", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 WPEV", DropReason::BadTopic },
     };
     for (Bad const& b : bad)
     {
@@ -718,6 +742,31 @@ TEST("endpoint: the Bleakhold Royale limits come from Limits")
     CHECK(Feed(ep, "1 RSPEC 6 1/1 1", 4000).verdict == Verdict::Refused);
     CHECK(Feed(ep, "1 RDEPLOY 7 1/1", 5000).verdict == Verdict::Accepted);
     CHECK(Feed(ep, "1 RDEPLOY 8 1/1", 5001).verdict == Verdict::Accepted);
+}
+
+TEST("endpoint: the War Mode limit comes from Limits; a repeated WARMODE within the window is a duplicate")
+{
+    Limits l;
+    l.warModeIntervalMs = 2000;
+    Endpoint ep(l);
+    Feed(ep, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    CHECK(Feed(ep, "1 WARMODE 2 1/1 1", 1000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 WARMODE 3 1/1 1", 1500).reason == DropReason::Duplicate);
+    Intent in;
+    ReceiveResult r = Feed(ep, "1 WARMODE 4 1/1 0", 2500, &in);
+    CHECK(r.verdict == Verdict::Refused && in.type == IntentType::WarMode && !in.warModeOn);
+    CHECK(Feed(ep, "1 WARMODE 5 1/1 0", 3100).verdict == Verdict::Accepted);
+    // the other limits are untouched by it
+    CHECK(Feed(ep, "1 GLIDE 6 1/1", 3200).verdict == Verdict::Accepted);
+    Limits off;
+    off.warModeIntervalMs = 0;   // 0: no limit of its own
+    off.duplicateWindowMs = 0;
+    Endpoint free(off);
+    Feed(free, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    CHECK(Feed(free, "1 WARMODE 2 1/1 1", 1000).verdict == Verdict::Accepted);
+    CHECK(Feed(free, "1 WARMODE 3 1/1 0", 1001).verdict == Verdict::Accepted);
+    CHECK(Feed(free, "1 GET 4 1/1 WMST;WPMAP", 1100, &in).verdict == Verdict::Accepted && in.topics.size() == 2);
+    CHECK(Feed(free, "1 GET 5 1/1 WMST", 1200).reason == DropReason::Throttled);
 }
 
 TEST("endpoint: the camping limits come from Limits")
@@ -1608,6 +1657,116 @@ TEST("royale: the ERR codes of section 17 are short machine codes and documented
     }
 }
 
+TEST("war mode: the ERR codes of section 19 are short machine codes and documented")
+{
+    std::string const doc = bhtest::ReadFile(g_repo + "/docs/BleakholdProtocol.md");
+    for (Refusal const& r : { WarModeErr::Off, WarModeErr::Level, WarModeErr::Hardcore, WarModeErr::Place,
+             WarModeErr::Cooldown, WarModeErr::Wanted, WarModeErr::Busy })
+    {
+        std::string const code = r.code;
+        bool ok = !code.empty() && code.size() <= WarBlockBytes;
+        for (char c : code)
+            ok = ok && ((c >= 'a' && c <= 'z') || c == '_');
+        CHECK_MSG(ok, "code [" + code + "]");
+        CHECK_MSG(doc.find("| `" + code + "` |") != std::string::npos, code + " is in an error table of the document");
+        CHECK_MSG(std::string(r.text).size() <= 160 && !std::string(r.text).empty(), code + " has a sentence");
+    }
+    CHECK_EQ(std::string(WarModeErr::Dead.code), "dead");
+    CHECK_EQ(std::string(WarModeErr::InCombat.code), "in_combat");
+    CHECK(doc.find("## 19. World PvP and War Mode") != std::string::npos);
+    CHECK(doc.find("16384 War Mode live") != std::string::npos && doc.find("32768 World PvP objectives live") != std::string::npos);
+    CHECK_EQN(static_cast<uint32_t>(FeatureWarMode), 16384u);
+    CHECK_EQN(static_cast<uint32_t>(FeatureWorldPvp), 32768u);
+}
+
+TEST("war mode: the encoders keep to the document")
+{
+    // WMST: 22 fields, the block is cut to a machine code, an unknown team letter is an empty field
+    WarModeState st;
+    st.on = true; st.block = "wm_wanted"; st.underdogTeam = static_cast<WarTeam>('Q');
+    st.wantedState = static_cast<WantedStateId>(7);
+    std::string p = EncodeWarModeState(st);
+    CHECK_EQ(p, "1,0,wm_wanted,0,0,0,0,0,,0,0,0,2,0,0,0,0,0,0,0,0,0");
+    st.deaths = 3;
+    CHECK_EQN(SplitStr(EncodeWarModeState(st), ',').size(), 22u);
+    st.block = std::string(40, 'x');
+    CHECK_EQN(SplitStr(EncodeWarModeState(st), ',')[2].size(), WarBlockBytes);
+
+    // WPZ: a zone without objectives is its id alone; records are capped and clamped
+    WarZone none;
+    none.zoneId = 4395;
+    CHECK_EQ(EncodeWarZone(none), "4395");
+    WarZone z;
+    z.zoneId = 616; z.kind = WarZoneKind::Front; z.state = static_cast<WarZoneState>(9); z.controlA = 4000u;
+    z.dominionStacks = 3;
+    for (uint32_t i = 0; i < 20; ++i)
+    {
+        WarObjective o;
+        o.objId = i + 1; o.name = "Shrine, " + std::to_string(i); o.slider = i % 2 ? 5000 : -5000;
+        o.owner = static_cast<WarTeam>(0); o.state = static_cast<WarObjectiveState>(9);
+        z.objectives.push_back(o);
+    }
+    std::vector<std::string> recs = SplitStr(EncodeWarZone(z), ';');
+    CHECK_EQN(recs.size(), 1 + MaxWarObjectives);
+    CHECK_EQ(recs[0], "616,F,2,0,1000,,,3");
+    CHECK_EQ(recs[1], "O,1,Shrine%2C 0,,,N,-1000,6");
+    CHECK_EQ(recs[2], "O,2,Shrine%2C 1,,,N,1000,6");
+
+    // WPCAP
+    WarCapture c;
+    c.objId = 0;
+    CHECK_EQ(EncodeWarCapture(c), "0,0,0,0,0,0,0");
+    c.objId = 2; c.slider = -2000; c.neutralPct = 250; c.state = WarObjectiveState::HordeAllianceChallenge;
+    c.countA = 2; c.countH = 3; c.maxNet = 5;
+    CHECK_EQ(EncodeWarCapture(c), "2,-1000,100,6,2,3,5");
+
+    // WPMAP: Z then P records, each capped
+    WarMap m;
+    for (uint32_t i = 0; i < 40; ++i)
+        m.zones.push_back({ i + 1, WarZoneKind::Stock, 1, 0, 2, std::nullopt, std::nullopt, WarZoneState::Active });
+    for (uint32_t i = 0; i < 120; ++i)
+        m.points.push_back({ 1, i + 1, WarTeam::Horde, WarObjectiveState::Horde });
+    recs = SplitStr(EncodeWarMap(m), ';');
+    CHECK_EQN(recs.size(), 1 + MaxWarZones + MaxWarPoints);
+    CHECK_EQ(recs[0], "0,0,0,0,0,0,0,0");
+    CHECK_EQ(recs[1], "Z,1,S,1,0,2,,,1");
+    CHECK_EQ(recs[1 + MaxWarZones], "P,1,1,H,2");
+
+    // WANTED: names are cut to 48 bytes; at most MaxWanted records; an empty list is the zone alone
+    WantedList w;
+    w.zoneId = 2817;
+    CHECK_EQ(EncodeWanted(w), "2817");
+    for (uint32_t i = 0; i < 12; ++i)
+    {
+        WantedEntry e;
+        e.name = std::string(60, 'a'); e.classId = 4; e.team = WarTeam::Horde; e.streak = 5 + i;
+        e.reason = i % 2 ? WantedReason::Bully : WantedReason::Streak; e.u = 1500u; e.ageSec = i;
+        w.entries.push_back(e);
+    }
+    recs = SplitStr(EncodeWanted(w), ';');
+    CHECK_EQN(recs.size(), 1 + MaxWanted);
+    std::vector<std::string> f = SplitStr(recs[2], ',');
+    CHECK_EQN(f.size(), 11u);
+    CHECK_EQN(f[1].size(), WarNameBytes);
+    CHECK_EQ(f[5], "B");
+    CHECK_EQ(f[8], "1000");
+    CHECK_EQ(f[9], "");
+
+    // WPEV: one field layout per kind
+    WarEvent ev;
+    ev.kind = WarEventKind::FrontEnd; ev.zoneId = 66; ev.team = WarTeam::Neutral; ev.controlA = 500; ev.controlH = 1500;
+    CHECK_EQ(EncodeWarEvent(ev), "E,66,,500,1000");   // a draw: no winner
+    ev.kind = WarEventKind::Reward; ev.why = static_cast<WarRewardWhy>('Z'); ev.honor = 1; ev.xp = 2; ev.shards = 3;
+    ev.drPermille = 1200;
+    CHECK_EQ(EncodeWarEvent(ev), "R,K,1,2,3,1000");
+    ev.kind = WarEventKind::Survived; ev.name = "Br\xC3\xA9nna";
+    CHECK_EQ(EncodeWarEvent(ev), "S,Br\xC3\xA9nna,1,3");
+    ev.kind = static_cast<WarEventKind>('Q');
+    CHECK_EQ(EncodeWarEvent(ev), "");
+    CHECK(WarTeamLetter(WarTeam::Neutral) == 'N' && WarTeamLetter(static_cast<WarTeam>('a')) == 0);
+    CHECK(WarZoneKindLetter(WarZoneKind::Wintergrasp) == 'W' && WarZoneKindLetter(WarZoneKind::None) == 0);
+}
+
 TEST("endpoint: SEQ per message, revisions per topic, snapshots reset by HELLO")
 {
     Endpoint ep;
@@ -1916,6 +2075,100 @@ static std::map<std::string, std::string> BuiltExamples()
         m["BGANN x"] = ann("Aldric", 1, "Dalia", 11, BgMultiKill::Triple, BgStreak::KillingSpree);
         m["BGANN y"] = ann("Garrick Stormwind", 4, "Aldric", 1, BgMultiKill::None, BgStreak::Dominating);
         m["BGANN z"] = ann("Eamon", 9, "Fenna", 3, BgMultiKill::Rampage, BgStreak::HolyShit);
+    }
+    {
+        // World PvP and War Mode (section 19)
+        WarModeState st;
+        st.on = false; st.cooldownSec = 0; st.minLevel = 20; st.xpPct = 0; st.honorPct = 10; st.shardPct = 0;
+        st.underdogPct = 8; st.underdogTeam = WarTeam::Horde; st.wmAlliance = 31; st.wmHorde = 22;
+        st.bonusHonorCap = 3720; st.shardsCap = 60; st.bestStreak = 7; st.kills = 118; st.deaths = 96;
+        m["WMST 2b"] = EncodeWarModeState(st);
+        ErrorReply e;
+        e.op = IntentType::WarMode; e.seq = ParseBase36("2c").value(); e.code = WarModeErr::Place.code;
+        e.text = WarModeErr::Place.text;
+        m["ERR 2d"] = EncodeError(e);
+        st.on = true; st.cooldownSec = 900;
+        m["WMST 2f"] = EncodeWarModeState(st);
+        WarEvent x;
+        x.kind = WarEventKind::FrontWarning; x.zoneId = 2817; x.seconds = 900; x.name = "Crystalsong Forest";
+        m["WPEV 2g"] = EncodeWarEvent(x);
+        x.kind = WarEventKind::FrontStart; x.seconds = 7200;
+        m["WPEV 2h"] = EncodeWarEvent(x);
+        WarMap map;
+        map.frontZone = 2817; map.frontState = WarZoneState::Active; map.secondsLeft = 4320; map.nextZone = 66;
+        map.nextStartsSec = 4920; map.levelZone = 267; map.levelState = WarZoneState::Active; map.levelSecondsLeft = 4320;
+        map.zones = { { 2817, WarZoneKind::Front, 2, 0, 1, 80u, 80u, WarZoneState::Active },
+            { 267, WarZoneKind::Levelling, 1, 1, 1, 20u, 35u, WarZoneState::Active },
+            { 3483, WarZoneKind::Stock, 2, 1, 0, std::nullopt, std::nullopt, WarZoneState::Active },
+            { 4197, WarZoneKind::Wintergrasp, 0, 1, 0, std::nullopt, std::nullopt, WarZoneState::Dormant } };
+        map.points = { { 2817, 1, WarTeam::Alliance, WarObjectiveState::Alliance },
+            { 2817, 2, WarTeam::Neutral, WarObjectiveState::HordeAllianceChallenge },
+            { 2817, 3, WarTeam::Alliance, WarObjectiveState::Alliance },
+            { 267, 11, WarTeam::Alliance, WarObjectiveState::Alliance },
+            { 267, 12, WarTeam::Horde, WarObjectiveState::Horde },
+            { 267, 13, WarTeam::Neutral, WarObjectiveState::Neutral } };
+        m["WPMAP 2i"] = EncodeWarMap(map);
+        WarZone z;
+        z.zoneId = 2817; z.kind = WarZoneKind::Front; z.state = WarZoneState::Active; z.secondsLeft = 4320;
+        z.controlA = 620u; z.controlH = 380u; z.dominionTeam = WarTeam::Alliance; z.dominionStacks = 2;
+        z.levelMin = 80u; z.levelMax = 80u;
+        z.objectives = { { 1, "Violet Stand", 512u, 388u, WarTeam::Alliance, 1000, WarObjectiveState::Alliance },
+            { 2, "Forlorn Woods", 604u, 455u, WarTeam::Neutral, -120, WarObjectiveState::HordeAllianceChallenge },
+            { 3, "Sunreaver Rise", 701u, 512u, WarTeam::Alliance, 800, WarObjectiveState::Alliance } };
+        m["WPZ 2j"] = EncodeWarZone(z);
+        WarCapture cap;
+        cap.objId = 2; cap.slider = -120; cap.neutralPct = 20; cap.state = WarObjectiveState::HordeAllianceChallenge;
+        cap.countA = 2; cap.countH = 3; cap.maxNet = 5;
+        m["WPCAP 2k"] = EncodeWarCapture(cap);
+        WarEvent a;
+        a.kind = WarEventKind::UnderAttack; a.zoneId = 2817; a.objId = 3; a.team = WarTeam::Horde; a.name = "Sunreaver Rise";
+        m["WPEV 2l"] = EncodeWarEvent(a);
+        a.kind = WarEventKind::Captured; a.objId = 2; a.team = WarTeam::Alliance; a.name = "Forlorn Woods";
+        m["WPEV 2m"] = EncodeWarEvent(a);
+        WarEvent r;
+        r.kind = WarEventKind::Reward; r.why = WarRewardWhy::Capture; r.honor = 186; r.xp = 0; r.shards = 2;
+        r.drPermille = 1000;
+        m["WPEV 2n"] = EncodeWarEvent(r);
+        st.cooldownSec = 512; st.streak = 3; st.todayBonusHonor = 412; st.todayShards = 6; st.kills = 121;
+        m["WMST 2o"] = EncodeWarModeState(st);
+        WarEvent wanted;
+        wanted.kind = WarEventKind::Wanted; wanted.name = "Garrick Stormwind"; wanted.classId = 4;
+        wanted.team = WarTeam::Horde; wanted.streak = 5; wanted.reason = WantedReason::Streak;
+        m["WPEV 2p"] = EncodeWarEvent(wanted);
+        WantedList list;
+        list.zoneId = 2817;
+        WantedEntry we;
+        we.name = "Garrick Stormwind"; we.classId = 4; we.team = WarTeam::Horde; we.streak = 5;
+        we.reason = WantedReason::Streak; we.bountyHonor = 248; we.bountyShards = 5; we.u = 560u; we.v = 402u;
+        we.ageSec = 35;
+        list.entries = { we };
+        m["WANTED 2q"] = EncodeWanted(list);
+        WarEvent b;
+        b.kind = WarEventKind::BountyClaimed; b.name = "Aldric"; b.victim = "Garrick Stormwind"; b.honor = 248;
+        b.shards = 5;
+        m["WPEV 2r"] = EncodeWarEvent(b);
+        list.entries.clear();
+        m["WANTED 2s"] = EncodeWanted(list);
+        WarEvent sv;
+        sv.kind = WarEventKind::Survived; sv.name = "Brenna"; sv.honor = 248; sv.shards = 5;
+        m["WPEV 2t"] = EncodeWarEvent(sv);
+        WarEvent n;
+        n.kind = WarEventKind::Neutralised; n.zoneId = 2817; n.objId = 1; n.team = WarTeam::Horde; n.name = "Violet Stand";
+        m["WPEV 2u"] = EncodeWarEvent(n);
+        WarEvent end;
+        end.kind = WarEventKind::FrontEnd; end.zoneId = 2817; end.team = WarTeam::Alliance; end.controlA = 640;
+        end.controlH = 360;
+        m["WPEV 2v"] = EncodeWarEvent(end);
+        WarEvent chest;
+        chest.kind = WarEventKind::Reward; chest.why = WarRewardWhy::Victory; chest.honor = 496; chest.shards = 10;
+        m["WPEV 2w"] = EncodeWarEvent(chest);
+        WarZone dal;
+        dal.zoneId = 4395;
+        m["WPZ 2x"] = EncodeWarZone(dal);
+        ErrorReply cd;
+        cd.op = IntentType::WarMode; cd.seq = ParseBase36("2y").value(); cd.code = WarModeErr::Cooldown.code;
+        cd.text = "You can change War Mode again in 296 s.";
+        m["ERR 2z"] = EncodeError(cd);
     }
     return m;
 }

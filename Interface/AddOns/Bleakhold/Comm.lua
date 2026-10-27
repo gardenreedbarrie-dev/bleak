@@ -233,6 +233,7 @@ local function token(maxLen) return { kind = "token", max = maxLen } end
 Comm.TOPICS = {
     WEEK = 0, ERA = 0, TASKS = 0, KEY = 0, BOARD = 0, QUEUE = 0, MPLUS = 0, RIFT = 0, COLL = 0,
     SET = 2, LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1, CASES = 0, CASE = 1, CAMPST = 0, ROYS = 0, ROYM = 0,
+    WMST = 0, WPZ = 0, WPMAP = 0, WANTED = 0,
 }
 
 -- A schema lists its fields in order; `min` (default: all of them) is how many must be given, the rest may be
@@ -268,6 +269,7 @@ Comm.INTENTS = {
     RDROP = { int(-17067, 17067), int(-17067, 17067) },               -- Royale landing pin: world x, y (yards)
     RDEPLOY = {},                                                     -- Royale: open the parachute now
     RSPEC = { int(0, 2) },                                            -- Royale spectator: 0 killer, 1 next, 2 previous
+    WARMODE = { int(0, 1) },                                          -- War Mode: 1 on, 0 off (section 19)
 }
 
 local function checkField(spec, v)
@@ -803,7 +805,7 @@ end)
 -- Feature bits from HELLO (the server can hide boards that are not ready).
 Comm.FEATURE = { RIFT_SCORE = 1, SHARDS = 2, DBM_BY_SERVER = 4, SEASON = 8, LEADERBOARDS = 16, COLLECTIONS = 32,
     EMOJI = 64, DANCE = 128, CASES = 256, CAMP = 512, GLIDE = 1024, FIELD_REPAIR = 2048, ROYALE = 4096,
-    BG_ANNOUNCER = 8192 }
+    BG_ANNOUNCER = 8192, WAR_MODE = 16384, WORLD_PVP = 32768 }   -- 32768 counts only with 16384 (ns.WarMode)
 
 function Comm.HasFeature(bitValue)
     local f = Comm.server and Comm.server.features or 0

@@ -14,6 +14,11 @@ ShoppingTooltip1
 ShoppingTooltip2
 UIErrorsFrame
 WorldMapFrame
+# the world map's map area (FrameXML WorldMapFrame.xml): War Mode's pins sit on it (tests create it)
+WorldMapButton
+# the world map's own tooltip (FrameXML WorldMapFrame.xml, parent WorldMapFrame): it shows on the full-size map,
+# which hides UIParent and GameTooltip with it; War Mode's pins use it (tests create it)
+WorldMapTooltip
 WatchFrame
 DEFAULT_CHAT_FRAME
 NUM_CHAT_WINDOWS

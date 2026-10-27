@@ -63,6 +63,7 @@ namespace Bleakhold::Proto
         uint32_t repairIntervalMs = 2000;    // REPAIR: 1 per BleakholdUi.RateLimit.RepairIntervalMs
         uint32_t royaleIntervalMs = 500;     // RDROP, RSPEC: 1 each per BleakholdUi.RateLimit.RoyaleIntervalMs
         uint32_t royaleDeployIntervalMs = 1000; // RDEPLOY: 1 per BleakholdUi.RateLimit.RoyaleDeployIntervalMs
+        uint32_t warModeIntervalMs = 2000;   // WARMODE: 1 per BleakholdUi.RateLimit.WarModeIntervalMs (section 19)
         // the same action intent again within this window is ignored (0 = off); RSPEC is never a duplicate (next,
         // next is two steps)
         uint32_t duplicateWindowMs = 1000;
@@ -148,6 +149,7 @@ namespace Bleakhold::Proto
         TokenBucket _royaleDrop;
         TokenBucket _royaleDeploy;
         TokenBucket _royaleSpectate;
+        TokenBucket _warMode;
         std::unordered_map<std::string, uint64_t> _lastGet;
         struct LastIntent { std::string key; uint64_t atMs = 0; bool set = false; };
         std::array<LastIntent, static_cast<std::size_t>(IntentType::Count)> _last{};

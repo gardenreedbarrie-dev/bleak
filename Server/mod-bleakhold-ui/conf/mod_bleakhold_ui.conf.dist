@@ -141,6 +141,8 @@ BleakholdUi.Frame.MaxBody = 1000
 #                                              camera): one each per this many ms           Default: 500
 #    BleakholdUi.RateLimit.RoyaleDeployIntervalMs  Bleakhold Royale RDEPLOY (open the parachute) one per this
 #                                              many ms                                     Default: 1000
+#    BleakholdUi.RateLimit.WarModeIntervalMs     WARMODE (turn War Mode on or off, section 19) one per this
+#                                              many ms; the server's own toggle cooldown is far longer   Default: 2000
 
 BleakholdUi.RateLimit.Burst = 10
 BleakholdUi.RateLimit.PerSecond = 5
@@ -160,6 +162,7 @@ BleakholdUi.RateLimit.GlideIntervalMs = 1000
 BleakholdUi.RateLimit.RepairIntervalMs = 2000
 BleakholdUi.RateLimit.RoyaleIntervalMs = 500
 BleakholdUi.RateLimit.RoyaleDeployIntervalMs = 1000
+BleakholdUi.RateLimit.WarModeIntervalMs = 2000
 
 ###################################################################################################
 # EMOJI BUBBLES (EMOJI: an emoji over the player's head for everyone nearby; needs the Bleakhold client)
@@ -466,7 +469,7 @@ BleakholdUi.KeyRun.HeartbeatSec = 15
 BleakholdUi.KeyRun.ServerPullTimer = 0
 
 ###################################################################################################
-# CHAT ANNOUNCEMENTS ([Raid Legacy], [Server First], [Season], [Queue], [Record], [Case], [Royale])
+# CHAT ANNOUNCEMENTS ([Raid Legacy], [Server First], [Season], [Queue], [Record], [Case], [Royale], [War])
 ###################################################################################################
 #
 #    BleakholdUi.Announce.ColorTagsWithoutAddon
@@ -485,6 +488,7 @@ BleakholdUi.Announce.Color.Queue = "9FD8E5"
 BleakholdUi.Announce.Color.Record = "F1D9A0"
 BleakholdUi.Announce.Color.Case = "C9A2F5"
 BleakholdUi.Announce.Color.Royale = "B98CFF"
+BleakholdUi.Announce.Color.War = "E0604A"
 
 ###################################################################################################
 # WAR EFFORT TOKEN HAND-IN (the "Hand in" button of the Season window)

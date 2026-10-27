@@ -214,6 +214,7 @@ Data.chatTags = {
     { tag = "Record", color = "F1D9A0", key = "record" },
     { tag = "Case", color = "C9A2F5", key = "case" },
     { tag = "Royale", color = "B98CFF", key = "royale" },
+    { tag = "War", color = "E0604A", key = "war" },
 }
 
 -- The addon's sentence for a server refusal (ERR code), shown instead of the server's text (ns.ErrorText); a
@@ -246,6 +247,22 @@ local function repairSkillText()
     elseif camp then
         return "You can only repair at a campfire with a blacksmith's anvil."
     end
+end
+-- War Mode's level and cooldown, from the last WMST (the server's MinLevel; the cooldown counted down here).
+local function warModeLevelText()
+    local wm = ns.S and ns.S.warMode
+    if wm and wm.minLevel then
+        return string.format("You must be level %d to use War Mode.", wm.minLevel)
+    end
+    return "You are not high enough level for War Mode yet."
+end
+local function warModeCooldownText()
+    local wm = ns.S and ns.S.warMode
+    local left = wm and ns.WarLeft and ns.WarLeft(wm.cooldownSec, wm.recvAt)
+    if left and left >= 1 then
+        return string.format("You can change War Mode again in %s.", ns.U.Duration(math.ceil(left)))
+    end
+    return "You changed War Mode recently: wait a little."
 end
 Data.errorTexts = {
     camp_off = "Camping is turned off on this realm.",
@@ -291,6 +308,22 @@ Data.errorTexts = {
     royale_nobody = "There is nobody left to watch.",
     no_proposal = "There is no match waiting for your answer.",
     glide_here = "You cannot glide here.",
+    -- War Mode (section 19); wm_cooldown keeps the server's sentence (the seconds left), wm_busy its reason
+    wm_off = "War Mode is not available on this realm right now.",
+    wm_level = warModeLevelText,
+    wm_hardcore = "Hardcore and Iron Man characters cannot use War Mode.",
+    wm_place = "War Mode can only be changed in an inn or a city.",
+    wm_cooldown = function(e)
+        if e and e.text then
+            return nil
+        end
+        return warModeCooldownText()
+    end,
+    wm_wanted = "You are Wanted: War Mode stays on until the hunt ends.",
+    wm_busy = serverText("You cannot change War Mode from where you are now."),
+    -- the generic codes of every feature: the server's sentence when it sent one
+    dead = serverText("You cannot do that while dead."),
+    in_combat = serverText("You cannot do that while in combat."),
 }
 
 -- Camp objects (CAMPST objs and place): by profession skill line (SkillLine.dbc), its stock 3.3.5a icon
@@ -357,3 +390,14 @@ Data.campProfessions = {
         { name = "Rowboat", buff = "Slip'kik's Savvy: more spell critical strike." } } },
 }
 Data.campTierNames = { "Apprentice", "Journeyman", "Expert" }
+
+-- World PvP zones by AreaTable id (WPZ, WPMAP and WPEV name zones by id): the server's Fronts and stock objectives
+-- (bh_wpvp_zone, OutdoorPvP), Wintergrasp and Dalaran. A name from WPEV F or X replaces these; any other zone is
+-- "Zone <id>" (the player's own zone: the client's name for it, ns.WarZoneName).
+Data.warZones = {
+    [2817] = "Crystalsong Forest", [66] = "Zul'Drak", [3711] = "Sholazar Basin", [67] = "The Storm Peaks",
+    [616] = "Mount Hyjal", [267] = "Hillsbrad Foothills", [331] = "Ashenvale", [45] = "Arathi Highlands",
+    [33] = "Stranglethorn Vale", [3483] = "Hellfire Peninsula", [3518] = "Nagrand", [3519] = "Terokkar Forest",
+    [3521] = "Zangarmarsh", [139] = "Eastern Plaguelands", [394] = "Grizzly Hills", [1377] = "Silithus",
+    [4197] = "Wintergrasp", [4395] = "Dalaran",
+}

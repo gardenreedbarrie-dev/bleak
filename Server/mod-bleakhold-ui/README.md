@@ -114,6 +114,7 @@ To change names, texts, the week schedule or seasons later: edit the `bleakhold_
 | Eclipse Rift | | `RiftStatus`, `RiftEnded`, `QJOIN` with kind `R` |
 | Bleakhold Royale (protocol section 17) | the protocol: `QJOIN` kind `B`, `RDROP`/`RDEPLOY`/`RSPEC` with their rate limits, `GET ROYS`/`ROYM`, the `ROYS ROYM ROYO ROYK ROYV ROYE` encoders, `[Royale]` chat tag; `ERR royale_off` while feature bit 4096 is off; no `GLIDE` in battlegrounds | the match (mod-bleakhold): `SetFeature(FeatureRoyale, true)`, the handlers and providers, the `SendRoyale*` pushes |
 | Battleground kill announcer (protocol section 18: first blood, kill streaks, multi-kills in every battleground and Bleakhold Royale) | the protocol: the `BGANN` encoder and `SendBgAnnounce` (to one player or a whole battleground) | the announcer (mod-bleakhold): the streaks and codes, `SetFeature(FeatureBgAnnouncer, true)` while it is enabled |
+| World PvP and War Mode (protocol section 19: the War Mode toggle, Wanted players and bounties, Front outposts and their capture bars) | the protocol: `WARMODE` with its rate limit (`BleakholdUi.RateLimit.WarModeIntervalMs`), `GET WMST`/`WPZ`/`WPMAP`/`WANTED`, the `WMST WPZ WPCAP WPMAP WANTED WPEV` encoders, the `WarModeErr` refusals, `[War]` chat tag; `ERR wm_off` while feature bit 16384 is off | War Mode and the objectives (mod-bleakhold): every rule, `SetFeature(FeatureWarMode / FeatureWorldPvp, true)`, the `WARMODE` handler, the providers and the `SendWar*` / `SendWanted` pushes |
 | Daily and weekly tasks, Mythic Coins, Shards | | `SendTasks`, `TaskProgress`, `SendWeek`, `TCLAIM`/`TREROLL` handlers |
 | Collections counts | | `SendCollections` |
 | Emoji bubbles (Animations tab, emote wheel, `/bh emoji`) | everything: the module checks `EMOJI` and shows the emoji over the player's head to everyone nearby; config `BleakholdUi.Emoji.*` | nothing (players need the Bleakhold client to see the bubbles) |
@@ -373,6 +374,7 @@ Ui::OnIntent(IntentType::Emoji, [](Player* p, Intent const& in) {
 | CAMPST | automatic (the module's camping); `SendCampState(player, CampState)` for a replacement | |
 | ROYS / ROYM / ROYO / ROYK / ROYV / ROYE | `SendRoyaleState`, `SendRoyaleMap`, `SendRoyaleObjects`, `SendRoyaleKill`, `SendRoyaleEvent` (the last four also for a list of players), `SendRoyaleResult` | |
 | BGANN | `SendBgAnnounce(player or players, BgAnnounce)` | |
+| WMST / WPZ / WPCAP / WPMAP / WANTED / WPEV | `SendWarModeState`, `SendWarZone`, `SendWarCapture`, `SendWarMap`, `SendWanted`, `SendWarEvent` (all but WMST and WPCAP also for a list of players) | |
 
 Intents (`Ui::OnIntent(IntentType::..., handler)`): `TaskClaim` (`in.taskUid`), `TaskReroll` (`in.taskUid`),
 `QueueJoin` (`in.queueKind, activityId, tier, roles, groupSize`), `QueueLeave`, `QueueReply`
@@ -380,7 +382,8 @@ Intents (`Ui::OnIntent(IntentType::..., handler)`): `TaskClaim` (`in.taskUid`), 
 `WarEffortHandIn`, `Outfit` (`in.setId`), `LeaderboardQuery` (`in.board, seasonId, dungeonId, classId, page`),
 `Emoji` (`in.emojiId`), `Dance` (`in.danceId`), `CaseOpen` (`in.caseItemId, in.caseNonce`), `Camp` (`in.campAct`:
 `CampAct::Make`, `Object` with `in.campSkill`, `Pack`), `Glide`, `Repair`, `RoyaleDrop` (`in.dropX, in.dropY`),
-`RoyaleDeploy`, `RoyaleSpectate` (`in.spectateDir`). Runtime feature bits: `SetFeature(bit, on)`, `FeatureOn(bit)`.
+`RoyaleDeploy`, `RoyaleSpectate` (`in.spectateDir`), `WarMode` (`in.warModeOn`). Runtime feature bits:
+`SetFeature(bit, on)`, `FeatureOn(bit)`. `OnHello(observer)` adds an observer; every one runs after each HELLO.
 
 ---
 

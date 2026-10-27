@@ -46,6 +46,7 @@ namespace Bleakhold
             { "RDROP", IntentType::RoyaleDrop },
             { "RDEPLOY", IntentType::RoyaleDeploy },
             { "RSPEC", IntentType::RoyaleSpectate },
+            { "WARMODE", IntentType::WarMode },
         }};
 
         struct TopicInfo
@@ -75,6 +76,10 @@ namespace Bleakhold
             { "CAMPST", Topic::CampState, 0 },
             { "ROYS", Topic::RoyaleState, 0 },
             { "ROYM", Topic::RoyaleMap, 0 },
+            { "WMST", Topic::WarModeState, 0 },
+            { "WPZ", Topic::WarZone, 0 },
+            { "WPMAP", Topic::WarMap, 0 },
+            { "WANTED", Topic::Wanted, 0 },
         }};
 
         constexpr char const* DropNames[] = {
@@ -184,6 +189,7 @@ namespace Bleakhold
                 case IntentType::RoyaleDrop: return 2;
                 case IntentType::RoyaleDeploy: return 0;
                 case IntentType::RoyaleSpectate: return 1;
+                case IntentType::WarMode: return 1;
                 default: return -1;
             }
         }
@@ -342,6 +348,13 @@ namespace Bleakhold
                     uint8_t dir = 0;
                     BH_TRY(Small(f[0], 0, 2, dir));
                     out.spectateDir = static_cast<SpectateDir>(dir);
+                    break;
+                }
+                case IntentType::WarMode:
+                {
+                    uint32_t on = 0;
+                    BH_TRY(Int(f[0], 0, 1, on));
+                    out.warModeOn = on == 1;
                     break;
                 }
                 default:
@@ -532,6 +545,8 @@ namespace Bleakhold
                 return std::to_string(in.dropX) + "," + std::to_string(in.dropY);
             case IntentType::RoyaleSpectate:
                 return n(static_cast<uint32_t>(in.spectateDir));
+            case IntentType::WarMode:
+                return in.warModeOn ? "1" : "0";
             default:
                 return std::string();
         }

@@ -115,8 +115,8 @@ end
 
 local function pushHello()
     local now = time()
-    Demo.Push("HELLO", { { ns.PROTO, 1, now, 0, 0, 2 + 8 + 16 + 32 + 64 + 4096 + 8192, 1, now + 7 * 3600 + 12 * 60,
-        now + 3 * 86400 + 5 * 3600, "Bleakhold", "bleakhold.com" } })
+    Demo.Push("HELLO", { { ns.PROTO, 1, now, 0, 0, 2 + 8 + 16 + 32 + 64 + 4096 + 8192 + 16384 + 32768, 1,
+        now + 7 * 3600 + 12 * 60, now + 3 * 86400 + 5 * 3600, "Bleakhold", "bleakhold.com" } })
 end
 
 local function pushWeek()
@@ -359,6 +359,10 @@ function Demo.Respond(op, payload)
     if ns.Royale and ns.Royale.DemoRespond(op, recs) then
         return
     end
+    -- War Mode and a short Front (WarMode.lua): WARMODE, and its topics of a GET
+    if ns.WarMode and ns.WarMode.DemoRespond(op, recs) then
+        return
+    end
     if op == "HELLO" then
         pushHello()
     elseif op == "GET" then
@@ -481,6 +485,9 @@ function Demo.Start()
     Comm.Reset()
     ns.ResetState()
     resetFixtures()
+    if ns.WarMode then
+        ns.WarMode.DemoReset()
+    end
     Comm.demo = Demo.Respond
     Comm.SendHello()
     -- a task finishes a little later, to show the toast
