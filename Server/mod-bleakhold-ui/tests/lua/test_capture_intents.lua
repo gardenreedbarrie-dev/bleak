@@ -30,8 +30,8 @@ end
 
 test("every intent the addon can send, captured for the C++ parser", function(M, ns)
     local C = ns.Comm
-    -- camping, glide, field repair, Bleakhold Royale, War Mode and World PvP
-    FX.connect(M, H, { [6] = 512 + 1024 + 2048 + 4096 + 16384 + 32768 })
+    -- camping, glide, field repair, Bleakhold Royale, War Mode and World PvP, arena seasons
+    FX.connect(M, H, { [6] = 512 + 1024 + 2048 + 4096 + 16384 + 32768 + 65536 })
     FX.all(M, H)
 
     -- the windows' own buttons (the paths players use)
@@ -51,6 +51,19 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
         local frameName = ({ collections = "BleakholdCollectionsFrame", season = "BleakholdSeasonFrame", leaderboards = "BleakholdLeaderboardsFrame" })[k]
         clickAll(M, ns.UI.windows[frameName].content)
     end
+    -- the Arena page (the 1v1 queue: QJOIN A, then QLEAVE once queued) and the Arena leaderboard (LBQ A)
+    H.send(M, "ARENA", FX.examples(M).ARENA)
+    M.Advance(2.1)
+    ns.UI.Open("arena")
+    M.Advance(1.2)
+    clickAll(M, ns.Arena.page)
+    M.Advance(2.1)
+    H.send(M, "QUEUE", { { 50, 1, "A", 1, 1, 1, 3, "" } })
+    clickAll(M, ns.Arena.page)
+    M.Advance(2.1)
+    ns.UI.Open("leaderboards-arena")
+    M.Advance(1.2)
+    clickAll(M, ns.UI.windows.BleakholdLeaderboardsFrame.content)
     M.Advance(10)
 
     -- every op through the client's encoder, with edge values
@@ -62,6 +75,9 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
         { "KMODE", 0 }, { "KMODE", 1 }, { "KMODE", 2 }, { "KSTART" }, { "KCANCEL" },
         { "BCLAIM", 55 }, { "WEHANDIN" }, { "OUTFIT", 201 },
         { "LBQ", "K", 1, 0, 0, 1 }, { "LBQ", "R", 1, 602, 11, 999 }, { "LBQ", "E", 0, 0, 0, 3 }, { "LBQ", "F", 1, 0, 0, 1 },
+        -- arena seasons (section 20): the arena board one bracket at a time, the 1v1 queue rated and skirmish
+        { "LBQ", "A", 0, 3, 0, 1 }, { "LBQ", "A", 2147483647, 1, 11, 999 }, { "LBQ", "A", 1, 5, 0, 2 },
+        { "QJOIN", "A", 1, 1, 4, 1 }, { "QJOIN", "A", 1, 0, 7, 1 },
     }
     for _, s in ipairs(sends) do
         H.eq(C.Send(unpack(s)), true, "the client sends " .. s[1])
@@ -167,6 +183,11 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
     H.eq(C.Send("QJOIN", "B", 901, 1, 4, 1), false, "Royale: tier 0")
     H.eq(C.Send("QJOIN", "B", 901, 0, 4, 2), false, "Royale: size 1")
     H.eq(C.Send("QJOIN", "B", 0, 0, 4, 1), false, "Royale: a mode id above 0")
+    H.eq(C.Send("QJOIN", "A", 2, 1, 4, 1), false, "arena: activity 1")
+    H.eq(C.Send("QJOIN", "A", 1, 2, 4, 1), false, "arena: tier 0 or 1")
+    H.eq(C.Send("QJOIN", "A", 1, 1, 4, 2), false, "arena: solo")
+    H.eq(C.Send("LBQ", "A", 0, 0, 0, 1), false, "arena board: a bracket, never all")
+    H.eq(C.Send("LBQ", "A", 0, 4, 0, 1), false, "arena board: 1, 2, 3 or 5")
     local royale = {}
     for _, it in ipairs(H.intents(M)) do
         if it.op == "RDROP" or it.op == "RSPEC" or it.op == "RDEPLOY" then
@@ -220,6 +241,7 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
     C.Refresh("WPZ")
     C.Refresh("WPMAP")
     C.Refresh("WANTED")
+    C.Refresh("ARENA")
     M.Advance(10)
 
     local ops, topics, n = {}, {}, 0

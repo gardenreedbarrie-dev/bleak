@@ -65,6 +65,7 @@ namespace Bleakhold
         FeatureBgAnnouncer = 8192,    // the battleground kill announcer is live (BGANN, section 18); Ui::SetFeature
         FeatureWarMode = 16384,       // War Mode is live (WARMODE, WMST, WANTED, section 19); Ui::SetFeature
         FeatureWorldPvp = 32768,      // World PvP objectives are live (WPZ, WPCAP, WPMAP, section 19); Ui::SetFeature
+        FeatureArena = 65536,         // arena seasons and the 1v1 ladder are live (ARENA, section 20); Ui::SetFeature
     };
 
     // One reward line of MPE / RIFTE.
@@ -149,6 +150,21 @@ namespace Bleakhold
     struct MythicLevelDef { uint32_t level = 0; std::string text; };
     struct ExtraClassDef { uint32_t id = 0; std::string name, token, colorHex, shortLabel; };
     struct RiftBossDef { uint32_t id = 0; std::string name; };
+    // V arena tier (section 20): 1 Combatant .. 6 Rank One, 7 Class Champion
+    struct ArenaTierDef { uint32_t id = 0; std::string name, colorHex, text; };
+    // Q arena reward (section 20). kind: ArenaRewardKind; entry: the achievement (T), the item (M, I), the look pack
+    // (X), else 0; count: the amount (C Shards, H honor, A arena points, W war effort), else 1
+    struct ArenaRewardDef
+    {
+        uint32_t id = 0;
+        uint32_t seasonId = 0;               // 0: every arena season
+        uint32_t bracket = 0;                // 1, 2, 3 or 5
+        uint32_t tierId = 0;                 // DEF V
+        char kind = 'C';
+        uint32_t entry = 0;
+        uint32_t count = 1;
+        std::string text;
+    };
 
     struct Definitions
     {
@@ -165,6 +181,8 @@ namespace Bleakhold
         std::vector<MythicLevelDef> mythicLevels;   // M
         std::vector<ExtraClassDef> extraClasses;    // X
         std::vector<RiftBossDef> riftBosses;        // R
+        std::vector<ArenaTierDef> arenaTiers;       // V (section 20)
+        std::vector<ArenaRewardDef> arenaRewards;   // Q (section 20)
     };
 
     // ---------------------------------------------------------------------------------------------
@@ -359,12 +377,15 @@ namespace Bleakhold
     struct LeaderboardRow
     {
         uint32_t rank = 0;
-        Opt<uint32_t> dungeonId;
-        Opt<int64_t> value;                  // K: key level, R: floor, E: empty
-        Opt<int64_t> timeSec;                // K: time left (negative = over time), R: run time, E: kill time
-        Opt<uint32_t> dateEpoch;
+        Opt<uint32_t> dungeonId;             // A: the bracket
+        Opt<int64_t> value;                  // K: key level, R: floor, E: empty, A: rating
+        Opt<int64_t> timeSec;                // K: time left (negative = over time), R: run time, E: kill time, A: empty
+        Opt<uint32_t> dateEpoch;             // A: the team's last game
         std::vector<LeaderboardMember> members;
-        std::string label;                   // E: boss name
+        std::string label;                   // E: boss name, A: the team's name
+        // board A only (section 20), after label: season wins and games, the projected (or final) tier (DEF V),
+        // flags (ArenaLadderFlags)
+        Opt<uint32_t> seasonWins, seasonGames, tierId, flags;
     };
 
     struct Leaderboard   // LB
@@ -380,11 +401,14 @@ namespace Bleakhold
     {
         Board board = Board::Keys;
         Opt<uint32_t> rank, topPercent;
-        Opt<int64_t> value;
-        Opt<uint32_t> dungeonId;
-        Opt<int64_t> timeSec;
-        Opt<uint32_t> barPermille;
-        std::string label;
+        Opt<int64_t> value;                  // A: rating
+        Opt<uint32_t> dungeonId;             // A: the bracket
+        Opt<int64_t> timeSec;                // A: empty
+        Opt<uint32_t> barPermille;           // A: progress toward the next tier's effective cutoff
+        std::string label;                   // A: the projected tier's name
+        // board A only (section 20), after label: the rank in permille of the ladder (for "top 0.4%"), the projected
+        // tier (DEF V)
+        Opt<uint32_t> topPermille, tierId;
     };
 
     struct ServerFirst { std::string kindKey, text, who; Opt<uint32_t> dateEpoch; };
@@ -598,6 +622,121 @@ namespace Bleakhold
     // Worth sending: both names clean to something and at least one valid code. Ui::SendBgAnnounce sends nothing
     // otherwise.
     bool BgAnnounceSendable(BgAnnounce const& m);
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // Arena seasons and the 1v1 ladder (section 20): ARENA, unrevisioned, the player's view of the arena season; board
+    // A of LB / LBME; DEF V and Q; QUEUE kind A for the 1v1 queue. BLEAKHOLD_UI_ARENA tells a server module that this
+    // API exists (Ui::SendArena, Ui::OnBoardQuery, FeatureArena, Definitions::arenaTiers / arenaRewards).
+    // ---------------------------------------------------------------------------------------------------------------
+#define BLEAKHOLD_UI_ARENA 1
+    // ARENA state: none (no arena season), live, final week, rated closed (locked), final standings (GM review),
+    // rewards delivered (the season is over), upcoming (the next season is scheduled, none is running)
+    enum class ArenaStateId : uint8_t
+    {
+        None = 0, Live = 1, FinalWeek = 2, Locked = 3, FinalStandings = 4, Rewarded = 5, Upcoming = 6
+    };
+    // M verdict: the match counted, the winner's gain was reduced (a repeated pairing), the win did not count
+    enum class ArenaVerdict : uint8_t { Normal = 0, Reduced = 1, NotCounted = 2 };
+    // M reason: R a repeated pairing, I the same network, E no effort (a match given away), S too short
+    enum class ArenaReason : char { None = 0, Repeat = 'R', Network = 'I', Effort = 'E', Short = 'S' };
+    // F grant: the end-of-season rewards are waiting, delivered, held for a game master's review
+    enum class ArenaGrant : uint8_t { Pending = 0, Delivered = 1, Held = 2 };
+    // DEF Q kind
+    enum class ArenaRewardKind : char
+    {
+        Title = 'T', Mount = 'M', Item = 'I', Looks = 'X', Shards = 'C', Honor = 'H', ArenaPoints = 'A',
+        WarEffort = 'W', ServerFirst = 'F'
+    };
+    // B missingMask: what keeps the player from the projected tier's rewards
+    enum ArenaMissingBits : uint32_t
+    {
+        ArenaMissGames = 1,       // too few season games
+        ArenaMissShare = 2,       // played too small a share of the team's games
+        ArenaMissGap = 4,         // personal rating too far below the team's
+        ArenaMissRecent = 8,      // too few games in the last days (Duelist and above)
+        ArenaMissWins = 16,       // too few season wins (Gladiator and Rank One)
+        ArenaMissLevel = 32,      // not at the level cap
+        ArenaMissReview = 64,     // the rewards are held for review
+        ArenaMissClosed = 128,    // the bracket gives no rewards this season (too small a ladder)
+    };
+    // LB board A row flags
+    enum ArenaLadderFlags : uint32_t
+    {
+        ArenaInactive = 1,        // no game for a week
+        ArenaProvisional = 2,     // below the games a team needs for rewards
+        ArenaFinalStandings = 4,  // the final standings of a past season (or of this one, states 4 and 5)
+    };
+    inline constexpr std::size_t MaxArenaSeasons = 24;    // ARENA S records
+    inline constexpr std::size_t MaxArenaCutoffs = 32;    // ARENA T records (4 brackets x 7 tiers)
+    inline constexpr std::size_t MaxArenaMatches = 5;     // ARENA M records
+    inline constexpr std::size_t ArenaNameBytes = 48;     // team and season names
+
+    struct ArenaSeasonInfo        // S: one arena season (the season list of the leaderboards)
+    {
+        uint32_t id = 0;
+        std::string name;
+        SeasonStateId state = SeasonStateId::Upcoming;   // 0 past, 1 current, 2 upcoming
+        Opt<uint32_t> startEpoch, endEpoch;
+    };
+    struct ArenaBracketState      // B: the player in one bracket (1v1 always, the others when they have a team)
+    {
+        uint32_t bracket = 1;
+        bool hasTeam = false;
+        Opt<uint32_t> rating, ladderRank, ladderSize, seasonGames, seasonWins, weekGames, weekWins, personalRating;
+        Opt<uint32_t> recentGames;           // games in the last Eligible.RecentDays days
+        Opt<uint32_t> tierId, nextTierId, ratingToNext;
+        uint32_t missingMask = 0;            // ArenaMissingBits
+        std::string teamName;
+    };
+    struct ArenaCutoff            // T: one tier of one bracket's live cutoffs
+    {
+        uint32_t bracket = 1;
+        uint32_t tierId = 0;
+        uint32_t slots = 0;                  // places of the tier (and the tiers above it)
+        Opt<uint32_t> cutRank;               // the lowest rank inside it now (empty: nobody)
+        Opt<uint32_t> cutRating;             // that team's rating
+        uint32_t floor = 0;                  // the rating the tier needs anyway
+    };
+    struct ArenaLadderInfo        // N: one bracket's ladder
+    {
+        uint32_t bracket = 1;
+        uint32_t eligibleTeams = 0;
+        bool rewardsOpen = true;             // false: too few teams, Combatant only (5v5)
+        bool titlesOpen = true;              // false: too few teams for titles (substitutes instead)
+    };
+    struct ArenaMatch             // M: one of the player's last rated matches
+    {
+        uint32_t bracket = 1;
+        bool won = false;
+        int32_t ratingChange = 0;
+        std::string opponent;                // the other team's name
+        uint32_t endEpoch = 0;
+        ArenaVerdict verdict = ArenaVerdict::Normal;
+        ArenaReason reason = ArenaReason::None;
+    };
+    struct ArenaFinal             // F: the player's final standing in one bracket (states 4 and 5)
+    {
+        uint32_t bracket = 1;
+        uint32_t finalRank = 0;
+        uint32_t finalRating = 0;
+        Opt<uint32_t> finalTierId;
+        ArenaGrant grant = ArenaGrant::Pending;
+    };
+    struct ArenaState             // ARENA
+    {
+        uint32_t seasonId = 0;               // 0: no arena season
+        ArenaStateId state = ArenaStateId::None;
+        Opt<uint32_t> startEpoch, endEpoch, nextStartEpoch;
+        bool ratedOpen = false;              // rated arena games count now
+        Opt<uint32_t> oneTeamCostCopper;     // what a 1v1 team costs (0: free); empty: the 1v1 queue is off
+        std::string seasonName;
+        std::vector<ArenaSeasonInfo> seasons;
+        std::vector<ArenaBracketState> brackets;
+        std::vector<ArenaCutoff> cutoffs;
+        std::vector<ArenaLadderInfo> ladders;
+        std::vector<ArenaMatch> matches;     // newest first, at most MaxArenaMatches
+        std::vector<ArenaFinal> finals;
+    };
 
     // ERR codes of Bleakhold Royale (section 17) with a default sentence; Ui::Refuse(player, intent, refusal) sends
     // one. `dead` and `in_combat` are the generic codes. royale_lockout should carry the seconds left: send it with
@@ -815,6 +954,20 @@ namespace Bleakhold
         inline constexpr Refusal InCombat{ "in_combat", "You cannot do that while in combat." };
     }
 
+    // ERR codes of QJOIN A, the 1v1 arena queue (section 20). arena_closed should say when rated games open again:
+    // send it with Ui::Refuse(player, intent, ArenaErr::Closed.code, "<your sentence with the date>").
+    namespace ArenaErr
+    {
+        inline constexpr Refusal Off{ "arena_off", "The 1v1 arena queue is not open right now." };
+        inline constexpr Refusal Level{ "arena_level", "You must be level 80 to queue for 1v1 arena." };
+        inline constexpr Refusal Closed{ "arena_closed", "Rated arena is closed between seasons." };
+        inline constexpr Refusal Busy{ "arena_busy", "You cannot queue for 1v1 arena from where you are now." };
+        inline constexpr Refusal Deserter{ "arena_deserter", "You cannot queue while you are a deserter." };
+        inline constexpr Refusal Talents{ "arena_talents", "Your talents are not allowed in 1v1 arena." };
+        inline constexpr Refusal Team{ "arena_team", "You have no 1v1 arena team, and it could not be made." };
+        inline constexpr Refusal Gold{ "arena_gold", "You cannot pay for a 1v1 arena team." };
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Encoders: payload of each op (without frame header). `rev` is the revision of the topic.
     // ---------------------------------------------------------------------------------------------
@@ -859,6 +1012,7 @@ namespace Bleakhold
     std::string EncodeWarMap(WarMap const& m);               // WPMAP
     std::string EncodeWanted(WantedList const& m);           // WANTED
     std::string EncodeWarEvent(WarEvent const& m);           // WPEV
+    std::string EncodeArena(ArenaState const& m);            // ARENA
 
     // DEF: one payload per non-empty kind, in a fixed order, followed by "Z,<dataVer>".
     std::vector<std::string> EncodeDefinitions(Definitions const& d, uint32_t dataVer);

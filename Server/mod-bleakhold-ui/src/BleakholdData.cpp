@@ -897,6 +897,20 @@ namespace Bleakhold
             Ui::SendFirsts(player, Firsts());
             return;
         }
+        if (in.board == Board::Arena)
+        {
+            // section 20: answered by the arena system's board handler (Ui::OnBoardQuery); without one, nothing ranks
+            Leaderboard empty;
+            empty.board = Board::Arena;
+            empty.seasonId = in.seasonId;
+            empty.dungeonId = in.dungeonId;
+            empty.classId = in.classId;
+            Ui::SendLeaderboard(player, empty);
+            LeaderboardMe none;
+            none.board = Board::Arena;
+            Ui::SendLeaderboardMe(player, none);
+            return;
+        }
         Config const cfg = Mgr::Instance().CfgCopy();
         uint32_t const season = in.seasonId ? in.seasonId : CurrentSeason();
         uint32_t const guid = player->GetGUID().GetCounter();
@@ -979,7 +993,7 @@ namespace Bleakhold
 
     void Data::RecordRun(Ui::LeaderboardEntry const& entry)
     {
-        if (entry.board == Board::Firsts)
+        if (entry.board == Board::Firsts || entry.board == Board::Arena)   // arena ratings are not runs (section 20)
             return;
         Config const cfg = Mgr::Instance().CfgCopy();
         LbRow row;

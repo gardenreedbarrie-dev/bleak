@@ -44,6 +44,7 @@ local function reset()
     S.warEvent = nil
     S.warZoneNames = {}
     S.warObjNames = {}
+    S.arena = nil
 end
 reset()
 ns.ResetState = reset
@@ -181,8 +182,22 @@ local DEF_PARSERS = {
     M = function(f) return { text = U.Str(f[2], nil, 200) } end,
     X = function(f) return { name = U.Str(f[2], nil, 24), token = U.Str(f[3], nil, 24), color = U.Str(f[4], nil, 6), short = U.Str(f[5], nil, 4) } end,
     R = function(f) return { name = U.Str(f[2], nil, 48) } end,
+    -- arena tiers and rewards (section 20)
+    V = function(f) return { name = U.Str(f[2], nil, 30), color = U.Str(f[3], nil, 6), text = U.Str(f[4], nil, 120) } end,
+    Q = function(f)
+        return {
+            seasonId = U.Int(f[2], 0, 0, INT32), bracket = U.Int(f[3], nil, 1, 5), tierId = U.Int(f[4], nil, 0, 99),
+            kind = U.Str(f[5], nil, 1), entry = U.Int(f[6], 0, 0, INT32), count = U.Int(f[7], 1, 0, INT32),
+            text = U.Str(f[8], nil, 60),
+        }
+    end,
 }
 ns.DEF_PARSERS = DEF_PARSERS
+-- The kinds above, as a number: raise it whenever DEF_PARSERS gains a kind. A cache saved under another schema (an
+-- addon that skipped kinds it did not know, such as V and Q before the arena) is fetched again even when its dataVer
+-- matches the server's.
+local DEF_SCHEMA = 2
+ns.DEF_SCHEMA = DEF_SCHEMA
 
 Comm.Handle("DEF", function(r)
     local head = r[1] or {}
@@ -191,6 +206,7 @@ Comm.Handle("DEF", function(r)
     if kind == "Z" then
         if not Comm.demo then
             ns.db.defsVer = U.Int(head[2], Comm.server.dataVer, 0, INT32)
+            ns.db.defsSchema = DEF_SCHEMA
         end
         ns.Fire("STATE", "DEF")
         return
@@ -414,7 +430,7 @@ Comm.Handle("BOARD", function(r)
 end)
 
 -- kind D dungeon board, R Eclipse Rift, B Bleakhold Royale (section 17: the queue counts after bandMax, no members)
-local QUEUE_KINDS = { D = true, R = true, B = true }
+local QUEUE_KINDS = { D = true, R = true, B = true, A = true }
 
 Comm.RegisterTopic("QUEUE", "QUEUE")
 Comm.Handle("QUEUE", function(r)
@@ -434,7 +450,7 @@ Comm.Handle("QUEUE", function(r)
         q.proposalSize = U.Int(f[17], nil, 0, 999)
         q.matchesRunning = U.Int(f[18], nil, 0, 999)
     end
-    for i = 2, q.kind == "B" and 1 or math.min(#r, 41) do
+    for i = 2, (q.kind == "B" or q.kind == "A") and 1 or math.min(#r, 41) do
         local m = r[i]
         local name = U.Str(m[1], nil, 24)
         if name then
@@ -699,7 +715,7 @@ end)
 ------------------------------------------------------------------------------------------------------
 -- Leaderboards
 ------------------------------------------------------------------------------------------------------
-local BOARDS = { K = true, R = true, E = true, F = true }
+local BOARDS = { K = true, R = true, E = true, F = true, A = true }
 ns.BOARDS = BOARDS
 
 Comm.Handle("LB", function(r)
@@ -725,6 +741,13 @@ Comm.Handle("LB", function(r)
                 row.members[#row.members + 1] = { name = name, classId = U.Int(t[2], 0, 0, 255) }
             end
         end
+        if board == "A" then
+            -- section 20: the bracket in dungeonId, the rating in value, the team in label, then these
+            row.wins = U.Int(e[8], nil, 0, 99999)
+            row.games = U.Int(e[9], nil, 0, 99999)
+            row.tierId = U.Int(e[10], nil, 0, 99)
+            row.flags = U.Int(e[11], 0, 0, 255)
+        end
         if row.rank then
             lb.rows[#lb.rows + 1] = row
         end
@@ -745,7 +768,97 @@ Comm.Handle("LBME", function(r)
         dungeonId = U.Int(f[5], nil, 0, INT32), timeSec = U.Int(f[6], nil, -86400, 864000), barPermille = U.Int(f[7], 0, 0, 1000),
         label = U.Str(f[8], nil, 48),
     }
+    if board == "A" then   -- section 20
+        S.lbme.A.topPermille = U.Int(f[9], nil, 0, 1000)
+        S.lbme.A.tierId = U.Int(f[10], nil, 0, 99)
+    end
     changed("LB")
+end)
+
+------------------------------------------------------------------------------------------------------
+-- Arena seasons and the 1v1 ladder (section 20): ARENA, the player's arena season (unrevisioned)
+------------------------------------------------------------------------------------------------------
+local ARENA_BRACKETS = { [1] = true, [2] = true, [3] = true, [5] = true }
+ns.ARENA_BRACKETS = ARENA_BRACKETS
+
+-- 1, 2, 3 or 5; anything else (9 too: U.Int would clamp it to 5) is no bracket
+local function arenaBracket(raw)
+    local b = U.Int(raw, nil, 0, 99)
+    return b and ARENA_BRACKETS[b] and b or nil
+end
+
+Comm.MapOpToTopic("ARENA", "ARENA")
+Comm.Handle("ARENA", function(r)
+    local f = r[1]
+    local a = {
+        seasonId = U.Int(f[1], 0, 0, INT32), state = U.Int(f[2], 0, 0, 99), startEpoch = U.Int(f[3], nil, 0, INT32),
+        endEpoch = U.Int(f[4], nil, 0, INT32), nextStartEpoch = U.Int(f[5], nil, 0, INT32), ratedOpen = U.Bool(f[6], false),
+        teamCost = U.Int(f[7], nil, 0, INT32), seasonName = U.Str(f[8], nil, 48),
+        seasons = {}, brackets = {}, cutoffs = {}, ladders = {}, matches = {}, finals = {}, recvAt = GetTime(),
+    }
+    for i = 2, #r do
+        local e = r[i]
+        local tag = U.Str(e[1], nil, 1)
+        if tag == "S" and #a.seasons < 24 then
+            local id = U.Int(e[2], nil, 0, INT32)
+            if id and id >= 1 then
+                a.seasons[#a.seasons + 1] = {
+                    id = id, name = U.Str(e[3], nil, 48), state = U.Int(e[4], 0, 0, 2), startEpoch = U.Int(e[5], nil, 0, INT32),
+                    endEpoch = U.Int(e[6], nil, 0, INT32),
+                }
+            end
+        elseif tag == "B" then
+            local b = arenaBracket(e[2])
+            if b then
+                a.brackets[b] = {
+                    bracket = b, hasTeam = U.Bool(e[3], false), rating = U.Int(e[4], nil, 0, 99999),
+                    rank = U.Int(e[5], nil, 1, INT32), size = U.Int(e[6], nil, 0, INT32), games = U.Int(e[7], nil, 0, 99999),
+                    wins = U.Int(e[8], nil, 0, 99999), weekGames = U.Int(e[9], nil, 0, 99999),
+                    weekWins = U.Int(e[10], nil, 0, 99999), personal = U.Int(e[11], nil, 0, 99999),
+                    recent = U.Int(e[12], nil, 0, 99999), tierId = U.Int(e[13], nil, 0, 99), nextTierId = U.Int(e[14], nil, 0, 99),
+                    toNext = U.Int(e[15], nil, 0, 99999), missing = U.Int(e[16], 0, 0, 255), team = U.Str(e[17], nil, 48),
+                }
+            end
+        elseif tag == "T" and #a.cutoffs < 32 then
+            local b = arenaBracket(e[2])
+            local tier = U.Int(e[3], nil, 0, 99)
+            if b and tier then
+                a.cutoffs[#a.cutoffs + 1] = {
+                    bracket = b, tierId = tier, slots = U.Int(e[4], 0, 0, INT32), cutRank = U.Int(e[5], nil, 1, INT32),
+                    cutRating = U.Int(e[6], nil, 0, 99999), floor = U.Int(e[7], 0, 0, 99999),
+                }
+            end
+        elseif tag == "N" then
+            local b = arenaBracket(e[2])
+            if b then
+                a.ladders[b] = {
+                    bracket = b, eligible = U.Int(e[3], 0, 0, INT32), rewardsOpen = U.Bool(e[4], true),
+                    titlesOpen = U.Bool(e[5], true),
+                }
+            end
+        elseif tag == "M" and #a.matches < 5 then
+            local b = arenaBracket(e[2])
+            if b then
+                a.matches[#a.matches + 1] = {
+                    bracket = b, won = U.Bool(e[3], false), change = U.Int(e[4], 0, -9999, 9999), opponent = U.Str(e[5], nil, 48),
+                    endEpoch = U.Int(e[6], nil, 0, INT32), verdict = U.Int(e[7], 0, 0, 2), reason = U.Str(e[8], nil, 1),
+                }
+            end
+        elseif tag == "F" then
+            local b = arenaBracket(e[2])
+            if b then
+                a.finals[b] = {
+                    bracket = b, rank = U.Int(e[3], nil, 1, INT32), rating = U.Int(e[4], nil, 0, 99999),
+                    tierId = U.Int(e[5], nil, 0, 99), grant = U.Int(e[6], 0, 0, 2),
+                }
+            end
+        end
+    end
+    if a.state > 6 then
+        a.state = 0           -- a state this client does not know: shown as none (ratedOpen still says it all)
+    end
+    S.arena = a
+    changed("ARENA")
 end)
 
 Comm.MapOpToTopic("FIRSTS", "FIRSTS")
@@ -1528,7 +1641,7 @@ Comm.Handle("WPEV", function(r)
 end)
 
 local TOAST_TARGETS = { tasks = true, dungeons = true, keys = true, rift = true, collections = true, season = true,
-    leaderboards = true, royale = true }
+    leaderboards = true, royale = true, arena = true }
 Comm.Handle("TOAST", function(r)
     local f = r[1]
     local title = U.Str(f[2], nil, 60)
@@ -1536,16 +1649,19 @@ Comm.Handle("TOAST", function(r)
         return
     end
     local target = U.Str(f[4], nil, 16)
-    ns.Fire("TOAST", { kind = U.Str(f[1], "I", 1), title = title, sub = U.Str(f[3], nil, 100), target = TOAST_TARGETS[target or ""] and target or nil })
+    target = TOAST_TARGETS[target or ""] and target or nil
+    ns.Fire("TOAST", { kind = U.Str(f[1], "I", 1), title = title, sub = U.Str(f[3], nil, 100), target = target })
 end)
 
 ------------------------------------------------------------------------------------------------------
 -- After the handshake: definitions and the topics the always-visible parts need
 ------------------------------------------------------------------------------------------------------
 ns.On("HELLO", function(s)
-    if s.dataVer and s.dataVer > 0 and tostring(ns.db.defsVer) ~= tostring(s.dataVer) then
+    if s.dataVer and s.dataVer > 0
+        and (tostring(ns.db.defsVer) ~= tostring(s.dataVer) or ns.db.defsSchema ~= DEF_SCHEMA) then
         ns.db.defs = {}
         ns.db.defsVer = nil
+        ns.db.defsSchema = nil
         Comm.Get("DEF", 0)
     end
     Comm.Get("WEEK")
@@ -1565,5 +1681,13 @@ ns.On("HELLO", function(s)
     elseif S.camp then
         S.camp = nil
         changed("CAMPST")
+    end
+    -- the server pushes ARENA after HELLO while bit 65536 is on (section 20); asking makes sure (the login push
+    -- can come before HELLO, and /reload has none). Without the bit the season is gone
+    if Comm.HasFeature(F.ARENA) then
+        Comm.Get("ARENA")
+    elseif S.arena then
+        S.arena = nil
+        changed("ARENA")
     end
 end)

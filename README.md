@@ -185,7 +185,7 @@ See `Tools/RaceForge/README.md` for the race settings (`races.json`) and what th
 
 The in-game Bleakhold interface is a built-in addon in `Interface/AddOns/Bleakhold`:
 - Activities: daily and weekly tasks, the Dungeon Journey board and queue, keystones, Eclipse Rift, Bleakhold Royale,
-  War Mode.
+  War Mode, arena seasons and the 1v1 queue.
 - Collections, Season and Leaderboards windows; Collections > Transmog is the transmog window (below).
 - Minimap buttons, the Mythic+ tracker and keystone countdown (with a DBM pull bar), task toasts, item tooltip
   lines and coloured server announcements.
@@ -409,6 +409,22 @@ objectives); the addon (`WarMode.lua`, `WarFront.lua`) shows its state and sends
   of its own), and arrows at the minimap's edge point to your faction's outposts under attack.
 - The HUD and the capture bar can be dragged or placed in AddicatUI's editor mode; `[War]` chat lines can be hidden
   per window with `/bh chat war off`. With bit 16384 off nothing of this shows; with 32768 off, no Fronts.
+
+## Arena seasons and the 1v1 ladder
+
+Rated arena runs in seasons with four ladders (1v1, 2v2, 3v3, 5v5), tiers from Combatant to Rank One (and Class
+Champion in 1v1), end-of-season rewards and a 1v1 queue (`docs/BleakholdProtocol.md` section 20, HELLO feature bit
+65536). The server decides everything; the addon (`Arena.lua`) shows it and is not there at all without the bit.
+
+- Activities > Arena (`/bh arena`): the season, its state and clock; a card per bracket with rating, place, season
+  and week record, the tier the team is on pace for and the way to the next one; the 1v1 queue (Rated, Skirmish,
+  Leave; a rated join without a 1v1 team asks to pay for one first); the last rated matches with their verdict
+  ("Not counted: same network"); and for the chosen bracket the live cutoffs, the reward checklist and the season's
+  rewards. The page asks for a new `ARENA` at most every 30 s while it is open.
+- Leaderboards > Arena (`/bh arena lb`): a bracket, an arena season and a class filter; rating, season win-loss,
+  tier and the inactive, provisional and final marks; your standing with the top permille near the top.
+- The 2v2, 3v3 and 5v5 teams are still made in the game's PvP window ("Arena teams" opens it).
+- Toasts after each rated match and at season events open the Arena page.
 
 ## Graphics (BleakFx)
 

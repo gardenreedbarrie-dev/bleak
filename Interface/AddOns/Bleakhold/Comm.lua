@@ -233,7 +233,7 @@ local function token(maxLen) return { kind = "token", max = maxLen } end
 Comm.TOPICS = {
     WEEK = 0, ERA = 0, TASKS = 0, KEY = 0, BOARD = 0, QUEUE = 0, MPLUS = 0, RIFT = 0, COLL = 0,
     SET = 2, LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1, CASES = 0, CASE = 1, CAMPST = 0, ROYS = 0, ROYM = 0,
-    WMST = 0, WPZ = 0, WPMAP = 0, WANTED = 0,
+    WMST = 0, WPZ = 0, WPMAP = 0, WANTED = 0, ARENA = 0,
 }
 
 -- A schema lists its fields in order; `min` (default: all of them) is how many must be given, the rest may be
@@ -243,10 +243,14 @@ Comm.INTENTS = {
     GET = "records",                                                  -- topic[,args] per record
     TCLAIM = { int(1, INT32) },                                       -- task uid (from TASKS)
     TREROLL = { int(1, INT32) },                                      -- task uid
-    -- kind (D dungeon, R Rift, B Bleakhold Royale), activity, tier (0 Normal .. 3 Nightmare), roles, size; for
-    -- Royale the activity is the mode id (above 0), tier 0 and size 1 (section 17)
-    QJOIN = { enum("D", "R", "B"), int(0, INT32), int(0, 3), int(1, 7), int(1, 5),
+    -- kind (D dungeon, R Rift, B Bleakhold Royale, A 1v1 arena), activity, tier (0 Normal .. 3 Nightmare), roles, size;
+    -- for Royale the activity is the mode id (above 0), tier 0 and size 1 (section 17); for the arena activity 1, tier
+    -- 0 skirmish or 1 rated, size 1 (section 20)
+    QJOIN = { enum("D", "R", "B", "A"), int(0, INT32), int(0, 3), int(1, 7), int(1, 5),
         check = function(kind, activity, tier, _, size)
+            if kind == "A" then
+                return tonumber(activity) == 1 and tonumber(tier) <= 1 and tonumber(size) == 1
+            end
             return kind ~= "B" or (tonumber(activity) >= 1 and tonumber(tier) == 0 and tonumber(size) == 1)
         end },
     QLEAVE = {},
@@ -257,7 +261,12 @@ Comm.INTENTS = {
     BCLAIM = { int(1, INT32) },                                       -- bounty id (from BOARD)
     WEHANDIN = {},
     OUTFIT = { int(1, INT32) },                                       -- legacy set id (from SET)
-    LBQ = { enum("K", "R", "E", "F"), int(0, INT32), int(0, INT32), int(0, INT32), int(1, 999) },
+    -- board (A arena: the bracket 1, 2, 3 or 5 in the dungeon field, section 20), season, dungeon, class, page
+    LBQ = { enum("K", "R", "E", "F", "A"), int(0, INT32), int(0, INT32), int(0, INT32), int(1, 999),
+        check = function(board, _, bracket)
+            local b = tonumber(bracket)
+            return board ~= "A" or b == 1 or b == 2 or b == 3 or b == 5
+        end },
     PING = { int(0, INT32) },
     EMOJI = { int(0, 255) },                                          -- emoji id (the server checks its catalogue)
     DANCE = { int(0, 1023) },                                         -- dance id (the server checks its catalogue)
@@ -728,7 +737,8 @@ end
 ------------------------------------------------------------------------------------------------------
 function Comm.SendHello()
     local locale = GetLocale and GetLocale() or "enUS"
-    local dataVer = (ns.db.defsVer and tonumber(ns.db.defsVer)) or 0
+    -- a cache of another DEF schema (State.lua DEF_SCHEMA) is fetched again: its dataVer is no hint
+    local dataVer = (ns.db.defsSchema == ns.DEF_SCHEMA and ns.db.defsVer and tonumber(ns.db.defsVer)) or 0
     Comm.Send("HELLO", ns.PROTO, ns.VERSION, dataVer, locale)
 end
 
@@ -805,7 +815,8 @@ end)
 -- Feature bits from HELLO (the server can hide boards that are not ready).
 Comm.FEATURE = { RIFT_SCORE = 1, SHARDS = 2, DBM_BY_SERVER = 4, SEASON = 8, LEADERBOARDS = 16, COLLECTIONS = 32,
     EMOJI = 64, DANCE = 128, CASES = 256, CAMP = 512, GLIDE = 1024, FIELD_REPAIR = 2048, ROYALE = 4096,
-    BG_ANNOUNCER = 8192, WAR_MODE = 16384, WORLD_PVP = 32768 }   -- 32768 counts only with 16384 (ns.WarMode)
+    BG_ANNOUNCER = 8192, WAR_MODE = 16384, WORLD_PVP = 32768,   -- 32768 counts only with 16384 (ns.WarMode)
+    ARENA = 65536 }                                             -- arena seasons and the 1v1 ladder (section 20)
 
 function Comm.HasFeature(bitValue)
     local f = Comm.server and Comm.server.features or 0

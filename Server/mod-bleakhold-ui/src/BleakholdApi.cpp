@@ -20,6 +20,7 @@ namespace Bleakhold::Ui
 
     // ---- intents ----
     void OnIntent(IntentType type, IntentHandler handler) { M().SetHandler(type, std::move(handler)); }
+    void OnBoardQuery(Board board, IntentHandler handler) { M().SetBoardHandler(board, std::move(handler)); }
     void Refuse(Player* player, Intent const& intent, std::string_view code, std::string_view text) { M().Refuse(player, intent, code, text); }
     void OnHello(std::function<void(Player*, Intent const&)> observer) { M().AddHelloObserver(std::move(observer)); }
     bool HasAddon(Player* player) { return M().HasAddon(player); }
@@ -229,6 +230,12 @@ namespace Bleakhold::Ui
     void SendWarEvent(std::vector<Player*> const& players, WarEvent const& m)
     {
         PushAll(players, "WPEV", EncodeWarEvent(m));
+    }
+
+    // ---- arena seasons (section 20) ----
+    void SendArena(Player* player, ArenaState const& m)
+    {
+        M().Push(player, "ARENA", Topic::Count, nullptr, [&](uint32_t) { return EncodeArena(m); });
     }
 
     void RiftStatus(Player* player, RiftState const& m)

@@ -36,6 +36,7 @@ ChatEdit_ExtractTellTarget
 ChatEdit_UpdateHeader
 StaticPopupDialogs
 SendMailNameEditBox
+TogglePVPFrame
 # Optional addons (always checked for nil before use)
 DragonUI
 DragonUI_QuestTrackerFrame

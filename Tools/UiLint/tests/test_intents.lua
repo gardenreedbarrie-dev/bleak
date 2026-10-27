@@ -8,18 +8,18 @@ local INT = "^%d+$"
 local SCHEMA = {
     HELLO = { INT, "^[%w_%.%-]+$", INT, "^%a%a%a%a$" },
     TCLAIM = { INT }, TREROLL = { INT },
-    QJOIN = { "^[DRB]$", INT, "^%d$", "^[1-7]$", "^[1-5]$" },
+    QJOIN = { "^[DRBA]$", INT, "^%d$", "^[1-7]$", "^[1-5]$" },
     QLEAVE = {}, QREPLY = { INT, "^[01]$" },
     KMODE = { "^[012]$" }, KSTART = {}, KCANCEL = {},
     BCLAIM = { INT }, WEHANDIN = {}, OUTFIT = { INT },
-    LBQ = { "^[KREF]$", INT, INT, INT, INT },
+    LBQ = { "^[KREFA]$", INT, INT, INT, INT },
     PING = { INT },
     EMOJI = { "^%d%d?%d?$" },
     RDROP = { "^%-?%d+$", "^%-?%d+$" }, RDEPLOY = {}, RSPEC = { "^[012]$" },
     WARMODE = { "^[01]$" },
 }
 local TOPICS = { WEEK = 0, ERA = 0, TASKS = 0, KEY = 0, BOARD = 0, QUEUE = 0, MPLUS = 0, RIFT = 0, COLL = 0, SET = 2,
-    LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1, ROYS = 0, ROYM = 0, WMST = 0, WPZ = 0, WPMAP = 0, WANTED = 0 }
+    LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1, ROYS = 0, ROYM = 0, WMST = 0, WPZ = 0, WPMAP = 0, WANTED = 0, ARENA = 0 }
 
 local function checkBody(body)
     H.ok(#body <= 251, "body over 251 bytes: " .. #body)
@@ -166,6 +166,45 @@ test("clicking every button of every window sends only valid intents (live mode)
     H.ok(n >= 10, "a good number of intents were exercised: " .. n)
     for _, want in ipairs({ "TCLAIM", "TREROLL", "QJOIN", "QREPLY", "KMODE", "KSTART", "BCLAIM", "WEHANDIN", "LBQ", "GET" }) do
         H.ok(ops[want], want .. " was sent by some button")
+    end
+end)
+
+test("clicking every button of the Arena page and the Arena leaderboard sends only valid intents", function(M, ns)
+    FX.connect(M, H, { [6] = 65536 })
+    local now = M.env.time()
+    H.send(M, "ARENA", { { 1, 1, now - 86400, now + 86400 * 30, "", 1, 100000, "Arena Season 1" },
+        { "S", 1, "Arena Season 1", 1, now - 86400, now + 86400 * 30 }, { "B", 1, 0 },
+        { "B", 3, 1, 1912, 4, 22, 44, 30, 12, 8, 1890, 12, 4, 5, 163, 16, "Ironvow Wardens" },
+        { "T", 3, 4, 4, 4, 1912, 1800 }, { "N", 3, 22, 1, 1 }, { "M", 3, 1, 14, "Brenna", now - 60, 2, "I" } })
+    local start = #M.sent
+    ns.UI.Open("arena")
+    M.Advance(0.3)
+    H.ok(clickAll(M, ns.Arena.page) >= 10, "the page's buttons")
+    H.send(M, "QUEUE", { { 9, 1, "A", 1, 1, 1, 5, "" } })
+    clickAll(M, ns.Arena.page)
+    ns.UI.Open("leaderboards-arena")
+    M.Advance(0.3)
+    clickAll(M, ns.UI.windows.BleakholdLeaderboardsFrame.content)
+    M.Advance(5)
+    local ops = {}
+    for i = start + 1, #M.sent do
+        local s = M.sent[i]
+        if s.prefix == "BHc" then
+            ops[checkBody(s.msg)] = true
+        end
+    end
+    for _, want in ipairs({ "QJOIN", "QLEAVE", "LBQ", "GET" }) do
+        H.ok(ops[want], want .. " was sent by some button")
+    end
+    local qjoin = {}
+    for _, it in ipairs(H.intents(M, start + 1)) do
+        if it.op == "QJOIN" then qjoin[#qjoin + 1] = it.payload end
+        if it.op == "LBQ" and it.payload:find("^A,") then
+            H.ok(it.payload:match("^A,%d+,[1235],%d+,%d+$"), "LBQ A with a bracket: " .. it.payload)
+        end
+    end
+    for _, p in ipairs(qjoin) do
+        H.ok(p == "A,1,1,4,1" or p == "A,1,0,4,1", "QJOIN A only: " .. p)
     end
 end)
 

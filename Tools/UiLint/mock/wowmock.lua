@@ -656,6 +656,7 @@ return function(opts)
     }
     new("EditBox", "SendMailNameEditBox", env.UIParent):SetMaxLetters(12)
     env.DressUpItemLink = function(link) M.dressedUp = link end
+    env.TogglePVPFrame = function() M.pvpFrameToggled = (M.pvpFrameToggled or 0) + 1 end
     -- GetMinimapShape, DragonUI*, DBM: absent unless a test sets them
 
     ------------------------------------------------------------------------------------------------

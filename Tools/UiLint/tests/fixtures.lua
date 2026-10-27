@@ -104,6 +104,12 @@ function FX.examples(M)
             { "Z", 4197, "W", 0, 1, 0, "", "", 0 }, { "P", 2817, 1, "A", 1 }, { "P", 2817, 2, "N", 6 } },
         WANTED = { { 2817 }, { "W", "Garrick Stormwind", 4, "H", 5, "S", 248, 5, 560, 402, 35 } },
         WPEV = { { "C", 2817, 1, "A", "Violet Stand" } },
+        -- arena seasons and the 1v1 ladder (section 20), unrevisioned
+        ARENA = { { 1, 1, now - 86400, now + 86400 * 30, now + 86400 * 32, 1, 0, "Arena Season 1" },
+            { "S", 1, "Arena Season 1", 1, now - 86400, now + 86400 * 30 },
+            { "B", 1, 1, 1734, 12, 48, 61, 38, 9, 6, 1734, 14, 3, 4, 66, 0, "Aldric" },
+            { "T", 1, 4, 6, 6, 1801, 1800 }, { "N", 1, 48, 1, 1 }, { "M", 1, 1, 14, "Brenna", now - 60, 0, "" },
+            { "F", 1, 12, 1734, 3, 0 } },
     }
 end
 
@@ -130,9 +136,17 @@ function FX.openEverything(M, ns)
     end
     ns.WarFront.Tick()
     ns.WarFront.UpdateMap()
+    ns.UI.Open("arena")
+    M.Advance(0.3)
+    if ns.Arena.page:IsVisible() then
+        for _, v in ipairs({ "checklist", "rewards", "cutoffs" }) do
+            ns.Arena.page.view = v
+            ns.Arena.page:Refresh()
+        end
+    end
     ns.UI.Open("season")
     ns.UI.Open("leaderboards")
-    for _, b in ipairs({ "K", "R", "E", "F" }) do
+    for _, b in ipairs({ "K", "R", "E", "F", "A" }) do
         ns.Leaderboards.board = b
         ns.Leaderboards.Refresh()
     end

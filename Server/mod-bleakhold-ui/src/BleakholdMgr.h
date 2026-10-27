@@ -132,6 +132,8 @@ namespace Bleakhold
         void SetProvider(Topic topic, Ui::TopicProvider p);
         void SetDefaultHandler(IntentType type, Ui::IntentHandler h);
         void SetDefaultProvider(Topic topic, Ui::TopicProvider p);
+        // LBQ of one board (Ui::OnBoardQuery): answers that board before the LBQ handler and the default
+        void SetBoardHandler(Board board, Ui::IntentHandler h);
         // Ui::OnHello: every observer added runs after each valid HELLO, in the order added.
         void AddHelloObserver(std::function<void(Player*, Intent const&)> f)
         {
@@ -231,6 +233,7 @@ namespace Bleakhold
         std::array<Ui::TopicProvider, static_cast<std::size_t>(Topic::Count)> _providers{};
         std::array<Ui::TopicProvider, static_cast<std::size_t>(Topic::Count)> _defaultProviders{};
         std::vector<std::function<void(Player*, Intent const&)>> _helloObservers;
+        std::map<char, Ui::IntentHandler> _boardHandlers;   // by Board letter
 
         std::vector<std::pair<uint64_t, std::function<void()>>> _timers;
         std::thread::id _worldThread;

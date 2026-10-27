@@ -161,7 +161,7 @@ These topics are revisioned. The first field of the first record of every messag
   answer with a snapshot.
 - Unrevisioned ops (`MPS`, `MP`, `MPE`, `RIFT`, `RIFTE`, `SET`, `LB`, `LBME`, `FIRSTS`, `DEF`, `TOAST`,
   `ERR`, `HELLO`, `PONG`, `CASES`, `CASE`, `UNBOX`, `CAMPST`, `ROYS`, `ROYM`, `ROYO`, `ROYK`, `ROYV`, `ROYE`, `BGANN`,
-  `WMST`, `WPZ`, `WPCAP`, `WPMAP`, `WANTED`, `WPEV`) are full states or events; each one stands alone.
+  `WMST`, `WPZ`, `WPCAP`, `WPMAP`, `WANTED`, `WPEV`, `ARENA`) are full states or events; each one stands alone.
 
 Push a new snapshot or delta whenever something changes (task progress, queue state, keystone, run
 events). The client also asks with `GET` when a window opens; answer every `GET` with the current
@@ -178,8 +178,8 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `GET` | records of `topic[,arg...]`, 1 to 8 records | send the current state of these topics |
 | `TCLAIM` | `uid` | claim the reward of task `uid` |
 | `TREROLL` | `uid` | replace task `uid` (a daily task that is still open); the server decides if it is free or what it costs |
-| `QJOIN` | `kind, activityId, tier, roles, size` | join the queue. `kind`: `D` dungeon board, `R` Eclipse Rift, `B` Bleakhold Royale (section 17). `activityId`: dungeon id (0 for the Rift, the mode id, above 0, for Royale). `tier`: 0 Normal, 1 Veteran, 2 Elite, 3 Nightmare (always 0 for Royale). `roles`: bit mask 1 tank, 2 healer, 4 damage (ignored for Royale). `size`: wanted group size 1..5 (1 = enter alone, no matchmaking; always 1 for Royale) |
-| `QLEAVE` | | leave the queue (the Royale queue when the player is in it) |
+| `QJOIN` | `kind, activityId, tier, roles, size` | join the queue. `kind`: `D` dungeon board, `R` Eclipse Rift, `B` Bleakhold Royale (section 17), `A` the 1v1 arena queue (section 20). `activityId`: dungeon id (0 for the Rift, the mode id, above 0, for Royale, 1 for the arena). `tier`: 0 Normal, 1 Veteran, 2 Elite, 3 Nightmare (always 0 for Royale; for the arena 0 skirmish, 1 rated). `roles`: bit mask 1 tank, 2 healer, 4 damage (ignored for Royale and the arena). `size`: wanted group size 1..5 (1 = enter alone, no matchmaking; always 1 for Royale and the arena) |
+| `QLEAVE` | | leave the queue (the Royale queue when the player is in it, else the 1v1 arena queue when the player is in that one) |
 | `QREPLY` | `proposalId, accept` | answer a group proposal or a Royale ready check (1 accept, 0 decline) |
 | `KMODE` | `mode` | set the dungeon mode for the next instance: 0 Normal, 1 Heroic, 2 Mythic (replaces the Mythic choice in the portrait Dungeon Difficulty menu, which the addon leaves alone) |
 | `KSTART` | | start the keystone (group leader, inside the dungeon) |
@@ -187,7 +187,7 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `BCLAIM` | `bountyId` | claim today's bounty |
 | `WEHANDIN` | | hand in spare war effort tokens (the server counts them) |
 | `OUTFIT` | `setId` | save the unlocked outfit of a legacy set |
-| `LBQ` | `board, seasonId, dungeonId, classId, page` | leaderboard page. `board`: `K` Mythic keys, `R` Eclipse Rift, `E` Raid Echoes, `F` server firsts. 0 = all for `dungeonId`/`classId`. `page` from 1 |
+| `LBQ` | `board, seasonId, dungeonId, classId, page` | leaderboard page. `board`: `K` Mythic keys, `R` Eclipse Rift, `E` Raid Echoes, `F` server firsts, `A` arena (section 20: `seasonId` an arena season, `dungeonId` the bracket 1, 2, 3 or 5, never 0). 0 = all for `dungeonId`/`classId`. `page` from 1 |
 | `PING` | `nonce` | answer with `PONG` |
 | `EMOJI` | `emojiId` | show emoji `emojiId` above the player's head to everyone nearby (section 13). `emojiId`: 0..255, an index into the emoji catalogue, `Tools/EmojiForge/emojis.json` |
 | `DANCE` | `danceId` | dance Bleakhold dance `danceId` until the player moves (section 14). `danceId`: 0..1023, an index into the dance catalogue, `Tools/DanceForge/dances.json` |
@@ -218,6 +218,7 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `WPZ` | | `WPZ` for the zone the player is in; nothing while World PvP is off (section 19) |
 | `WPMAP` | | `WPMAP`; nothing while World PvP is off (section 19) |
 | `WANTED` | | `WANTED` for the player's zone, to a War Mode player; nothing otherwise (section 19) |
+| `ARENA` | | `ARENA` while feature bit 65536 is on; nothing otherwise (section 20) |
 
 Examples:
 
@@ -280,10 +281,10 @@ may define more with `DEF X`), item ids are item template entries.
   the food XP bonus, repair at a camp anvil; section 16), 1024 the High Elf glide live, 2048 blacksmiths repair
   anywhere (section 16), 4096 Bleakhold Royale live (section 17), 8192 the battleground kill announcer live
   (section 18), 16384 War Mode live, 32768 World PvP objectives live (section 19; 32768 is only ever on together
-  with 16384).
+  with 16384), 65536 arena seasons and the 1v1 ladder live (section 20).
 - The server may send `HELLO` again at any time, without a client `HELLO`, when its feature bits change (Bleakhold
-  Royale, War Mode and World PvP turn their bits on or off at runtime). The client reads it like an answer to its
-  own.
+  Royale, War Mode and World PvP turn their bits on or off at runtime, the arena system 65536). The client reads it
+  like an answer to its own.
 - `dailyResetEpoch`/`weeklyResetEpoch`: the next resets (Unix time).
 - `siteUrl`: shown for copying under the leaderboards (there is no web browser in game).
 
@@ -330,10 +331,14 @@ The client has built-in fallback names, but the server is the source of truth. F
 | `M` mythic level | `level, text` (the Keys tab ladder; level 0 is Mythic 0) |
 | `X` extra class | `id, name, token, colorHex, shortLabel` |
 | `R` Rift boss | `id, name` |
+| `V` arena tier | `id, name, colorHex, text` (section 20) |
+| `Q` arena reward | `id, seasonId, bracket, tierId, kind, entry, count, text` (section 20) |
 | `Z` end | header only: `Z, dataVer` |
 
 Send `DEF Z,<dataVer>` after the last kind: the client keeps the definitions for that `dataVer` only once
-the set is complete.
+the set is complete. The client also stores the set of kinds it parsed (its DEF schema): a cache saved by an addon
+that did not know some kinds (V and Q before section 20) is fetched again after an addon update even when `dataVer`
+matches, and its `HELLO` then says `dataVer` 0.
 
 ```
 S> 1 DEF 4 1/1 A,7;1,Fortified,Non-boss enemies have more health and hit harder.;3,Bolstering,When a non-boss enemy dies%2C its allies nearby grow stronger.
@@ -380,7 +385,8 @@ S> 1 TASK a 1/1 2,102,20,1
 
 `kind, title, subtitle, openTarget` - `kind`: `T` task, `Q` queue, `K` keystone, `R` record, `S` season,
 `I` info. `openTarget` (window opened on click): `tasks`, `dungeons`, `keys`, `rift`, `collections`,
-`season`, `leaderboards`, `royale` (the Bleakhold Royale card, section 17), or empty.
+`season`, `leaderboards`, `royale` (the Bleakhold Royale card, section 17), `arena` (the Arena page, section 20), or
+empty.
 
 ```
 S> 1 TOAST b 1/1 R,New record,Halls of Lightning +8 in 24%3A13,leaderboards
@@ -422,6 +428,7 @@ First record: `rev, state, kind, activityId, tier, size, queuedSec, estWaitSec, 
 - `queuedSec` and `timeoutSec` count on locally from the moment the message arrives.
 - Kind `B` (Bleakhold Royale) appends `queued, minPlayers, maxPlayers, accepted, proposalSize, matchesRunning` after
   `bandMax` and never has member records (section 17).
+- Kind `A` (the 1v1 arena queue) ends at `estWaitSec` and never has member records (section 20).
 
 Then, for proposals, one record per member: `name, classId, role (1, 2 or 4), accepted (0 pending, 1 yes, 2 no), level`
 
@@ -523,7 +530,8 @@ per row: `rank, dungeonId, value, timeSec, dateEpoch, members (list of name~clas
 | `R` Eclipse Rift | floor | run time | |
 | `E` Raid Echoes | | kill time | boss name |
 
-Page 1 should include ranks 1-3 (the podium). Up to 10 rows per page fit comfortably in a few frames.
+Page 1 should include ranks 1-3 (the podium). Up to 10 rows per page fit comfortably in a few frames. Board `A` (arena)
+has rows and an `LBME` of its own, with more fields after `label` (section 20).
 
 `LBME`: the player's own best: `board, rank, topPercent, value, dungeonId, timeSec, barPermille, label`.
 
@@ -547,9 +555,9 @@ does not throttle addon messages for you (AzerothCore's addon flood check is not
 |---|---|
 | all `BHc` messages | token bucket of 10, refilled at 5 per second; drop the rest silently; after 200 drops in a minute ignore the player's `BHc` for 60 s and log it |
 | `HELLO` | 1 per 5 s |
-| `GET` | at most 8 records per message; each topic at most once per second |
+| `GET` | at most 8 records per message; each topic at most once per second (`ARENA` too; the addon asks for it at most every 30 s) |
 | `LBQ` | 2 per second |
-| `QJOIN`, `QLEAVE`, `QREPLY` | 1 per second each |
+| `QJOIN`, `QLEAVE`, `QREPLY` | 1 per second each (every kind together, `QJOIN A` too) |
 | `KSTART`, `KCANCEL`, `KMODE` | 1 per 2 s each |
 | `TCLAIM`, `TREROLL`, `BCLAIM`, `OUTFIT`, `WEHANDIN` | 2 per second together; idempotent anyway |
 | `EMOJI` | 1 per `BleakholdUi.Emoji.CooldownMs` (2.5 s); the addon waits 3.25 s itself |
@@ -591,7 +599,7 @@ lets each chat window hide a tag (`/bh chat`):
 |---|---|
 | `[Raid Legacy] ` | legacy set drops |
 | `[Server First] ` | server firsts |
-| `[Season] ` | season and war effort news |
+| `[Season] ` | season and war effort news, arena seasons (section 20) |
 | `[Queue] ` | a group search started (sent to the whole server) |
 | `[Record] ` | a new run record |
 | `[Case] ` | a rare reward from a case (section 15) |
@@ -624,6 +632,11 @@ when the timer starts, then `MP` on every change -> end: `MP state 2/3`, `MPE`, 
 **War Mode and World PvP.** `HELLO` (bits 16384, 32768) -> `WMST` -> `WARMODE 1` in an inn or a city -> `WMST` ->
 entering a Front zone: `WPZ` -> at an outpost: `WPCAP` every second -> `WPEV` for captures, Wanted players, bounties
 and rewards. The whole flow is in section 19 ("A Front").
+
+**Arena.** `HELLO` (feature bit 65536) -> `ARENA` (and the client's `GET ARENA`); the Arena page: `GET ARENA` ->
+`QJOIN A` -> `QUEUE` kind `A` state 1 -> the game's invite dialog -> `QUEUE` state 3 -> the match ends: `ARENA` (with
+the match in `M`) and `QUEUE` state 0.
+The arena leaderboard: `LBQ A` -> `LB` and `LBME`. Season changes: `ARENA` to everyone (section 20).
 
 ## 12. Versioning
 
@@ -1699,3 +1712,220 @@ After three counted kills, a Horde rogue becomes Wanted with a streak of 5 and a
 which Aldric claims; later another Wanted player survives the hunt. The Horde neutralises an outpost, the Alliance
 wins the Front with 64% of the points and the player gets the War Chest. In Dalaran (no objectives) the Front display
 hides, and turning War Mode off there is refused for another 296 s.
+
+## 20. Arena seasons and the 1v1 ladder
+
+Rated arena on Bleakhold runs in seasons: four ladders (1v1, 2v2, 3v3 and 5v5), each ranked on its own, end-of-season
+rewards by tier, weekly rewards for rated wins, and a 1v1 queue the addon joins without a battlemaster. The server
+decides everything: the season's dates and state, who is ranked, every cutoff, whether a match counted, who gets which
+reward. The client shows what `ARENA`, `LB`/`LBME` board `A` and `DEF V`/`Q` tell it and sends only the player's
+wishes: `GET ARENA`, `LBQ A`, `QJOIN A` and `QLEAVE`.
+
+`HELLO` feature bit 65536 is on while the server's arena system runs (`Bleakhold.Arena.Enable = 1` and its startup
+checks passed). The server turns it on and off at runtime; clients already connected get a new `HELLO` (section 7).
+While the bit is off the server answers `QJOIN A` with `ERR` `arena_off`, and the client shows neither the Arena page nor
+the Arena leaderboard. The 2v2, 3v3 and 5v5 teams are still made and managed in the game's own PvP window: the 3.3.5a
+client has room for three arena teams only, so the 1v1 team never shows there.
+
+**Seasons.** Arena seasons have their own numbers (1, 2, ...), separate from the content seasons of section 7 (`SEASON`,
+`DEF S`) and from the core's arena season (the season vendors). A season is live for its weeks (12 by default), the last
+7 days are its final week, and then rated arena closes until the next season starts (about 48 hours later). The
+`state` of `ARENA`:
+
+| `state` | | Rated arena |
+|---|---|---|
+| 0 none | no arena season has been scheduled | the realm's own setting |
+| 1 live | the season runs | open |
+| 2 final week | the last days of the season | open |
+| 3 rated closed | the season ended: nobody can queue for rated arena; matches already running finish and count | closed |
+| 4 final standings | the ladder is frozen; game masters review the results (about a day) before the rewards go out | closed |
+| 5 rewards delivered | the rewards were handed out: online players get them at once, the others at their next login | closed |
+| 6 upcoming | no season runs and the next one is scheduled | closed |
+
+Skirmishes and the unrated 1v1 queue stay open in every state.
+
+**Ladders.** Each bracket has its own ladder of the bracket's teams (a 1v1 team is one player) with at least
+`Bleakhold.Arena.Ladder.MinGamesShown` (10) games this season, sorted by rating, then the team's matchmaking rating,
+then season games, then the team id. The ladder of the current season is live (a few seconds old at most); a past
+season's ladder is its final standings.
+
+**Tiers.** The tiers (`DEF V`) are 1 Combatant, 2 Challenger, 3 Rival, 4 Duelist, 5 Gladiator, 6 Rank One and, in 1v1
+only, 7 Class Champion. Only teams with enough season games for rewards (`Bleakhold.Arena.Eligible.MinGames.*`: 50 in
+1v1, 30 in 2v2 and 3v3, 20 in 5v5) and no game master in the team count; `N` of the eligible teams decides the places of
+each tier: `slots = max(ceil(N * topPermille / 1000), minSlots)`, rounded up, so a small ladder still has a Gladiator.
+The slots never shrink toward a lower tier, never exceed `N`, and teams tied on rating with the last team inside a tier
+are inside it too (Rank One is always the first team alone). A team gets the highest tier whose slots its place is in,
+whose rating `floor` it has, and whose extra conditions it meets: Duelist and above need 10 games in the last 21 days,
+Gladiator and Rank One need 50 season wins (75 in 1v1). A team that misses a condition gets the best lower tier it
+meets, and nobody moves up into its place. The Class Champion of a class is its best ranked eligible 1v1 player, when
+that player has 1700 rating and 75 wins (nobody moves up into the place). A 5v5 ladder with fewer than 10 eligible teams
+gives Combatant only, and a ladder with fewer than 20 eligible teams gives no titles (a title reward pays its substitute
+instead). The default cutoffs (the server's tables may differ, and `ARENA` `T` always says what they are now):
+
+| Tier | 2v2 and 3v3: top, slots, floor | 1v1: top, slots, floor | 5v5: top, slots, floor |
+|---|---|---|---|
+| 6 Rank One | the first team, 2000 | the first player, 2000 | the first team, 1850 |
+| 5 Gladiator | 0.5 %, 2, 2000 | 0.5 %, 3, 1950 | 0.5 %, 1, 1850 |
+| 4 Duelist | 3 %, 4, 1800 | 3 %, 6, 1800 | 3 %, 2, 1700 |
+| 3 Rival | 10 %, 0, 1650 | 10 %, 0, 1650 | 10 %, 0, 1550 |
+| 2 Challenger | 35 %, 0, 1500 | 35 %, 0, 1500 | 35 %, 0, 1450 |
+| 1 Combatant | every team, 1300 | every player, 1300 | every team, 1300 |
+
+**Members.** In 2v2, 3v3 and 5v5 a member gets the team's tier when they are at the level cap, played at least 50 % of
+the team's season games, and their personal rating is at most 150 below the team's rating. A member who played the
+bracket's minimum games but misses the share or the rating gets Combatant at most. At most two characters of one account
+get 1v1 rewards above Combatant (the best two). Each tier also gets the rewards of the tiers below it (`DEF Q`). A title
+the character already has, a mount or item the account already got this season or the character already owns, pays the
+reward's substitute (200 Dungeon Shards) instead. Currencies (Shards, honor) are paid in full for the character's best
+bracket and at 50 % for each other bracket.
+
+**Match verdicts.** A rated match the server judges to be traded does not count normally; `ARENA` `M` shows each
+player the verdict of their last matches, so nobody loses or misses rating silently:
+
+| `verdict` | `reason` | When |
+|---|---|---|
+| 0 counted | | a normal match |
+| 1 reduced | `R` | the same two teams (or the same accounts) met for the 4th to 6th time within 24 hours: the winner gains half |
+| 2 win not counted | `R` | ... for the 7th time or more |
+| 2 win not counted | `I` | a winner and a loser play from the same network |
+| 2 win not counted | `E` | the match ended within a minute of the gates opening and the losers did next to nothing |
+| 2 win not counted | `S` | the match was over within 15 seconds of the gates opening |
+
+A win that does not count gives the winners no rating, no matchmaking rating, no win and no game; the losers lose as
+usual. At the end of the season the rewards of a team are held for a game master's review when, with at least 20 season
+wins, at least 30 % of its wins came against the same opponents or at least 40 % of its rating gain came from reduced
+wins, and those of a player with a same-network or low-effort match a game master has not cleared yet: the rewards wait
+(`missingMask` 64, `F` `grant` 2) until the review releases or withholds them. Their place on the ladder stays.
+
+### The 1v1 queue
+
+`QJOIN A,1,tier,roles,size` joins the 1v1 arena queue: `activityId` is always 1, `tier` 0 for a skirmish (unrated) or 1
+for rated, `size` always 1; `roles` (1..7) is ignored. Anything else is malformed and dropped. A rated join without a 1v1
+team makes the team first, for `oneTeamCostCopper` (`ARENA` header; the addon asks the player to confirm a cost first).
+A repeated `QJOIN A` while queued only sends `QUEUE` again. `QLEAVE` leaves the 1v1 queue (the Royale queue first, when
+the player is in that one; section 17). The game's own invite dialog takes the player into the match.
+
+`QJOIN A`, in this order:
+
+| Check | Answer |
+|---|---|
+| malformed (for `A`: `activityId` not 1, `tier` not 0 or 1, `size` not 1) | dropped silently (section 1) |
+| the player's `QJOIN` rate (section 8) | `ERR` `busy` |
+| the arena system is off (no feature bit 65536), the 1v1 arena is off on the realm, or the UI queue is off | `ERR` `arena_off` (`unavailable` on a realm without the UI bridge) |
+| the player is below the 1v1 level (80) | `ERR` `arena_level` |
+| `tier` 1 and rated arena is closed (`state` 3 to 6, or 0 with the realm's rated arena closed) | `ERR` `arena_closed` (the text says when it opens again) |
+| the player is in a group, an instance, a battleground or an arena, any battleground, arena, dungeon finder or Bleakhold Royale queue, or in combat | `ERR` `arena_busy` |
+| the player has Deserter | `ERR` `arena_deserter` |
+| the player's talents are not allowed in 1v1 (the realm's healer, tank or talent-tree rules) | `ERR` `arena_talents` |
+| `tier` 1, no 1v1 team, and the player cannot pay for one | `ERR` `arena_gold` |
+| `tier` 1, no 1v1 team, and it could not be made (or the realm makes none from the UI) | `ERR` `arena_team` |
+
+`QUEUE` for kind `A` has the fields of section 7 up to `estWaitSec` and nothing after them:
+
+- `state`: 0 not queued, 1 queued (also while the game's invite dialog is open), 3 in the match.
+- `activityId` 1; `tier` 0 skirmish or 1 rated; `size` 1.
+- `queuedSec`: time in the queue so far; `estWaitSec`: the server's average wait (empty when it has none).
+
+### ARENA (the player's arena season)
+
+First record: `seasonId, state, startEpoch, endEpoch, nextStartEpoch, ratedOpen, oneTeamCostCopper, seasonName`.
+
+- `seasonId`: the season `state` is about (the current one, the last one in states 5, or the next one in state 6); 0
+  with `state` 0.
+- `startEpoch`, `endEpoch`: its start and end (Unix time). `nextStartEpoch`: when the next season starts, once it is
+  scheduled.
+- `ratedOpen`: 1 while rated arena games count.
+- `oneTeamCostCopper`: what a 1v1 team costs (0 free); empty when the 1v1 queue is off.
+
+Then records tagged by their first field:
+
+- `S, id, name, state, startEpoch, endEpoch`: an arena season (`state` 0 past, 1 current, 2 upcoming), at most 24, for the
+  season choice of the arena leaderboard.
+- `B, bracket, hasTeam, rating, ladderRank, ladderSize, seasonGames, seasonWins, weekGames, weekWins, personalRating,
+  recentGames, tierId, nextTierId, ratingToNext, missingMask, teamName`: the player in one bracket. Always sent for 1v1
+  (with `hasTeam` 0 and nothing else when the player has no 1v1 team), for 2v2, 3v3 and 5v5 only when the player has a
+  team. `ladderRank` of `ladderSize`: the place on the shown ladder (empty below its minimum games). `recentGames`: the
+  team's rated games in the last 21 days. `tierId`: the tier the player would get if the season ended now (empty: none);
+  `nextTierId` and `ratingToNext`: the tier above and the rating it takes now. `missingMask`, what keeps the player from
+  the rewards of `tierId` or above: 1 too few season games, 2 too small a share of the team's games, 4 personal rating
+  too far below the team's, 8 too few recent games (Duelist and above), 16 too few wins (Gladiator and Rank One), 32 not
+  at the level cap, 64 rewards held for review, 128 the bracket gives no rewards beyond Combatant this season.
+- `T, bracket, tierId, slots, cutRank, cutRating, floor`: the live cutoff of one tier of one bracket. `slots`: the places
+  of the tier; `cutRank`, `cutRating`: the last team inside it now (empty: nobody); `floor`: the rating the tier needs
+  anyway. What a tier takes now is the higher of `cutRating` and `floor`.
+- `N, bracket, eligibleTeams, rewardsOpen, titlesOpen`: one bracket's ladder. `rewardsOpen` 0: too few teams, Combatant
+  only; `titlesOpen` 0: too few teams for titles.
+- `M, bracket, won, ratingChange, opponent, endEpoch, verdict, reason`: one of the player's last five rated matches,
+  newest first (`verdict` and `reason` as above).
+- `F, bracket, finalRank, finalRating, finalTierId, grant`: the player's final standing in one bracket, in states 4 and
+  5 only. `grant`: 0 the rewards are coming, 1 delivered, 2 held for review.
+
+The server sends `ARENA` after `HELLO` while feature bit 65536 is on, for `GET ARENA`, to every player of a rated match
+after it ends, and to every player when the season's `state` changes. The client also sends `GET ARENA` after each
+`HELLO` with the bit (a push made at login, before the client's `HELLO`, does not reach it, and `/reload` has none).
+Cutoffs move with every match: the client asks with `GET ARENA` again (every 30 s at most) while it shows them.
+Unrevisioned; the last one counts.
+
+### LB and LBME, board A
+
+`LBQ A,seasonId,bracket,classId,page`: `seasonId` an arena season (0 the current one), the bracket in `dungeonId` (1, 2,
+3 or 5; never 0), `classId` the teams with a member of that class (0 all). The answer is `LB` with these rows:
+
+`rank, bracket, rating, , lastGameEpoch, members (list of name~classId), teamName, seasonWins, seasonGames, tierId, flags`
+
+- `rating` in the `value` field, `timeSec` empty, `lastGameEpoch` in `dateEpoch`, the team's name in `label`.
+- `tierId`: the tier the team would get now (a past season: the tier it got), `flags`: 1 inactive (no game for 7 days),
+  2 provisional (below the games the bracket needs for rewards), 4 final standings.
+
+`LBME`: `A, rank, topPercent, rating, bracket, , barPermille, tierName, topPermille, tierId`: the player's own team in
+that bracket. `topPermille` is the rank in permille of the ladder (`topPercent` is too coarse near the top: 4 of 1000 is
+0.4 %); `barPermille`: the way from the floor of the team's tier to what the next tier takes now; `tierName` is in
+`label`. Both are empty but `A` when the player has no team there.
+
+### DEF V and Q
+
+| Kind | Record |
+|---|---|
+| `V` arena tier | `id, name, colorHex, text` |
+| `Q` arena reward | `id, seasonId, bracket, tierId, kind, entry, count, text` |
+
+`Q` lists every end-of-season reward: `seasonId` 0 for every season (a row of one season replaces the row of the same
+bracket, tier and kind of season 0), `kind` `T` a title (`entry` the achievement that grants it), `M` a mount (`entry` the
+item), `I` an item, `X` the season set's looks (`entry` a look pack), `C` Dungeon Shards, `H` honor, `A` arena points,
+`W` war effort, `F` a server first (section 7, `FIRSTS`); `count` the amount.
+
+### Error codes
+
+| Code | Meaning |
+|---|---|
+| `arena_off` | the arena system is off (no feature bit 65536), or the 1v1 arena or its UI queue is off on the realm |
+| `arena_level` | below the 1v1 level |
+| `arena_closed` | rated arena is closed (between seasons); the text says when it opens again |
+| `arena_busy` | in a group, an instance, a battleground or arena, another queue (Bleakhold Royale's too) or in combat |
+| `arena_deserter` | the player has Deserter |
+| `arena_talents` | the player's talents are not allowed in 1v1 |
+| `arena_team` | no 1v1 team, and none could be made |
+| `arena_gold` | no 1v1 team, and not enough money for one |
+
+```
+C> 1 GET 1a 1/1 ARENA
+S> 1 ARENA 2a 1/2 1,1,1793318400,1800576000,1800748800,1,0,Arena Season 1;S,1,Arena Season 1,1,1793318400,1800576000;S,2,Arena Season 2,2,1800748800,1808006400;B,1,1,1734,12,48,61,38,9,6,1734,14,3,4,66,0,Aldric;B,3,1,1912,4,22,44,30,12,8,1890,12,4,5,163,16,Ironvow Wardens
+S> 1 ARENA 2a 2/2 ;T,3,6,1,1,2140,2000;T,3,5,2,2,2075,2000;T,3,4,4,4,1912,1800;T,3,3,4,4,1912,1650;T,3,2,8,8,1702,1500;T,3,1,22,22,1310,1300;N,1,48,1,1;N,3,22,1,1;M,1,1,14,Brenna,1793900000,0;M,1,0,-11,Corwin,1793899000,0;M,1,1,0,Dalia,1793898000,2,I;M,1,1,7,Eamon,1793897000,1,R
+C> 1 LBQ 1d 1/1 A,0,3,0,1
+S> 1 LB 2d 1/1 A,1,3,0,1,3;1,3,2140,,1793896400,Brenna~2:Corwin~5:Dalia~8,Dawnbreakers,61,70,6;2,3,2075,,1793890000,Eamon~11:Fenna~3:Garrick Stormwind~4,The Unbowed,55,68,5;3,3,1990,,1793200000,Hale~7:Isolde~9:Jorund~6,Ashen Pact,40,52,4,1
+S> 1 LBME 2e 1/1 A,4,19,1912,3,,407,Duelist,182,4
+S> 1 DEF 2f 1/1 V,7;1,Combatant,9D9D9D,Enough season games and 1300 rating.;5,Gladiator,FF8000,The top 0.5%25 of the ladder with 50 wins.
+S> 1 DEF 2g 1/1 Q,7;101,0,3,2,T,2090,1,Challenger;105,1,3,5,M,30609,1,Swift Nether Drake;110,0,3,1,C,0,150,150 Dungeon Shards
+C> 1 QJOIN 1b 1/1 A,1,1,4,1
+S> 1 QUEUE 2i 1/1 7,1,A,1,1,1,8,95
+C> 1 QJOIN 2j 1/1 A,1,1,4,1
+S> 1 ERR 2k 1/1 QJOIN,2j,arena_closed,Rated arena opens again when Arena Season 2 starts.
+S> 1 ARENA 2b 1/1 1,4,1793318400,1800576000,1800748800,0,0,Arena Season 1;B,1,1,1734,12,48,61,38,0,0,1734,14,3,4,66,64,Aldric;F,1,12,1734,3,2
+```
+
+The first `ARENA` is a live season: Aldric is 12th of 48 in 1v1 at 1734, on Rival pace, 66 rating short of Duelist; in
+3v3 his team is the last Duelist (4th of 22) and would need 2075 for Gladiator, but has too few wins for it anyway
+(`missingMask` 16). His match against Dalia did not count (the same network), the one against Eamon was a repeated
+pairing (half the gain). The leaderboard shows 3v3 (the Ashen Pact has not played for a week), and the player's own team
+4th, top 19 % (182 in permille). The `ERR` came when rated arena had closed; the last `ARENA` shows the final standings
+with Aldric's 1v1 rewards held for review.
