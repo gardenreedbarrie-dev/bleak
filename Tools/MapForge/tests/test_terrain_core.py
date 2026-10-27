@@ -306,6 +306,26 @@ class TestSpecErrors(unittest.TestCase):
         with self.assertRaises(SpecError):
             resolve_placements(spec, LatticeGrid(spec, HeightField(spec)))
 
+    def test_real_model_box_wins_over_spec_bounds(self):
+        # A realm patch (an HD pack) can replace a WMO with a bigger one: --assets must use the real box.
+        import tempfile
+        from terrain.assets import AssetFolder
+        from terrain.placements import resolve_placements
+        with tempfile.TemporaryDirectory() as tmp:
+            os.makedirs(os.path.join(tmp, "w"))
+            mohd = struct.pack("<9I6f", *([0] * 9), -20.0, -20.0, 0.0, 20.0, 20.0, 30.0)
+            with open(os.path.join(tmp, "w", "hut.wmo"), "wb") as f:
+                f.write(b"DHOM" + struct.pack("<I", len(mohd)) + mohd)
+            spec = tiny_spec(wmos=[{"model": "w\\hut.wmo", "position": [-100, -100], "radius": 5,
+                                    "bounds": [[-5, -5, 0], [5, 5, 10]]}])
+            grid = LatticeGrid(spec, HeightField(spec))
+            _, wmos, _ = resolve_placements(spec, grid, AssetFolder(tmp))
+            self.assertEqual(wmos[0].bounds_source, "assets")
+            self.assertAlmostEqual(wmos[0].radius, 20.0, places=3)
+            _, wmos, _ = resolve_placements(spec, grid)
+            self.assertEqual(wmos[0].bounds_source, "spec")
+            self.assertAlmostEqual(wmos[0].radius, 5.0, places=3)
+
     def test_wmo_group_file_rejected(self):
         with self.assertRaises(SpecError):
             tiny_spec(wmos=[{"model": "w\\t_000.wmo", "position": [-10, -10]}])

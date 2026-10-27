@@ -406,7 +406,7 @@ Keys starting with `_` are comments. Every other unknown key is an error.
   painted along the line, and a mask the scatter groups keep clear of.
 - `doodads` (`.m2`) and `wmos` (root `.wmo`): `model`, `position` `[x, y]` (on the ground) or `[x, y, z]`,
   `z_offset`, `facing` (the server's orientation in degrees) or raw `rotation` `[x, y, z]` in file order, `scale`
-  (doodads only), `uid`, `bounds` (model box), `radius` (fallback footprint), and for WMOs `doodad_set`,
+  (doodads only), `uid`, `bounds` (model box, used when `--assets` does not have the model), `radius` (fallback footprint), and for WMOs `doodad_set`,
   `name_set`. Chests, orbs and other interactive things are server GameObjects, not terrain doodads.
 - `water`: `liquid_type` (stock LiquidType id, 1 = water), `height`, `shape`, `min_depth`: flat water in a shape,
   without carving (v1's river and pond).
@@ -456,8 +456,9 @@ From the client's own readers (`WoW/Source/WorldClient`) and AzerothCore's `map_
 - **Placements**: doodad scale 1024 = 1.0; WMOs never get flag 0x1 (destructible, skipped by the client); MODF
   scale 1024. A placement is listed in every tile and referenced from every chunk its footprint touches, with the
   same unique id; ids are unique across doodads and WMOs (the client dedups by id, `vmap4_extractor` spawns by
-  it). MODF extents are the placed model box: from `bounds`, from the real model with `--assets` (MOHD of a WMO,
-  the header box of an M2), or a cube of `radius` as a fallback.
+  it). MODF extents are the placed model box: from the real model with `--assets` (MOHD of a WMO, the header box
+  of an M2; it wins over `bounds`, because a realm patch such as an HD pack can replace a model with a bigger
+  one), else from `bounds`, else a cube of `radius` as a fallback.
 - **Water**: MH2O, one liquid instance per chunk, vertex format 0 (heights + depth), fishable bits for the wet
   cells, deep 0, an 8-byte exists bitmap (AzerothCore reads a whole u64), the rectangle of the wet cells (a river
   bank that crosses a chunk gives a partial rectangle and bitmap). A cell is wet where a body's shape holds its

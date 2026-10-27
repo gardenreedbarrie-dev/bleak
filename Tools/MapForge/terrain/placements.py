@@ -95,7 +95,7 @@ def _footprint(spec, x0: float, x1: float, y0: float, y1: float, circle=None):
 
 
 def resolve_placements(spec, grid, assets=None, extra=None) -> tuple[list[Resolved], list[Resolved], list[str]]:
-    """Resolve every placement. `assets` (assets.AssetFolder) supplies real model bounds where the spec has none.
+    """Resolve every placement. `assets` (assets.AssetFolder) supplies real model bounds, which win over the spec's.
     The spec's generated doodads (waterfalls) and `extra` (scatter_placements) come last, so their automatic ids
     never shift the spec's own placements."""
     warnings: list[str] = []
@@ -140,13 +140,16 @@ def resolve_placements(spec, grid, assets=None, extra=None) -> tuple[list[Resolv
         r.rotation = p.rotation
         r.flags = p.flags
         r.radius = p.radius
+        # The real model's box wins over the spec's: a realm patch (an HD pack) can replace a model with a bigger
+        # one, and the client culls by MODF's extents and vmap4_extractor assigns tiles by them.
         bounds = p.bounds
         r.bounds_source = "spec" if bounds is not None else "radius"
-        if bounds is None and assets is not None:
-            bounds = assets.model_bounds(p.model)
-            if bounds is not None:
+        if assets is not None:
+            real = assets.model_bounds(p.model)
+            if real is not None:
+                bounds = real
                 r.bounds_source = "assets"
-            else:
+            elif bounds is None:
                 warnings.append(f"{where}: {p.model!r} not found in the asset folder; using radius {p.radius:g}")
         if p.kind == "doodad":
             r.scale_u16 = max(1, min(0xFFFF, int(p.scale * 1024.0 + 0.5)))
