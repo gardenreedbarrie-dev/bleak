@@ -4975,6 +4975,13 @@ void CWorldScene::RenderHorizon() {
     g_theGxDevicePtr->XformSetProjection(savedProjection);
 }
 
+// BLEAKHOLD(storm): the depth range RenderHorizon draws the low-detail terrain and map objects into, for the part of
+// the Bleakhold Royale storm wall past the far plane (WoW/Source/Ui/BleakholdStorm.cpp).
+void CWorldScene::BleakHorizonDepthRange(float& minZ, float& maxZ) {
+    minZ = s_horizonMinZ;
+    maxZ = s_horizonMaxZ;
+}
+
 // VERIFY: 8f0548db manual
 // OFFSET: 0x00783A60
 void World::ObjectSetRenderEnabled(CMapBaseObj* object, int32_t enable) {

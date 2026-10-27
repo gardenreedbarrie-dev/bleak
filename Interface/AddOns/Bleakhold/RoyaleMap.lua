@@ -4,7 +4,8 @@
 -- outside, the next one in white, moving as ROYS says), the orbs and supply drops of ROYO with their timers, the
 -- supply pings of ROYV, the landing pin and the player's own arrow. In the lobby a click sets the landing pin (RDROP,
 -- Royale.lua); the map opens by itself when the player arrives in the lobby and closes at the drop. Key binding
--- BLEAKHOLD_ROYALE_MAP (BleakholdToggle("royalemap")), /bh royale map, the minimap orb.
+-- BLEAKHOLD_ROYALE_MAP (BleakholdToggle("royalemap"); ALT-M by default, set once per account when the player first
+-- gets into a match and the key is free), /bh royale map, the minimap orb.
 --
 -- Map transform (ROYM's frame): u = (maxY - y) / (maxY - minY), v = (maxX - x) / (maxX - minX); north up, west left.
 -- The map sits in a ScrollFrame, which clips what lies outside it (storm circles larger than the island).
@@ -669,6 +670,39 @@ UI.RegisterOpener("royalemap", function()
     MP.Toggle()
 end)
 
+-- The map's key: ALT-M (next to the world map's M; free in the stock key bindings, unlike N and SHIFT-M), set once per
+-- account when the player first gets into a match, only when neither the key nor the map's binding is taken, like the
+-- emote wheel's Ctrl+G (Animations.lua). Not in combat: tried again with the next ROYS.
+MP.BINDING = "BLEAKHOLD_ROYALE_MAP"
+MP.DEFAULT_KEY = "ALT-M"
+
+function MP.OfferDefaultKey()
+    local opts = ns.db.options
+    if opts.royaleMapKeyOffered or not SetBinding or not GetBindingAction or not GetBindingKey then
+        return
+    end
+    if InCombatLockdown and InCombatLockdown() then
+        return
+    end
+    opts.royaleMapKeyOffered = true
+    if GetBindingKey(MP.BINDING) then
+        return
+    end
+    local current = GetBindingAction(MP.DEFAULT_KEY)
+    if current == nil or current == "" then
+        if SetBinding(MP.DEFAULT_KEY, MP.BINDING) and SaveBindings and GetCurrentBindingSet then
+            SaveBindings(GetCurrentBindingSet())
+        end
+    else
+        ns.Print("Royale island map: " .. MP.DEFAULT_KEY .. " is taken; bind a key in Key Bindings, Bleakhold.")
+    end
+end
+
+-- The key that opens the map now, or nil.
+function MP.KeyText()
+    return GetBindingKey and GetBindingKey(MP.BINDING) or nil
+end
+
 -- In the lobby the map opens by itself, once per match (closing it keeps it closed); at the drop an
 -- automatically opened map closes again.
 function MP.AutoCheck()
@@ -699,6 +733,9 @@ ns.On("STATE", function(topic)
             MP.Update()
         end
         MP.AutoCheck()
+        if S.royale then
+            MP.OfferDefaultKey()
+        end
     elseif topic == "ROYO" and win:IsShown() then
         MP.RefreshObjects()
     end

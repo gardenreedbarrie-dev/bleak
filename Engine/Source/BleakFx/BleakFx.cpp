@@ -4,6 +4,7 @@
 #include <vector>
 #include "BleakFxShaders.h"
 #include "Engine/Source/BleakFx/BleakFxRipples.h"
+#include "Engine/Source/BleakFx/BleakFxStormNoise.h"
 #include "Engine/Source/ConsoleBase/ConsoleVar.h"
 #include "Engine/Source/ConsoleBase/Types.h"
 #include "Engine/Source/Gx/BleakDepth.h"
@@ -25,11 +26,18 @@ namespace {
     // Shader constant registers, as in Shaders/bh_common.hlsli and bh_fullscreen_vs.hlsl.
     const uint32_t kPsWater = 180;
     const uint32_t kPsParams = 200;
+    const uint32_t kPsStorm = 205;
     const uint32_t kPsSky = 217;
     const uint32_t kPsProjection = 218;
     const uint32_t kPsInputTexel = 222;
     const uint32_t kPsOutputTexel = 223;
     const uint32_t kVsHalfPixel = 250;
+    // The storm wall's vertex constants (Shaders/bh_storm_vs.hlsl).
+    const uint32_t kVsStormEye = 249;
+    const uint32_t kVsStormViewProj = 251;
+    const uint32_t kVsStormNoise = 255;
+    // Noise tiles per yard of the storm wall (one tile every 64 yards).
+    const double kStormNoisePerYard = 1.0 / 64.0;
 
     const uint32_t kMaxBloomLevels = 6;
     const int32_t kMinTargetSize = 8;
@@ -53,6 +61,8 @@ namespace {
         Ps_SmaaEdge,
         Ps_SmaaWeights,
         Ps_SmaaBlend,
+        Ps_Storm,
+        Ps_StormTint,
         Ps_Count,
     };
 
@@ -109,6 +119,7 @@ namespace {
     // shader, and the device recreates the Direct3D shaders after a reset by itself.
     CGxShader* s_vertexShader;
     CGxShader* s_waterVertexShader;
+    CGxShader* s_stormVertexShader;
     CGxShader* s_pixelShaders[Ps_Count];
     bool s_shadersCreated;
 
@@ -123,6 +134,8 @@ namespace {
     Target s_waterScene;
     Target s_waterDepth;
     CGxTex* s_rippleTex;
+    // The storm wall's noise, made the first time the wall draws.
+    CGxTex* s_stormNoiseTex;
     // SMAA: its blending weights (full size), and its area and search textures. Made when SMAA is first used.
     Target s_smaaWeights;
     CGxTex* s_smaaArea;
@@ -192,7 +205,8 @@ namespace {
     }
 #endif
 
-    bool ShadersValid() {
+    // Makes every shader once; false when the client was built without them.
+    bool CreateShaders() {
 #if BLEAKFX_HAVE_SHADERS
 #define BLEAKFX_SHADER(name) g_bleakFxShader_##name, sizeof(g_bleakFxShader_##name)
         if (!s_shadersCreated) {
@@ -216,12 +230,26 @@ namespace {
             s_pixelShaders[Ps_SmaaWeights] = CreateShader(GxSh_Pixel, "BleakFx:SmaaWeights", BLEAKFX_SHADER(bh_smaa_weights_ps));
             s_pixelShaders[Ps_SmaaBlend] = CreateShader(GxSh_Pixel, "BleakFx:SmaaBlend", BLEAKFX_SHADER(bh_smaa_blend_ps));
             s_waterVertexShader = CreateShader(GxSh_Vertex, "BleakFx:WaterVs", BLEAKFX_SHADER(bh_water_vs));
+            s_pixelShaders[Ps_Storm] = CreateShader(GxSh_Pixel, "BleakFx:Storm", BLEAKFX_SHADER(bh_storm_ps));
+            s_pixelShaders[Ps_StormTint] = CreateShader(GxSh_Pixel, "BleakFx:StormTint", BLEAKFX_SHADER(bh_storm_tint_ps));
+            s_stormVertexShader = CreateShader(GxSh_Vertex, "BleakFx:StormVs", BLEAKFX_SHADER(bh_storm_vs));
         }
 #undef BLEAKFX_SHADER
 
+        return true;
+#else
+        return false;
+#endif
+    }
+
+    bool ShadersValid() {
+        if (!CreateShaders()) {
+            return false;
+        }
+
         // Valid() creates the Direct3D shader the first time and again after a device reset. These are the shaders
-        // of the post-processing; the water's and SMAA's are checked where they are used, so that a driver refusing
-        // one of them only turns that off.
+        // of the post-processing; the water's, SMAA's and the storm wall's are checked where they are used, so that
+        // a driver refusing one of them only turns that off.
         if (!s_vertexShader->Valid()) {
             return false;
         }
@@ -233,9 +261,6 @@ namespace {
         }
 
         return true;
-#else
-        return false;
-#endif
     }
 
     bool WaterShadersValid() {
@@ -244,6 +269,11 @@ namespace {
 
     bool SmaaShadersValid() {
         return ShadersValid() && s_pixelShaders[Ps_Clear]->Valid() && s_pixelShaders[Ps_SmaaEdge]->Valid() && s_pixelShaders[Ps_SmaaWeights]->Valid() && s_pixelShaders[Ps_SmaaBlend]->Valid();
+    }
+
+    // The storm wall needs its own shaders and the full-screen quad's (the tint), not the post-processing's.
+    bool StormShadersValid() {
+        return CreateShaders() && s_stormVertexShader->Valid() && s_pixelShaders[Ps_Storm]->Valid() && s_vertexShader->Valid() && s_pixelShaders[Ps_StormTint]->Valid();
     }
 
     bool DeviceSupported() {
@@ -813,6 +843,102 @@ namespace {
     double Fraction(double value) {
         return value - floor(value);
     }
+
+    // The readable depth buffer as view depth in yards into s_waterDepth (R32F), for a world drawn into the depth
+    // range [minZ, maxZ] of the viewport given, which is put back afterwards with the back buffer. False when there
+    // is nothing to copy from or into; a target the device could not make is then freed.
+    bool CopyViewDepth(float minX, float maxX, float minY, float maxY, float minZ, float maxZ) {
+        Target depth = { GxBleakDepthTexture(), s_width, s_height };
+
+        if (!s_depthReady || !depth.tex || !s_waterDepth.tex || !PerspectiveProjection(s_projection) || !(maxZ > minZ)) {
+            return false;
+        }
+
+        g_theGxDevicePtr->RsPush();
+        GxRsSet(GxRs_BlendingMode, GxBlend_Opaque);
+        GxRsSet(GxRs_AlphaRef, 0);
+        GxRsSet(GxRs_DepthTest, 0);
+        GxRsSet(GxRs_DepthWrite, 0);
+        GxRsSet(GxRs_ColorWrite, 15);
+        GxRsSet(GxRs_Culling, 0);
+        GxRsSet(GxRs_Fog, 0);
+        GxRsSet(GxRs_Lighting, 0);
+        GxRsSet(GxRs_ScissorTest, 0);
+        GxRsSet(GxRs_ClipPlaneMask, 0);
+        GxRsSet(GxRs_VertexShader, s_vertexShader);
+
+        const Target* inputs[1] = { &depth };
+        SetDepthConstants(s_projection, minZ, maxZ);
+        s_passFailed = false;
+        RunPass(Ps_DepthCopy, &s_waterDepth, inputs, 1);
+
+        g_theGxDevicePtr->RsPop();
+        GxRenderTargetSet(GxBuffers_Color, nullptr, 0);
+        GxXformSetViewport(minX, maxX, minY, maxY, minZ, maxZ);
+
+        if (s_passFailed) {
+            DestroyTarget(s_waterDepth);
+            s_passFailed = false;
+            return false;
+        }
+
+        return true;
+    }
+
+    void StormNoiseTexUserFunc(EGxTexCommand command, uint32_t width, uint32_t height, uint32_t face, uint32_t level, void* userArg, uint32_t& texelStrideInBytes, const void*& texels) {
+        if (command != GxTex_Latch) {
+            return;
+        }
+
+        uint32_t clamped = level < BleakFxStormNoise::kLevels ? level : BleakFxStormNoise::kLevels - 1;
+        texels = BleakFxStormNoise::Levels() + BleakFxStormNoise::LevelOffset(clamped);
+        texelStrideInBytes = BleakFxStormNoise::LevelSize(clamped) * 4;
+    }
+
+    // The storm wall's noise, made the first time the wall draws (a managed texture: it survives device resets).
+    CGxTex* StormNoiseTexture() {
+        if (!s_stormNoiseTex) {
+            CGxTexFlags flags(GxTex_LinearMipLinear, GxTex_Wrap, GxTex_Wrap, 0, 0, 0, 1);
+
+            if (!GxTexCreate(GxTex_2d, BleakFxStormNoise::kSize, BleakFxStormNoise::kSize, 0, GxTex_Argb8888, GxTex_Argb8888, flags, nullptr, StormNoiseTexUserFunc, "BleakFx::StormNoise", s_stormNoiseTex)) {
+                s_stormNoiseTex = nullptr;
+            }
+        }
+
+        return s_stormNoiseTex;
+    }
+
+    // Draws one of the storm's meshes (the shaders and constants are set).
+    void DrawStormMesh(const BleakStorm::Vertex* vertices, uint32_t vertexCount, const uint16_t* indices, uint32_t indexCount) {
+        if (!vertices || !indices || vertexCount < 3 || vertexCount > 0x10000 || indexCount < 3) {
+            return;
+        }
+
+        const uint32_t stride = sizeof(BleakStorm::Vertex);
+        GxPrimVertexPtr(vertexCount, reinterpret_cast<const C3Vector*>(vertices[0].pos), stride, reinterpret_cast<const C3Vector*>(vertices[0].normal), stride, nullptr, 0, reinterpret_cast<const C2Vector*>(vertices[0].shape), stride, nullptr, 0);
+        GxPrimIndexPtr(indexCount, indices);
+        CGxBatch batch = { GxPrim_Triangles, 0, indexCount, 0, static_cast<uint16_t>(vertexCount - 1) };
+        GxDraw(&batch, 1);
+    }
+
+    // The wall, then the ring, with one projection (the shaders, the textures and the clock are set). farClamp > 0
+    // keeps what lies past that projection's far plane at this fraction of it, 0 clips it there; nothing nearer than
+    // the view depth drawFrom is drawn.
+    void DrawStormPass(const BleakFx::StormDraw& draw, const C44Matrix& viewProj, float farClamp, float drawFrom, bool depth) {
+        float eye[4] = { draw.eye[0], draw.eye[1], draw.eye[2], farClamp };
+        GxShaderConstantsSet(GxSh_Vertex, kVsStormEye, eye, 1);
+        GxShaderConstantsSet(GxSh_Vertex, kVsStormViewProj, &viewProj.a0, 4);
+        float fogRange = draw.fogEnd - draw.fogStart;
+        SetPsVector(kPsStorm + 3, fogRange > 1.0f ? 1.0f / fogRange : 0.0f, drawFrom, depth ? 1.0f / s_width : 0.0f, depth ? 1.0f / s_height : 0.0f);
+
+        float moving = Clamp(draw.moving, 0.0f, 1.0f);
+        float strength = Clamp(draw.strength, 0.0f, 1.0f);
+        SetPsVector(kPsStorm + 1, moving, depth ? 1.0f : 0.0f, strength, 0.0f);
+        DrawStormMesh(draw.wall, draw.wallVertexCount, draw.wallIndices, draw.wallIndexCount);
+
+        SetPsVector(kPsStorm + 1, moving, depth ? 1.0f : 0.0f, strength, 1.0f);
+        DrawStormMesh(draw.ring, draw.ringVertexCount, draw.ringIndices, draw.ringIndexCount);
+    }
 }
 
 void BleakFx::Init() {
@@ -858,6 +984,11 @@ void BleakFx::Destroy() {
         s_smaaSearch = nullptr;
     }
 
+    if (s_stormNoiseTex) {
+        GxTexDestroy(s_stormNoiseTex);
+        s_stormNoiseTex = nullptr;
+    }
+
     s_waterReady = false;
     s_waterDepthReady = false;
     GxBleakDepthSet(false);
@@ -895,39 +1026,9 @@ void BleakFx::BeginLiquids() {
 
     s_waterReady = true;
 
-    // The depth as view depth in yards, from the readable depth buffer (which stays bound for the world).
-    Target depth = { GxBleakDepthTexture(), s_width, s_height };
-
-    if (!s_depthReady || !depth.tex || !s_waterDepth.tex || !PerspectiveProjection(s_projection) || !(maxZ > minZ)) {
-        return;
-    }
-
-    g_theGxDevicePtr->RsPush();
-    GxRsSet(GxRs_BlendingMode, GxBlend_Opaque);
-    GxRsSet(GxRs_AlphaRef, 0);
-    GxRsSet(GxRs_DepthTest, 0);
-    GxRsSet(GxRs_DepthWrite, 0);
-    GxRsSet(GxRs_ColorWrite, 15);
-    GxRsSet(GxRs_Culling, 0);
-    GxRsSet(GxRs_Fog, 0);
-    GxRsSet(GxRs_Lighting, 0);
-    GxRsSet(GxRs_ScissorTest, 0);
-    GxRsSet(GxRs_ClipPlaneMask, 0);
-    GxRsSet(GxRs_VertexShader, s_vertexShader);
-
-    const Target* inputs[1] = { &depth };
-    SetDepthConstants(s_projection, minZ, maxZ);
-    s_passFailed = false;
-    RunPass(Ps_DepthCopy, &s_waterDepth, inputs, 1);
-
-    g_theGxDevicePtr->RsPop();
-    GxRenderTargetSet(GxBuffers_Color, nullptr, 0);
-    GxXformSetViewport(minX, maxX, minY, maxY, minZ, maxZ);
-
-    // Without its target the water goes on without depth (not tried again until the targets are made again).
-    if (s_passFailed) {
-        DestroyTarget(s_waterDepth);
-        s_passFailed = false;
+    // The depth as view depth in yards, from the readable depth buffer (which stays bound for the world). Without
+    // its target the water goes on without depth (not tried again until the targets are made again).
+    if (!CopyViewDepth(minX, maxX, minY, maxY, minZ, maxZ)) {
         return;
     }
 
@@ -1144,4 +1245,109 @@ void BleakFx::RenderWorld(bool sunVisible, bool skyShown) {
         s_targetsFailed = true;
         s_passFailed = false;
     }
+}
+
+const char* BleakFx::StormSupport() {
+    if (!g_theGxDevicePtr || !g_theGxDevicePtr->m_context || !DeviceSupported()) {
+        return "device";
+    }
+
+    return StormShadersValid() ? "" : "shaders";
+}
+
+void BleakFx::RenderStorm(const StormDraw& draw) {
+    bool meshes = (draw.wallVertexCount && draw.wallIndexCount) || (draw.ringVertexCount && draw.ringIndexCount);
+
+    if ((!meshes && !(draw.tint > 0.0f)) || *StormSupport()) {
+        return;
+    }
+
+    CGxTex* noise = StormNoiseTexture();
+
+    // Never a world drawn into a texture (a portrait, the minimap), only the frame in the back buffer.
+    CGxTex* renderTarget;
+    g_theGxDevicePtr->DeviceGetRenderTarget(GxBuffers_Color, renderTarget);
+
+    if (!noise || renderTarget) {
+        return;
+    }
+
+    float minX, maxX, minY, maxY, minZ, maxZ;
+    GxXformViewport(minX, maxX, minY, maxY, minZ, maxZ);
+
+    // The view depth for the soft foot and the seam: the water's copy of this frame (made before the liquids), else
+    // a copy now. Both need the readable depth buffer and a world that fills the window (the copy maps all of it).
+    bool depth = s_waterDepthReady && s_waterDepth.tex;
+    int32_t width, height;
+
+    if (meshes && !depth && s_depthReady && FillsWindow(minX, maxX, minY, maxY) && WindowSize(width, height) && EnsureTargets(width, height)
+        && s_vertexShader->Valid() && s_pixelShaders[Ps_DepthCopy]->Valid()) {
+        depth = CopyViewDepth(minX, maxX, minY, maxY, minZ, maxZ);
+    }
+
+    g_theGxDevicePtr->RsPush();
+    GxRsSet(GxRs_BlendingMode, GxBlend_Alpha);
+    GxRsSet(GxRs_AlphaRef, 0);
+    GxRsSet(GxRs_DepthTest, 1);
+    GxRsSet(GxRs_DepthWrite, 0);
+    GxRsSet(GxRs_ColorWrite, 15);
+    GxRsSet(GxRs_Culling, 0);
+    GxRsSet(GxRs_Fog, 0);
+    GxRsSet(GxRs_Lighting, 0);
+    GxRsSet(GxRs_ScissorTest, 0);
+    GxRsSet(GxRs_ClipPlaneMask, 0);
+
+    if (meshes) {
+        GxRsSet(GxRs_VertexShader, s_stormVertexShader);
+        GxRsSet(GxRs_PixelShader, s_pixelShaders[Ps_Storm]);
+        GxRsSet(GxRs_Texture0, noise);
+        // Without the depth copy the shader reads nothing from stage 1, but a texture must be there.
+        GxRsSet(GxRs_Texture1, depth ? s_waterDepth.tex : noise);
+
+        // The noise is anchored in the world: the origin's part of it goes in as fractions of a tile, reduced in
+        // double precision (the shader adds the vertex's own part).
+        float noisePlace[4] = {
+            static_cast<float>(Fraction(draw.origin[0] * kStormNoisePerYard)),
+            static_cast<float>(Fraction(draw.origin[1] * kStormNoisePerYard)),
+            static_cast<float>(Fraction(draw.origin[2] * kStormNoisePerYard)),
+            static_cast<float>(kStormNoisePerYard),
+        };
+        GxShaderConstantsSet(GxSh_Vertex, kVsStormNoise, noisePlace, 1);
+
+        // In yards a second: the billows rise at 1.2, the cloud drifts across at 0.6 and rises at 2, the streaks rise
+        // at 7; as offsets in each layer's own texture coordinates (bh_storm_ps scales the noise by 0.25, 0.9 and
+        // 0.8, 0.12). Upwards is a falling texture coordinate.
+        double tiles = draw.phase * kStormNoisePerYard;
+        SetPsVector(kPsStorm + 0, static_cast<float>(Fraction(-tiles * 1.2 * 0.25)), static_cast<float>(Fraction(tiles * 0.6 * 0.9)), static_cast<float>(Fraction(-tiles * 2.0 * 0.8)), static_cast<float>(Fraction(-tiles * 7.0 * 0.12)));
+        SetPsVector(kPsStorm + 2, draw.fogColor.r / 255.0f, draw.fogColor.g / 255.0f, draw.fogColor.b / 255.0f, draw.fogStart);
+
+        // Up to the world's far plane with the world's projection, depth-tested against everything drawn so far.
+        // Past it the low-detail horizon was drawn with a projection and a depth range of its own: the wall's part
+        // out there goes the same way, so that the horizon's hills hide it, and the world's pass clips it at its far
+        // plane. Without the horizon pass the world's pass keeps it at its far plane, in front of the sky.
+        DrawStormPass(draw, draw.viewProj, draw.horizon ? 0.0f : static_cast<float>(BleakStorm::kWorldFarClamp), 0.0f, depth);
+
+        if (draw.horizon) {
+            // The world's copy of the depth knows nothing of the horizon: it reads "far away" out there, so the foot
+            // has no seam and no soft edge past the far plane, only the depth test.
+            GxXformSetViewport(minX, maxX, minY, maxY, draw.horizonMinZ, draw.horizonMaxZ);
+            DrawStormPass(draw, draw.horizonViewProj, static_cast<float>(BleakStorm::kHorizonFarClamp), draw.farZ, depth);
+            GxXformSetViewport(minX, maxX, minY, maxY, minZ, maxZ);
+        }
+    }
+
+    // In the storm: a faint purple over the world (the full-screen quad covers the world's viewport).
+    if (draw.tint > 0.0f) {
+        float noOffset[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
+        GxRsSet(GxRs_DepthTest, 0);
+        GxRsSet(GxRs_VertexShader, s_vertexShader);
+        GxRsSet(GxRs_PixelShader, s_pixelShaders[Ps_StormTint]);
+        GxShaderConstantsSet(GxSh_Vertex, kVsHalfPixel, noOffset, 1);
+        SetPsVector(kPsStorm, 0x6A / 255.0f, 0x2C / 255.0f, 0x91 / 255.0f, Clamp(draw.tint, 0.0f, 0.5f));
+        GxPrimVertexPtr(4, s_quadPos, sizeof(C3Vector), nullptr, 0, nullptr, 0, s_quadTex, sizeof(C2Vector), nullptr, 0);
+        GxPrimIndexPtr(4, s_quadIndices);
+        GxDraw(&s_quadBatch, 1);
+    }
+
+    g_theGxDevicePtr->RsPop();
 }

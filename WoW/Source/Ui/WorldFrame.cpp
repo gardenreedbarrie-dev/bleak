@@ -71,6 +71,7 @@
 #include "WoW/Source/Ui/CommentatorFrame.h"
 #include "WoW/Source/Ui/DressUpModelFrame.h"
 #include "WoW/Source/Ui/BleakholdDance.h"
+#include "WoW/Source/Ui/BleakholdStorm.h"
 #include "WoW/Source/Ui/EmojiBubbleFrame.h"
 #include "WoW/Source/Ui/GameUI.h"
 #include "WoW/Source/Ui/MailInfo.h"
@@ -1779,15 +1780,21 @@ void CGWorldFrame::OnWorldRender() {
     GxuFlushDrawList(GxuCat_0, *World::GetCamPos());
     CWorldScene::RenderDetailDoodads();
 
+    // BLEAKHOLD(storm): the Bleakhold Royale storm wall right after the liquids in both orders. The water writes no
+    // depth, so the wall blends over it; the transparent models, particles and weather of the camera's side of the
+    // water (M2PASS_2 under water, M2PASS_1 above it) come after and blend over the wall, so the spell effects and
+    // glows in front of it keep their colour. The trade-off: those behind it show over it too, untinted.
     if (World::SceneCamLiquidStatus(nullptr)) {
         CWorldScene::RenderBarriers(this->m_elapsedSec);
         scene->Draw(M2PASS_1);
         CWorldScene::RenderWeather();
         CWorldScene::RenderLiquidPass();
+        CGBleakholdStorm::OnWorldRender();
         scene->Draw(M2PASS_2);
     } else {
         scene->Draw(M2PASS_2);
         CWorldScene::RenderLiquidPass();
+        CGBleakholdStorm::OnWorldRender();
         CWorldScene::RenderWeather();
         CWorldScene::RenderBarriers(this->m_elapsedSec);
         scene->Draw(M2PASS_1);

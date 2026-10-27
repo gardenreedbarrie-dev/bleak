@@ -363,9 +363,23 @@ A solo free-for-all battle royale: 20 to 40 players at level 80 on their own isl
 - Drop: "Open parachute" while you fall (or a key: Key Bindings, Bleakhold, "Bleakhold Royale: open the
   parachute"); it opens by itself 2.5 seconds into the fall.
 - Fight: the top bar (players alive, your eliminations, the storm's timer and stage, its damage while you are
-  outside the circle), the kill feed, the kill announcer (a banner and a voice line), a purple screen edge and an
-  arrow at the minimap's edge to the safe zone while you are outside, and the island map (key "Bleakhold Royale:
-  island map", `/bh royale map` or the orb) with the storm circles, orbs, supply drops and your own arrow.
+  outside the circle), the kill feed, the kill announcer (a banner and a voice line), a purple screen edge while you
+  are outside, an arrow at the minimap's edge to the safe zone with its distance (dimmed, with how far inside you
+  are, once you are in it), and the island map (key "Bleakhold Royale: island map", ALT-M unless that key was taken,
+  `/bh royale map` or the orb) with the storm circles, orbs, supply drops and your own arrow.
+- Storm wall (BLEAKHOLD(storm), Bleakhold.exe only): the storm's edge is a tall translucent purple wall in the world,
+  where it is at every moment (also while it moves), brighter where it meets the ground; the next circle is a pale
+  ring on the ground, and the world turns faintly purple while your camera is in the storm. It shows from the moment
+  the first circle is revealed, 15 seconds before the drop; the lobby lies outside the first circle but the storm
+  cannot reach it, so the world stays untinted there. Distant hills hide it as they hide anything behind them, also
+  past the view distance (it is drawn the way the horizon is), and spell effects in front of it keep their colour.
+  The addon hands the exe the circle of every `ROYS` (`BleakholdStorm_Set`, `WoW/Source/Ui/BleakholdStorm.h`), and
+  the exe moves it exactly as the addon's own timers do (`Engine/Source/BleakFx/BleakStorm.h`, tested by
+  `Tools/StormWall/tests/run_tests.sh` against the same cases as the addon). `/bh royale wall` says whether it
+  draws, `/bh royale wall on|off` sets the CVar `bleakStormWall` (default `1`; `2` the wall without the ring), and
+  `/bh royale wall test [radius] [seconds]` puts a closing test circle around you on any map (`stop` ends it). It
+  needs the Direct3D 9 renderer with shader model 3, but not BleakFx: it draws with `bleakFx 0` too; the soft line
+  where it meets the ground needs BleakFx's depth buffer (Multisampling 1x).
 - Eliminated: the spectator bar (Killer, Prev, Next, Queue again, Leave) and the end card (placement,
   eliminations, damage, healing, time survived, rewards).
 - The kill announcer is the battleground one (below): it plays in Royale matches too.
@@ -483,7 +497,8 @@ effect; they are the `bleakFx*` CVars, saved in `Config.wtf`.
   `bleakFxVibrance`, `bleakFxWarmth`, `bleakFxBrightness`, `bleakFxShadows`, `bleakFxVignette`, `bleakFxAA` (0
   off, 1 FXAA, 2 SMAA), `bleakFxSharpen`, `bleakFxWater` (0 the stock water), `bleakFxWaterReflections`,
   `bleakFxWaterRipples`, `bleakFxGrassWind` (0 still - 2) and `bleakFxGrassParting`; each one's description gives
-  its range.
+  its range. The Bleakhold Royale storm wall has its own, `bleakStormWall` (0 off, 1 the wall and the next circle's
+  ring, 2 the wall only), and is drawn whatever `bleakFx` is (Bleakhold Royale, above).
 - Anti-aliasing: SMAA 1x (`bleakFxAA 2`, the default) is the reference implementation of SMAA by Jimenez et al.
   (MIT, `ThirdParty/SMAA`): luma edges, the High preset, compiled for shader model 3; FXAA (`bleakFxAA 1`) is the
   cheaper choice.
@@ -548,7 +563,7 @@ this works with signature checks on or off.
 | `docs/BleakholdProtocol.md` | Message protocol between the Bleakhold server module and the UI |
 | `Server/mod-bleakhold-ui/` | AzerothCore module: server side of the Bleakhold UI protocol |
 | `Engine/Source/ModernAssets/` | Runs those conversions on the files the client opens |
-| `Engine/Source/BleakFx/` | Post-processing of the 3D world (ambient occlusion, light shafts, bloom, grading, FXAA, sharpening), the water shaders and their HLSL sources |
+| `Engine/Source/BleakFx/` | Post-processing of the 3D world (ambient occlusion, light shafts, bloom, grading, FXAA, sharpening), the water shaders, the Bleakhold Royale storm wall and their HLSL sources |
 | `Tools/WowClient/` | The `WowClient` executable target |
 | `Tools/XvidDecoder/` | x64 movie decoder that replaces the original 32-bit `DivxDecoder.dll`, linked into the executables (the client ships no DLL) |
 

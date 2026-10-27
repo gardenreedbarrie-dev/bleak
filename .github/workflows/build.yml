@@ -300,6 +300,9 @@ jobs:
       - name: Grass wind shader patch tests
         run: bash Tools/GrassWind/tests/run_tests.sh
 
+      - name: Storm wall geometry tests
+        run: bash Tools/StormWall/tests/run_tests.sh
+
       - name: Server module tests
         run: bash Server/mod-bleakhold-ui/tests/run_tests.sh --fuzz-iterations 100000 --fuzz-seconds 20
 

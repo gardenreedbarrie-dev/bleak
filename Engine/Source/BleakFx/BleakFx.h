@@ -2,14 +2,17 @@
 #define ENGINE_SOURCE_BLEAKFX_BLEAKFX_H
 
 #include <cstdint>
+#include "Engine/Source/BleakFx/BleakStorm.h"
 #include "Engine/Source/Tempest/C3Vector.h"
+#include "Engine/Source/Tempest/C44Matrix.h"
 #include "Engine/Source/Tempest/CImVector.h"
 
 class CGxShader;
 
 // BLEAKHOLD(bleakfx): post-processing of the 3D world after it is drawn and before the interface: ambient occlusion
 // and light shafts from the depth buffer, bloom, clarity (local contrast), colour grading, vignette, SMAA or FXAA and
-// contrast-adaptive sharpening; and water with reflections, refraction and colour by depth. The shaders
+// contrast-adaptive sharpening; water with reflections, refraction and colour by depth; and the wall of the Bleakhold
+// Royale storm (BleakStorm.h). The shaders
 // (Shaders/*.hlsl, ps_3_0 and vs_3_0) are compiled with fxc at build time and created from memory, so they need no
 // game files. Runs on the Direct3D 9 devices with shader model 3 only;
 // anywhere else the frame stays exactly as the stock client draws it. The settings are the bleakFx* console
@@ -41,6 +44,42 @@ namespace BleakFx {
         float fogOffset;
         // The sky shows the sun (DayNight::BleakSunDrawn): no skybox of the zone or of the WMO covers it.
         bool sunVisible;
+    };
+
+    // BLEAKHOLD(storm): one frame of the Bleakhold Royale storm wall (WoW/Source/Ui/BleakholdStorm.h).
+    struct StormDraw {
+        // The wall on the storm's edge and the next circle's ring (BleakStorm::Build); either may be empty.
+        const BleakStorm::Vertex* wall;
+        uint32_t wallVertexCount;
+        const uint16_t* wallIndices;
+        uint32_t wallIndexCount;
+        const BleakStorm::Vertex* ring;
+        uint32_t ringVertexCount;
+        const uint16_t* ringIndices;
+        uint32_t ringIndexCount;
+        // The world position the vertices are relative to, the camera relative to it, and the view and projection
+        // the world is drawn with (from a position relative to the origin into clip space).
+        double origin[3];
+        float eye[3];
+        C44Matrix viewProj;
+        // Past the world's far plane farZ (a view depth), when horizon (BleakStorm::HorizonPass): the view and the
+        // horizon's projection, and the depth range the horizon is drawn into (CWorldScene::RenderHorizon).
+        bool horizon;
+        C44Matrix horizonViewProj;
+        float horizonMinZ;
+        float horizonMaxZ;
+        float farZ;
+        // A steady clock that runs faster while the storm moves (seconds), and how much it moves (0 - 1).
+        double phase;
+        float moving;
+        // How strongly the wall shows (0 - 1), and the purple over the whole world while the camera is in the storm
+        // (0 none).
+        float strength;
+        float tint;
+        // The world's fog: its colour, and the view depths where it starts and where it is complete.
+        CImVector fogColor;
+        float fogStart;
+        float fogEnd;
     };
 
     // Registers the console variables. Called by every world frame; registering twice keeps the values.
@@ -79,6 +118,18 @@ namespace BleakFx {
     // sun (DayNight::BleakSunDrawn, after the world is drawn: a WMO's skybox is chosen while it is drawn); skyShown:
     // the sky was drawn at all (outdoors), so the sun lights the world even behind a skybox.
     void RenderWorld(bool sunVisible, bool skyShown);
+
+    // BLEAKHOLD(storm): "" when this device draws the storm wall, else why not: "device" (not Direct3D 9 with shader
+    // model 3) or "shaders" (built without them, or the driver refused them). Independent of the bleakFx switch: the
+    // wall shows the game's state, it is not a look.
+    const char* StormSupport();
+
+    // In the world pass, after the liquids and before the transparent models and particles on the camera's side of
+    // the water (CGWorldFrame::OnWorldRender): draws the wall and the ring with the depth test and no depth writes,
+    // alpha-blended, up to the world's far plane and, with draw.horizon, past it the way the horizon is drawn; then
+    // the tint. The soft foot needs the readable depth buffer (BleakFx on, multisampling off): the water's copy of
+    // this frame, else a copy made here. Never into a texture target.
+    void RenderStorm(const StormDraw& draw);
 }
 
 #endif

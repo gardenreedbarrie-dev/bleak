@@ -204,6 +204,8 @@ class CWorldScene {
 
     static void BuildViewMatrices(const C3Vector& position);
     static void RenderHorizon();
+    // BLEAKHOLD(storm): the depth range RenderHorizon draws into, between the world's and the sky's.
+    static void BleakHorizonDepthRange(float& minZ, float& maxZ);
     static void UpdateSortedModels();
     static void RenderEntitys();
     static void CullModelSplitBody(CM2Model* model, uint32_t boneId, int32_t skip);

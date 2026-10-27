@@ -1,0 +1,23 @@
+# The storm circle at time t (seconds after the ROYS arrived), checked against Bleakhold.exe's BleakStorm::CircleAt
+# (test_storm.cpp) and the addon's R.Circle (Tools/UiLint/tests/test_royale.lua), so that the wall and the HUD cannot
+# drift apart. An empty field is nil (a ROYS field left empty). recvAt is 1000.25 in both tests.
+# name,curX,curY,curR,nextX,nextY,nextR,shrinkStartMs,shrinkEndMs,t,x,y,r,moving
+hold,-267,-267,320,-200,-300,180,10000,30000,5,-267,-267,320,0
+start exactly,-267,-267,320,-200,-300,180,10000,30000,10,-267,-267,320,0
+just after start,-267,-267,320,-200,-300,180,10000,30000,10.002,-266.9933,-267.0033,319.986,1
+halfway,-267,-267,320,-200,-300,180,10000,30000,20,-233.5,-283.5,250,1
+quarter to go,-267,-267,320,-200,-300,180,10000,30000,25,-216.75,-291.75,215,1
+end exactly,-267,-267,320,-200,-300,180,10000,30000,30,-200,-300,180,0
+after the end,-267,-267,320,-200,-300,180,10000,30000,95,-200,-300,180,0
+shrinking now,100,-50,520,80,-40,320,0,20000,5,95,-47.5,470,1
+shrinking now at 0,100,-50,520,80,-40,320,0,20000,0,100,-50,520,0
+no start field,100,-50,520,80,-40,320,,20000,10,90,-45,420,1
+no next circle,100,-50,520,,,,0,20000,10,100,-50,520,0
+no shrink end,100,-50,520,80,-40,320,0,,10,100,-50,520,0
+shrink end 0,100,-50,520,80,-40,320,0,0,10,100,-50,520,0
+end before start,100,-50,520,80,-40,320,20000,10000,15,80,-40,320,0
+end before start early,100,-50,520,80,-40,320,20000,10000,5,100,-50,520,0
+end equals start,100,-50,520,80,-40,320,10000,10000,10,80,-40,320,0
+before it arrived,100,-50,520,80,-40,320,0,20000,-1,100,-50,520,0
+closing to nothing,0,0,40,5,5,0,0,40000,30,3.75,3.75,10,1
+far corner of a map,17000,-17000,1080,16800,-16900,520,1500,171500,86.5,16900,-16950,800,1

@@ -1,8 +1,9 @@
 -- Bleakhold: Bleakhold Royale (docs/BleakholdProtocol.md section 17), the core. Everything shown is server state
 -- (QUEUE kind B, ROYS ROYM ROYO ROYK ROYV ROYE, parsed in State.lua); the client counts the timers down and sends
 -- only the player's wishes: QJOIN B / QLEAVE / QREPLY (the queue and its ready check), RDROP (a landing pin),
--- RDEPLOY (the parachute) and RSPEC (the spectator camera). This file holds what the map (RoyaleMap.lua) and the HUD
--- (RoyaleHud.lua) share: the match helpers (storm circle now, the player's own position), the intents with their
+-- RDEPLOY (the parachute) and RSPEC (the spectator camera). Bleakhold.exe also draws the storm circle as a wall in the
+-- world (RoyaleHud.lua hands it the circle: BleakholdStorm_Set). This file holds what the map (RoyaleMap.lua) and the
+-- HUD (RoyaleHud.lua) share: the match helpers (storm circle now, the player's own position), the intents with their
 -- client-side gates, the patch gate, and the queue side: the Royale page of Activities, the ready check popup, the
 -- minimap orb, /bh royale and a scripted match for /bh demo.
 --
@@ -960,10 +961,14 @@ R.orb = ns.Orbs.Add({
     end,
 })
 
-ns.AddCommand("royale", "Bleakhold Royale: /bh royale [map|leave|voice off|male|female|quiet|normal]", function(args)
+local ROYALE_USAGE = "Bleakhold Royale: /bh royale [map|leave|wall [on|off|test|stop]|voice off|male|female|quiet"
+    .. "|normal]"
+ns.AddCommand("royale", ROYALE_USAGE, function(args)
     local a, b = (args or ""):lower():match("^(%S*)%s*(%S*)")
     if a == "map" then
         UI.Open("royalemap", true)
+    elseif a == "wall" then
+        ns.RoyaleHud.WallCommand((args or ""):match("^%S*%s*(.*)$"))   -- the storm wall (Bleakhold.exe)
     elseif a == "leave" then
         R.LeaveMatch()
     elseif a == "voice" and (b == "off" or b == "male" or b == "female") then
@@ -1051,7 +1056,8 @@ local function demoKill(killer, kc, victim, vc, cause, kills, multi, streak)
 end
 
 local function demoMatch()
-    local st = { phase = 0, ms = 6000, alive = 24, me = 0, curX = -267, curY = -267, curR = 1080, myX = 452, myY = 450 }
+    local st = { phase = 0, ms = 6000, alive = 24, me = 0, curX = -267, curY = -267, curR = 860, myX = 452,
+        myY = 450 }
     demo.st = st
     demoMap()
     demoState()
@@ -1060,13 +1066,14 @@ local function demoMatch()
         demoState()
     end)
     demoAfter(11, function()
-        st.stage, st.nextX, st.nextY, st.nextR = 1, -150, -310, 520
+        -- circle 1 is shown; like the server, the stage stays 0 until the drop
+        st.nextX, st.nextY, st.nextR = -150, -310, 520
         demoPush("ROYV", { { "R", 1, -150, -310, "", "" } })
         st.ms = 15000
         demoState()
     end)
     demoAfter(26, function()
-        st.phase, st.ms, st.me = 2, 6000, 1
+        st.phase, st.ms, st.me, st.stage = 2, 6000, 1, 1
         st.myX, st.myY = st.pinX or -45, st.pinY or -170
         demoState()
     end)

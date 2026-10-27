@@ -8,7 +8,10 @@
 --                    (first blood, streaks, multi-kills) is Announcer.lua's (BGANN, section 18) in every battleground
 --   the parachute    "Open parachute" while falling from the drop (RDEPLOY; key binding BLEAKHOLD_ROYALE_DEPLOY)
 --   the storm        a purple screen edge while outside the circle, and an arrow on the minimap's edge to the safe
---                    zone (the next circle once shown) with the distance
+--                    zone (the next circle once shown) with the distance, or how far inside it the player is; in
+--                    Bleakhold.exe also the storm wall in the world (BleakholdStorm_*, WoW/Source/Ui/BleakholdStorm.h):
+--                    the circle of every ROYS goes to the exe, which moves it like R.Circle and draws a purple wall
+--                    on its edge and a pale ring where the next circle is; /bh royale wall [on|off|test|stop]
 --   spectating       "Watching <name> (N kills)" with Killer / Prev / Next (RSPEC), Queue again (QJOIN B), Leave
 --   the end card     ROYE: "#1 VICTORY" or "#7 of 32", eliminations, damage, healing, time survived, rewards
 --   the countdown    the last seconds before the drop in the centre (Countdown.lua CD.StartGeneric)
@@ -368,7 +371,9 @@ ns.On("ROYALE_EVENT", function(e)
         local title = e.value .. (e.value == 1 and " PLAYER LEFT" or " PLAYERS LEFT")
         H.Banner({ key = "eN", kicker = "", title = title, color = C.goldPale })
     elseif e.kind == "R" then
+        local key = ns.RoyaleMap.KeyText()
         local kicker = "The storm circle " .. (e.value > 0 and e.value or "") .. " is shown on the map"
+            .. (key and (" (press " .. key .. ")") or "")
         H.Banner({ key = "eR", kicker = kicker, title = "THE STORM CLOSES IN", color = C.purple })
     elseif e.kind == "S" then
         H.Banner({ key = "eS", kicker = "", title = "THE STORM IS MOVING", color = C.purple })
@@ -475,19 +480,104 @@ function H.UpdateStorm(m)
         tx, ty, tr = m.nextX, m.nextY, m.nextR
     end
     local away = R.OutsideBy(x, y, tx, ty, tr)
-    if not away or away <= 0 or not Minimap then
+    if not away or not Minimap then
         ea:Hide()
         return
     end
+    -- inside the safe zone the arrow stays, dimmed, pointing deeper in, with how far the edge is
+    local inside = away <= 0
     local a = H.MinimapAngle(tx - x, ty - y)
     local scale = (Minimap:GetEffectiveScale() or 1) / (ea:GetEffectiveScale() or 1)
     local radius = (Minimap:GetWidth() or 140) / 2 * scale - 10
     ea:ClearAllPoints()
     ea:SetPoint("CENTER", Minimap, "CENTER", cos(a) * radius, sin(a) * radius)
     ea.tex:SetRotation(a - pi / 2)
-    ea.tex:SetVertexColor(UI.Rgb(H.outside and C.purple or "FFFFFF"))
-    ea.dist:SetText(ceil(away) .. " yd")
+    ea.tex:SetVertexColor(UI.Rgb(H.outside and C.purple or "FFFFFF", inside and 0.45 or 1))
+    ea.dist:SetText(inside and (floor(-away) .. " yd inside") or (ceil(away) .. " yd"))
     ea:Show()
+end
+
+------------------------------------------------------------------------------------------------------
+-- The storm wall in the world (Bleakhold.exe: BleakholdStorm_*). The exe moves the circle each frame exactly as
+-- R.Circle does and forgets it 30 s after the last one; a stock client has none of these functions.
+------------------------------------------------------------------------------------------------------
+H.WALL_REFRESH = 10      -- s: the circle goes again this often without a new ROYS
+
+-- A circle is up from the reveal of circle 1, 15 s before the drop, until the match is decided. In the lobby the
+-- server's ROYS still says stage 0 after the reveal (stage 1 comes with the drop), with the next circle set.
+function H.WallWanted(m)
+    if m == nil or m.phase < R.PHASE.COUNTDOWN or m.phase > R.PHASE.OVERTIME then
+        return false
+    end
+    return (m.stage or 0) >= 1 or (m.phase == R.PHASE.COUNTDOWN and m.nextR ~= nil)
+end
+
+function H.UpdateWall(m)
+    if not BleakholdStorm_Set then
+        return
+    end
+    if not H.WallWanted(m) then
+        if H.wallKey then
+            H.wallKey = nil
+            if BleakholdStorm_Clear then
+                BleakholdStorm_Clear()
+            end
+        end
+        return
+    end
+    -- the lobby lies outside circle 0 but out of the storm's reach: no purple over the world there
+    local noTint = m.me == R.ME.LOBBY
+    local key = m.matchId .. ":" .. tostring(m.recvAt) .. ":" .. tostring(noTint)
+    local now = GetTime()
+    if key == H.wallKey and now - (H.wallSentAt or 0) < H.WALL_REFRESH then
+        return
+    end
+    H.wallKey, H.wallSentAt = key, now
+    local mapId = (S.royaleMap and S.royaleMap.mapId) or R.MAP_ID
+    BleakholdStorm_Set(mapId, m.curX, m.curY, m.curR, m.nextX, m.nextY, m.nextR, m.recvAt, m.shrinkStartMs,
+        m.shrinkEndMs, noTint)
+end
+
+H.WALL_STATUS = {
+    [""] = "drawing the storm circle",
+    off = "off (/bh royale wall on)",
+    device = "needs the Direct3D 9 renderer with shader model 3",
+    shaders = "this Bleakhold.exe has no storm shaders, or the graphics driver refused them",
+    nodata = "on; no storm circle right now",
+    map = "on; the storm circle is for another map",
+}
+
+function H.WallStatusText()
+    if not BleakholdStorm_Status then
+        return "Storm wall: this game is not Bleakhold.exe (the storm shows on the island map and as the purple "
+            .. "screen edge)."
+    end
+    local status = BleakholdStorm_Status()
+    return "Storm wall: " .. (H.WALL_STATUS[status] or tostring(status)) .. "."
+end
+
+-- /bh royale wall [on|off|test [radius [seconds]]|stop]
+function H.WallCommand(args)
+    local cmd, a, b = (args or ""):lower():match("^(%S*)%s*(%S*)%s*(%S*)")
+    if (cmd == "on" or cmd == "off") and GetCVar and GetCVar("bleakStormWall") ~= nil then
+        SetCVar("bleakStormWall", cmd == "on" and "1" or "0")
+    elseif cmd == "test" and BleakholdStorm_Test then
+        local radius = U.Clamp(tonumber(a) or 60, 5, 2000)
+        local seconds = U.Clamp(tonumber(b) or 30, 1, 600)
+        if H.WallWanted(R.Match()) then
+            ns.Print("Storm wall test: not during a match; the wall shows the storm itself.")
+        elseif BleakholdStorm_Test(radius, seconds) then
+            ns.Print(string.format("Storm wall test: a %d yd circle around you closes to %d yd over %d s "
+                .. "(/bh royale wall stop ends it).", radius, radius / 2, seconds))
+        else
+            ns.Print("Storm wall test: no position to put it at.")
+            return
+        end
+    elseif cmd == "stop" and BleakholdStorm_Clear then
+        BleakholdStorm_Clear()
+        H.wallKey = nil
+    end
+    ns.Print(H.WallStatusText())
 end
 
 ------------------------------------------------------------------------------------------------------
@@ -703,6 +793,7 @@ end
 function H.Tick()
     local m = R.Match()
     H.UpdateStorm(m)
+    H.UpdateWall(m)
     H.UpdateBar(m)
     H.UpdateFeed()
     H.UpdateBanner()

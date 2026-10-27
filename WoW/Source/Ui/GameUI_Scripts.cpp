@@ -73,6 +73,7 @@
 #include "WoW/Source/ObjectMgrClient/ObjectMgrClient.h"
 #include "WoW/Source/SoundInterface/SoundInterface2.h"
 #include "WoW/Source/Ui/BleakholdDance.h"
+#include "WoW/Source/Ui/BleakholdStorm.h"
 #include "WoW/Source/Ui/AchievementInfo.h"
 #include "WoW/Source/Ui/ActionBarFrame.h"
 #include "WoW/Source/Ui/AddOns.h"
@@ -6539,6 +6540,8 @@ void LoadScriptFunctions() {
     FriendList::RegisterScriptFunctions();
     // BLEAKHOLD(dance)
     CGBleakholdDance::RegisterScriptFunctions();
+    // BLEAKHOLD(storm)
+    CGBleakholdStorm::RegisterScriptFunctions();
     PetInfoRegisterScriptFunctions();
     WorldMapRegisterScriptFunctions();
     ReputationInfoRegisterScriptFunctions();
@@ -6622,6 +6625,7 @@ void UnloadScriptFunctions() {
     BankUnregisterScriptFunctions();
     FriendList::UnregisterScriptFunctions();
     CGBleakholdDance::UnregisterScriptFunctions();
+    CGBleakholdStorm::UnregisterScriptFunctions();
     PetInfoUnregisterScriptFunctions();
     WorldMapUnregisterScriptFunctions();
     ReputationInfoUnregisterScriptFunctions();

@@ -458,12 +458,198 @@ function(M, ns)
         [19] = 30000, [20] = 20, [22] = -267, [23] = -267 })
     M.Advance(0.3)
     H.ok(not M.env.BleakholdRoyaleVignette:IsShown(), "inside: no edge")
-    H.ok(not ea:IsShown(), "inside the next circle: no arrow")
+    H.ok(ea:IsShown(), "inside the next circle the arrow stays")
+    H.eq(ea.dist:GetText(), "105 yd inside", "how far inside the next circle")
+    local _, _, _, alpha = ea.tex:GetVertexColor()
+    H.ok(alpha and alpha < 0.6, "dimmed inside")
     H.ok(not bar.sub:GetText():find("Outside", 1, true))
     -- a spectator sees neither
     roys(M, { [2] = 3, [6] = 3, [14] = 10, [22] = 300, [23] = -267 })
     M.Advance(0.3)
     H.ok(not M.env.BleakholdRoyaleVignette:IsShown() and not ea:IsShown(), "spectators take no storm")
+end)
+
+-- Bleakhold.exe's storm wall functions, recording what the addon hands them.
+local function fakeStorm(M, status)
+    local log = { sets = {}, clears = 0, tests = {} }
+    M.env.BleakholdStorm_Set = function(...)
+        log.sets[#log.sets + 1] = { n = select("#", ...), ... }
+        return true
+    end
+    M.env.BleakholdStorm_Clear = function() log.clears = log.clears + 1 end
+    M.env.BleakholdStorm_Status = function() return log.status or "" end
+    M.env.BleakholdStorm_Test = function(radius, seconds)
+        log.tests[#log.tests + 1] = { radius, seconds }
+        return true
+    end
+    log.status = status
+    return log
+end
+
+test("royale: the storm wall gets every ROYS circle once, again every 10 s, and goes when the match is decided",
+function(M, ns)
+    local log = fakeStorm(M)
+    connect(M)
+    H.send(M, "ROYM", MAP)
+    -- the lobby before the first circle: nothing
+    roys(M, { [2] = 1, [3] = 30000 })
+    M.Advance(0.3)
+    H.eq(#log.sets, 0, "no circle before the first one is shown")
+    -- circle 1 shown 15 s before the drop, as the server sends it: still stage 0 (1 only from the drop), the next
+    -- circle set; the lobby (450, 452) lies outside circle 0 (r 860) but takes no storm damage, so no tint
+    roys(M, { [2] = 1, [3] = 15000, [14] = 860, [15] = -150, [16] = -310, [17] = 520, [18] = 135000,
+        [19] = 305000 })
+    M.Advance(0.3)
+    H.eq(#log.sets, 1, "the wall from the reveal on, in the lobby")
+    local l = log.sets[1]
+    H.eq(l.n, 11, "eleven arguments")
+    H.eq(l[4], 860); H.eq(l[5], -150); H.eq(l[6], -310); H.eq(l[7], 520)
+    H.eq(l[11], true, "no tint in the lobby")
+    -- stage 2 hold: cur (-267,-267) r 320, next (-200,-300) r 180, moving in 10 s for 20 s
+    roys(M, { [2] = 3, [3] = 0, [6] = 2, [11] = 2, [14] = 320, [15] = -200, [16] = -300, [17] = 180, [18] = 10000,
+        [19] = 30000, [20] = 20 })
+    local recvAt = ns.S.royale.recvAt
+    M.Advance(0.3)
+    H.eq(#log.sets, 2, "one Set per ROYS")
+    local a = log.sets[2]
+    H.eq(a.n, 11, "eleven arguments")
+    H.eq(a[1], 901); H.eq(a[2], -267); H.eq(a[3], -267); H.eq(a[4], 320)
+    H.eq(a[5], -200); H.eq(a[6], -300); H.eq(a[7], 180)
+    H.eq(a[8], recvAt, "recvAt: the GetTime() the ROYS arrived")
+    H.eq(a[9], 10000); H.eq(a[10], 30000)
+    H.eq(a[11], false, "the tint for a fighter")
+    M.Advance(5)
+    H.eq(#log.sets, 2, "no new ROYS: nothing new")
+    M.Advance(5)
+    H.eq(#log.sets, 3, "but again after 10 s (the exe forgets a circle after 30)")
+    -- a ROYS without a next circle or shrink: nil for them, as R.Circle reads them
+    roys(M, { [2] = 3, [6] = 2, [11] = 2, [14] = 320 })
+    M.Advance(0.3)
+    local b = log.sets[#log.sets]
+    H.eq(b[4], 320)
+    H.ok(b[5] == nil and b[6] == nil and b[7] == nil and b[9] == nil and b[10] == nil, "nil next and shrink")
+    H.eq(log.clears, 0)
+    -- a spectator still sees it
+    roys(M, { [2] = 3, [6] = 3, [11] = 2, [14] = 300, [22] = "", [23] = "" })
+    M.Advance(0.3)
+    H.eq(log.sets[#log.sets][4], 300, "spectators get the wall")
+    -- decided: cleared, once
+    local sets = #log.sets
+    roys(M, { [2] = 5, [6] = 3, [11] = 3 })
+    M.Advance(0.3)
+    M.Advance(11)
+    H.eq(log.clears, 1, "cleared at victory, once")
+    H.eq(#log.sets, sets, "no circle after the match")
+    -- a match that goes stale (no ROYS for 25 s) clears it too
+    roys(M, { [1] = 7002, [2] = 3, [6] = 2, [11] = 1, [14] = 900 })
+    M.Advance(0.3)
+    H.eq(log.sets[#log.sets][4], 900)
+    M.Advance(26)
+    H.eq(log.clears, 2, "stale match: cleared")
+end)
+
+test("royale: R.Circle and Bleakhold.exe's BleakStorm::CircleAt agree on Tools/StormWall/tests/circle_cases.csv",
+function(M, ns)
+    local text = host_readfile(repo .. "/Tools/StormWall/tests/circle_cases.csv")
+    H.ok(text, "circle_cases.csv")
+    local recvAt = 1000.25   -- as in test_storm.cpp
+    local cases = 0
+    for line in text:gmatch("[^\n]+") do
+        if not line:match("^#") then
+            local f = {}
+            for field in (line .. ","):gmatch("([^,]*),") do
+                f[#f + 1] = field
+            end
+            H.eq(#f, 14, line)
+            local num = function(v) return v ~= "" and tonumber(v) or nil end
+            local m = {
+                curX = num(f[2]), curY = num(f[3]), curR = num(f[4]), nextX = num(f[5]), nextY = num(f[6]),
+                nextR = num(f[7]), shrinkStartMs = num(f[8]), shrinkEndMs = num(f[9]), recvAt = recvAt,
+            }
+            local x, y, r, moving = ns.Royale.Circle(m, recvAt + tonumber(f[10]))
+            local ok = math.abs(x - tonumber(f[11])) < 1e-3 and math.abs(y - tonumber(f[12])) < 1e-3
+                and math.abs(r - tonumber(f[13])) < 1e-3
+            H.ok(ok, f[1] .. ": " .. x .. ", " .. y .. ", " .. r)
+            H.eq(moving and "1" or "0", f[14], f[1] .. ": moving")
+            cases = cases + 1
+        end
+    end
+    H.ok(cases >= 15, "the cases are there")
+end)
+
+test("royale: a stock client (no BleakholdStorm_*) plays a match without errors", function(M, ns)
+    H.ok(M.env.BleakholdStorm_Set == nil, "the mock has no exe functions")
+    connect(M)
+    roys(M, { [2] = 3, [6] = 2, [11] = 2, [14] = 320, [15] = -200, [16] = -300, [17] = 180, [18] = 0, [19] = 9000 })
+    M.Advance(1)
+    M.env.SlashCmdList.BLEAKHOLD("royale wall")
+    H.ok(M.chat[#M.chat].msg:find("not Bleakhold.exe", 1, true), "/bh royale wall says why")
+end)
+
+test("royale: /bh royale wall shows the status, switches the CVar and runs the test circle", function(M, ns)
+    local log = fakeStorm(M, "nodata")
+    M.cvars.bleakStormWall = "1"
+    M.env.SlashCmdList.BLEAKHOLD("royale wall")
+    H.contains(M.chat[#M.chat].msg, "Storm wall: on; no storm circle right now.")
+    M.env.SlashCmdList.BLEAKHOLD("royale wall off")
+    H.eq(M.cvars.bleakStormWall, "0")
+    log.status = "off"
+    M.env.SlashCmdList.BLEAKHOLD("royale wall")
+    H.contains(M.chat[#M.chat].msg, "off (/bh royale wall on)")
+    M.env.SlashCmdList.BLEAKHOLD("royale wall on")
+    H.eq(M.cvars.bleakStormWall, "1")
+    log.status = ""
+    M.env.SlashCmdList.BLEAKHOLD("royale wall test")
+    H.eq(log.tests[1][1], 60); H.eq(log.tests[1][2], 30)
+    H.ok(M.chat[#M.chat - 1].msg:find("60 yd circle around you closes to 30 yd over 30 s", 1, true), "test text")
+    M.env.SlashCmdList.BLEAKHOLD("royale wall test 9999 abc")
+    H.eq(log.tests[2][1], 2000, "radius clamped"); H.eq(log.tests[2][2], 30, "garbage seconds: the default")
+    M.env.SlashCmdList.BLEAKHOLD("royale wall stop")
+    H.eq(log.clears, 1)
+    log.status = "shaders"
+    M.env.SlashCmdList.BLEAKHOLD("royale wall")
+    H.contains(M.chat[#M.chat].msg, "no storm shaders")
+    -- outside a match the HUD leaves a test circle alone
+    M.Advance(12)
+    H.eq(log.clears, 1, "no match: no Clear")
+    -- during a match the storm itself is shown
+    connect(M)
+    roys(M, { [2] = 3, [6] = 2, [11] = 2, [14] = 320 })
+    M.Advance(0.3)
+    M.env.SlashCmdList.BLEAKHOLD("royale wall test")
+    H.eq(#log.tests, 2, "no test in a match")
+    H.ok(M.chat[#M.chat - 1].msg:find("not during a match", 1, true), "says why")
+end)
+
+test("royale: the island map gets ALT-M once when it is free, and the circle banner names the key", function(M, ns)
+    connect(M)
+    H.ok(M.bindings["ALT-M"] == nil, "not before a match")
+    roys(M, { [2] = 0 })
+    M.Advance(0.3)
+    H.eq(M.bindings["ALT-M"], "BLEAKHOLD_ROYALE_MAP")
+    H.eq(M.savedBindings, 1, "saved")
+    M.bindings["ALT-M"] = nil
+    roys(M, { [2] = 1 })
+    M.Advance(0.3)
+    H.ok(M.bindings["ALT-M"] == nil, "a removed binding is not put back")
+    -- the banner names whatever key the map has
+    M.bindings["CTRL-SHIFT-M"] = "BLEAKHOLD_ROYALE_MAP"
+    roys(M, { [2] = 3, [6] = 2, [11] = 1 })
+    H.send(M, "ROYV", { { "R", 2, "", "", "", "" } })
+    M.Advance(0.2)
+    H.eq(ns.RoyaleHud.banner.kicker:GetText(), "The storm circle 2 is shown on the map (press CTRL-SHIFT-M)")
+end)
+
+test("royale: a taken ALT-M is left alone and the banner has no key", function(M, ns)
+    M.bindings["ALT-M"] = "TOGGLEMUSIC"
+    connect(M)
+    roys(M, { [2] = 3, [6] = 2, [11] = 1 })
+    M.Advance(0.3)
+    H.eq(M.bindings["ALT-M"], "TOGGLEMUSIC")
+    H.ok(M.chat[#M.chat].msg:find("ALT-M is taken", 1, true), "says so once")
+    H.send(M, "ROYV", { { "R", 2, "", "", "", "" } })
+    M.Advance(0.2)
+    H.eq(ns.RoyaleHud.banner.kicker:GetText(), "The storm circle 2 is shown on the map")
 end)
 
 -- The stage pips shown and lit.
@@ -915,4 +1101,30 @@ test("royale: /bh demo plays a whole match through the real receive path", funct
     M.env.SlashCmdList.BLEAKHOLD("demo off")
     M.Advance(0.5)
     H.ok(not M.env.BleakholdRoyaleBar:IsShown(), "demo off: the HUD goes")
+end)
+
+test("royale: /bh demo shows circle 1 in the lobby as the server does: stage 0 until the drop", function(M, ns)
+    local log = fakeStorm(M)
+    M.env.SlashCmdList.BLEAKHOLD("demo")
+    M.Advance(1)
+    ns.UI.Open("royale")
+    M.Advance(0.3)
+    ns.Royale.page.join:Click()
+    M.Advance(3.5)
+    M.env.BleakholdRoyaleReady.accept:Click()
+    -- the match starts 1 s later; circle 1 is shown 11 s into it, the drop comes at 26 s
+    for _ = 1, 20 do
+        M.Advance(1)
+    end
+    local m = ns.S.royale
+    H.eq(m.phase, 1); H.eq(m.stage, 0, "stage 0 in the lobby"); H.eq(m.nextR, 520)
+    H.ok(#log.sets >= 1, "the wall in the lobby")
+    H.eq(log.sets[#log.sets][11], true, "no tint in the lobby")
+    for _ = 1, 10 do
+        M.Advance(1)
+    end
+    H.eq(ns.S.royale.stage, 1, "stage 1 from the drop")
+    H.eq(log.sets[#log.sets][11], false, "the tint once dropped")
+    M.env.SlashCmdList.BLEAKHOLD("demo off")
+    M.Advance(0.5)
 end)

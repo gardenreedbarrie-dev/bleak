@@ -1193,7 +1193,8 @@ in a match. After a `/reload` in a match the client sends `GET ROYS;ROYM` once `
 - `me`: 0 in the lobby, 1 dropping, 2 alive, 3 spectating, 4 left, 5 the winner.
 - `kills`: the player's eliminations. `placement`: empty while the player is in the fight.
 - `pinX`, `pinY`: the player's snapped landing pin; empty when none is set.
-- `stage`: the storm stage, 1 to `stages` (0 before the first circle is shown); `stages` + 1 in overtime (phase 4).
+- `stage`: the storm stage, 1 to `stages` from the drop (0 in the lobby, also once circle 1 is shown there 15 s
+  before the drop: `next` is set then); `stages` + 1 in overtime (phase 4).
 - `curX`, `curY`, `curR`: the storm circle when the message was sent.
 - `nextX`, `nextY`, `nextR`: the next circle; empty until it is shown.
 - `shrinkStartMs`, `shrinkEndMs`: until the next shrink starts and ends. `shrinkStartMs` 0 and `shrinkEndMs` above 0:
@@ -1206,6 +1207,13 @@ in a match. After a `/reload` in a match the client sends `GET ROYS;ROYM` once `
 
 The server sends `ROYS` when the player arrives, on every change of `phase`, `stage` or `me`, after `RDROP` and
 `RSPEC`, every 5 s, and for `GET ROYS`.
+
+The Bleakhold client draws the storm in the world from these fields alone: `cur` as a wall, moved towards `next`
+between `shrinkStartMs` and `shrinkEndMs` exactly as the HUD and the island map move it, and `next` as a ring on the
+ground (the addon hands each `ROYS` to the client's `BleakholdStorm_Set`). It shows from the moment circle 1 is shown
+(phase 1 with `next` set, or any `stage` from 1) until the match is decided; while `me` is 0 (the lobby, which lies
+outside circle 0 but takes no storm damage) the world is not tinted purple outside the circle. A client that misses
+`ROYS` for 30 s stops drawing it.
 
 ### ROYM (the island map)
 

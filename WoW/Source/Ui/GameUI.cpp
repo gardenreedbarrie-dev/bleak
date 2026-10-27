@@ -92,6 +92,7 @@
 #include "WoW/Source/Ui/DressUpModelFrame.h"
 #include "WoW/Source/Ui/DuelInfo.h"
 #include "WoW/Source/Ui/BleakholdDance.h"
+#include "WoW/Source/Ui/BleakholdStorm.h"
 #include "WoW/Source/Ui/EmojiBubbleFrame.h"
 #include "WoW/Source/Ui/EquipmentManager.h"
 #include "WoW/Source/Ui/GameUI.h"
@@ -1914,6 +1915,8 @@ void CGGameUI::InitializeGame() {
     CGEmojiBubbleFrame::InitializeGame();
     // BLEAKHOLD(dance): the bleakDances and bleakDanceMusic CVars, also before FrameXML.
     CGBleakholdDance::InitializeGame();
+    // BLEAKHOLD(storm): the bleakStormWall CVar.
+    CGBleakholdStorm::InitializeGame();
     CGCharacterInfo::InitializeGame();
     CGWorldStateInfo::InitializeGame();
     CGMinigameInfo::InitializeGame();
@@ -7180,6 +7183,8 @@ void CGGameUI::ShutdownGame() {
     CGEmojiBubbleFrame::ShutdownGame();
     // BLEAKHOLD(dance)
     CGBleakholdDance::ShutdownGame();
+    // BLEAKHOLD(storm)
+    CGBleakholdStorm::ShutdownGame();
     CGCharacterInfo::ShutdownGame();
     CGWorldStateInfo::ShutdownGame();
     CGMinigameInfo::ShutdownGame();
@@ -7524,6 +7529,7 @@ void CGGameUI::Shutdown() {
     // BLEAKHOLD(emoji): before the world frame (and the emoji bubbles under it) is deleted below.
     CGEmojiBubbleFrame::ClearAll();
     CGBleakholdDance::ClearAll();
+    CGBleakholdStorm::ClearAll();
     CGWorldMap::ClearArrowFrames();
     CGChat::SaveChatSettings();
     CGUIMacros::SaveMacros();
@@ -8199,6 +8205,8 @@ void CGGameUI::LeaveWorld() {
     CGEmojiBubbleFrame::ClearAll();
     // BLEAKHOLD(dance): nor dances.
     CGBleakholdDance::ClearAll();
+    // BLEAKHOLD(storm): nor the storm wall's circle.
+    CGBleakholdStorm::ClearAll();
 
     if (!CGWorldFrame::s_currentWorldFrame) {
         SErrDisplayAppFatalMessage("", "", 0);

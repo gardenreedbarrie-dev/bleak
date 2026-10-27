@@ -46,7 +46,10 @@ ART_RE = re.compile(r"(?:UI\.)?ART\s*\.\.\s*[\"']([A-Za-z0-9_]+)[\"']")
 
 # Lua functions Bleakhold.exe adds to the 3.3.5a API, read from the client's own registration table so the lint
 # and the client cannot drift apart (the addon checks that each exists before calling it).
-CLIENT_API_SOURCES = (("WoW/Source/Ui/BleakholdDance.cpp", re.compile(r'\{\s*"(BleakholdDance_\w+)",\s*&Script_')),)
+CLIENT_API_SOURCES = (
+    ("WoW/Source/Ui/BleakholdDance.cpp", re.compile(r'\{\s*"(BleakholdDance_\w+)",\s*&Script_')),
+    ("WoW/Source/Ui/BleakholdStorm.cpp", re.compile(r'\{\s*"(BleakholdStorm_\w+)",\s*&Script_')),
+)
 
 
 def client_api(root):

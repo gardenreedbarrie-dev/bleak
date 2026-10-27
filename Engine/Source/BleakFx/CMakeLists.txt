@@ -24,6 +24,9 @@ set(BLEAKFX_SHADERS
     bh_smaa_edge_ps:ps_3_0
     bh_smaa_weights_ps:ps_3_0
     bh_smaa_blend_ps:ps_3_0
+    bh_storm_vs:vs_3_0
+    bh_storm_ps:ps_3_0
+    bh_storm_tint_ps:ps_3_0
 )
 
 # What the shaders include.
