@@ -26,10 +26,12 @@ aborts when a DBC's column count or row size is different).
 It needs Python 3.10 or newer and nothing else. Run it with `-I`.
 
 The client side of the races (ids up to 31, Blood Elf and Draenei scenes, voices and Death Knight filters for the
-new races) is already in the decompilation, `BLEAKHOLD(races)`. The character creation screen needs Bleakhold glue
-UI as well: the stock GlueXML has 10 race buttons and stops with "Too many races!" when ChrRaces holds more playable
-races. Install the races together with that glue UI. The new races use the template races' models; HD models are a
-later step.
+new races) is already in the decompilation, `BLEAKHOLD(races)`. The client finds High Elf and Eredar by their
+`client_file_string` (`HighElf`, `Eredar`, in any case), not by id, so the same client works with the build's 22 and
+23 and with the realm's 15 and 19; a race with another file name borrows nothing. The character creation screen
+needs Bleakhold glue UI as well: the stock GlueXML has 10 race buttons and stops with "Too many races!" when
+ChrRaces holds more playable races. Install the races together with that glue UI. The new races use the template
+races' models; HD models are a later step.
 
 ## The easy way
 
@@ -241,7 +243,7 @@ Some race handling is in AzerothCore's code, not its data, and needs a module or
 | `realm_id` | The race's id on the realm `update` works on, when that realm's own race patch put it in another ChrRaces slot (Bleakhold: High Elf 15, Eredar 19); `null` or missing: `id`. `update` refuses to run unless the realm's ChrRaces holds the race there under its `client_file_string`. `build` ignores it |
 | `name`, `names` | Name for every locale; `names` overrides single locales (`enUS`, `koKR`, `frFR`, `deDE`, `zhCN`, `zhTW`, `esES`, `esMX`, `ruRU`) |
 | `name_female`, `name_male` | Gendered names. `null`: the race's name wherever the template has a gendered name (German, French, ...), empty elsewhere |
-| `client_file_string` | 1-13 letters or digits; names portraits, corpse skeletons and Lua race tokens (`UnitRace`) |
+| `client_file_string` | 1-13 letters or digits; names portraits, corpse skeletons and Lua race tokens (`UnitRace`). `HighElf` and `Eredar` are how the client knows the Bleakhold races (Blood Elf and Draenei scenes, voices and portraits) |
 | `template_race` | The race cloned for looks, sounds and classes, and its racials unless `racials` drops them |
 | `faction`, `faction_race` | `alliance` or `horde`, and a playable race of that faction for the faction template, reputations and content masks |
 | `faction_template` | A FactionTemplate id instead of the faction race's |

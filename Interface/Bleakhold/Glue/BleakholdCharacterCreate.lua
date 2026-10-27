@@ -2,11 +2,11 @@
 --
 -- High Elf (Alliance, ChrRaces clientFileString "HighElf") and Eredar (Horde, "Eredar"), found by file name
 -- whatever their race ids (22 and 23 after RaceForge's build, 15 and 19 on the Bleakhold realm), borrow the
--- Blood Elf and Draenei art until they have their own; the client shows races 22 and 23 in the Blood Elf
--- and Draenei background scenes (WoW/Common/BleakholdRaces.h). The stock CharacterCreate.lua knows ten race
--- buttons (MAX_RACES = 10, "Too many races!" beyond that) and looks race icons up by file name, so this file
--- raises MAX_RACES, adds the buttons and icons, and lays the buttons out as an Alliance column and a Horde
--- column for any race count. With the stock ten races the stock layout is kept.
+-- Blood Elf and Draenei art until they have their own; the client finds them by file name too and shows them
+-- in the Blood Elf and Draenei background scenes (WoW/Common/BleakholdRaces.h). The stock CharacterCreate.lua
+-- knows ten race buttons (MAX_RACES = 10, "Too many races!" beyond that) and looks race icons up by file name,
+-- so this file raises MAX_RACES, adds the buttons and icons, and lays the buttons out as an Alliance column and
+-- a Horde column for any race count. With the stock ten races the stock layout is kept.
 
 local BH = BleakholdGlue
 

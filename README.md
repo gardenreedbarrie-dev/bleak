@@ -162,9 +162,10 @@ under the same license.
 
 ## Bleakhold races
 
-The client accepts race ids up to 31 (`WoW/Common/BleakholdRaces.h`). High Elf (22, Alliance, built from Blood
-Elf) and Eredar (23, Horde, built from Draenei) need game data that is made from your own 3.3.5a DBCs; no game
-data is in this repository:
+The client accepts race ids up to 31 (`WoW/Common/BleakholdRaces.h`) and knows High Elf (Alliance, built from
+Blood Elf) and Eredar (Horde, built from Draenei) by their ChrRaces file names, `HighElf` and `Eredar`, whatever
+their ids (22 and 23 after the build below, 15 and 19 on the Bleakhold realm). The two races need game data that is
+made from your own 3.3.5a DBCs; no game data is in this repository:
 
 ```powershell
 py -3 -I Tools\RaceForge\raceforge.py build --dbc C:\azerothcore\data\dbc --out C:\bleakhold\raceforge-out --mpq

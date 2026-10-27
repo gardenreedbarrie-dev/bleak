@@ -3,6 +3,7 @@
 #include "Engine/Source/ConsoleBase/IConsole.h"
 #include "Engine/Source/Storm/H/storm.h"
 #include "Engine/Source/Storm/H/stpl.h"
+#include "WoW/Common/BleakholdRaces.h"
 #include "WoW/Source/DB/Rec/MapDifficultyRec.h"
 
 // STATIC: 0x00AD3028
@@ -1147,6 +1148,7 @@ void ClientDBInitialize() {
     InitWeaponSubclasses();
     SDBItemSubclassInitialize();
     InitLights(1);
+    BleakholdRacesInitialize(); // BLEAKHOLD(races): finds the Bleakhold races by name in ChrRaces
 }
 
 // VERIFY: 144a65d1 auto
