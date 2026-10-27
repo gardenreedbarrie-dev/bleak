@@ -1798,7 +1798,7 @@ TEST("arena: QJOIN A, LBQ A and GET ARENA parse as section 20 says; everything e
     CHECK(Parse("1 GET 1 1/1 ARENA;QUEUE;ROYS", &in) == DropReason::None && in.topics.size() == 3);
     CHECK_EQ(TopicName(Topic::Arena), "ARENA");
     CHECK(!IsRevisioned(Topic::Arena));
-    CHECK(static_cast<uint8_t>(Topic::Arena) == static_cast<uint8_t>(Topic::RoyaleMap) + 1);   // appended
+    CHECK(static_cast<uint8_t>(Topic::Arena) == static_cast<uint8_t>(Topic::Wanted) + 1);   // appended after section 19
     CHECK_EQN(RevisionedTopicCount, 9u);
     CHECK(IsArenaBracket(1) && IsArenaBracket(2) && IsArenaBracket(3) && IsArenaBracket(5));
     CHECK(!IsArenaBracket(0) && !IsArenaBracket(4) && !IsArenaBracket(6));

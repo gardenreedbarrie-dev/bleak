@@ -212,7 +212,10 @@ test("demo mode routes intents locally and sends nothing to the server", functio
     M.env.SlashCmdList.BLEAKHOLD("demo")
     M.Advance(1)
     local start = #M.sent
-    local logStart = #ns.Comm.log
+    -- Comm.log keeps the last 60 messages only, and the demo's War Mode and Arena pushes fill it: count the intents
+    -- with Comm.stats.sent and check the ones still in the log
+    local sentStart = ns.Comm.stats.sent
+    local t0 = M.env.GetTime()
     for _, k in ipairs({ "tasks", "dungeons", "keys", "rift" }) do
         ns.UI.Open(k)
         M.Advance(0.3)
@@ -222,14 +225,12 @@ test("demo mode routes intents locally and sends nothing to the server", functio
     clickAll(M, ns.UI.windows.BleakholdSeasonFrame.content)
     M.Advance(40)
     H.eq(#M.sent, start, "no SendAddonMessage in demo mode")
-    local out = 0
-    for i = logStart + 1, #ns.Comm.log do
-        local e = ns.Comm.log[i]
-        if e.dir == ">" then
+    for _, e in ipairs(ns.Comm.log) do
+        if e.dir == ">" and e.t >= t0 then
             checkBody(e.body)
-            out = out + 1
         end
     end
+    local out = ns.Comm.stats.sent - sentStart
     H.ok(out > 5, "intents went to the demo responder: " .. out)
 end)
 
