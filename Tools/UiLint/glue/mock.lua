@@ -2,7 +2,14 @@
 -- the client's own Lua 5.1 (wowlua). Behaviour mirrors the decomp where the Bleakhold code depends on it:
 -- Texture:SetTexture returns nil for a missing file (CSimpleTexture::SetTexture), Font:SetFont returns nil for a
 -- missing font, Button:Set*Texture(path) reuses an existing state texture or creates one with SetAllPoints
--- (CSimpleButton::SetStateTexture), CreateFrame errors on an unknown template, LoginServerLogin's gate.
+-- (CSimpleButton::SetStateTexture) and Set*Texture(texture) takes that texture, CreateFrame errors on an unknown
+-- template before it makes anything (Script_CreateFrame), LoginServerLogin's gate. Anchors as CScriptRegion_Scripts.cpp
+-- keeps them: SetPoint without a relative region anchors to the parent, with an explicit nil to the screen; GetPoint
+-- lists the points in FRAMEPOINT order and gives nil for the screen; anchoring to itself or to a region that depends
+-- on this one is an error. GetLeft/GetTop/GetRect resolve the anchors (MOCK.rect) the way the layout does, with
+-- scales as CLayoutFrame applies them: a region's anchor offsets and size count in its effective scale (its own
+-- times its parents', CSimpleFrame::UpdateScale), and GetLeft/GetTop/GetRect answer in that scale's units.
+-- CreateFrame's fifth argument is the frame's id, set before the template's OnLoad runs (CSimpleFrame::PreLoadXML).
 
 MOCK = { collisions = {}, files = {}, log = {}, launched = {}, logins = {}, messages = {}, sounds = {} }
 
@@ -19,7 +26,8 @@ local allFrames = {}
 
 local function newObject(kind, name, parent)
     local o = setmetatable({ _kind = kind, _name = name, _parent = parent, _shown = true, _points = {}, _alpha = 1,
-                             _width = 0, _height = 0, _scripts = {}, _regions = {}, _children = {} }, Object)
+                             _width = 0, _height = 0, _scale = 1, _scripts = {}, _regions = {}, _children = {} },
+                           Object)
     if name then
         if _G[name] ~= nil and not string.find(name, "^CharacterCreateRaceButton%d+") then table.insert(MOCK.collisions, name) end
         _G[name] = o
@@ -36,18 +44,154 @@ function Object:SetHeight(h) self._height = h; self:_fire("OnSizeChanged", self.
 function Object:SetSize(w, h) self._width = w; self._height = h end
 function Object:GetWidth() return self._width end
 function Object:GetHeight() return self._height end
-function Object:SetPoint(point, rel, relPoint, x, y)
-    if type(rel) == "number" then rel, relPoint, x, y = nil, nil, rel, relPoint end
-    if type(rel) == "string" then rel = _G[rel] end
-    for i, p in ipairs(self._points) do
-        if p[1] == point then table.remove(self._points, i) break end
+-- Frames only (CSimpleFrame_Scripts.cpp); a texture or font string is drawn at its frame's effective scale.
+local NOT_FRAMES = { Texture = true, FontString = true, Font = true, Screen = true }
+function Object:SetScale(s)
+    if NOT_FRAMES[self._kind] then
+        error(tostring(self._name) .. ":SetScale(): not a method of a " .. self._kind, 2)
     end
-    table.insert(self._points, { point, rel or self._parent, relPoint or point, x or 0, y or 0 })
+    if type(s) ~= "number" or s <= 0 then error("Usage: " .. tostring(self._name) .. ":SetScale(scale)", 2) end
+    self._scale = s
+end
+function Object:GetScale() return self._scale or 1 end
+local function effectiveScale(region)
+    local scale = 1
+    while region and region ~= MOCK.SCREEN do
+        scale = scale * (region._scale or 1)
+        region = region._parent
+    end
+    return scale
+end
+function Object:GetEffectiveScale() return effectiveScale(self) end
+-- CSimpleTop: what an anchor to nil means. GetPoint reports it as nil.
+MOCK.SCREEN = setmetatable({ _kind = "Screen", _points = {}, _children = {}, _regions = {}, _scripts = {} }, Object)
+local FRAMEPOINTS = { "TOPLEFT", "TOP", "TOPRIGHT", "LEFT", "CENTER", "RIGHT", "BOTTOMLEFT", "BOTTOM", "BOTTOMRIGHT" }
+local POINT_ORDER = {}
+for i, p in ipairs(FRAMEPOINTS) do POINT_ORDER[p] = i end
+
+local function layoutParent(self) return self._parent or MOCK.SCREEN end
+local function displayName(self) return self._name or "<unnamed>" end
+-- CLayoutFrame::IsResizeDependency: rel is laid out from self (through its anchors, at any depth).
+local function dependsOn(rel, self, seen)
+    if rel == self then return true end
+    seen = seen or {}
+    if seen[rel] then return false end
+    seen[rel] = true
+    for _, p in ipairs(rel._points or {}) do
+        if p[2] and dependsOn(p[2], self, seen) then return true end
+    end
+    return false
+end
+local function relativeRegion(self, method, n, rel)
+    local relative = layoutParent(self)
+    if n >= 1 then
+        if type(rel) == "string" then
+            relative = _G[rel]
+            if type(relative) ~= "table" then error(displayName(self) .. ":" .. method .. "(): Couldn't find region named '" .. rel .. "'", 3) end
+        elseif type(rel) == "table" then relative = rel
+        elseif rel == nil then relative = MOCK.SCREEN end
+    end
+    if relative == self then error(displayName(self) .. ":" .. method .. "(): trying to anchor to itself", 3) end
+    if dependsOn(relative, self) then error(displayName(self) .. ":" .. method .. "(): " .. displayName(relative) .. " is dependent on this", 3) end
+    return relative
+end
+function Object:SetPoint(point, ...)
+    if type(point) ~= "string" then error("Usage: " .. displayName(self) .. ':SetPoint("point" [, region or nil] [, "relativePoint"] [, offsetX, offsetY])', 2) end
+    if not POINT_ORDER[point] then error(displayName(self) .. ":SetPoint(): Unknown region point", 2) end
+    local n, args = select("#", ...), { ... }
+    local i = 1
+    local rel = layoutParent(self)
+    if n >= 1 and type(args[1]) ~= "number" then rel = relativeRegion(self, "SetPoint", n, args[1]); i = 2 end
+    local relPoint = point
+    if type(args[i]) == "string" then
+        relPoint = args[i]
+        if not POINT_ORDER[relPoint] then error(displayName(self) .. ":SetPoint(): Unknown region point", 2) end
+        i = i + 1
+    end
+    local x, y = 0, 0
+    if type(args[i]) == "number" and type(args[i + 1]) == "number" then x, y = args[i], args[i + 1] end
+    for k, p in ipairs(self._points) do
+        if p[1] == point then table.remove(self._points, k) break end
+    end
+    table.insert(self._points, { point, rel, relPoint, x, y })
+    table.sort(self._points, function(a, b) return POINT_ORDER[a[1]] < POINT_ORDER[b[1]] end)
 end
 function Object:ClearAllPoints() self._points = {} end
 function Object:GetNumPoints() return #self._points end
-function Object:GetPoint(i) local p = self._points[i or 1]; if p then return p[1], p[2], p[3], p[4], p[5] end end
-function Object:SetAllPoints(rel) self._points = { { "TOPLEFT", rel or self._parent, "TOPLEFT", 0, 0 }, { "BOTTOMRIGHT", rel or self._parent, "BOTTOMRIGHT", 0, 0 } } end
+function Object:GetPoint(i)
+    local p = self._points[i or 1]
+    if p then
+        local rel = p[2]
+        if rel == MOCK.SCREEN then rel = nil end
+        return p[1], rel, p[3], p[4], p[5]
+    end
+end
+function Object:SetAllPoints(...)
+    local rel = relativeRegion(self, "SetAllPoints", select("#", ...), ...)
+    self._points = { { "TOPLEFT", rel, "TOPLEFT", 0, 0 }, { "BOTTOMRIGHT", rel, "BOTTOMRIGHT", 0, 0 } }
+end
+function Object:SetParent(parent)
+    if type(parent) == "string" then parent = _G[parent] end
+    local ancestor = parent
+    while ancestor do
+        if ancestor == self then error(displayName(self) .. ":SetParent(): Would create a loop parenting to " .. displayName(parent), 2) end
+        ancestor = ancestor._parent
+    end
+    local old = self._parent
+    if old then
+        for k, c in ipairs(old._children) do if c == self then table.remove(old._children, k) break end end
+    end
+    self._parent = parent
+    if parent then
+        table.insert(parent._children, self)
+        self._level = (parent._level or 0) + 1
+    end
+end
+
+-- The rectangle the layout gives a region (left, bottom, width, height) in screen units, from its anchors and size
+-- (both times its effective scale, as CFramePoint::X/Y and CLayoutFrame::Resize take them); nil when it has no
+-- anchors (a top-level frame without any is taken as placed at the origin, as GlueParent fills the screen).
+local H = { TOPLEFT = 0, TOP = 0.5, TOPRIGHT = 1, LEFT = 0, CENTER = 0.5, RIGHT = 1, BOTTOMLEFT = 0, BOTTOM = 0.5, BOTTOMRIGHT = 1 }
+local V = { TOPLEFT = 1, TOP = 1, TOPRIGHT = 1, LEFT = 0.5, CENTER = 0.5, RIGHT = 0.5, BOTTOMLEFT = 0, BOTTOM = 0, BOTTOMRIGHT = 0 }
+function MOCK.rect(region, depth)
+    depth = (depth or 0) + 1
+    assert(depth < 64, "anchor loop")
+    if region == MOCK.SCREEN then return 0, 0, MOCK.cpp.screenWidth, MOCK.cpp.screenHeight end
+    local scale = effectiveScale(region)
+    if #region._points == 0 then
+        if not region._parent then return 0, 0, region._width * scale, region._height * scale end
+        return nil
+    end
+    local hs, vs = {}, {}
+    for _, p in ipairs(region._points) do
+        local l, b, w, h = MOCK.rect(p[2], depth)
+        if not l then return nil end
+        hs[H[p[1]]] = l + w * H[p[3]] + p[4] * scale
+        vs[V[p[1]]] = b + h * V[p[3]] + p[5] * scale
+    end
+    local function solve(set, size)
+        if set[0] and set[1] then return set[0], set[1] - set[0] end
+        if set[0] then return set[0], size end
+        if set[1] then return set[1] - size, size end
+        return set[0.5] - size / 2, size
+    end
+    local left, width = solve(hs, region._width * scale)
+    local bottom, height = solve(vs, region._height * scale)
+    return left, bottom, width, height
+end
+-- Script_GetRect, GetLeft, ...: the rectangle in the region's own units (screen units over its effective scale).
+local function ownRect(region)
+    local l, b, w, h = MOCK.rect(region)
+    if not l then return nil end
+    local s = effectiveScale(region)
+    return l / s, b / s, w / s, h / s
+end
+function Object:GetRect() return ownRect(self) end
+function Object:GetLeft() local l = ownRect(self); return l end
+function Object:GetBottom() local _, b = ownRect(self); return b end
+function Object:GetRight() local l, _, w = ownRect(self); return l and l + w end
+function Object:GetTop() local _, b, _, h = ownRect(self); return b and b + h end
+function Object:GetCenter() local l, b, w, h = ownRect(self); if l then return l + w / 2, b + h / 2 end end
 function Object:SetAlpha(a) self._alpha = a end
 function Object:GetAlpha() return self._alpha end
 function Object:IsShown() return self._shown and 1 or nil end
@@ -138,6 +282,7 @@ end
 
 -- models
 function Object:SetModel(m) self._model = m end
+function Object:GetModel() return self._model end
 function Object:ClearModel() self._model = nil end
 function Object:SetSequence() end
 function Object:SetCamera() end
@@ -160,14 +305,21 @@ function Object:SetTexture(a, g, b, alpha)
     return 1
 end
 function Object:GetTexture() return self._file end
-function Object:SetTexCoord(l, r, t, b) self._coords = { l, r, t, b } end
+-- SetTexCoord(left, right, top, bottom) or the eight corner coordinates (ULx, ULy, LLx, LLy, URx, URy, LRx, LRy).
+function Object:SetTexCoord(...)
+    local a = { ... }
+    if #a == 8 then self._coords = { a[1], a[7], a[2], a[8] } else self._coords = { a[1], a[2], a[3], a[4] } end
+end
 function Object:GetTexCoord() local c = self._coords; return c[1], c[3], c[1], c[4], c[2], c[3], c[2], c[4] end
-function Object:SetVertexColor() end
+function Object:SetVertexColor(r, g, b, a) self._vertexColor = { r, g, b, a or 1 } end
+function Object:GetVertexColor() local c = self._vertexColor or { 1, 1, 1, 1 }; return c[1], c[2], c[3], c[4] end
 function Object:SetGradient(o, ...) self._gradient = { o, ... } end
 function Object:SetGradientAlpha(o, ...) self._gradient = { o, ... } end
 function Object:SetDesaturated(d) self._desaturated = d; return 1 end
 function Object:SetBlendMode(m) self._blend = m end
+function Object:GetBlendMode() return self._blend or "BLEND" end
 function Object:SetDrawLayer(l) self._layer = l end
+function Object:GetDrawLayer() return self._layer end
 
 -- font strings
 function Object:SetFontObject(f) self._font = f end
@@ -199,8 +351,10 @@ end
 function Object:SetFormattedText(fmt, ...) self:SetText(string.format(fmt, ...)) end
 function Object:GetStringWidth() return #(self._text or "") * 7 end
 function Object:SetJustifyH(j) self._justifyH = j end
+function Object:GetJustifyH() return self._justifyH or "CENTER" end
 function Object:SetJustifyV() end
-function Object:SetTextColor() end
+function Object:SetTextColor(r, g, b, a) self._textColor = { r, g, b, a or 1 } end
+function Object:GetTextColor() local c = self._textColor or { 1, 1, 1, 1 }; return c[1], c[2], c[3], c[4] end
 function Object:SetShadowColor() end
 function Object:SetShadowOffset() end
 
@@ -220,6 +374,7 @@ for state, field in pairs(STATES) do
     Object["Get" .. state .. "Texture"] = function(self) return self[field] end
 end
 function Object:SetHighlightTexture(tex, mode)
+    if type(tex) == "table" then self._highlightTex = tex; tex:SetBlendMode(mode or "ADD"); return end
     if self._highlightTex then self._highlightTex:SetTexture(tex); self._highlightTex:SetBlendMode(mode or "ADD"); return end
     if not MOCK.hasFile(tex) then return end
     local t = self:CreateTexture(nil, "HIGHLIGHT"); t:SetTexture(tex); t:SetAllPoints(self); t:SetBlendMode(mode or "ADD")
@@ -227,12 +382,14 @@ function Object:SetHighlightTexture(tex, mode)
 end
 function Object:GetHighlightTexture() return self._highlightTex end
 function Object:SetCheckedTexture(tex)
+    if type(tex) == "table" then self._checkedTex = tex; return end
     if self._checkedTex then self._checkedTex:SetTexture(tex); return end
     if not MOCK.hasFile(tex) then return end
     local t = self:CreateTexture(nil, "OVERLAY"); t:SetTexture(tex); t:SetAllPoints(self); self._checkedTex = t
 end
 function Object:GetCheckedTexture() return self._checkedTex end
 function Object:SetDisabledCheckedTexture(tex)
+    if type(tex) == "table" then self._disabledCheckedTex = tex; return end
     if self._disabledCheckedTex then self._disabledCheckedTex:SetTexture(tex); return end
     if not MOCK.hasFile(tex) then return end
     local t = self:CreateTexture(nil, "OVERLAY"); t:SetTexture(tex); t:SetAllPoints(self); self._disabledCheckedTex = t
@@ -245,6 +402,9 @@ end
 function Object:SetNormalFontObject(f) self._normalFont = f; ensureFontString(self) end
 function Object:SetHighlightFontObject(f) self._highlightFont = f end
 function Object:SetDisabledFontObject(f) self._disabledFont = f end
+function Object:GetNormalFontObject() return self._normalFont end
+function Object:GetHighlightFontObject() return self._highlightFont end
+function Object:GetDisabledFontObject() return self._disabledFont end
 function Object:SetPushedTextOffset(x, y) self._pushedOffset = { x, y } end
 function Object:GetFontString() return self._fontString end
 function Object:GetTextWidth() return self._fontString and #(self._fontString._text or "") * 7 or 0 end
@@ -309,22 +469,24 @@ end
 -- --------------------------------------------------------------------------------------------- CreateFrame
 
 MOCK.templates = {}
-function MOCK.CreateFrame(kind, name, parent, template)
+function MOCK.CreateFrame(kind, name, parent, template, id)
     if type(parent) == "string" then parent = _G[parent] end
+    -- Script_CreateFrame checks every inherited node before it makes the frame.
+    local builders = {}
+    for t in string.gmatch(template or "", "[^ ,]+") do
+        local builder = MOCK.templates[t]
+        if not builder then error('CreateFrame(): Couldn\'t find inherited node "' .. t .. '"', 2) end
+        builders[#builders + 1] = builder
+    end
     local f = newObject(kind, name, parent)
+    if tonumber(id) and tonumber(id) >= 0 then f._id = math.floor(tonumber(id)) end
     f._level = parent and (parent._level or 0) + 1 or 0
     if parent then table.insert(parent._children, f) end
     table.insert(allFrames, f)
-    if template then
-        for t in string.gmatch(template, "[^ ,]+") do
-            local builder = MOCK.templates[t]
-            if not builder then error('CreateFrame(): Couldn\'t find inherited node "' .. t .. '"', 2) end
-            builder(f, name)
-        end
-    end
+    for _, builder in ipairs(builders) do builder(f, name) end
     return f
 end
-CreateFrame = function(kind, name, parent, template) return MOCK.CreateFrame(kind, name, parent, template) end
+CreateFrame = function(kind, name, parent, template, id) return MOCK.CreateFrame(kind, name, parent, template, id) end
 
 -- --------------------------------------------------------------------------------------------- C++ glue API
 

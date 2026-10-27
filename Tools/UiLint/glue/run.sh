@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Runs every Bleakhold glue scenario (login screen, race buttons, first and last names) against the mock of the
+# Runs every Bleakhold glue scenario (login screen, race buttons on the stock screen and on a realm patch's own, first
+# and last names) against the mock of the
 # 3.3.5a glue API, with the client's own Lua (Tools/UiLint/build/wowlua, built by check.sh).
 #   Tools/UiLint/glue/run.sh [wowlua]      (exit code 0 = every scenario passed)
 set -uo pipefail
@@ -9,7 +10,9 @@ wowlua="${1:-$here/../build/wowlua}"
 glue="$root/Interface/Bleakhold/Glue"
 rc=0
 for s in login login-classic login-noart login-noscanevent login-stockignoresscan login-autoaccept races12 races12-female races10 races13 \
-         races12-noart names names-off names-paid; do
+         races12-noart races12-nudged races12-scaled custom-chain custom-tplanchor custom-offsets custom-scaled custom-slots \
+         custom-rows custom-parent custom-seven custom-full custom-template custom-template-stock \
+         custom-ownlayout names names-off names-paid; do
     "$wowlua" "$here/tests.lua" "$here" "$glue" "$s" || rc=1
 done
 exit $rc

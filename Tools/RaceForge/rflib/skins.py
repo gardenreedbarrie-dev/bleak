@@ -358,8 +358,10 @@ def overlay(client_data: str, patches_dir: str, locale: str, game: Game) -> dict
     return files
 
 
-def game_archives(client_dir: str, patches_dir: str, packs: dict, locale: str | None = None) -> Game:
-    """The archives the client loads from the launcher's game folder, in its order (lowest first)."""
+def game_archives(client_dir: str, patches_dir: str, packs: dict, locale: str | None = None,
+                  alternate: bool = False) -> Game:
+    """The archives the client loads from the launcher's game folder, in its order (lowest first). alternate: also
+    alternate.MPQ, which the client loads above every patch (find reads it; skins only warns about it)."""
     data = client_dir if find_entry(client_dir, "common.MPQ") else (find_entry(client_dir, "Data") or "")
 
     if not data or not os.path.isdir(data):
@@ -391,7 +393,9 @@ def game_archives(client_dir: str, patches_dir: str, packs: dict, locale: str | 
         key = ("Data\\" + name.replace("****", locale)).casefold()
 
         if kind == 3:
-            if key in files:
+            if key in files and alternate:
+                add(key, 2)
+            elif key in files:
                 game.warnings.append(f"{files[key][1]}: the client loads {name} above every patch, so a "
                                      "CharSections.dbc or texture in it would hide the new ones; this tool does not "
                                      "read it")

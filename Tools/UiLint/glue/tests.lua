@@ -26,7 +26,24 @@ if not noArt then
 end
 MOCK.addFile("Fonts\\FRIZQT__.TTF"); MOCK.addFile("Fonts\\MORPHEUS.TTF")
 
+-- A realm patch's own character creation screen in place of the stock one (custom.lua).
+if SCENARIO:find("^custom") or SCENARIO == "races12-nudged" or SCENARIO == "races12-scaled" then
+    dofile(HARNESS .. "/custom.lua")
+    MOCK.raceGlue = assert(MOCK.raceGlues[SCENARIO], "no custom screen for " .. SCENARIO)
+end
+
 dofile(HARNESS .. "/stock.lua")
+
+-- Anchors as GetPoint lists them, to compare later.
+local function anchorList(region)
+    local out = {}
+    for i = 1, region:GetNumPoints() do out[i] = { region:GetPoint(i) } end
+    return out
+end
+local screenAnchors = {}
+if MOCK.raceGlue then
+    for i = 1, MOCK.raceGlue.count do screenAnchors[i] = anchorList(_G["CharacterCreateRaceButton" .. i]) end
+end
 
 if SCENARIO == "login-stockignoresscan" then
     -- A stock handler that does not continue past the scan error by itself.
@@ -271,13 +288,59 @@ local STOCK = {
     { name = "Blood Elf", file = "BloodElf", faction = "Horde" },
 }
 
-local function racesScenario(count, female)
+-- The client's order (CCharacterCreation::Initialize): every Alliance race, then every Horde race, by id.
+local function raceList(count)
     local list = {}
     for i = 1, 5 do list[#list + 1] = STOCK[i] end
     if count >= 12 then list[#list + 1] = { name = "High Elf", file = "HighElf", faction = "Alliance" } end
     for i = 6, 10 do list[#list + 1] = STOCK[i] end
     if count >= 12 then list[#list + 1] = { name = "Eredar", file = "Eredar", faction = "Horde" } end
     if count >= 13 then list[#list + 1] = { name = "Stranger", file = "Stranger", faction = "Horde" } end
+    return list
+end
+
+local function sameAnchorList(a, b)
+    if #a ~= #b then return false end
+    for i = 1, #a do
+        for k = 1, 5 do
+            local x, y = a[i][k], b[i][k]
+            if type(x) == "number" then
+                if not near(x, y) then return false end
+            elseif x ~= y then return false end
+        end
+    end
+    return true
+end
+local function describeAnchors(list)
+    local out = {}
+    for _, a in ipairs(list) do
+        local rel = a[2] and (a[2]:GetName() or "?") or "screen"
+        out[#out + 1] = string.format("%s %s %s %.2f %.2f", tostring(a[1]), rel, tostring(a[3]), a[4] or 0, a[5] or 0)
+    end
+    return table.concat(out, "; ")
+end
+local function centerX(b) local l, _, w = MOCK.rect(b); return l and l + w / 2 end
+local function overlap(a, b)
+    local al, ab, aw, ah = MOCK.rect(a)
+    local bl, bb, bw, bh = MOCK.rect(b)
+    return al < bl + bw - 0.01 and bl < al + aw - 0.01 and ab < bb + bh - 0.01 and bb < ab + ah - 0.01
+end
+-- Every shown race button 1..n is laid out, and no two of them cover each other.
+local function checkPlacedApart(n, label)
+    for i = 1, n do
+        local a = _G["CharacterCreateRaceButton" .. i]
+        check(MOCK.rect(a) ~= nil, label .. "button " .. i .. " is placed")
+        for j = i + 1, n do
+            local b = _G["CharacterCreateRaceButton" .. j]
+            if MOCK.rect(a) and MOCK.rect(b) then
+                check(not overlap(a, b), label .. "buttons " .. i .. " and " .. j .. " do not overlap")
+            end
+        end
+    end
+end
+
+local function racesScenario(count, female)
+    local list = raceList(count)
     MOCK.setRaces(list)
     if female then SetSelectedSex(SEX_FEMALE) end
 
@@ -288,9 +351,12 @@ local function racesScenario(count, female)
     check(RACE_ICON_TCOORDS.EREDAR_FEMALE[3] == 0.5, "Eredar female icon = Draenei female icon")
     check(GlueAmbienceTracks.HIGHELF == "GlueScreenBloodElf" and RaceLights.EREDAR == RaceLights.DRAENEI, "scene aliases")
 
+    local kind = BleakholdGlue.RaceScreenKind()
+    check(kind == "stock", "the stock screen is recognised: " .. tostring(kind))
     SetGlueScreen("charcreate")
     check(#MOCK.messages == 0, "no 'Too many races!' (" .. table.concat(MOCK.messages, ",") .. ")")
     check(CharacterCreate.numRaces == #list, "all races enumerated")
+    checkPlacedApart(#list, "stock: ")
     for i = 1, #list do
         check(_G["CharacterCreateRaceButton" .. i]:IsShown(), "race button " .. i .. " shown")
     end
@@ -342,6 +408,176 @@ local function racesScenario(count, female)
     end
     SetCharacterGender(female and SEX_MALE or SEX_FEMALE)
     check(#MOCK.messages == 0, "gender switch enumerates without errors")
+    check(#BLEAKHOLD_GLUE_ERRORS == 0, "no caught errors: " .. table.concat(BLEAKHOLD_GLUE_ERRORS, " | "))
+end
+
+-- A realm patch's own screen (custom.lua): its buttons stay where it put them, the added ones continue the column of
+-- their faction, nothing overlaps, and every race still works.
+local function customScenario()
+    local glue = MOCK.raceGlue
+    local list = raceList(12)
+    local prefix = "CharacterCreateRaceButton"
+    MOCK.setRaces(list)
+    local kind = BleakholdGlue.RaceScreenKind()
+    check(kind == glue.kind, "screen recognised as " .. glue.kind .. ": " .. tostring(kind))
+    check(MAX_RACES >= 12, "MAX_RACES raised to 12 (" .. tostring(MAX_RACES) .. ")")
+    for i = 1, 12 do check(_G[prefix .. i] ~= nil, "race button " .. i .. " exists") end
+    if glue.count >= 12 then
+        check(_G[prefix .. 13] == nil, "a screen with twelve buttons gets none added")
+        for i = 1, 12 do check(_G[prefix .. i].screenMade, "button " .. i .. " is the screen's own") end
+    end
+
+    local function verify(when)
+        local label = when .. ": "
+        check(#MOCK.messages == 0, label .. "no message() popups (" .. table.concat(MOCK.messages, ",") .. ")")
+        check(CharacterCreate.numRaces == 12, label .. "all races enumerated")
+        for i = 1, 12 do check(_G[prefix .. i]:IsShown(), label .. "race button " .. i .. " shown") end
+        if glue.keepsOwn then
+            for i = 1, glue.count do
+                local now = anchorList(_G[prefix .. i])
+                check(sameAnchorList(now, screenAnchors[i]),
+                      label .. "the screen's button " .. i .. " not moved: " .. describeAnchors(now))
+            end
+        end
+        if glue.ownLayout then
+            for i = 1, 12 do
+                local want, now = glue.ownLayout(i), anchorList(_G[prefix .. i])
+                check(#now == 1 and sameAnchorList(now, { { want[1], _G[want[2]], want[3], want[4], want[5] } }),
+                      label .. "button " .. i .. " where the screen's own code put it: " .. describeAnchors(now))
+            end
+        end
+        checkPlacedApart(12, label)
+        local leftmostHorde = math.huge
+        for i, r in ipairs(list) do
+            if r.faction == "Horde" then
+                leftmostHorde = math.min(leftmostHorde, centerX(_G[prefix .. i]) or -math.huge)
+            end
+        end
+        for _, i in ipairs(glue.left) do
+            local x = centerX(_G[prefix .. i])
+            check(x and x + _G[prefix .. i]:GetWidth() / 2 < leftmostHorde,
+                  label .. "Alliance button " .. i .. " left of every Horde button")
+        end
+        for i, want in pairs(glue.added) do
+            local now, list = anchorList(_G[prefix .. i]), {}
+            for _, a in ipairs(type(want[1]) == "table" and want or { want }) do
+                list[#list + 1] = { a[1], _G[a[2]], a[3], a[4], a[5] }
+            end
+            check(sameAnchorList(now, list),
+                  label .. "added button " .. i .. " continues its column: " .. describeAnchors(now))
+        end
+        if glue.scale then
+            for i = 1, 12 do
+                local scale = _G[prefix .. i]:GetScale()
+                check(near(scale, glue.scale),
+                      label .. "button " .. i .. " at the screen's scale " .. glue.scale .. ": " .. scale)
+            end
+        end
+        -- The Horde column: one step between each button, one edge.
+        local c = glue.column
+        local function top(i) local _, b, _, h = MOCK.rect(_G[prefix .. i]); return b + h end
+        local function right(i) local l, _, w = MOCK.rect(_G[prefix .. i]); return l + w end
+        local step = top(c[1]) - top(c[2])
+        for k = 2, #c - 1 do
+            local what = label .. "Horde column: button " .. c[k + 1]
+            check(near(top(c[k]) - top(c[k + 1]), step), what .. " one step under " .. c[k])
+            check(near(right(c[k + 1]), right(c[1])), what .. " on the column's edge")
+        end
+    end
+
+    SetGlueScreen("charcreate")
+    verify("shown")
+
+    if glue.kind == "stock" then
+        -- Laid out like the stock screen, from the offsets read back.
+        local stockPitch = 38 + glue.gap
+        local pitch = math.min(stockPitch, (stockPitch * 4 + 20) / 5)
+        local rows = { Alliance = 0, Horde = 0 }
+        for i, r in ipairs(list) do
+            rows[r.faction] = rows[r.faction] + 1
+            local p, rel, rp, x, y = _G[prefix .. i]:GetPoint(1)
+            local wantY = glue.y - (rows[r.faction] - 1) * pitch
+            check(p == "TOP" and rel == CharacterCreateRaceFrame and near(x, glue.x[r.faction]) and near(y, wantY),
+                  "stock screen: button " .. i .. " in its faction's column, row " .. rows[r.faction])
+        end
+    end
+
+    if glue.idAtLoad then
+        for _, i in ipairs({ 11, 12 }) do
+            local b = _G[prefix .. i]
+            check(b.idAtLoad == i,
+                  "added button " .. i .. ": its template's OnLoad saw its id (" .. tostring(b.idAtLoad) .. ")")
+        end
+    end
+
+    if glue.parts then
+        local model = CharacterCreateRaceButton1
+        local function count(...) return select("#", ...) end
+        for _, i in ipairs({ 11, 12 }) do
+            local b = _G[prefix .. i]
+            local name = b:GetName()
+            local what = "added button " .. i
+            local portrait, ring, label = _G[name .. "Portrait"], _G[name .. "Ring"], _G[name .. "Name"]
+            check(portrait and ring and label, what .. " has the screen's named parts")
+            check(portrait:GetParent() == b and portrait:GetTexture() ~= nil,
+                  what .. ": its own portrait, filled by the screen's code")
+            local _, ringTo = ring:GetPoint(1)
+            check(ringTo == portrait, what .. ": the ring is centred on its own portrait")
+            check(label:GetText() == list[i].name, what .. " named by the screen's code: " .. tostring(label:GetText()))
+            check(b:GetWidth() == 72 and b:GetHeight() == 72, what .. " is the screen's size")
+            local hover = b:GetHighlightTexture()
+            check(hover and hover:GetTexture() == "Interface\\Glues\\BleakTest\\Hover",
+                  what .. " has the hover texture")
+            check(b:GetScript("OnClick") ~= nil, what .. " has a click script")
+            -- named child frames, and their own named regions
+            local selection, glow = _G[name .. "Selection"], _G[name .. "SelectionGlow"]
+            local portraitModel = _G[name .. "Model"]
+            check(selection and selection:GetObjectType() == "Frame" and selection:GetParent() == b,
+                  what .. ": its own Selection frame")
+            check(selection and selection:GetWidth() == 90 and selection:GetFrameLevel() == b:GetFrameLevel() + 2,
+                  what .. ": the Selection frame's size and level")
+            local p, rel = selection:GetPoint(1)
+            check(p == "CENTER" and rel == portrait, what .. ": the Selection frame centred on its own portrait")
+            check(glow and glow:GetParent() == selection and glow:GetTexture() == "Interface\\Glues\\BleakTest\\Glow",
+                  what .. ": the Selection frame has its glow")
+            check(glow and select(2, glow:GetPoint(1)) == selection, what .. ": the glow fills its own Selection frame")
+            check(portraitModel and portraitModel:GetObjectType() == "Model" and portraitModel:GetParent() == b
+                  and select(2, portraitModel:GetPoint(1)) == portrait, what .. ": its own portrait model")
+            check(portraitModel and portraitModel:GetModel() == "Character\\" .. list[i].file .. "\\Portrait.m2",
+                  what .. ": the portrait model set by the screen's code")
+            if glue.parts.whole then
+                check(count(b:GetRegions()) == count(model:GetRegions()),
+                      what .. " has every region of the screen's buttons")
+                check(count(b:GetChildren()) == count(model:GetChildren()),
+                      what .. " has every child frame of the screen's buttons")
+                local sparkle
+                for _, child in ipairs({ b:GetChildren() }) do if child:GetName() == nil then sparkle = child end end
+                check(sparkle and count(sparkle:GetRegions()) == 1 and select(2, sparkle:GetPoint(1)) == ring,
+                      what .. ": the unnamed sparkle frame, on its own ring")
+            end
+        end
+    end
+
+    -- Every race can be picked, the Bleakhold races with their own texts.
+    for i, r in ipairs(list) do
+        _G[prefix .. i]:Click()
+        check(GetSelectedRace() == i, r.name .. " selected by its button")
+    end
+    _G[prefix .. 6]:Click()
+    check(CharacterCreateRaceText:GetText():find("Quel'Thalas", 1, true) ~= nil, "High Elf description shown")
+    _G[prefix .. 12]:Click()
+    check(CharacterCreateRaceText:GetText():find("Argus", 1, true) ~= nil, "Eredar description shown")
+    if glue.parts then
+        for i = 1, 12 do
+            check((_G[prefix .. i .. "Selection"]:IsShown() ~= nil) == (i == 12),
+                  "the screen's code shows only button 12's selection: " .. i)
+        end
+    end
+    verify("after clicks")
+    SetCharacterGender(SEX_FEMALE)
+    verify("after a gender switch")
+    SetGlueScreen("login"); SetGlueScreen("charcreate")
+    verify("shown again")
     check(#BLEAKHOLD_GLUE_ERRORS == 0, "no caught errors: " .. table.concat(BLEAKHOLD_GLUE_ERRORS, " | "))
 end
 
@@ -489,6 +725,7 @@ local ok, err = pcall(function()
     elseif SCENARIO == "races10" then racesScenario(10)
     elseif SCENARIO == "races13" then racesScenario(13)
     elseif SCENARIO == "races12-noart" then racesScenario(12)
+    elseif MOCK.raceGlue then customScenario()
     else error("unknown scenario " .. SCENARIO) end
 end)
 check(ok, "scenario ran to the end" .. (ok and "" or (": " .. tostring(err))))

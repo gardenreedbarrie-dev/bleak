@@ -9,6 +9,9 @@
                                   --out <output folder> [--preview]
     python3 -I raceforge.py install --from <output folder of update or skins> --patches <the realm's patch folder>
                                     [--dry-run] [--restore]
+    python3 -I raceforge.py find --patches <the realm's patch folder> --client <the launcher's game folder>
+                                 [<file path in the archives>] [--grep <text>] [--after <n>] [--out <file>]
+                                 [--list <folder in the archives>]
     python3 -I raceforge.py schemas --check
     python3 -I raceforge.py [<DBC folder> [<customization package>]]   (double-click or drop folders: builds next to it)
 
@@ -817,6 +820,15 @@ def cmd_skins(args) -> int:
     return 1 if result.failed else 0
 
 
+def cmd_find(args) -> int:
+    from rflib import find  # noqa: E402  (loads Tools/MapForge's archive code)
+
+    try:
+        return find.run(args)
+    except find.FindError as e:
+        raise ForgeError(str(e)) from None
+
+
 def cmd_install(args) -> int:
     try:
         return install.run(args.source, args.patches, args.dry_run, args.restore)
@@ -858,7 +870,7 @@ def cmd_schemas(args) -> int:
 
 
 EASY_OUT = "Bleakhold-RaceForge-Output"
-COMMANDS = ("build", "validate", "update", "skins", "install", "schemas", "-h", "--help")
+COMMANDS = ("build", "validate", "update", "skins", "install", "find", "schemas", "-h", "--help")
 
 
 def easy_mode(argv: list[str]) -> int:
@@ -995,6 +1007,21 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--restore", action="store_true", help="put the archives of --from's old-patches back (undo an "
                                                           "install)")
 
+    p = sub.add_parser("find", help="which archive the client reads a file from, for every pack combination; its "
+                                    "lines (--grep), the file itself (--out), or every file of a folder (--list)")
+    p.add_argument("path", nargs="?", help="the file's path in the archives, with / or \\ (Interface/GlueXML/"
+                                           "CharacterCreate.xml); any case")
+    p.add_argument("--patches", required=True, help="the realm's patch folder (/srv/bleakhold-launcher/patches)")
+    p.add_argument("--client", required=True, help="the game folder the launcher ships (/srv/bleakhold-launcher/base)")
+    p.add_argument("--grep", action="append", metavar="TEXT", help="print the lines of the copy the client reads that "
+                                                                  "contain TEXT, in any case (repeat for more texts)")
+    p.add_argument("--after", type=int, default=0, metavar="N", help="with --grep: also the N lines after each one")
+    p.add_argument("--out", help="write the copy the client reads to this file (or into this folder)")
+    p.add_argument("--list", metavar="FOLDER", help="list every file under FOLDER (Interface/GlueXML) with the "
+                                                    "archive the client reads it from; * marks the patches folder's")
+    p.add_argument("--config", default=DEFAULT_CONFIG, help="races config, for its optional packs (default: races.json)")
+    p.add_argument("--locale", help="the client's locale (default: the one of Data/<locale>/locale-<locale>.MPQ)")
+
     p = sub.add_parser("schemas", help="check (or regenerate) rflib/schemas.py against the client's Rec classes")
     p.add_argument("--rec-dir", help="WoW/Source/DB/Rec of the decompilation (default: found next to Tools/)")
     p.add_argument("--write", action="store_true", help="regenerate rflib/schemas.py")
@@ -1013,6 +1040,8 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_skins(args)
         if args.command == "install":
             return cmd_install(args)
+        if args.command == "find":
+            return cmd_find(args)
         if args.command == "schemas":
             return cmd_schemas(args)
     except (configmod.ConfigError, ForgeError, DbcError, recparse.RecParseError, spellmod.SpellError, OSError) as e:

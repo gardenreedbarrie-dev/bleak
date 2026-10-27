@@ -274,8 +274,10 @@ AccountLogin_OnLoad(AccountLogin)
 
 MAX_RACES = 10
 CharacterCreate = frame("Model", "CharacterCreate", GlueParent, 1365, 768, true)
+CharacterCreate:SetAllPoints(GlueParent)
 CharacterCreate.numRaces = 0; CharacterCreate.selectedRace = 0
 local raceFrame = frame("Frame", "CharacterCreateRaceFrame", CharacterCreate, 256, 512)
+raceFrame:SetPoint("TOPLEFT", CharacterCreate, "TOPLEFT", 24, -24)
 MOCK.addFile("Interface\\Glues\\CharacterCreate\\UI-CharacterCreate-Races")
 MOCK.templates.CharacterCreateRaceButtonTemplate = function(b, name)
     b:SetSize(38, 38)
@@ -286,12 +288,17 @@ MOCK.templates.CharacterCreateRaceButtonTemplate = function(b, name)
     _G[name .. "Text"] = b:CreateFontString(name .. "Text", "ARTWORK")
     b:SetScript("OnClick", function(self) if self.enable then CharacterRace_OnClick(self, self:GetID()) end end)
 end
-for i = 1, 10 do
-    local b = CreateFrame("CheckButton", "CharacterCreateRaceButton" .. i, raceFrame, "CharacterCreateRaceButtonTemplate")
-    b:SetID(i)
-    if i == 1 then b:SetPoint("TOP", raceFrame, "TOP", -50, -61)
-    elseif i == 6 then b:SetPoint("TOP", raceFrame, "TOP", 50, -61)
-    else b:SetPoint("TOPLEFT", _G["CharacterCreateRaceButton" .. (i - 1)], "BOTTOMLEFT", 0, -21) end
+-- A realm patch's own character creation screen (custom.lua) makes its own race buttons instead.
+if MOCK.raceGlue then
+    MOCK.raceGlue.buttons(raceFrame)
+else
+    for i = 1, 10 do
+        local b = CreateFrame("CheckButton", "CharacterCreateRaceButton" .. i, raceFrame, "CharacterCreateRaceButtonTemplate")
+        b:SetID(i)
+        if i == 1 then b:SetPoint("TOP", raceFrame, "TOP", -50, -61)
+        elseif i == 6 then b:SetPoint("TOP", raceFrame, "TOP", 50, -61)
+        else b:SetPoint("TOPLEFT", _G["CharacterCreateRaceButton" .. (i - 1)], "BOTTOMLEFT", 0, -21) end
+    end
 end
 CharacterCreateRaceIcon = CharacterCreate:CreateTexture("CharacterCreateRaceIcon")
 CharacterCreateRaceLabel = CharacterCreate:CreateFontString("CharacterCreateRaceLabel")
@@ -417,3 +424,5 @@ function SetCharacterGender(sex)
     SetCharacterRace(GetSelectedRace())
 end
 CharacterCreate:SetScript("OnShow", function() CharacterCreate_OnShow() end)
+-- ... and its own Lua, after the stock functions it replaces.
+if MOCK.raceGlue and MOCK.raceGlue.scripts then MOCK.raceGlue.scripts() end

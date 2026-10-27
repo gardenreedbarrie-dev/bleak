@@ -627,6 +627,74 @@ python3 -I raceforge.py install --from /root/raceforge-skins --patches /srv/blea
   folder's file is byte for byte the one in its `client/`, which that loop copied there; an archive such an install
   added stays.
 
+## Finding a file in the realm's archives (`raceforge.py find`)
+
+`find` tells which archive the client reads a file from, so a screen that looks different from the stock one (a
+realm patch's own character creation screen, say) can be traced to the patch that brings it. It reads the game the
+way `skins` does: `--client` (the game folder the launcher ships) with `--patches` over it, in the client's order
+(see "Where the files go"), `alternate.MPQ` included, for every combination of the launcher's optional packs
+(`archives.optional_packs` of races.json: `hd`, the Reforged HD pack). It changes nothing.
+
+```sh
+cd /root/bleak/Tools/RaceForge
+python3 -I raceforge.py find --patches /srv/bleakhold-launcher/patches --client /srv/bleakhold-launcher/base \
+  Interface/GlueXML/CharacterCreate.xml
+```
+
+prints, for a realm whose HD pack brings its own screen (the archive names are the realm's):
+
+```text
+Interface\GlueXML\CharacterCreate.xml
+  all packs (hd): from Patch-Y.MPQ (patches, hd pack)
+    in, lowest first: enUS/locale-enUS.MPQ (game), Patch-Y.MPQ (patches, hd pack)
+  no packs: from enUS/locale-enUS.MPQ (game)
+```
+
+Each line is one kind of player: with every pack, without some, without any. `from` names the archive whose copy
+that player's client reads (the highest that holds the file); `in, lowest first` every archive that holds it. Write
+the path with `/` (or in single quotes): a shell drops the backslashes of `Interface\GlueXML\...` when it is not in
+quotes, and `find` says so when a path (or a `--list` folder) has no folder left in it. Case does not matter.
+
+| Option | What it does |
+|---|---|
+| `--grep TEXT` | Prints the lines of the copy the client reads that contain TEXT, in any case, with their line numbers (`35:`, as an editor counts them); once for each different copy, naming the players who read it. Repeat it for more texts. At most 200 lines (the `--` lines of `--after` count too), then how many matching lines were left out; text files only (an image says `not a text file`) |
+| `--after N` | With `--grep`: also the N lines after each one (up to 50), so an XML button's `<Anchors>` show under its name; `--` separates the blocks (without `--after` there is none) |
+| `--out FILE` | Writes the copy the client reads to FILE (or, for a folder, to the file's own name in it); a copy that other players read goes next to it as `<name>-2<ext>` |
+| `--list FOLDER` | Lists every file under FOLDER that the archives' listfiles name, with the archive the client reads it from (with every pack); `*` marks a file from the patches folder, and `(no packs: ...)` a file other players read from another archive. An archive without a listfile is named in a note (find its files by name) |
+| `--locale`, `--config` | As for `skins` |
+
+The exit code is 0 when the file (or a file of the folder) was found.
+
+### The Bleakhold realm: which patch draws the character creation screen
+
+On the VPS, as root (each command prints a few lines to screenshot):
+
+1. The glue files the realm's patches replace (`*`):
+   ```sh
+   cd /root/bleak/Tools/RaceForge
+   python3 -I raceforge.py find --patches /srv/bleakhold-launcher/patches --client /srv/bleakhold-launcher/base \
+     --list Interface/GlueXML
+   ```
+   When `GlueXML.toc` has a `*`, the files that patch's screens load:
+   `... find ... Interface/GlueXML/GlueXML.toc --grep .` (every line with a dot: the file names).
+2. The race buttons of the screen the players get, with their anchors:
+   ```sh
+   python3 -I raceforge.py find --patches /srv/bleakhold-launcher/patches --client /srv/bleakhold-launcher/base \
+     Interface/GlueXML/CharacterCreate.xml --grep RaceButton --after 8
+   ```
+3. Its Lua: the race count, the button names, and how it shows racials:
+   ```sh
+   python3 -I raceforge.py find --patches /srv/bleakhold-launcher/patches --client /srv/bleakhold-launcher/base \
+     Interface/GlueXML/CharacterCreate.lua --grep MAX_RACES --grep RaceButton --grep ABILITY --grep RACIAL --after 2
+   ```
+4. Both files whole, to send on:
+   ```sh
+   python3 -I raceforge.py find --patches /srv/bleakhold-launcher/patches --client /srv/bleakhold-launcher/base \
+     Interface/GlueXML/CharacterCreate.xml --out /root/glue/
+   python3 -I raceforge.py find --patches /srv/bleakhold-launcher/patches --client /srv/bleakhold-launcher/base \
+     Interface/GlueXML/CharacterCreate.lua --out /root/glue/
+   ```
+
 ## Checks
 
 `build` re-reads what it wrote and checks:
@@ -684,5 +752,12 @@ palette change and `"sections": []`; the refusals. `install`: a dry run, a linke
 it is replaced and backed up), a patch that changed since, `--restore` (twice; after the tool ran again into the same
 folder; after another tool's install in between, from either folder; a folder installed by hand), a folder without
 `install.json`, and `update`'s output with its install line.
+
+`test_find.py` covers `find` on a made-up game folder and patch folder: the archive each pack combination reads a
+file from and every holder, `--grep` (several texts, `--after`, no `--` without it, the 200-line limit with the `--`
+lines in it, a binary file, line numbers past a form feed, a Windows-1252 ellipsis or U+2028, none of which ends a
+line), `--out` (a folder, one file per different copy), `--list` (the `*` marks, another combination's archive, a file
+only one pack has), a file in no archive, a path and a `--list` folder a shell has stripped of their backslashes,
+`alternate.MPQ` above every patch, and an archive without a listfile.
 
 After a change to the Rec classes, regenerate the layouts with `py -3 -I Tools\RaceForge\raceforge.py schemas --write`.

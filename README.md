@@ -511,6 +511,11 @@ this works with signature checks on or off.
   Only Blizzard's account buttons are hidden. `"bleakhold"` shows the Bleakhold painting, logo and form instead.
 - Settings (links, skipping the agreement screens, the Login button waiting for both fields, two names on or
   off) are at the top of `BleakholdStrings.lua`.
+- Race buttons: on the stock screen every button is laid out again in an Alliance and a Horde column. When a realm
+  patch brings a character creation screen of its own, none of its buttons is moved; the buttons it lacks continue
+  their faction's column with its step and scale, with the parts its code finds by name (`BleakholdCharacterCreate.lua`).
+  `Tools/RaceForge/raceforge.py find` tells which patch brings that screen and prints its race buttons
+  (Tools/RaceForge/README.md, "Finding a file in the realm's archives").
 - Tests: `Tools/UiLint/glue/run.sh` runs the login, race and name scenarios against a mock of the glue API
   (part of `Tools/UiLint/check.sh`).
 - Fonts: Marcellus and Marcellus SC, SIL Open Font License 1.1 (`Fonts/OFL.txt`).
