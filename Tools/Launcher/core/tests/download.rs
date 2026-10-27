@@ -226,16 +226,23 @@ fn cancel_keeps_the_part_for_later() {
     let t = task(&srv, &dir, "big.bin", &content);
     let ctl = Arc::new(Control::new());
     let c2 = ctl.clone();
+    // Stop once the part has bytes in it, not after a fixed time: a slow runner may not have written any yet.
+    let watch = dir.join("big.bin.part");
     let stopper = thread::spawn(move || {
-        thread::sleep(Duration::from_millis(300));
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline && fs::metadata(&watch).map_or(true, |m| m.len() == 0) {
+            thread::sleep(Duration::from_millis(10));
+        }
+        let asked = Instant::now();
         c2.request_stop();
+        asked
     });
-    let started = Instant::now();
     let (r, _, done) = run(&srv, std::slice::from_ref(&t), &opts(), &ctl);
-    stopper.join().unwrap();
+    let returned = Instant::now();
+    let asked = stopper.join().unwrap();
     assert!(r.unwrap_err().is_cancelled());
     assert!(done.is_empty());
-    assert!(started.elapsed() < Duration::from_secs(2));
+    assert!(returned.saturating_duration_since(asked) < Duration::from_secs(2));
     let part = fs::metadata(dir.join("big.bin.part")).unwrap().len();
     assert!(part > 0 && part < 2_000_000, "{part}");
     assert!(!dir.join("big.bin").exists());
