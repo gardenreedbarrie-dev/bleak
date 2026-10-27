@@ -1,6 +1,6 @@
 {
     "_comment": [
-        "Bleakhold Royale v2: the same map (id 901, BleakholdRoyale, zone 5100 and its subzones) with the bright",
+        "Bleakhold Royale v2: the same map (id 901, BleakholdRoyale, zone 5200 and its subzones) with the bright",
         "tropical atmosphere of the v2 terrain (specs/royale_v2.json, 'Sunglass Lagoon'). package.py build reads it",
         "like bleakhold_royale.json (see its _comment); only the atmosphere and the subzone names differ. The ids",
         "below are from the stock 3.3.5a DBCs (asset kit v2, README_v2.md 'Atmosphere'):",
@@ -18,7 +18,7 @@
         "ambience_id 32, zone_music 3 and intro_sound 0 keep Stranglethorn's jungle ambience and music, the sounds",
         "Echo Isles uses, over the template's own (Un'Goro's are 33 and 223).",
         "zone.subzones: the v2 names (all original; none is, or is part of, a stock AreaTable name). Totem Knoll,",
-        "Heron Rise, Salvagers' Camp and the Tidewalk are POIs only (ids 5114-5117), shown in zone 5100 or 5104.",
+        "Heron Rise, Salvagers' Camp and the Tidewalk are POIs only (ids 5214-5217), shown in zone 5200 or 5204.",
         "archives.marker_texture MarkerV2.blp (v1: Marker.blp): the addon's patch gate (Royale.lua R.MARKER) tests",
         "it, so a client that still has v1's patch-Q (v1 terrain under the same map id) cannot queue onto v2."
     ],
@@ -40,7 +40,7 @@
         "max_players": 40
     },
     "zone": {
-        "id": 5100,
+        "id": 5200,
         "template": 490,
         "name": "Bleakhold Royale",
         "set_flags": ["ARENA", "NO_FLY_ZONE"],
@@ -54,19 +54,19 @@
         "zone_music": 3,
         "intro_sound": 0,
         "subzones": [
-            { "id": 5101, "name": "Sunstair Isle" },
-            { "id": 5102, "name": "Tidecall Village" },
-            { "id": 5103, "name": "Twinfall Terrace" },
-            { "id": 5104, "name": "Saltwreck Cove" },
-            { "id": 5105, "name": "Serpent Steps" },
-            { "id": 5106, "name": "Sunbloom Meadow" },
-            { "id": 5107, "name": "Kingfisher Point" },
-            { "id": 5108, "name": "Mossvine Hollow" },
-            { "id": 5109, "name": "Bamboo Reach" },
-            { "id": 5110, "name": "Sunwatch Falls" },
-            { "id": 5111, "name": "Stepping Stones" },
-            { "id": 5112, "name": "Vine Bridge" },
-            { "id": 5113, "name": "Sunwatch Overlook" }
+            { "id": 5201, "name": "Sunstair Isle" },
+            { "id": 5202, "name": "Tidecall Village" },
+            { "id": 5203, "name": "Twinfall Terrace" },
+            { "id": 5204, "name": "Saltwreck Cove" },
+            { "id": 5205, "name": "Serpent Steps" },
+            { "id": 5206, "name": "Sunbloom Meadow" },
+            { "id": 5207, "name": "Kingfisher Point" },
+            { "id": 5208, "name": "Mossvine Hollow" },
+            { "id": 5209, "name": "Bamboo Reach" },
+            { "id": 5210, "name": "Sunwatch Falls" },
+            { "id": 5211, "name": "Stepping Stones" },
+            { "id": 5212, "name": "Vine Bridge" },
+            { "id": 5213, "name": "Sunwatch Overlook" }
         ]
     },
     "loading_screen": null,

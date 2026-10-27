@@ -22,9 +22,9 @@ CONFIG = os.path.join(TOOL_DIR, "bleakhold_royale.json")
 C = (-266.6667, -266.6667)
 FINAL_WEIGHTS = {"keep": 20, "mill": 6, "siege": 12, "crows_rise": 14, "caravan": 16, "mirefen": 14, "graves": 12,
                  "old_ford": 6}
-LANDMARKS = {5101: (-266, -266, 88), 5102: (120, 80, 62), 5103: (180, -760, 54), 5104: (-620, -600, 40),
-             5105: (-700, 60, 26), 5106: (220, -250, 60), 5107: (60, -420, 60), 5108: (-80, -120, 60),
-             5109: (-520, -260, 70), 5110: (-480, 170, 60)}
+LANDMARKS = {5201: (-266, -266, 88), 5202: (120, 80, 62), 5203: (180, -760, 54), 5204: (-620, -600, 40),
+             5205: (-700, 60, 26), 5206: (220, -250, 60), 5207: (60, -420, 60), 5208: (-80, -120, 60),
+             5209: (-520, -260, 70), 5210: (-480, 170, 60)}
 
 
 def dist(a, b):
@@ -65,9 +65,9 @@ class TestRoyaleV1(unittest.TestCase):
             self.assertEqual((p["x"], p["y"], p["radius"]), (x, y, r), pid)
             self.assertTrue(p["title"])
         (lobby,) = self.by_kind["lobby"]
-        self.assertEqual((lobby["id"], lobby["x"], lobby["y"], lobby["radius"]), (5113, 455, 455, 32))
-        self.assertEqual({p["id"] for p in self.by_kind["crossing"]}, {5111, 5112, 5114})
-        pit = next(p for p in self.by_kind["crossing"] if p["id"] == 5114)
+        self.assertEqual((lobby["id"], lobby["x"], lobby["y"], lobby["radius"]), (5213, 455, 455, 32))
+        self.assertEqual({p["id"] for p in self.by_kind["crossing"]}, {5211, 5212, 5214})
+        pit = next(p for p in self.by_kind["crossing"] if p["id"] == 5214)
         self.assertEqual((pit["x"], pit["y"], pit["facing"]), (150, -665, 103))
         self.assertEqual(pit["z_source"], "placement:pit bridge")
 
@@ -82,7 +82,7 @@ class TestRoyaleV1(unittest.TestCase):
                 self.assertEqual(wet, [], p["name"])
         self.assertEqual(weights, FINAL_WEIGHTS)
         # Farm, Pit and Shrine are never final (early game only).
-        for pid in (5102, 5103, 5105):
+        for pid in (5202, 5203, 5205):
             x, y, r = LANDMARKS[pid]
             self.assertFalse(any(dist((p["x"], p["y"]), (x, y)) < r + 35 for p in self.by_kind["final_site"]))
 
@@ -162,8 +162,8 @@ class TestRoyaleV1(unittest.TestCase):
         self.assertEqual(zone["template"], 10)
         self.assertEqual(self.cfg["map"]["time_of_day_override"], 1050)
         subzones = {z["id"]: z["name"] for z in zone["subzones"]}
-        self.assertEqual(sorted(subzones), list(range(5101, 5114)))
-        self.assertEqual(subzones[5113], "The Overlook")
+        self.assertEqual(sorted(subzones), list(range(5201, 5214)))
+        self.assertEqual(subzones[5213], "The Overlook")
         self.assertEqual({a for a, _ in self.spec.areas}, set(subzones))
         for flag in ("ALLOW_DUELS", "INSIDE", "SANCTUARY", "OUTLAND", "NEED_FLY"):
             self.assertIn(flag, zone["clear_flags"])

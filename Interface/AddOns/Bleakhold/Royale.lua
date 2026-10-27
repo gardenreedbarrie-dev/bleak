@@ -983,16 +983,16 @@ end)
 local DEMO_MATCH = 7001
 -- the places of Bleakhold Royale v2 (MapForge specs/royale_v2.json pois, ids and radii as the server sends them)
 local DEMO_PLACES = {
-    { 5113, "Y", 455, 455, 32, "Sunwatch Overlook" },
-    { 5101, "L", -258, -345, 95, "Sunstair Isle" }, { 5102, "L", -45, -170, 90, "Tidecall Village" },
-    { 5103, "L", 320, -790, 80, "Twinfall Terrace" }, { 5104, "L", -490, -662, 60, "Saltwreck Cove" },
-    { 5105, "L", -776, 339, 80, "Serpent Steps" }, { 5106, "L", -250, 200, 90, "Sunbloom Meadow" },
-    { 5107, "L", 215, -312, 50, "Kingfisher Point" }, { 5108, "L", -255, -745, 80, "Mossvine Hollow" },
-    { 5109, "L", -740, -290, 70, "Bamboo Reach" }, { 5110, "L", 360, 250, 60, "Sunwatch Falls" },
-    { 5115, "L", -790, -784, 70, "Salvagers' Camp" }, { 5116, "L", -425, 50, 50, "Totem Knoll" },
-    { 5117, "L", 80, -520, 50, "Heron Rise" },
-    { 5111, "C", -10, -625, 16, "Stepping Stones" }, { 5112, "C", -785, 263, 18, "Vine Bridge" },
-    { 5114, "C", -150, -275, 14, "Tidewalk" },
+    { 5213, "Y", 455, 455, 32, "Sunwatch Overlook" },
+    { 5201, "L", -258, -345, 95, "Sunstair Isle" }, { 5202, "L", -45, -170, 90, "Tidecall Village" },
+    { 5203, "L", 320, -790, 80, "Twinfall Terrace" }, { 5204, "L", -490, -662, 60, "Saltwreck Cove" },
+    { 5205, "L", -776, 339, 80, "Serpent Steps" }, { 5206, "L", -250, 200, 90, "Sunbloom Meadow" },
+    { 5207, "L", 215, -312, 50, "Kingfisher Point" }, { 5208, "L", -255, -745, 80, "Mossvine Hollow" },
+    { 5209, "L", -740, -290, 70, "Bamboo Reach" }, { 5210, "L", 360, 250, 60, "Sunwatch Falls" },
+    { 5215, "L", -790, -784, 70, "Salvagers' Camp" }, { 5216, "L", -425, 50, 50, "Totem Knoll" },
+    { 5217, "L", 80, -520, 50, "Heron Rise" },
+    { 5211, "C", -10, -625, 16, "Stepping Stones" }, { 5212, "C", -785, 263, 18, "Vine Bridge" },
+    { 5214, "C", -150, -275, 14, "Tidewalk" },
 }
 local demo
 

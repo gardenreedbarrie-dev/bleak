@@ -46,7 +46,7 @@ class ForgeTests(unittest.TestCase):
         row = maps.by_id()[901]
         self.assertEqual(maps.get_str(row, "directory"), "BleakholdRoyale")
         self.assertEqual(maps.get(row, "instanceType"), 3)
-        self.assertEqual(maps.get(row, "areaTableID"), 5100)
+        self.assertEqual(maps.get(row, "areaTableID"), 5200)
         self.assertEqual(maps.get(row, "maxPlayers"), 40)
         self.assertEqual(maps.get(row, "expansionID"), 0)
         self.assertEqual(maps.get_loc(row, "mapName"), ["Bleakhold Royale"] * 9 + [""] * 7)
@@ -59,7 +59,7 @@ class ForgeTests(unittest.TestCase):
     def test_zone_is_ffa(self):
         cfg, tables, result, _ = run_forge()
         areas = tables["AreaTable"]
-        row = areas.by_id()[5100]
+        row = areas.by_id()[5200]
         self.assertEqual(areas.get(row, "continentID"), 901)
         self.assertEqual(areas.get(row, "parentAreaID"), 0)
         flags = areas.get(row, "flags")
@@ -72,20 +72,20 @@ class ForgeTests(unittest.TestCase):
         # A fresh exploration bit, unique over the whole table.
         bits = [areas.get(r, "areaBit") for r in areas.rows]
         self.assertEqual(bits.count(areas.get(row, "areaBit")), 1)
-        self.assertEqual(result.area_bits[5100], areas.get(row, "areaBit"))
+        self.assertEqual(result.area_bits[5200], areas.get(row, "areaBit"))
 
     def test_subzones_point_at_the_zone(self):
         data = synth_dbc.default_config()
-        data["zone"]["subzones"] = [{"id": 5101, "name": "The Crater"}, {"id": 5102, "name": "Storm's Eye"}]
+        data["zone"]["subzones"] = [{"id": 5201, "name": "The Crater"}, {"id": 5202, "name": "Storm's Eye"}]
         cfg, tables, result, _ = run_forge(data)
         areas = tables["AreaTable"]
 
-        for area_id in (5101, 5102):
+        for area_id in (5201, 5202):
             row = areas.by_id()[area_id]
-            self.assertEqual(areas.get(row, "parentAreaID"), 5100)
+            self.assertEqual(areas.get(row, "parentAreaID"), 5200)
             self.assertEqual(areas.get(row, "continentID"), 901)
 
-        bits = {result.area_bits[i] for i in (5100, 5101, 5102)}
+        bits = {result.area_bits[i] for i in (5200, 5201, 5202)}
         self.assertEqual(len(bits), 3)
 
     def test_inherited_zone_flags_must_be_harmless(self):
@@ -94,7 +94,7 @@ class ForgeTests(unittest.TestCase):
         data["zone"]["template"] = 12
         data["zone"]["set_flags"] = ["ARENA", "NO_FLY_ZONE"]
         data["zone"]["clear_flags"] = ["SANCTUARY"]
-        data["zone"]["subzones"] = [{"id": 5101, "name": "The Bleak Hold"}]
+        data["zone"]["subzones"] = [{"id": 5201, "name": "The Bleak Hold"}]
         cfg, tables, result, raw = run_forge(data)
         output = {name: tables[name].to_bytes() for name in result.changes}
         problems = forgemod.check({n: raw[n] for n in output}, output, cfg, result)
@@ -104,16 +104,16 @@ class ForgeTests(unittest.TestCase):
         cfg, tables, result, raw = run_forge(data)
         output = {name: tables[name].to_bytes() for name in result.changes}
         self.assertEqual(forgemod.check({n: raw[n] for n in output}, output, cfg, result), [])
-        row = tables["AreaTable"].by_id()[5101]
+        row = tables["AreaTable"].by_id()[5201]
         self.assertEqual(tables["AreaTable"].get(row, "flags"), 0x80 | 0x20000000)  # ARENA | NO_FLY_ZONE only
-        note = next(n for n in result.notes if n.startswith("zone 5100"))
+        note = next(n for n in result.notes if n.startswith("zone 5200"))
         self.assertIn("ARENA | NO_FLY_ZONE", note)
         self.assertIn("kept from template 12: none", note)
 
     def test_harmless_template_flags_stay(self):
         # The default template (3277) has OUTSIDE | OUTLAND: OUTLAND is cleared, OUTSIDE is harmless and stays.
         cfg, tables, result, _ = run_forge()
-        flags = tables["AreaTable"].get(tables["AreaTable"].by_id()[5100], "flags")
+        flags = tables["AreaTable"].get(tables["AreaTable"].by_id()[5200], "flags")
         self.assertEqual(flags, 0x80 | 0x4000000)
         self.assertEqual(configmod.flag_names(flags), ["ARENA", "OUTSIDE"])
         self.assertTrue(configmod.HARMLESS_TEMPLATE_FLAGS & configmod.AREA_FLAGS["OUTSIDE"])
@@ -183,7 +183,7 @@ class ForgeTests(unittest.TestCase):
         wma = tables["WorldMapArea"]
         row = wma.by_id()[result.world_map_area_id]
         self.assertEqual(wma.get(row, "mapID"), 901)
-        self.assertEqual(wma.get(row, "areaID"), 5100)
+        self.assertEqual(wma.get(row, "areaID"), 5200)
         left, right = wma.float_value(row, "locLeft"), wma.float_value(row, "locRight")
         top, bottom = wma.float_value(row, "locTop"), wma.float_value(row, "locBottom")
         self.assertGreater(left, right)
@@ -251,7 +251,7 @@ class ForgeTests(unittest.TestCase):
 
     def test_dropped_subzone_is_removed_on_rebuild(self):
         data = synth_dbc.default_config()
-        data["zone"]["subzones"] = [{"id": 5101, "name": "The Crater"}]
+        data["zone"]["subzones"] = [{"id": 5201, "name": "The Crater"}]
         cfg, tables, result, _ = run_forge(data)
         once = {name: tables[name].to_bytes() for name in tables}
 
@@ -259,8 +259,8 @@ class ForgeTests(unittest.TestCase):
         cfg2 = configmod.parse(data)
         tables2 = {name: DbcTable.from_bytes(bytes_, layout.get(name), name) for name, bytes_ in once.items()}
         result2 = forgemod.Forge(tables2, cfg2, None, synth_dbc.TILES).run()
-        self.assertNotIn(5101, tables2["AreaTable"].ids())
-        self.assertIn(5101, result2.changes["AreaTable"].removed)
+        self.assertNotIn(5201, tables2["AreaTable"].ids())
+        self.assertIn(5201, result2.changes["AreaTable"].removed)
 
     def test_missing_template_is_an_error(self):
         data = synth_dbc.default_config()

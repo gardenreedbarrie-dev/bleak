@@ -13,7 +13,7 @@
     "format": "mapforge-terrain/1",
     "map": {"directory": "RoyaleV2Demo", "tiles": {"x": [31, 32], "y": [31, 32]}},
     "seed": 2602,
-    "area_id": 5100,
+    "area_id": 5200,
     "uid_base": 1,
     "heightmap": {
         "base": 9.0,

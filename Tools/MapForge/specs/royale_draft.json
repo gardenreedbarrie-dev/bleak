@@ -12,7 +12,7 @@
     "server's spawn tables. Chests and orbs themselves are server-spawned GameObjects, NOT terrain doodads;",
     "the terrain only flattens their spots.",
     "Every texture and model path comes from the verified 3.3.5a asset kit (scratchpad assets/kit.json; all",
-    "entries live in the base MPQs of a clean client). area_id 5100 is the zone row that package.py adds",
+    "entries live in the base MPQs of a clean client). area_id 5200 is the zone row that package.py adds",
     "(bleakhold_royale.json 'zone.id'; it refuses MCNK area ids it does not add). Placements carry no 'bounds'",
     "here, so MODF extents and chunk",
     "footprints come from each entry's radius (from the kit's footprint estimates); on the VPS, rebuild with",
@@ -21,7 +21,7 @@
   "format": "mapforge-terrain/1",
   "map": {"id": 901, "directory": "BleakholdRoyale", "tiles": {"x": [31, 33], "y": [31, 33]}},
   "seed": 20261024,
-  "area_id": 5100,
+  "area_id": 5200,
   "uid_base": 310000,
   "heightmap": {
     "base": 8,

@@ -26,8 +26,8 @@ count or row size differs).
 - **Map.dbc**: id **901**, directory `BleakholdRoyale`, InstanceType **3**, MaxPlayers 40, `timeOfDayOverride`
   **1050** (17:30 light; the client uses value / 1440). Values the config leaves out are copied from Warsong Gulch
   (489); the loading screen is Warsong's.
-- **AreaTable.dbc**: zone **5100** on map 901 with the flags `ARENA` (0x80, free-for-all PvP for the whole zone)
-  and `NO_FLY_ZONE`; ambience and music copied from Duskwood (`zone.template` 10). Subzones **5101-5113** (The
+- **AreaTable.dbc**: zone **5200** on map 901 with the flags `ARENA` (0x80, free-for-all PvP for the whole zone)
+  and `NO_FLY_ZONE`; ambience and music copied from Duskwood (`zone.template` 10). Subzones **5201-5213** (The
   Bleak Hold, Harrow Farm, ... The Overlook) copy the zone row, so they inherit `ARENA` and `NO_FLY_ZONE` and give
   the native zone text; the terrain spec's `areas` put them on the chunks. `clear_flags` drops every template flag
   that changes the rules (duels, rest, sanctuary, cities, ghost revival, indoor-only, outdoor PvP): the build
@@ -59,8 +59,10 @@ count or row size differs).
 **Ids.** Stock 3.3.5a maps end at 724 and AzerothCore's sources and SQL know none above it; the realm's own Emberwing
 Hollow is map 740 (`mod-bleakhold`), so 901 keeps clear of both and of anything a pack installer may have added
 near 740. The map id stays below 1000: the server names its map files with `%03u` and `mmaps_generator` overflows a
-12-byte filter for 4-digit ids. Stock areas end below 5000, so the zone is 5100. Ids the server's own SQL already
-uses (`--server-sql`, for example the fork's server-only WorldMapArea rows 1000 and 1001) are refused or skipped,
+12-byte filter for 4-digit ids. Stock areas end below 5000, and the realm's own patches add areas 5006-5018, 5100,
+5101 and more from 6001 on (its AreaTable row 5100 stopped the first build on the VPS), so the zone is 5200, its
+subzones 5201-5213 and the places that are only POIs 5214-5217. Ids the server's own SQL already uses
+(`--server-sql`, for example the fork's server-only WorldMapArea rows 1000 and 1001) are refused or skipped,
 and every other id is the next free one above the table's own ids, because the client keeps each table in an array
 indexed from its lowest to its highest id. The build stops when an id belongs to anything that is not this map.
 **The live world database was not available**: run `bleakhold_royale_check.sql` before installing (below).

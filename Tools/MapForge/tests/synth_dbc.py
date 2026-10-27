@@ -203,7 +203,7 @@ def default_config() -> dict:
             "instance_type": 3, "pvp": 1, "flags": 0, "corpse_map": -1, "expansion": 0, "max_players": 40,
         },
         "zone": {
-            "id": 5100, "template": 3277, "name": "Bleakhold Royale",
+            "id": 5200, "template": 3277, "name": "Bleakhold Royale",
             "set_flags": ["ARENA"], "subzones": [],
             # bleakhold_royale.json's list: every template flag that changes the rules (forge.check fails on any
             # that remains besides HARMLESS_TEMPLATE_FLAGS).

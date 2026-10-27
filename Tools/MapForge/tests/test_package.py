@@ -28,7 +28,7 @@ AREA = "DBFilesClient\\AreaTable.dbc"
 DIRECTORY = "BleakholdRoyale"
 
 
-def write_terrain(folder: str, tiles=synth_dbc.TILES, area_ids=(5100,)):
+def write_terrain(folder: str, tiles=synth_dbc.TILES, area_ids=(5200,)):
     """A stand-in for the terrain build's output: the folder layout and the manifest, with placeholder files."""
     maps = os.path.join(folder, "World", "Maps", DIRECTORY)
     os.makedirs(maps, exist_ok=True)
@@ -166,12 +166,12 @@ class PackageTests(unittest.TestCase):
 
         with mpqpack.MpqArchive(os.path.join(client, "Patch-Y.MPQ")) as archive:
             ids = DbcTable.from_bytes(archive.read(AREA), layout.get("AreaTable")).ids()
-            self.assertTrue({4800, 5100} <= ids)
+            self.assertTrue({4800, 5200} <= ids)
 
         with mpqpack.MpqArchive(os.path.join(client, "patch-R.MPQ")) as archive:
             ids = DbcTable.from_bytes(archive.read(AREA), layout.get("AreaTable")).ids()
             # Players without the HD pack keep patch-R's copy (no HD-only row), plus our zone.
-            self.assertIn(5100, ids)
+            self.assertIn(5200, ids)
             self.assertNotIn(4800, ids)
 
         with mpqpack.MpqArchive(os.path.join(client, "patch-Q.MPQ")) as archive:
@@ -211,7 +211,7 @@ class PackageTests(unittest.TestCase):
         self.assertIn("Not in any patch", output)
 
     def test_terrain_area_ids_must_be_ours(self):
-        write_terrain(self.terrain, area_ids=(5100, 3277))
+        write_terrain(self.terrain, area_ids=(5200, 3277))
         code, output = self.build()
         self.assertEqual(code, 2)
         self.assertIn("MCNK area ids", output)
@@ -475,7 +475,7 @@ class ConfigFileTests(unittest.TestCase):
         self.assertEqual(cfg.warnings, [])
         self.assertEqual(cfg.map.time_of_day_override, 1050)
         self.assertEqual(cfg.zone.template, 10)
-        self.assertEqual([a.id for a in cfg.zone.subzones], list(range(5101, 5114)))
+        self.assertEqual([a.id for a in cfg.zone.subzones], list(range(5201, 5214)))
         self.assertEqual(cfg.archives.marker_texture, MARKER_BLP)
         self.assertFalse(cfg.zone.clear_flags & cfg.zone.set_flags)
         # Everything but ARENA, NO_FLY_ZONE and the harmless bits is cleared, whatever template 10 holds.

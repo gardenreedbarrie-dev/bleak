@@ -39,7 +39,7 @@ STOCK_TEX = "Tileset\\Made\\Up\\Stock.blp"
 SPEC = {
     "map": {"directory": "BleakholdRoyale", "tiles": {"x": [32, 32], "y": [32, 32]}, "id": 901},
     "seed": 3,
-    "area_id": 5100,
+    "area_id": 5200,
     "heightmap": {"base": 12.0},
     "textures": [{"name": "g", "path": "Tileset\\Made\\Up\\Grass.blp"},
                  {"name": "s", "path": {"modern": HD_SAND, "fallback": "Tileset\\Made\\Up\\Sand.blp"}},

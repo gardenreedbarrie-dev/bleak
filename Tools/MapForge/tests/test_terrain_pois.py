@@ -34,7 +34,7 @@ POI_SPEC = {
     "wmos": [{"label": "hall", "model": "World\\wmo\\X\\Hall.wmo", "position": [-400, -400, 20.0], "radius": 10}],
     "pois": [
         {"name": "lobby", "kind": "lobby", "id": 900, "title": "The Overlook", "position": [-80, -80], "radius": 20},
-        {"name": "keep", "kind": "landmark", "id": 5101, "title": "The Bleak Hold", "position": [-266, -266],
+        {"name": "keep", "kind": "landmark", "id": 5201, "title": "The Bleak Hold", "position": [-266, -266],
          "radius": 60},
         {"name": "c1", "kind": "crate", "param": 1, "position": [-200, -200], "radius": 2},
         {"name": "c2", "kind": "crate", "param": 2, "position": [-400, -400], "z_from": "hall", "z_offset": 0.3},
@@ -91,7 +91,7 @@ class TestPoiSpec(unittest.TestCase):
     def test_ids_explicit_unique_and_assigned(self):
         spec = parse()
         ids = [p["id"] for p in spec.pois]
-        self.assertEqual(ids[:2], [900, 5101])
+        self.assertEqual(ids[:2], [900, 5201])
         self.assertEqual(ids[2:], [1, 2, 3, 4, 5, 6, 7, 8])
         data = with_pois({"name": "a", "kind": "crate", "param": 1, "id": 2, "position": [-10, -10]},
                          {"name": "b", "kind": "crate", "param": 1, "position": [-20, -20]},

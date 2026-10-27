@@ -72,21 +72,21 @@ class SqlTests(unittest.TestCase):
         self.assertEqual(row[2], 3)  # InstanceType
         self.assertEqual(row[5], "Bleakhold's Royale")  # slot 0 (enUS)
         self.assertEqual(row[21], client[maps.col("mapName_flags")])  # the flags column, by position
-        self.assertEqual(row[22], 5100)  # AreaTableID
+        self.assertEqual(row[22], 5200)  # AreaTableID
         self.assertEqual(row[65], 40)  # MaxPlayers
 
         area = con.execute("SELECT `ContinentID`, `Flags`, `AreaBit` FROM `areatable_dbc` "
-                           "WHERE `ID` = 5100").fetchone()
+                           "WHERE `ID` = 5200").fetchone()
         self.assertEqual(area[0], 901)
         self.assertTrue(area[1] & 0x80)
-        self.assertEqual(area[2], self.result.area_bits[5100])
+        self.assertEqual(area[2], self.result.area_bits[5200])
 
         self.assertEqual(con.execute("SELECT `MapID_1`, `MapID_2` FROM `battlemasterlist_dbc` WHERE `ID` = 12")
                          .fetchone(), (901, -1))
         self.assertEqual(con.execute("SELECT COUNT(*) FROM `pvpdifficulty_dbc` WHERE `MapID` = 901")
                          .fetchone(), (1,))
         self.assertEqual(con.execute("SELECT `ContinentID` FROM `light_dbc`").fetchone(), (901,))
-        self.assertEqual(con.execute("SELECT `AreaID` FROM `worldmaparea_dbc`").fetchone(), (5100,))
+        self.assertEqual(con.execute("SELECT `AreaID` FROM `worldmaparea_dbc`").fetchone(), (5200,))
 
         # The whole row equals the client's values column by column.
         values = [float(v) if isinstance(v, float) else v for v in row]
@@ -156,11 +156,11 @@ class SqlTests(unittest.TestCase):
 def poi_doc(**changes):
     """A pois.json like terrain/build.py writes (3 x 3 tiles 31..33)."""
     pois = [
-        {"id": 5113, "name": "overlook", "kind": "lobby", "title": "The Overlook", "x": 455.0, "y": 455.0,
+        {"id": 5213, "name": "overlook", "kind": "lobby", "title": "The Overlook", "x": 455.0, "y": 455.0,
          "z": 44.7, "facing": 0.0, "radius": 32.0, "weight": 0, "param": 0},
-        {"id": 5107, "name": "crows_rise", "kind": "landmark", "title": "Crow's Rise", "x": 60.0, "y": -420.0,
+        {"id": 5207, "name": "crows_rise", "kind": "landmark", "title": "Crow's Rise", "x": 60.0, "y": -420.0,
          "z": 18.2, "facing": 0.0, "radius": 60.0, "weight": 0, "param": 0},
-        {"id": 5114, "name": "pit_bridge", "kind": "crossing", "title": "Pit Bridge", "x": 150.0, "y": -665.0,
+        {"id": 5214, "name": "pit_bridge", "kind": "crossing", "title": "Pit Bridge", "x": 150.0, "y": -665.0,
          "z": 3.6, "facing": 90.0, "radius": 18.0, "weight": 0, "param": 0},
         {"id": 1, "name": "crate_a", "kind": "crate", "title": "", "x": -240.25, "y": -252.0, "z": 31.0,
          "facing": 0.0, "radius": 2.0, "weight": 0, "param": 2},
@@ -189,7 +189,7 @@ class PoiSqlTests(unittest.TestCase):
         con.executescript(to_sqlite(text))
         con.executescript(to_sqlite(text))  # DELETE before INSERT: runs again
         rows = con.execute(f"SELECT * FROM `{sqlgen.POI_TABLE}` WHERE `map` = 901 ORDER BY `id`").fetchall()
-        self.assertEqual([r[1] for r in rows], [1, 2, 5107, 5113, 5114])
+        self.assertEqual([r[1] for r in rows], [1, 2, 5207, 5213, 5214])
         crate = rows[0]
         self.assertEqual(crate[2:4], ("crate", "crate_a"))  # no title: the POI name
         self.assertEqual((crate[4], crate[5], crate[6], crate[10]), (-240.25, -252.0, 31.0, 2))
