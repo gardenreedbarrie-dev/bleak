@@ -338,8 +338,10 @@ bleakserv's SQL linter. `--server-sql-out <folder>` also writes it, when every c
 is the server's folder of SQL made on the VPS, which bleakserv's `deploy/update-bleakhold-ui.sh` deploys like the
 repository's pending SQL and `ac-db-import` applies once. A file of that folder that already holds the same SQL is
 kept and nothing is written (running `update` again makes no second file); a `.sql` path in place of the folder is
-never overwritten when it holds other SQL. `--server-sql <file>` compares the DBC rows with another file field for
-field.
+never overwritten when it holds other SQL. The file is there whole or not at all: it is written as a hidden
+`.rev_<nanoseconds>.sql.part` (no `.sql` file, so the deploy does not take it) and gets its name only once it is
+complete, so a full disk or Ctrl-C leaves no cut-off `.sql` file for `ac-db-import` to run. `--server-sql <file>`
+compares the DBC rows with another file field for field.
 
 ### The Bleakhold realm, step by step
 
@@ -410,9 +412,17 @@ racials") has the same steps with what each check prints.
    ```text
    mod-bleakhold: racials on (High Elf race 15: 90500; Eredar race 19: 90501, 90502; Read Ley Line 120 s while resting)
    ```
-   Lines `mod-bleakhold: racials: ...` and `racials stay off ...` say what is still wrong; nothing was taken from any
-   character then. Each High Elf and Eredar logs `mod-bleakhold: racials of <name> (race 15)` (or `race 19`) at its
-   first login after the update.
+   Each High Elf and Eredar logs `mod-bleakhold: racials of <name> (race 15)` (or `race 19`) at its first login
+   after the update. Lines `mod-bleakhold: racials: ...` and `racials stay off ...` say what is still wrong: fix it at
+   once. Once `ac-db-import` has applied the rev file of step 2, the core takes the Blood Elf and Draenei racials from
+   every High Elf and Eredar at login (`Player::_LoadSkills`), whether or not mod-bleakhold runs, so with the racials
+   off they log in with no racials at all. Nothing was taken from any character only when that file was not applied.
+
+The realm's world rows have no plain way back. bleakserv's `rollback.sh` leaves the database as it is, and the old
+mod-bleakhold it puts back knows races 22 and 23 only, so races 15 and 19 then have no racials;
+`Bleakhold.Racials.Enable = 0` leaves them without racials too (unless `PlayerStart.CustomSpells = 1`). The template
+racials come back only with a new rev that gives races 15 and 19 the skill lines 756 and 760 again: fixing what the
+log names and updating again is the way out.
 
 ## Checks
 
@@ -454,9 +464,8 @@ tests of its own: High Elf and Eredar in the slots 15 and 19 of `Patch-R.MPQ` wi
 a race alone, a Pandaren bit, the languages) and a server data/dbc with rows the client lacks; ChrRaces without the
 races there, in an HD pack's copy, and a wrong `realm_id`; the SQL on a model of that realm's world database after the
 earlier update for races 22 and 23 (run twice); `--server-sql-out` (one rev file, never a changed one, none when a
-check fails). With a bleakserv checkout next
-to this repository it
-also compares the server's `spell_dbc` columns, the pending world-database file and mod-bleakhold's racial table with
-races.json.
+check fails, and none at all when the disk fills up or Ctrl-C comes while it is written). With a bleakserv checkout
+next to this repository it also compares the server's `spell_dbc` columns, the pending world-database file and
+mod-bleakhold's racial table with races.json.
 
 After a change to the Rec classes, regenerate the layouts with `py -3 -I Tools\RaceForge\raceforge.py schemas --write`.

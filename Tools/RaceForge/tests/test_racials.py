@@ -7,6 +7,7 @@ pending world-database file and mod-bleakhold's racial table with races.json.
 """
 
 import contextlib
+import errno
 import io
 import json
 import os
@@ -17,6 +18,12 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
+
+try:
+    import resource
+except ImportError:  # not on Windows
+    resource = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOL_DIR = os.path.dirname(HERE)
@@ -49,6 +56,31 @@ WALK_ON_AIR = 100800
 
 def run_tool(*args):
     return subprocess.run([sys.executable, "-I", os.path.join(TOOL_DIR, "raceforge.py"), *args], capture_output=True, text=True)
+
+
+# raceforge.py with a disk that fills up halfway through the rev file (RLIMIT_FSIZE while write_rev runs)
+FULL_DISK_TOOL = """
+import resource, sys
+sys.path.insert(0, sys.argv[1])
+import raceforge
+from rflib import update
+
+real = update.write_rev
+
+
+def write_rev(target, text):
+    soft, hard = resource.getrlimit(resource.RLIMIT_FSIZE)
+    resource.setrlimit(resource.RLIMIT_FSIZE, (len(text) // 2, hard))
+
+    try:
+        return real(target, text)
+    finally:
+        resource.setrlimit(resource.RLIMIT_FSIZE, (soft, hard))
+
+
+update.write_rev = write_rev
+sys.exit(raceforge.main(sys.argv[2:]))
+"""
 
 
 def races_json() -> dict:
@@ -922,6 +954,30 @@ class BleakholdRealmTests(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.work, "elsewhere")))
         self.assertIn("not written to", result.stdout)
 
+    @unittest.skipUnless(resource is not None, "no RLIMIT_FSIZE here")
+    def test_rev_file_whole_or_not_at_all(self):
+        # the disk fills up while the rev file is written: no .sql file stays (update-bleakhold-ui.sh would deploy it
+        # and ac-db-import run it cut off), the report says so, and the next run writes it whole, once
+        args = ["update", "--patches", self.patches, "--dbc", self.server_dbc, "--out", os.path.join(self.work, "out"), "--force",
+                "--server-sql-out", self.generated]
+        result = subprocess.run([sys.executable, "-I", "-c", FULL_DISK_TOOL, TOOL_DIR, *args], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+        self.assertIn(f"Server SQL rev: not written ([Errno {errno.EFBIG}]", result.stdout)
+        self.assertNotIn("Traceback", result.stderr)
+        self.assertEqual(os.listdir(self.generated), [])
+
+        with open(os.path.join(self.work, "out", "report.txt"), encoding="utf-8") as f:
+            self.assertIn("Server SQL rev: not written (", f.read())
+
+        result = self.update("--server-sql-out", self.generated)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        revs = os.listdir(self.generated)
+        self.assertEqual(len(revs), 1)
+        self.assertRegex(revs[0], r"^rev_\d{19}\.sql$")
+
+        with open(os.path.join(self.generated, revs[0]), encoding="utf-8") as f:
+            self.assertEqual(f.read(), self.sql())
+
     @unittest.skipUnless(os.path.isfile(os.path.join(SERVER_SRC, "apps", "codestyle", "codestyle-sql.py")), "bleakserv checkout not found")
     def test_realm_sql_passes_bleakserv_codestyle(self):
         result = self.update()
@@ -931,6 +987,93 @@ class BleakholdRealmTests(unittest.TestCase):
 
 
 @unittest.skipUnless(os.path.isfile(os.path.join(SERVER_SRC, "data", "sql", "base", "db_world", "spell_dbc.sql")), "bleakserv checkout not found")
+class WriteRevTests(unittest.TestCase):
+    """update.write_rev(): the rev file is there whole or not at all, and never over a file that is there."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.folder = os.path.join(tmp.name, "pending_db_world")
+        self.text = "DELETE FROM `spell_dbc` WHERE `ID` IN (90500, 90501, 90502);\n" + "-- a row\n" * 4000
+
+    def read(self, path) -> str:
+        with open(path, encoding="utf-8", newline="") as f:
+            return f.read()
+
+    def test_written_whole(self):
+        path, written = update.write_rev(self.folder, self.text)
+        self.assertTrue(written)
+        self.assertEqual(os.listdir(self.folder), [os.path.basename(path)])
+        self.assertEqual(self.read(path), self.text)
+
+        if os.name == "posix":
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o644)
+
+    def test_cancelled_write_leaves_nothing(self):
+        # Ctrl-C (or a failed write) before the file is complete: no .sql file and no part file stay
+        for error in (KeyboardInterrupt(), OSError(errno.ENOSPC, "No space left on device")):
+            with mock.patch.object(update.os, "fsync", side_effect=error), self.assertRaises(type(error)):
+                update.write_rev(self.folder, self.text)
+
+            self.assertEqual(os.listdir(self.folder), [])
+
+        path, written = update.write_rev(self.folder, self.text)
+        self.assertTrue(written)
+        self.assertEqual(os.listdir(self.folder), [os.path.basename(path)])
+
+    def test_named_file_that_appears_meanwhile_stays(self):
+        target = os.path.join(self.folder, "rev_1793100000000000003.sql")
+        real_fsync = os.fsync
+
+        def another_run(fd):
+            real_fsync(fd)
+
+            if not os.path.exists(target):
+                with open(target, "w", encoding="utf-8") as f:
+                    f.write("-- another run\n")
+
+        with mock.patch.object(update.os, "fsync", side_effect=another_run):
+            with self.assertRaisesRegex(update.UpdateError, "appeared while the rev file was written; it is never changed"):
+                update.write_rev(target, self.text)
+
+        self.assertEqual(os.listdir(self.folder), [os.path.basename(target)])
+        self.assertEqual(self.read(target), "-- another run\n")
+
+    def test_folder_name_taken_meanwhile(self):
+        # the folder's new name was taken between the check and the link: the next name, the other file unchanged
+        os.makedirs(self.folder)
+        real_link = os.link
+        taken = []
+
+        def link(src, dst):
+            if not taken:
+                taken.append(dst)
+
+                with open(dst, "w", encoding="utf-8") as f:
+                    f.write("-- another run\n")
+
+            return real_link(src, dst)
+
+        with mock.patch.object(update.os, "link", side_effect=link):
+            path, written = update.write_rev(self.folder, self.text)
+
+        self.assertTrue(written)
+        self.assertNotEqual(path, taken[0])
+        self.assertEqual(self.read(taken[0]), "-- another run\n")
+        self.assertEqual(self.read(path), self.text)
+        self.assertEqual(sorted(os.listdir(self.folder)), sorted(os.path.basename(p) for p in (path, taken[0])))
+
+    def test_filesystem_without_hard_links(self):
+        target = os.path.join(self.folder, "rev_1793100000000000004.sql")
+
+        with mock.patch.object(update.os, "link", side_effect=PermissionError(errno.EPERM, "Operation not permitted")):
+            path, written = update.write_rev(target, self.text)
+
+        self.assertEqual((path, written), (target, True))
+        self.assertEqual(os.listdir(self.folder), [os.path.basename(target)])
+        self.assertEqual(self.read(target), self.text)
+
+
 class BleakservTests(unittest.TestCase):
     """races.json against the server: the spell_dbc columns, the pending world-database file, mod-bleakhold's table."""
 

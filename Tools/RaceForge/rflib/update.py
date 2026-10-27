@@ -31,6 +31,8 @@ folder as a new rev file (write_rev()).
 
 from __future__ import annotations
 
+import contextlib
+import errno
 import functools
 import os
 import re
@@ -697,7 +699,8 @@ def write_rev(target: str, text: str) -> tuple[str, bool]:
     """The server SQL as a world-database update file of its own: target is a folder (a new rev_<nanoseconds>.sql goes
     there, as create_sql.sh names them) or a .sql path. Never changes a file that is there (ac-db-import may have applied
     it): a file of other content at the path stops it, and a .sql file of the folder that already holds the same text is
-    the one (nothing written). Returns (path, written)."""
+    the one (nothing written). The file is there whole or not at all: update-bleakhold-ui.sh deploys every .sql file of
+    the folder, and a cut-off one (disk full, Ctrl-C) would fail ac-db-import halfway. Returns (path, written)."""
     folder, path = (os.path.dirname(os.path.abspath(target)), target) if target.lower().endswith(".sql") else (target, None)
 
     if path is not None and os.path.exists(path):
@@ -718,14 +721,74 @@ def write_rev(target: str, text: str) -> tuple[str, bool]:
                         return other, False
 
     os.makedirs(folder, exist_ok=True)
+    named = path is not None
 
-    while path is None or os.path.exists(path):
+    while not named and (path is None or os.path.exists(path)):
         path = os.path.join(folder, f"rev_{time.time_ns()}.sql")
 
-    with open(path, "x", encoding="utf-8", newline="\n") as f:
-        f.write(text)
+    # written as a dot file that is no .sql file (neither the deploy's *.sql nor the scan above takes it), then linked
+    # to its name once complete, as build-royale.sh's put_rev does; the part file goes on any error, Ctrl-C included
+    part = os.path.join(folder, f".{os.path.basename(path)}.part")
 
+    try:
+        with open(part, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+
+        os.chmod(part, 0o644)
+
+        while True:
+            try:
+                link_new(part, path)
+                break
+            except FileExistsError:
+                if named:
+                    raise UpdateError(f"{path} appeared while the rev file was written; it is never changed. Run it again") from None
+
+                path = os.path.join(folder, f"rev_{time.time_ns()}.sql")
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(part)
+
+    sync_folder(folder)
     return path, True
+
+
+# os.link's errors on a filesystem without hard links (FAT, some network shares)
+NO_HARD_LINKS = {getattr(errno, name) for name in ("EPERM", "EOPNOTSUPP", "ENOTSUP", "EMLINK", "ENOSYS") if hasattr(errno, name)}
+
+
+def link_new(src: str, dst: str):
+    """dst as a new name of the complete file src, never over a file that is there (FileExistsError). Where the
+    filesystem has no hard links, src is renamed to dst once dst is checked not to be there."""
+    try:
+        os.link(src, dst)
+    except FileExistsError:
+        raise
+    except OSError as e:
+        if e.errno not in NO_HARD_LINKS:
+            raise
+
+        if os.path.lexists(dst):
+            raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), dst) from None
+
+        os.replace(src, dst)
+
+
+def sync_folder(folder: str):
+    """The folder's entries on disk (the new name survives a power cut); a filesystem that cannot sync folders is left."""
+    try:
+        fd = os.open(folder, os.O_RDONLY)
+    except OSError:
+        return
+
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
 
 
 def compare_sql(generated: str, other: str, tables=("spell_dbc", "skillraceclassinfo_dbc", "skilllineability_dbc")) -> list[str]:
