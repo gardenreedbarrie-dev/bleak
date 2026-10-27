@@ -148,8 +148,9 @@ def build_tables() -> dict[str, bytes]:
     out["LightParams"] = params.pack()
 
     skyboxes = Packer("LightSkybox")
-    skyboxes.row(7, "Environments\\Stars\\WintergraspSmokySky.M2", 0)
-    skyboxes.row(8, "Environments\\Stars\\DeathSkybox.M2", 0)
+    # Stock 3.3.5a LightSkybox.dbc names every skybox with .mdx (the client loads the .M2).
+    skyboxes.row(7, "Environments\\Stars\\WintergraspSmokySky.mdx", 0)
+    skyboxes.row(8, "Environments\\Stars\\DeathSkybox.mdx", 0)
     out["LightSkybox"] = skyboxes.pack()
 
     wma = Packer("WorldMapArea")

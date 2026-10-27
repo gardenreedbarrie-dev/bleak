@@ -1,10 +1,15 @@
 """Build a map's terrain files from a JSON spec.
 
     python3 -I Tools/MapForge/terrain/build.py SPEC.json OUT_DIR [--force] [--no-preview] [--quiet]
+        [--assets DIR] [--resolution asset_resolution.json]
 
 Writes OUT_DIR/World/Maps/<Dir>/<Dir>.wdt, <Dir>.wdl and <Dir>_<tx>_<ty>.adt, OUT_DIR/pois.json (the named points
 for the server's spawn tables, with resolved ground heights), OUT_DIR/terrain_manifest.json (placements, bounds,
 file hashes) and the previews OUT_DIR/preview.png and OUT_DIR/heightmap.png. Same spec (and seed) = same bytes.
+
+With extra assets resolved (--resolution, from package.py resolve-assets) it also writes OUT_DIR/extra_assets/
+(the modern files the tiles use, for the map archive) and, when modern doodads are placed, OUT_DIR/server/
+World/Maps/<Dir>/: the same map without them, the copy the server's extractors read.
 """
 
 from __future__ import annotations
@@ -21,11 +26,13 @@ if __package__ in (None, ""):
 
 from terrain import coords  # noqa: E402
 from terrain.adt import build_adt  # noqa: E402
+from terrain.extra_assets import Resolution, ResolutionError  # noqa: E402
 from terrain.heightmap import HeightField, LatticeGrid  # noqa: E402
 from terrain.placements import resolve_placements, scatter_placements  # noqa: E402
 from terrain.spec import Spec, load_spec, parse_spec  # noqa: E402
 from terrain.spec_errors import SpecError  # noqa: E402
 from terrain.texturing import TexturePainter  # noqa: E402
+from terrain.water import water_bodies  # noqa: E402
 from terrain.wdt_wdl import build_wdl, build_wdt  # noqa: E402
 
 GENERATOR = "MapForge terrain 1"
@@ -42,6 +49,8 @@ class Context:
         self.scattered, self.scatter_stats = scatter_placements(spec, self.grid)
         self.doodads, self.wmos, w = resolve_placements(spec, self.grid, assets, self.scattered)
         self.warnings += w
+        self.water_stats: dict = {}
+        self.extra_files: list[dict] = []
         self.border = None
         self.texture_overflow: list[dict] = []
         by_label: dict[str, list] = {}
@@ -99,22 +108,69 @@ def build(spec: Spec, assets=None) -> BuildResult:
         holes[(tx, ty)] = res.holes
     result.files[f"{base}/{spec.directory}.wdt"] = build_wdt(spec)
     result.files[f"{base}/{spec.directory}.wdl"] = build_wdl(spec, ctx.grid, holes)
+    if any(d.modern for d in ctx.doodads):
+        # The server's extract copy: the same tiles without the modern doodads, so vmap4_extractor only reads 3.3.5
+        # models (they are decoration: no collision or line of sight on the server).
+        for tx, ty in spec.tiles:
+            res = build_adt(ctx, tx, ty, keep_doodad=lambda d: not d.modern, base=result.tiles[(tx, ty)])
+            result.files[f"{SERVER_DIR}/{base}/{spec.directory}_{tx}_{ty}.adt"] = res.data
+        for ext in ("wdt", "wdl"):
+            result.files[f"{SERVER_DIR}/{base}/{spec.directory}.{ext}"] = result.files[f"{base}/{spec.directory}.{ext}"]
+    ctx.extra_files = _extra_files(spec, result, ctx)
     result.files["pois.json"] = _pois_json(spec, ctx)
     ctx.texture_overflow = texture_overflow(result.tiles)
     if ctx.texture_overflow:
         names = sorted({spec.textures[k].name for c in ctx.texture_overflow for k in c["dropped"]})
         ctx.warnings.append(f"{len(ctx.texture_overflow)} chunks hold more than 4 textures; dropped there: "
                             f"{', '.join(names)} (keep regional layers at least one chunk apart)")
-    ctx.border = border_check(spec, ctx.grid)
+    ctx.border = border_check(spec, ctx.grid, field=ctx.field)
     if not ctx.border["closed"]:
         x, y = ctx.border["at"]
-        ctx.warnings.append(f"players can walk from the map centre to the edge of the tiles (at {x}, {y}); add a "
+        ctx.warnings.append(f"players can walk or swim to the edge of the tiles (at {x}, {y}); add a "
                             f"steeper 'border' (slopes above {WALKABLE_SLOPE_DEG:g} degrees stop walking)")
+    m = ctx.border.get("mountains")
+    if m and m["past_cliff"]:
+        x, y = m["at"]
+        ctx.warnings.append(f"players can walk {m['deepest_yards']:g} yards into the mountains (at {x}, {y}), past "
+                            "the cliff at their foot; make the cliff higher or steeper there")
+    for use in spec.assets:
+        if use.modern_used and use.kind == "doodad" and use.entry.get("collision"):
+            ctx.warnings.append(f"{use.where}: the modern model {use.modern!r} has collision geometry; the client "
+                                "collides with it, the server (which never sees it) does not")
     result.manifest = _manifest(spec, ctx, result)
     return result
 
 
 WALKABLE_SLOPE_DEG = 50.0  # the client's walkable limit (steeper ground makes a character slide)
+SERVER_DIR = "server"
+EXTRA_DIR = "extra_assets"
+
+
+def _extra_files(spec: Spec, result: BuildResult, ctx: Context) -> list[dict]:
+    """Copy the modern files the tiles use (from the resolution's files/) into extra_assets/."""
+    out = []
+    seen = set()
+    for use in spec.assets:
+        if not use.modern_used:
+            continue
+        for f in spec.resolution.files_for(use.modern):
+            key = f["path"].replace("/", "\\").lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                with open(f["file"], "rb") as fh:
+                    data = fh.read()
+            except OSError as e:
+                raise SpecError(f"{use.where}: the resolution's copy of {f['path']!r} is unreadable ({e.strerror}); "
+                                "run package.py resolve-assets again") from None
+            digest = hashlib.sha256(data).hexdigest()
+            if f.get("sha256") and f["sha256"] != digest:
+                raise SpecError(f"{use.where}: {f['path']!r} changed since resolve-assets (sha256 differs)")
+            rel = f"{EXTRA_DIR}/" + f["path"].replace("\\", "/")
+            result.files[rel] = data
+            out.append({"path": f["path"], "file": rel, "size": len(data), "sha256": digest})
+    return sorted(out, key=lambda e: e["path"].lower())
 
 
 def texture_overflow(tiles: dict) -> list[dict]:
@@ -127,11 +183,23 @@ def texture_overflow(tiles: dict) -> list[dict]:
     return out
 
 
-def border_check(spec: Spec, grid, max_slope_deg: float = WALKABLE_SLOPE_DEG) -> dict:
-    """Can a player walk from the map centre to the edge of the tile range?
+def border_check(spec: Spec, grid, max_slope_deg: float = WALKABLE_SLOPE_DEG, field=None,
+                 surface: bool | None = None) -> dict:
+    """Can a player walk or swim to the edge of the tile range?
 
-    Flood fill over the half-unit lattice; a step is walkable when its rise is at most tan(max_slope) per step.
-    Water and models are ignored (swimming crosses water anyway), so this only proves the terrain ring is closed.
+    Flood fill over the half-unit lattice from the map centre (with mountains, from the whole valley, below); a
+    step is walkable when its rise is at most tan(max_slope) per step.
+    Models are ignored, so this only proves the terrain ring is closed. Water is crossed by swimming: a point under
+    water counts at the water surface, and the slope of its bed never stops the fill (a carved channel's sides are
+    steeper than walking allows, but only the lip stands above the water).
+
+    `surface` (the default when the spec has mountains) also needs walkable ground under each point: its normal at
+    most max_slope from vertical. The client stops a character on a steeper surface whichever way it walks, and a
+    range's foot is never straight, so a rise per step alone would let the fill zigzag up an oblique cliff. With
+    mountains (and the height `field`) the fill starts from every walkable point of the valley, since players can
+    be dropped anywhere in it (a steep spot or a river at the centre must not hide a way out), and the result also
+    says how far into the range the walkable ground reaches: past the cliff at the foot means players can leave
+    the valley there.
     """
     import math
     from collections import deque
@@ -142,10 +210,48 @@ def border_check(spec: Spec, grid, max_slope_deg: float = WALKABLE_SLOPE_DEG) ->
     cols = (spec.tx1 - spec.tx0 + 1) * coords.LATTICE_PER_TILE + 1
     limit = math.tan(math.radians(max_slope_deg)) * coords.HALF_UNIT
     h = [[grid.get(r0 + r, c0 + c) for c in range(cols)] for r in range(rows)]
+    wet = bytearray(rows * cols)
+    for body in water_bodies(spec):
+        # The lowest water over the ground, as water_level_at gives it, on the lattice points of the body's box.
+        bx0, bx1, by0, by1 = body.bbox
+        r_lo = max(0, int(math.floor(coords.LATTICE_ORIGIN - bx1 * 12.0 / 25.0)) - r0)
+        r_hi = min(rows - 1, int(math.ceil(coords.LATTICE_ORIGIN - bx0 * 12.0 / 25.0)) - r0)
+        c_lo = max(0, int(math.floor(coords.LATTICE_ORIGIN - by1 * 12.0 / 25.0)) - c0)
+        c_hi = min(cols - 1, int(math.ceil(coords.LATTICE_ORIGIN - by0 * 12.0 / 25.0)) - c0)
+        for r in range(r_lo, r_hi + 1):
+            x = coords.lattice_x(r0 + r)
+            for c in range(c_lo, c_hi + 1):
+                level = body.probe(x, coords.lattice_y(c0 + c))
+                if level is not None and grid.get(r0 + r, c0 + c) < level and (not wet[r * cols + c]
+                                                                                or level < h[r][c]):
+                    h[r][c] = level
+                    wet[r * cols + c] = 1
     seen = bytearray(rows * cols)
-    start = (rows // 2, cols // 2)
-    seen[start[0] * cols + start[1]] = 1
-    queue = deque([start])
+    if surface is None:
+        surface = bool(spec.mountain_features())
+    if surface:
+        # Points under a steeper surface are marked as seen, so the fill never enters them (a swimmer is not
+        # stopped by the bed under it).
+        min_nz = coords.dcos(max_slope_deg)
+        for r in range(rows):
+            for c in range(cols):
+                if not wet[r * cols + c] and grid.normal(r0 + r, c0 + c)[2] < min_nz:
+                    seen[r * cols + c] = 2
+    ranges = spec.mountain_features()
+    depth = None
+    queue = deque()
+    if ranges and field is not None:
+        # Players can be dropped anywhere in the valley: every walkable point of it starts the fill.
+        depth = [field.mountain_depth(coords.lattice_x(r0 + r), coords.lattice_y(c0 + c))
+                 for r in range(rows) for c in range(cols)]
+        for i in range(rows * cols):
+            if not seen[i] and depth[i] <= 0.0:
+                seen[i] = 1
+                queue.append(divmod(i, cols))
+    if not queue:
+        start = (rows // 2, cols // 2)
+        seen[start[0] * cols + start[1]] = 1
+        queue.append(start)
     closest = None
     while queue:
         r, c = queue.popleft()
@@ -161,9 +267,26 @@ def border_check(spec: Spec, grid, max_slope_deg: float = WALKABLE_SLOPE_DEG) ->
                     seen[nr * cols + nc] = 1
                     queue.append((nr, nc))
     edge, r, c = closest
-    return {"max_slope_deg": max_slope_deg, "closed": edge > 0,
-            "closest_walkable_to_edge_yards": _round(edge * coords.HALF_UNIT),
-            "at": [_round(coords.lattice_x(r0 + r)), _round(coords.lattice_y(c0 + c))]}
+    out = {"max_slope_deg": max_slope_deg, "closed": edge > 0,
+           "closest_walkable_to_edge_yards": _round(edge * coords.HALF_UNIT),
+           "at": [_round(coords.lattice_x(r0 + r)), _round(coords.lattice_y(c0 + c))]}
+    if surface:
+        out["surface_slope_checked"] = True
+    if depth is not None:
+        deepest = None
+        at = (0, 0)
+        for i in range(rows * cols):
+            if seen[i] != 1:
+                continue
+            t = depth[i]
+            if deepest is None or t > deepest:
+                deepest = t
+                at = divmod(i, cols)
+        cliff = min(f["cliff_width"] for f in ranges)
+        out["mountains"] = {"foot_yards": min(f["width"] for f in ranges), "deepest_yards": _round(deepest),
+                            "past_cliff": deepest > cliff,
+                            "at": [_round(coords.lattice_x(r0 + at[0])), _round(coords.lattice_y(c0 + at[1]))]}
+    return out
 
 
 def poi_counts(pois: list[dict]) -> dict:
@@ -241,7 +364,43 @@ def _manifest(spec: Spec, ctx: Context, result: BuildResult) -> dict:
         "border": ctx.border,
         "warnings": ctx.warnings,
         "files": files,
-    }
+    } | _manifest_v2(spec, ctx)
+
+
+def _manifest_v2(spec: Spec, ctx: Context) -> dict:
+    """Manifest keys for mountains, lakes, rivers, beaches and extra assets (only when the spec uses them)."""
+    out = {}
+    ranges = spec.mountain_features()
+    if ranges:
+        out["mountains"] = [{"width": f["width"], "height": list(f["height"]),
+                             "cliff": [f["cliff_height"], f["cliff_width"]], "layers": f["layers"],
+                             "saddles": f["saddles"], "ledges": f["ledges"]} for f in ranges]
+    if spec.lakes:
+        out["lakes"] = [{"name": lk["name"], "liquid_type": lk["liquid_type"], "level": lk["level"],
+                         "islands": len(lk["islands"])} for lk in spec.lakes]
+    if spec.rivers:
+        out["rivers"] = [{"name": r["name"], "liquid_type": r["liquid_type"], "levels": r["levels"],
+                          "falls": [{"at": [_round(f["x"]), _round(f["y"])], "top": f["top"], "bottom": f["bottom"],
+                                     "facing": _round(f["facing"])} for f in r["falls"]],
+                          "waterfall_doodads": len([p for p in spec.generated
+                                                    if p.label.startswith(r["name"] + " ")])} for r in spec.rivers]
+    if spec.lakes or spec.rivers or ctx.water_stats:
+        out["water_merged_chunks"] = ctx.water_stats.get("merged_chunks", 0)
+        out["water_dropped_cells"] = ctx.water_stats.get("dropped_cells", 0)
+    if spec.beaches is not None:
+        b = spec.beaches
+        out["beaches"] = {k: (spec.textures[b[k]].name if b[k] is not None else None)
+                          for k in ("sand", "wet_sand", "riverbed", "lakebed")} | \
+                         {k: b[k] for k in ("width", "height", "wet_width", "wet_depth", "slope_max")}
+    if spec.assets:
+        out["extra_assets"] = [{"where": u.where, "kind": u.kind, "modern": u.modern, "fallback": u.fallback,
+                                "path": u.path, "modern_used": u.modern_used, "reason": u.reason}
+                               for u in spec.assets]
+        out["extra_files"] = ctx.extra_files
+        modern = [d for d in ctx.doodads if d.modern]
+        out["server_tiles"] = f"{SERVER_DIR}/{map_dir(spec)}" if modern else None
+        out["server_doodads_left_out"] = len(modern)
+    return out
 
 
 def write(result: BuildResult, out_dir: str, force: bool = False, preview: bool = True) -> list[str]:
@@ -251,6 +410,12 @@ def write(result: BuildResult, out_dir: str, force: bool = False, preview: bool 
         if not force:
             raise FileExistsError(f"{target} exists; pass --force to replace it")
         shutil.rmtree(target)
+    # A rebuild must not leave an older build's extract tiles or extra files behind.
+    for stale in (os.path.join(out_dir, SERVER_DIR, *map_dir(spec).split("/")), os.path.join(out_dir, EXTRA_DIR)):
+        if os.path.exists(stale):
+            if not force:
+                raise FileExistsError(f"{stale} exists; pass --force to replace it")
+            shutil.rmtree(stale)
     written = []
     for name, data in sorted(result.files.items()):
         path = os.path.join(out_dir, *name.split("/"))
@@ -272,12 +437,12 @@ def write(result: BuildResult, out_dir: str, force: bool = False, preview: bool 
     return written
 
 
-def build_from_file(spec_path: str) -> BuildResult:
-    return build(load_spec(spec_path))
+def build_from_file(spec_path: str, resolution: Resolution | None = None) -> BuildResult:
+    return build(load_spec(spec_path, resolution))
 
 
-def build_from_dict(data: dict) -> BuildResult:
-    return build(parse_spec(data))
+def build_from_dict(data: dict, resolution: Resolution | None = None) -> BuildResult:
+    return build(parse_spec(data, resolution))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -286,6 +451,8 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("out", help="output folder (World\\Maps\\<Dir> is created inside)")
     ap.add_argument("--force", action="store_true", help="replace an existing World/Maps/<Dir> in the output")
     ap.add_argument("--assets", help="folder of extracted client files, for real model bounds (optional)")
+    ap.add_argument("--resolution", help="asset_resolution.json from package.py resolve-assets: the modern files "
+                                         "found for the spec's extra assets (without it every one falls back)")
     ap.add_argument("--no-preview", action="store_true", help="skip preview.png and heightmap.png")
     ap.add_argument("--quiet", action="store_true")
     args = ap.parse_args(argv)
@@ -294,9 +461,10 @@ def main(argv: list[str] | None = None) -> int:
         from terrain.assets import AssetFolder
         assets = AssetFolder(args.assets)
     try:
-        result = build(load_spec(args.spec), assets)
+        resolution = Resolution.load(args.resolution) if args.resolution else None
+        result = build(load_spec(args.spec, resolution), assets)
         written = write(result, args.out, force=args.force, preview=not args.no_preview)
-    except (SpecError, FileExistsError, OSError) as e:
+    except (SpecError, ResolutionError, FileExistsError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
     if not args.quiet:
@@ -310,6 +478,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  scatter {g['name']}: {g['placed']} of {g['candidates']} candidates")
         if m["poi_counts"]:
             print("  pois: " + ", ".join(f"{k} {v}" for k, v in m["poi_counts"].items()))
+        if "extra_assets" in m:
+            used = sum(1 for u in m["extra_assets"] if u["modern_used"])
+            print(f"  extra assets: {used} of {len(m['extra_assets'])} uses modern, {len(m['extra_files'])} files to "
+                  f"pack; server tiles: {m['server_tiles'] or 'same as the client'}")
         for w in m["warnings"]:
             print(f"  warning: {w}")
         for path in written:

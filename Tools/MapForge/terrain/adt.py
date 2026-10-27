@@ -84,24 +84,30 @@ class TileResult:
         self.wmos = []  # Resolved, in MODF order
 
 
-def build_adt(ctx, tx: int, ty: int) -> TileResult:
+def build_adt(ctx, tx: int, ty: int, keep_doodad=None, base: TileResult | None = None) -> TileResult:
+    """One tile. `keep_doodad` (a predicate) leaves doodads out, as the server's extract tiles leave out the extra
+    assets; `base` reuses another build's texturing and water for the same tile."""
     spec = ctx.spec
     grid = ctx.grid
     res = TileResult()
-    weights = ctx.painter.weights_for_tile(tx, ty)
-
-    tex_chunks = {}
-    used_textures: set[int] = set()
-    for iy in range(16):
-        for ix in range(16):
-            t = texture_chunk(weights, ix, iy)
-            tex_chunks[(ix, iy)] = t
-            used_textures.update(t.layers)
-    res.texturing = tex_chunks
-    res.textures = sorted(used_textures)
+    if base is None:
+        weights = ctx.painter.weights_for_tile(tx, ty)
+        tex_chunks = {}
+        used_textures: set[int] = set()
+        for iy in range(16):
+            for ix in range(16):
+                t = texture_chunk(weights, ix, iy)
+                tex_chunks[(ix, iy)] = t
+                used_textures.update(t.layers)
+        res.texturing = tex_chunks
+        res.textures = sorted(used_textures)
+    else:
+        tex_chunks = base.texturing
+        res.texturing = base.texturing
+        res.textures = base.textures
     tex_slot = {k: i for i, k in enumerate(res.textures)}
 
-    doodads = [d for d in ctx.doodads if (tx, ty) in d.footprint]
+    doodads = [d for d in ctx.doodads if (tx, ty) in d.footprint and (keep_doodad is None or keep_doodad(d))]
     wmos = [w for w in ctx.wmos if (tx, ty) in w.footprint]
     res.doodads = doodads
     res.wmos = wmos
@@ -126,7 +132,10 @@ def build_adt(ctx, tx: int, ty: int) -> TileResult:
     waters = []
     for iy in range(16):
         for ix in range(16):
-            cw = water_for_chunk(spec, grid, tx, ty, ix, iy, ctx.warnings)
+            if base is None:
+                cw = water_for_chunk(spec, grid, tx, ty, ix, iy, ctx.warnings, ctx.water_stats)
+            else:
+                cw = base.water.get((ix, iy))
             waters.append(cw)
             if cw is not None:
                 res.water[(ix, iy)] = cw

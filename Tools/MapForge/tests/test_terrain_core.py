@@ -13,7 +13,7 @@ if TOOL_DIR not in sys.path:
 from terrain import coords  # noqa: E402
 from terrain.heightmap import HeightField, LatticeGrid  # noqa: E402
 from terrain.noise import Fbm, GradientNoise, hash32  # noqa: E402
-from terrain.shapes import Circle, Polygon, Polyline, Rect, parse_shape  # noqa: E402
+from terrain.shapes import Circle, Polygon, Polyline, Rect, RiverPath, parse_shape  # noqa: E402
 from terrain.spec import parse_spec  # noqa: E402
 from terrain.spec_errors import SpecError  # noqa: E402
 from terrain.texturing import TexturePainter, pack_alpha_4bit, texture_chunk  # noqa: E402
@@ -73,6 +73,13 @@ class TestCoords(unittest.TestCase):
             self.assertLess(abs(coords.dcos(deg) - math.cos(math.radians(deg))), 1e-9, deg)
 
 
+    def test_datan2_matches_libm(self):
+        for y, x in ((0.0, 1.0), (1.0, 0.0), (0.0, -1.0), (-1.0, 0.0), (3.0, 4.0), (-60.0, -80.0), (1e-9, -5.0),
+                     (7.25, -0.125), (-0.5, 0.75)):
+            self.assertLess(abs(coords.datan2(y, x) - math.degrees(math.atan2(y, x))), 1e-9, (y, x))
+        self.assertEqual(coords.datan2(0.0, 0.0), 0.0)
+
+
 class TestNoise(unittest.TestCase):
     def test_hash_deterministic(self):
         self.assertEqual(hash32(12, -7, 99), hash32(12, -7, 99))
@@ -117,6 +124,27 @@ class TestShapes(unittest.TestCase):
         line = Polyline([(0.0, 0.0), (10.0, 0.0)], 4.0)
         self.assertEqual(line.distance(5.0, 1.9), 0.0)
         self.assertAlmostEqual(line.distance(5.0, 5.0), 3.0)
+
+    def test_inside_distance(self):
+        self.assertAlmostEqual(Circle((0.0, 0.0), 10.0).inside_distance(3.0, 4.0), 5.0)
+        self.assertEqual(Circle((0.0, 0.0), 10.0).inside_distance(30.0, 0.0), 0.0)
+        self.assertAlmostEqual(Rect((0.0, 0.0), (10.0, 4.0)).inside_distance(5.0, 1.0), 1.0)
+        square = Polygon([(0.0, 0.0), (10.0, 0.0), (10.0, 10.0), (0.0, 10.0)])
+        self.assertAlmostEqual(square.inside_distance(5.0, 2.0), 2.0)
+        self.assertEqual(square.inside_distance(-1.0, 5.0), 0.0)
+        self.assertAlmostEqual(Polyline([(0.0, 0.0), (10.0, 0.0)], 4.0).inside_distance(5.0, 0.5), 1.5)
+
+    def test_river_path_reaches(self):
+        path = RiverPath([(0.0, 0.0), (10.0, 0.0), (20.0, 0.0), (30.0, 0.0)], [0, 1, 1], [9.0, 5.0], 4.0, 2.0)
+        self.assertEqual(path.joints, [(10.0, 1)])
+        self.assertEqual(path.level_at(5.0, 1.0), 9.0)
+        self.assertEqual(path.level_at(25.0, -1.0), 5.0)
+        self.assertEqual(path.level_at(10.0, 1.0), 9.0)  # a tie at the joint belongs upstream
+        self.assertEqual(path.terrain_level(8.0), 9.0)
+        self.assertEqual(path.terrain_level(10.0), 7.0)  # halfway down the step, spread over fall_run
+        self.assertEqual(path.terrain_level(12.0), 5.0)
+        dist, seg, t = path.nearest(15.0, 3.0)
+        self.assertEqual((dist, seg, path.arc(seg, t)), (3.0, 1, 15.0))
 
     def test_parse_rejects_unknown(self):
         with self.assertRaises(SpecError):

@@ -451,8 +451,14 @@ class Forge:
         """The lowest stock LightParams id whose LightSkybox shows the M2 at path (skyboxes bind through Light ->
         LightParams -> LightSkybox, never through ADTs)."""
         skyboxes = self._table("LightSkybox")
-        wanted = path.replace("/", "\\").lower()
-        skybox_ids = {to_signed(r[0]) for r in skyboxes.rows if skyboxes.get_str(r, "name").lower() == wanted}
+
+        def key(name: str) -> str:
+            # The client's model loader reads a .mdx name as .m2, and stock LightSkybox rows use both spellings.
+            name = name.replace("/", "\\").lower()
+            return name[:-4] + ".m2" if name.endswith(".mdx") else name
+
+        wanted = key(path)
+        skybox_ids = {to_signed(r[0]) for r in skyboxes.rows if key(skyboxes.get_str(r, "name")) == wanted}
 
         if not skybox_ids:
             raise ForgeError(f"light.skybox: no LightSkybox row shows {path}; use params_from_light instead")

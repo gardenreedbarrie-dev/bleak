@@ -21,10 +21,11 @@ from .spec_errors import SpecError
 
 class Resolved:
     __slots__ = ("kind", "model", "uid", "world", "file_pos", "rotation", "scale_u16", "flags", "extents",
-                 "doodad_set", "name_set", "footprint", "label", "radius", "bounds_source")
+                 "doodad_set", "name_set", "footprint", "label", "radius", "bounds_source", "modern")
 
     def __init__(self):
         self.footprint: dict[tuple[int, int], list[tuple[int, int]]] = {}
+        self.modern = False
 
 
 def _rotate(v, rx_file: float, ry_file: float, rz_file: float):
@@ -95,12 +96,13 @@ def _footprint(spec, x0: float, x1: float, y0: float, y1: float, circle=None):
 
 def resolve_placements(spec, grid, assets=None, extra=None) -> tuple[list[Resolved], list[Resolved], list[str]]:
     """Resolve every placement. `assets` (assets.AssetFolder) supplies real model bounds where the spec has none.
-    `extra` are generated doodads (scatter_placements); they come last, so their automatic ids never shift the
-    spec's own placements."""
+    The spec's generated doodads (waterfalls) and `extra` (scatter_placements) come last, so their automatic ids
+    never shift the spec's own placements."""
     warnings: list[str] = []
     used: dict[int, str] = {}
     everything = [("doodads", i, p) for i, p in enumerate(spec.doodads)] + \
                  [("wmos", i, p) for i, p in enumerate(spec.wmos)] + \
+                 [("waterfalls", i, p) for i, p in enumerate(spec.generated)] + \
                  [("scatter", i, p) for i, p in enumerate(extra or [])]
     for group, i, p in everything:
         if p.uid is not None:
@@ -118,6 +120,7 @@ def resolve_placements(spec, grid, assets=None, extra=None) -> tuple[list[Resolv
         r.kind = p.kind
         r.model = p.model
         r.label = p.label
+        r.modern = p.modern
         if p.uid is None:
             while next_uid in used:
                 next_uid += 1
@@ -274,11 +277,16 @@ def scatter_placements(spec, grid) -> tuple[list[Placement], list[dict]]:
     stats: list[dict] = []
     if not spec.scatter:
         return out, stats
+    from .water import water_level_at  # noqa: PLC0415
+
     wx0, wx1, wy0, wy1 = spec.world_bounds()
     rivers = [(Polyline(list(f["path"]), f["width"]), f["width"] * 0.5) for f in spec.features
               if f["type"] == "river"]
+    rivers += [(Polyline(list(r["points"]), r["width"]), r["width"] * 0.5) for r in spec.rivers]
     fixed = [(p.x, p.y, _body_radius(p, 1.0)) for p in spec.wmos] + \
-            [(p.x, p.y, _body_radius(p, 0.5)) for p in spec.doodads]
+            [(p.x, p.y, _body_radius(p, 0.5)) for p in spec.doodads] + \
+            [(p.x, p.y, _body_radius(p, 0.5)) for p in spec.generated]
+    new_water = bool(spec.lakes or spec.rivers)
     occupancy = _Occupancy(16.0)
     for gi, g in enumerate(spec.scatter):
         seed = (spec.seed * 2654435761 + g["seed"] * 40503 + gi * 977 + 17) & 0xFFFFFFFF
@@ -338,7 +346,8 @@ def scatter_placements(spec, grid) -> tuple[list[Placement], list[dict]]:
             if g["height"] is not None and not (g["height"][0] <= ground <= g["height"][1]):
                 rejected["height"] += 1
                 continue
-            if g["dry"] and any(w["shape"].contains(x, y) and ground < w["height"] + 0.25 for w in spec.water):
+            if g["dry"] and (any(w["shape"].contains(x, y) and ground < w["height"] + 0.25 for w in spec.water) or
+                             (new_water and water_level_at(spec, x, y, ground - 0.25) is not None)):
                 rejected["wet"] += 1
                 continue
             if clear["roads"] is not None and any(r["shape"].distance(x, y) < clear["roads"] + body
@@ -365,6 +374,6 @@ def scatter_placements(spec, grid) -> tuple[list[Placement], list[dict]]:
             placed += 1
             out.append(Placement("doodad", model["model"], x, y, None, model["z_offset"],
                                  (0.0, (facing - 180.0) % 360.0, 0.0), scale, None, model["radius"] * scale, 0, None,
-                                 0, 0, f"{g['name']} #{placed}"))
+                                 0, 0, f"{g['name']} #{placed}", model["modern"]))
         stats.append({"name": g["name"], "candidates": len(cells), "placed": placed, "rejected": rejected})
     return out, stats

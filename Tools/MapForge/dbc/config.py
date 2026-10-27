@@ -325,6 +325,22 @@ def _flags(names, where: str) -> int:
     return value
 
 
+def _time_of_day(value, where: str) -> int | None:
+    """Map.dbc timeOfDayOverride: null copies the template, "off" (or -1) is the natural day cycle, 0-1440 a fixed
+    time in minutes (WorldFrame: the client uses value / 1440 as the time of day)."""
+    if value is None:
+        return None
+
+    if value == "off":
+        return -1
+
+    if isinstance(value, bool) or not isinstance(value, int) or not -1 <= value <= 1440:
+        raise ConfigError(f"{where}: null (the template's), \"off\" or -1 (the natural day cycle), or minutes "
+                          "0-1440 (a fixed time of day)")
+
+    return value
+
+
 def _map(r: _Reader) -> MapConfig:
     directory = r.str("directory")
 
@@ -346,7 +362,7 @@ def _map(r: _Reader) -> MapConfig:
         corpse_map=r.int("corpse_map", -1),
         corpse_x=r.float("corpse_x", 0.0),
         corpse_y=r.float("corpse_y", 0.0),
-        time_of_day_override=r.int("time_of_day_override", None, null=True),
+        time_of_day_override=_time_of_day(r.raw("time_of_day_override"), f"{r.where}.time_of_day_override"),
         expansion=r.int("expansion", low=0, high=2),
         raid_offset=r.int("raid_offset", None, null=True),
         max_players=r.int("max_players", low=0, high=1000),

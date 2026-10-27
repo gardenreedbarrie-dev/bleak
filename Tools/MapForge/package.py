@@ -8,6 +8,8 @@
     python3 -I Tools/MapForge/package.py doctor --patches <folder> [--config <map.json>]
     python3 -I Tools/MapForge/package.py validate --config <map.json> --out <folder>
     python3 -I Tools/MapForge/package.py poi-sql --pois <terrain output or pois.json> --out <folder> [--map-id N]
+    python3 -I Tools/MapForge/package.py resolve-assets --spec <terrain spec> --out <folder>
+        [--sources <folder or MPQ> ...] [--listfile <3.3.5 listfile or kit> ...]
     python3 -I Tools/MapForge/package.py schemas [--check | --write]
 
 It ships no game data: it reads the DBC files and archives you give it and writes modified copies. The terrain
@@ -17,6 +19,7 @@ It ships no game data: it reads the DBC files and archives you give it and write
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -34,6 +37,10 @@ from dbc import config as configmod  # noqa: E402
 from dbc import forge as forgemod  # noqa: E402
 from dbc import layout, minimap, plan as planmod, sqlgen  # noqa: E402
 from dbc.patches import PatchError, PatchSet, outranks, rebuild  # noqa: E402
+from dbc.sources import SourceReadError, SourceSet  # noqa: E402
+from terrain import extra_assets  # noqa: E402
+from terrain.spec import load_spec  # noqa: E402
+from terrain.spec_errors import SpecError  # noqa: E402
 
 import mpqpack  # noqa: E402
 from rflib.dbc import DbcError, DbcTable  # noqa: E402
@@ -84,7 +91,9 @@ def read_tables(folder: str, required: list[str], optional: list[str]) -> tuple[
 
 
 def read_terrain(folder: str, cfg: configmod.Config) -> tuple[dict, list[str], set[tuple[int, int]]]:
-    """(manifest, client files to pack as (archive name, path on disk), WDT tiles)."""
+    """(manifest, client files to pack as (archive name, path on disk), WDT tiles). The manifest also gets
+    "_extra" (the extra-asset files for the map archive) and "_server" (the tiles the server extracts: the
+    server copy without the extra-asset doodads when the terrain has one, else the client tiles)."""
     manifest_path = os.path.join(folder, "terrain_manifest.json")
 
     if not os.path.isfile(manifest_path):
@@ -119,6 +128,43 @@ def read_terrain(folder: str, cfg: configmod.Config) -> tuple[dict, list[str], s
         raise BuildError(f"the terrain's MCNK area ids {sorted(terrain_areas - {0})} are not all in the config's "
                          f"areas {cfg.area_ids()}")
 
+    extra = []
+
+    for entry in manifest.get("extra_files", []):
+        why = extra_assets.unsafe_path(entry["path"]) or extra_assets.unsafe_path(entry["file"])
+
+        if why:
+            raise BuildError(f"{folder}: the extra asset {entry['path']!r} ({entry['file']!r}) is not a plain "
+                             f"relative path ({why})")
+
+        path = os.path.join(folder, *entry["file"].split("/"))
+
+        if not os.path.isfile(path):
+            raise BuildError(f"{folder}: the extra asset {entry['path']} is missing ({entry['file']})")
+
+        with open(path, "rb") as f:
+            if hashlib.sha256(f.read()).hexdigest() != entry["sha256"]:
+                raise BuildError(f"{path} differs from the terrain manifest (sha256); rebuild the terrain")
+
+        extra.append((entry["path"], path))
+
+    server = files
+
+    if manifest.get("server_tiles"):
+        server_dir = os.path.join(folder, *manifest["server_tiles"].split("/"))
+
+        if not os.path.isdir(server_dir):
+            raise BuildError(f"{folder}: the manifest names the server copy {manifest['server_tiles']}, which is "
+                             "missing")
+
+        server = [(f"World\\Maps\\{directory}\\{entry}", os.path.join(server_dir, entry))
+                  for entry in sorted(os.listdir(server_dir)) if entry.lower().endswith((".wdt", ".wdl", ".adt"))]
+
+        if sorted(n.lower() for n, _ in server) != sorted(n.lower() for n, _ in files):
+            raise BuildError(f"{server_dir}: the server copy holds other files than World/Maps/{directory}")
+
+    manifest["_extra"] = extra
+    manifest["_server"] = server
     return manifest, files, tiles
 
 
@@ -221,14 +267,16 @@ def stage_minimap(cfg: configmod.Config, tile_folder: str, trs_base: str | None,
     return notes
 
 
-def collisions(patchset: PatchSet, map_archive: str, staging: dict[str, str]) -> list[str]:
+def collisions(patchset: PatchSet, map_archive: str, staging: dict[str, str],
+               extra: frozenset = frozenset()) -> list[str]:
     """Map archive files another realm archive already has: terrain paths must be new, and a shared file
-    (md5translate.trs) must not be loaded over ours."""
+    (md5translate.trs) must not be loaded over ours. Extra assets (`extra`, lower-case names) are left to
+    extra_asset_notes: they were often found in those very archives."""
     problems = []
     ours = f"Data\\{map_archive}"
 
     for name in sorted(staging):
-        if name.lower().startswith("dbfilesclient\\") or name == MARKER_FILE:
+        if name.lower().startswith("dbfilesclient\\") or name == MARKER_FILE or name.lower() in extra:
             continue
 
         holders = [a for a in patchset.holders(name) if a.name.lower() != map_archive.lower()]
@@ -245,6 +293,41 @@ def collisions(patchset: PatchSet, map_archive: str, staging: dict[str, str]) ->
             problems.append(f"{name} is already in {', '.join(a.name for a in holders)}")
 
     return problems
+
+
+def extra_asset_notes(patchset: PatchSet, map_archive: str, extra: list[tuple[str, str]]) -> list[str]:
+    """Where the realm's archives already hold an extra asset: the same bytes are fine; a different copy in an
+    archive that loads over the map archive is what its players see."""
+    notes = []
+    ours = f"Data\\{map_archive}"
+
+    for name, path in extra:
+        holders = [a for a in patchset.holders(name) if a.name.lower() != map_archive.lower()]
+
+        if not holders:
+            continue
+
+        with open(path, "rb") as f:
+            mine = f.read()
+
+        for archive in holders:
+            try:
+                same = archive.read(name) == mine
+            except PatchError:
+                same = False
+
+            over = not outranks(ours, [archive])
+            pack = f" (pack {archive.pack})" if archive.pack else ""
+
+            if same:
+                notes.append(f"[NOTE] {name}: also in {archive.name}{pack}, same bytes")
+            elif over:
+                notes.append(f"[WARN] {name}: {archive.name}{pack} holds a different copy and loads over "
+                             f"{map_archive}; its players see that one")
+            else:
+                notes.append(f"[NOTE] {name}: {archive.name}{pack} holds a different copy; {map_archive} loads over it")
+
+    return notes
 
 
 def write_extract(out_dir: str, cfg: configmod.Config, terrain_files: list, maps: DbcTable, work_dir: str,
@@ -453,9 +536,24 @@ def cmd_build(args) -> int:
     terrain_files = []
     wdt_tiles = set()
 
+    extra_files = []
+    server_files = []
+
     if args.terrain:
         manifest, terrain_files, wdt_tiles = read_terrain(args.terrain, cfg)
+        extra_files = manifest["_extra"]
+        server_files = manifest["_server"]
         report.say(f"[NOTE] terrain: {len(terrain_files)} files, {len(wdt_tiles)} tiles")
+
+        if extra_files:
+            used = [u for u in manifest.get("extra_assets", []) if u["modern_used"]]
+            report.say(f"[NOTE] extra assets: {len(extra_files)} modern files for {len(used)} uses go into "
+                       f"{cfg.archives.map_archive} (every player gets them, HD pack or not)")
+
+        if manifest.get("server_tiles"):
+            report.say(f"[NOTE] server/extract gets {manifest['server_tiles']}: the tiles without the "
+                       f"{manifest.get('server_doodads_left_out', 0)} modern doodads (vmap4_extractor reads only "
+                       "3.3.5 models)")
     else:
         report.say("[WARN] no --terrain: the archive gets DBCs only; a Map.dbc row without the map files crashes "
                    "players on teleport, so do not install this build")
@@ -523,6 +621,7 @@ def cmd_build(args) -> int:
 
         # The map archive.
         staging = dict(terrain_files)
+        staging.update(extra_files)
         staging[MARKER_FILE] = write_marker(work_dir)
         stage_marker_texture(cfg, staging, work_dir, report)
 
@@ -536,8 +635,13 @@ def cmd_build(args) -> int:
         map_archive_tables = placement.map_archive_tables() if placement else list(written)
 
         if patchset:
-            for problem in collisions(patchset, cfg.archives.map_archive, staging):
+            extra_names = frozenset(n.lower() for n, _ in extra_files)
+
+            for problem in collisions(patchset, cfg.archives.map_archive, staging, extra_names):
                 report.check(False, "map archive paths", problem)
+
+            for note in extra_asset_notes(patchset, cfg.archives.map_archive, extra_files):
+                report.say(note)
 
             if placement:
                 for name in map_archive_tables:
@@ -609,7 +713,7 @@ def cmd_build(args) -> int:
             report.say(f"[NOTE] wrote {path}")
 
         if terrain_files:
-            for note in write_extract(args.out, cfg, terrain_files, tables["Map"], work_dir, args.full_extract_dbc):
+            for note in write_extract(args.out, cfg, server_files, tables["Map"], work_dir, args.full_extract_dbc):
                 report.say(f"[NOTE] {note}")
 
         # Re-read the archive and check it holds what was staged.
@@ -765,6 +869,204 @@ def cmd_poi_sql(args) -> int:
     return 1 if report.failed or not rows else 0
 
 
+def resolve_asset(use, sources: SourceSet, stock: set[str], copies: dict) -> dict:
+    """One modern path: found complete in the sources (status "resolved", with the files to ship) or not (status
+    "fallback", with the reason). `copies` collects {path: (bytes, source)} for every file to ship."""
+    entry = {"modern": use.modern, "fallback": use.fallback, "kind": use.kind, "status": "fallback", "reason": "",
+             "source": None, "files": [], "stock": []}
+    key = extra_assets.norm(use.modern)
+    why = extra_assets.unsafe_path(use.modern)
+
+    if why:
+        entry["reason"] = f"{use.modern!r} is not a plain relative client path ({why})"
+        return entry
+
+    if key in stock:
+        entry.update(status="resolved", reason="a 3.3.5 listfile path: every client has it", source="stock")
+        entry["stock"].append(use.modern)
+
+        if use.kind == "texture":
+            entry["specular"] = extra_assets.norm(extra_assets.specular_name(use.modern)) in stock
+
+        return entry
+
+    try:
+        found = sources.read(use.modern)
+    except SourceReadError as e:
+        # The copy the client loads; a lower source's copy may be another version, so it is not used instead.
+        entry["reason"] = str(e)
+        return entry
+
+    if found is None:
+        entry["reason"] = "not in the sources" if sources.layers else "no --sources given (offline): falls back"
+        return entry
+
+    data, label = found
+    entry["source"] = label
+    files = {use.modern: (data, label)}
+
+    if use.kind == "texture":
+        problem = extra_assets.blp_problem(data)
+
+        if problem:
+            entry["reason"] = problem
+            return entry
+
+        spec_name = extra_assets.specular_name(use.modern)
+
+        try:
+            spec_found = sources.read(spec_name)
+        except SourceReadError as e:
+            entry["reason"] = f"needs {spec_name}: {e}"
+            return entry
+
+        if spec_found is not None and not extra_assets.blp_problem(spec_found[0]):
+            files[spec_name] = spec_found
+            entry["specular"] = True
+        else:
+            entry["specular"] = extra_assets.norm(spec_name) in stock
+
+            if entry["specular"]:
+                entry["stock"].append(spec_name)
+    else:
+        try:
+            deps = extra_assets.m2_dependencies(use.modern, data)
+        except extra_assets.ResolutionError as e:
+            entry["reason"] = str(e)
+            return entry
+
+        entry["collision"] = deps["collision"]
+        entry["format"] = f"M2 version {deps['version']}"
+
+        if deps["fdid"]:
+            entry["reason"] = (f"names its files by FileDataID ({', '.join(deps['fdid'])}): a client without the "
+                               "HD pack's listfile.csv shows placeholders; use a path-named (MD20) version")
+            return entry
+
+        for dep in deps["skins"] + deps["textures"] + deps["anims"]:
+            why = extra_assets.unsafe_path(dep)
+
+            if why:
+                entry["reason"] = f"names {dep!r}, which is not a plain relative client path ({why})"
+                return entry
+
+            if extra_assets.norm(dep) in stock:
+                entry["stock"].append(dep)
+                continue
+
+            try:
+                dep_found = sources.read(dep)
+            except SourceReadError as e:
+                entry["reason"] = f"needs {dep}: {e}"
+                return entry
+
+            if dep_found is None:
+                entry["reason"] = f"needs {dep}, which no source holds"
+                return entry
+
+            files[dep] = dep_found
+
+    entry["status"] = "resolved"
+
+    for path, (blob, source) in files.items():
+        # One copy per file whatever the spelling (models name shared textures in any case): every entry points
+        # at the spelling written first, which is the one under files/.
+        canon, blob = copies.setdefault(extra_assets.norm(path), (path, blob))
+        entry["files"].append({"path": path, "file": extra_assets.file_rel(canon), "size": len(blob),
+                               "sha256": hashlib.sha256(blob).hexdigest(), "source": source})
+
+    return entry
+
+
+def cmd_resolve_assets(args) -> int:
+    """Which modern files of the spec's extra assets the sources hold: writes <out>/asset_resolution.json and the
+    files under <out>/files/ for `terrain/build.py --resolution`."""
+    spec = load_spec(args.spec)
+    uses = {}
+
+    for use in spec.assets:
+        key = extra_assets.norm(use.modern)
+        known = uses.get(key)
+
+        if known is not None and known.kind != use.kind:
+            raise BuildError(f"{use.where}: {use.modern} is used as a {use.kind} and as a {known.kind}")
+
+        uses.setdefault(key, use)
+
+    stock = set()
+
+    for path in args.listfile or []:
+        try:
+            stock |= extra_assets.load_listfile(path)
+        except (OSError, ValueError) as e:
+            raise BuildError(f"--listfile {path}: {e}") from None
+
+    out = args.out
+    target = os.path.join(out, extra_assets.RESOLUTION_FILE)
+    files_dir = os.path.join(out, extra_assets.FILES_DIR)
+
+    if os.path.exists(target) or os.path.exists(files_dir):
+        if not args.force:
+            raise BuildError(f"{out} already holds a resolution; --force replaces it")
+
+        shutil.rmtree(files_dir, ignore_errors=True)
+
+    sources = SourceSet(args.sources or [])
+    copies: dict = {}
+    entries = []
+
+    try:
+        for problem in sources.problems:
+            print(f"warning: {problem}")
+
+        opened = len(sources.problems)
+
+        for key in sorted(uses):
+            entries.append(resolve_asset(uses[key], sources, stock, copies))
+
+        for problem in sources.problems[opened:]:  # files a source holds but cannot read (their assets fall back)
+            print(f"warning: {problem}")
+    finally:
+        sources.close()
+
+    os.makedirs(out, exist_ok=True)
+    root = os.path.realpath(files_dir)
+
+    for path, blob in copies.values():
+        dest = os.path.join(out, *extra_assets.file_rel(path).split("/"))
+
+        if os.path.commonpath([os.path.realpath(dest), root]) != root:
+            raise BuildError(f"{path!r} would be written outside {files_dir}")
+
+        os.makedirs(os.path.dirname(dest), exist_ok=True)
+
+        with open(dest, "wb") as f:
+            f.write(blob)
+
+    doc = {"format": extra_assets.FORMAT, "generator": "MapForge package.py resolve-assets",
+           "spec": os.path.basename(args.spec), "sources": list(sources.labels),
+           "listfiles": [os.path.basename(p) for p in args.listfile or []], "assets": entries}
+
+    with open(target, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(doc, f, indent=2)
+        f.write("\n")
+
+    resolved = [e for e in entries if e["status"] == "resolved"]
+    print(f"{len(resolved)} of {len(entries)} extra assets resolved, {len(copies)} files to ship; wrote {target}")
+
+    for e in entries:
+        if e["status"] == "resolved":
+            print(f"  modern   {e['modern']}  (from {e['source']}, {len(e['files'])} files to ship)")
+        else:
+            found = f"; found in {e['source']}" if e["source"] else ""
+            print(f"  fallback {e['modern']}  ({e['reason']}{found})")
+
+        if stock and e["status"] != "resolved" and extra_assets.norm(e["fallback"]) not in stock:
+            print(f"  warning: its fallback {e['fallback']} is not in the 3.3.5 listfile")
+
+    return 0
+
+
 def cmd_schemas(args) -> int:
     rec_dir = layout.default_rec_dir()
 
@@ -798,7 +1100,8 @@ def main(argv: list[str] | None = None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("build", help="add the map's rows to the realm's DBCs, pack the archives, write the SQL")
-    p.add_argument("--config", required=True, help="the map's JSON config (bleakhold_royale.json)")
+    p.add_argument("--config", required=True,
+                   help="the map's JSON config (bleakhold_royale_v2.json; v1: bleakhold_royale.json)")
     p.add_argument("--dbc", required=True, help="folder with the realm's CURRENT DBCs (package.py pull)")
     p.add_argument("--out", required=True, help="output folder")
     p.add_argument("--terrain", help="the terrain build's output folder (terrain_manifest.json)")
@@ -837,6 +1140,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--label", help="a name for the SQL header (default: the map directory)")
     p.set_defaults(func=cmd_poi_sql)
 
+    p = sub.add_parser("resolve-assets", help="find the modern files of a terrain spec's extra assets (on the VPS) "
+                                              "and write the resolution file the terrain build uses")
+    p.add_argument("--spec", required=True, help="the terrain spec (JSON) naming the extra assets")
+    p.add_argument("--sources", nargs="*", default=[], help="where to look, in order: folders (the launcher's patches "
+                                                           "folder, loose files) and MPQ files; none = all fall back")
+    p.add_argument("--listfile", action="append", help="a 3.3.5a listfile or asset kit: files in it are in every "
+                                                       "client and are not copied (repeatable)")
+    p.add_argument("--out", required=True, help="folder for asset_resolution.json and files/")
+    p.add_argument("--force", action="store_true", help="replace an existing resolution")
+    p.set_defaults(func=cmd_resolve_assets)
+
     p = sub.add_parser("schemas", help="check or regenerate dbc/schemas.py from WoW/Source/DB/Rec")
     p.add_argument("--write", action="store_true")
     p.add_argument("--check", action="store_true")
@@ -847,7 +1161,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         return args.func(args)
     except (BuildError, configmod.ConfigError, forgemod.ForgeError, planmod.PlanError, PatchError,
-            minimap.TrsError, DbcError, mpqpack.MpqError) as e:
+            minimap.TrsError, DbcError, mpqpack.MpqError, SpecError, extra_assets.ResolutionError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
 

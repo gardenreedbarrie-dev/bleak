@@ -155,3 +155,36 @@ def dsin(deg: float) -> float:
 def dcos(deg: float) -> float:
     """cos of an angle in degrees, using only exact IEEE operations."""
     return dsin(deg + 90.0)
+
+
+def _atan_unit(a: float) -> float:
+    """atan(a) in radians for 0 <= a <= 1, with only exact IEEE operations (sqrt included)."""
+    halvings = 0
+    # atan(a) = 2 * atan(a / (1 + sqrt(1 + a^2))): three halvings bring a below 0.1.
+    while a > 0.1:
+        a = a / (1.0 + math.sqrt(1.0 + a * a))
+        halvings += 1
+    a2 = a * a
+    term = a
+    total = a
+    for n in range(1, 12):
+        term = -term * a2
+        total += term / (2 * n + 1)
+    return total * (1 << halvings)
+
+
+def datan2(y: float, x: float) -> float:
+    """atan2(y, x) in degrees (-180, 180], using only exact IEEE operations."""
+    if x == 0.0 and y == 0.0:
+        return 0.0
+    ax = -x if x < 0.0 else x
+    ay = -y if y < 0.0 else y
+    if ay <= ax:
+        r = _atan_unit(ay / ax)
+    else:
+        r = _PI * 0.5 - _atan_unit(ax / ay)
+    if x < 0.0:
+        r = _PI - r
+    if y < 0.0:
+        r = -r
+    return r * 180.0 / _PI

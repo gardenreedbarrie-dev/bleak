@@ -4,6 +4,7 @@ The extractor test runs only when MAPFORGE_AC_EXTRACTOR points at a built map_ex
 MAPFORGE_AC_VMAP4 at a vmap4_extractor); see terrain/ac_crosscheck.py.
 """
 
+import copy
 import io
 import json
 import os
@@ -94,7 +95,9 @@ class TestCli(unittest.TestCase):
             shutil.rmtree(out)
 
 
-SAMPLES = ("royale_v1.json", "royale_draft.json")  # the first is the default (README)
+SAMPLES = ("royale_v2.json", "royale_v1.json", "royale_draft.json")  # the first is the default (README)
+# the packaging config each sample is built with (README "Build on the VPS"); the rest use v1's
+SAMPLE_CONFIGS = {"royale_v2.json": "bleakhold_royale_v2.json"}
 
 
 class TestSampleSpec(unittest.TestCase):
@@ -118,14 +121,12 @@ class TestSampleSpec(unittest.TestCase):
 
     def test_sample_specs_match_packaging_config(self):
         # package.py refuses terrain whose directory or MCNK area ids differ from its config.
-        cfg_path = os.path.join(TOOL_DIR, "bleakhold_royale.json")
-        if not os.path.isfile(cfg_path):
-            self.skipTest("no bleakhold_royale.json")
-        with open(cfg_path, encoding="utf-8") as f:
-            cfg = json.load(f)
-        allowed = {cfg["zone"]["id"]} | {z["id"] for z in cfg["zone"].get("subzones", [])}
         for name in SAMPLES:
             with self.subTest(name):
+                cfg_name = SAMPLE_CONFIGS.get(name, "bleakhold_royale.json")
+                with open(os.path.join(TOOL_DIR, cfg_name), encoding="utf-8") as f:
+                    cfg = json.load(f)
+                allowed = {cfg["zone"]["id"]} | {z["id"] for z in cfg["zone"].get("subzones", [])}
                 spec = load_spec(os.path.join(TOOL_DIR, "specs", name))
                 self.assertEqual(spec.directory, cfg["map"]["directory"])
                 self.assertEqual(spec.map_id, cfg["map"]["id"])
@@ -135,17 +136,45 @@ class TestSampleSpec(unittest.TestCase):
 
 @unittest.skipUnless(os.environ.get("MAPFORGE_AC_EXTRACTOR"), "set MAPFORGE_AC_EXTRACTOR to a built map_extractor")
 class TestAzerothCoreExtractor(unittest.TestCase):
-    def test_extractor_accepts_and_matches(self):
+    def crosscheck(self, out, *extra):
         sys.path.insert(0, os.path.join(TOOL_DIR, "terrain"))
         import ac_crosscheck
-        _, out = built("golden", GOLDEN_SPEC)
-        args = [out, "--extractor", os.environ["MAPFORGE_AC_EXTRACTOR"]]
+        args = [out, "--extractor", os.environ["MAPFORGE_AC_EXTRACTOR"], *extra]
         if os.environ.get("MAPFORGE_AC_VMAP4"):
             args += ["--vmap4", os.environ["MAPFORGE_AC_VMAP4"]]
         buf = io.StringIO()
         with redirect_stdout(buf):
             code = ac_crosscheck.main(args)
-        self.assertEqual(code, 0, buf.getvalue())
+        return code, buf.getvalue()
+
+    def test_extractor_accepts_and_matches(self):
+        _, out = built("golden", GOLDEN_SPEC)
+        code, log = self.crosscheck(out)
+        self.assertEqual(code, 0, log)
+
+    def test_per_chunk_and_per_reach_water_levels(self):
+        # A river stepping down at two falls into a lake, a pond of another liquid type, partial chunks: every wet
+        # cell's level comes through map_extractor at its own height.
+        from test_terrain_water import WATER_SPEC
+        _, out = built("water", WATER_SPEC)
+        code, log = self.crosscheck(out)
+        self.assertEqual(code, 0, log)
+
+    def test_server_copy_without_modern_doodads(self):
+        from test_terrain_assets import ASSET_SPEC, make_resolution
+        from terrain.extra_assets import Resolution
+        tmp = tempfile.mkdtemp()
+        try:
+            res = Resolution.load(make_resolution(os.path.join(tmp, "res")))
+            tbuild.write(tbuild.build_from_dict(copy.deepcopy(ASSET_SPEC), res), os.path.join(tmp, "out"),
+                         preview=False)
+            code, log = self.crosscheck(os.path.join(tmp, "out"))
+            self.assertEqual(code, 0, log)
+            self.assertIn("server's extract copy", log)
+            code, log = self.crosscheck(os.path.join(tmp, "out"), "--client")
+            self.assertEqual(code, 0, log)
+        finally:
+            shutil.rmtree(tmp)
 
 
 if __name__ == "__main__":

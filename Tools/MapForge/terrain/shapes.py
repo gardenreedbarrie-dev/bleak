@@ -1,7 +1,8 @@
 """2D regions in world coordinates: circle, rect, polygon, polyline (a path with a width).
 
-Every shape answers `distance(x, y)`: 0 inside, the distance to the region outside. Specs write a shape as a
-one-key object, e.g. {"circle": {"center": [x, y], "radius": r}}.
+Every shape answers `distance(x, y)`: 0 inside, the distance to the region outside, and `inside_distance(x, y)`:
+how far a point inside lies from the boundary (0 outside). Specs write a shape as a one-key object, e.g.
+{"circle": {"center": [x, y], "radius": r}}.
 """
 
 from __future__ import annotations
@@ -48,6 +49,10 @@ class Shape:
     def reference_point(self) -> tuple[float, float]:
         raise NotImplementedError
 
+    def inside_distance(self, x: float, y: float) -> float:
+        """Distance from a point inside to the boundary; 0 on or outside it."""
+        raise NotImplementedError
+
     def contains(self, x: float, y: float) -> bool:
         return self.distance(x, y) <= 0.0
 
@@ -68,6 +73,12 @@ class Circle(Shape):
     def bbox(self):
         r = self.radius
         return (self.cx - r, self.cx + r, self.cy - r, self.cy + r)
+
+    def inside_distance(self, x: float, y: float) -> float:
+        dx = x - self.cx
+        dy = y - self.cy
+        d = self.radius - math.sqrt(dx * dx + dy * dy)
+        return d if d > 0.0 else 0.0
 
     def reference_point(self):
         return (self.cx, self.cy)
@@ -91,6 +102,10 @@ class Rect(Shape):
 
     def bbox(self):
         return (self.x0, self.x1, self.y0, self.y1)
+
+    def inside_distance(self, x: float, y: float) -> float:
+        d = min(x - self.x0, self.x1 - x, y - self.y0, self.y1 - y)
+        return d if d > 0.0 else 0.0
 
     def reference_point(self):
         return ((self.x0 + self.x1) * 0.5, (self.y0 + self.y1) * 0.5)
@@ -122,6 +137,12 @@ class Polygon(Shape):
     def distance(self, x: float, y: float) -> float:
         if self._inside(x, y):
             return 0.0
+        return self._edge_distance(x, y)
+
+    def bbox(self):
+        return self._bbox
+
+    def _edge_distance(self, x: float, y: float) -> float:
         pts = self.points
         best = math.inf
         for i in range(len(pts)):
@@ -132,8 +153,11 @@ class Polygon(Shape):
                 best = d
         return best
 
-    def bbox(self):
-        return self._bbox
+    def inside_distance(self, x: float, y: float) -> float:
+        b = self._bbox
+        if x < b[0] or x > b[1] or y < b[2] or y > b[3] or not self._inside(x, y):
+            return 0.0
+        return self._edge_distance(x, y)
 
     def reference_point(self):
         n = len(self.points)
@@ -170,6 +194,10 @@ class Polyline(Shape):
 
     def distance(self, x: float, y: float) -> float:
         d = self.center_distance(x, y) - self.half
+        return d if d > 0.0 else 0.0
+
+    def inside_distance(self, x: float, y: float) -> float:
+        d = self.half - self.center_distance(x, y)
         return d if d > 0.0 else 0.0
 
     def bbox(self):
@@ -216,3 +244,79 @@ def parse_shape(obj, where: str) -> Shape:
     if width < 0.0:
         raise SpecError(f"{where}.polyline.width: must be >= 0")
     return Polyline(pts, width)
+
+
+class RiverPath:
+    """A river's centre line from its source to its mouth: one polyline whose segments belong to reaches.
+
+    Each reach holds its water at one level (`levels`, falling downstream); the river steps down where one reach
+    meets the next (a waterfall). `nearest` finds the closest segment (the first one on a tie, so the upstream
+    reach owns the joint), `level_at` the water level there, and `terrain_level` the level along the arc length
+    with each step spread over `fall_run` yards, which the terrain carving follows.
+    """
+
+    def __init__(self, points: list[tuple[float, float]], seg_reach: list[int], levels: list[float], width: float,
+                 fall_run: float):
+        self.points = points
+        self.seg_reach = seg_reach
+        self.levels = levels
+        self.half = width * 0.5
+        self.fall_run = fall_run
+        self.seg_len = []
+        self.cum = [0.0]
+        for i in range(len(points) - 1):
+            dx = points[i + 1][0] - points[i][0]
+            dy = points[i + 1][1] - points[i][1]
+            length = math.sqrt(dx * dx + dy * dy)
+            self.seg_len.append(length)
+            self.cum.append(self.cum[-1] + length)
+        # Arc position of each joint: the first point of reach j (j >= 1).
+        self.joints = []
+        for i in range(1, len(seg_reach)):
+            if seg_reach[i] != seg_reach[i - 1]:
+                self.joints.append((self.cum[i], seg_reach[i]))
+        xs = [p[0] for p in points]
+        ys = [p[1] for p in points]
+        self.bbox = (min(xs), max(xs), min(ys), max(ys))
+
+    def nearest(self, x: float, y: float) -> tuple[float, int, float]:
+        """(distance to the centre line, segment index, parameter t along it)."""
+        pts = self.points
+        best = math.inf
+        best_i = 0
+        best_t = 0.0
+        for i in range(len(pts) - 1):
+            a = pts[i]
+            b = pts[i + 1]
+            d, t = _segment_distance(x, y, a[0], a[1], b[0], b[1])
+            if d < best:
+                best = d
+                best_i = i
+                best_t = t
+        return best, best_i, best_t
+
+    def arc(self, seg: int, t: float) -> float:
+        return self.cum[seg] + self.seg_len[seg] * t
+
+    def level_at(self, x: float, y: float) -> float:
+        return self.levels[self.seg_reach[self.nearest(x, y)[1]]]
+
+    def terrain_level(self, s: float) -> float:
+        level = self.levels[0]
+        half_run = self.fall_run * 0.5
+        for (sj, reach) in self.joints:
+            lower = self.levels[reach]
+            if half_run <= 0.0:
+                if s >= sj:
+                    level = lower
+                    continue
+                break
+            if s >= sj + half_run:
+                level = lower
+                continue
+            if s > sj - half_run:
+                k = (s - (sj - half_run)) / self.fall_run
+                k = k * k * (3.0 - 2.0 * k)
+                level = level + (lower - level) * k
+            break
+        return level

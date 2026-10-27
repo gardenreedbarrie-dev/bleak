@@ -352,7 +352,8 @@ A solo free-for-all battle royale: 20 to 40 players at level 80 on their own isl
 - Queue: Activities > Royale, the sword orb on the minimap ring or `/bh royale`: the queue's count, Queue and
   Leave, and a ready check popup (15 seconds, Accept or Decline). The page is hidden while the realm has the mode
   off (HELLO feature bit 4096), and Queue stays disabled with "Install the latest client patch" until the client
-  has the map patch (`patch-Q.MPQ`, which carries `Interface\Bleakhold\Royale\Marker.blp`).
+  has the current map patch (`patch-Q.MPQ`, which carries `Interface\Bleakhold\Royale\MarkerV2.blp`; v1's
+  patch-Q had `Marker.blp` and no longer counts).
 - Lobby: the island map opens by itself; click it to set your landing pin (the pins lock 3 seconds before the
   drop). The last 10 seconds count down in the middle of the screen.
 - Drop: "Open parachute" while you fall (or a key: Key Bindings, Bleakhold, "Bleakhold Royale: open the

@@ -1,5 +1,6 @@
 """The map's rows: the forge adds exactly the configured rows and touches nothing else."""
 
+import json
 import os
 import sys
 import unittest
@@ -135,6 +136,38 @@ class ForgeTests(unittest.TestCase):
         self.assertEqual([light.get(row, f"lightParamsID[{i}]") for i in range(8)], [55] * 8)
         # The default light sits at coordinates (0, 0, 0): DayNight::LightLoad takes it for the whole map.
         self.assertEqual(light.float_value(row, "gameCoords[0]"), 0.0)
+
+    def test_skybox_matches_mdx_rows(self):
+        # The stock rows say .mdx; configs name the .M2 (v1's bleakhold_royale.json does). Case, extension (.m2 or
+        # .mdx) and slashes do not matter.
+        with open(os.path.join(TOOL_DIR, "bleakhold_royale.json"), encoding="utf-8") as f:
+            v1 = json.load(f)
+        self.assertTrue(v1["light"]["skybox"].endswith(".M2"))
+        for name in (v1["light"]["skybox"], "Environments\\Stars\\WintergraspSmokySky.mdx",
+                     "ENVIRONMENTS/STARS/WINTERGRASPSMOKYSKY.MDX", "environments\\stars\\wintergraspsmokysky.m2"):
+            data = synth_dbc.default_config()
+            data["light"] = {"skybox": name}
+            _, tables, result, _ = run_forge(data)
+            light = tables["Light"]
+            row = light.by_id()[result.light_id]
+            self.assertEqual([light.get(row, f"lightParamsID[{i}]") for i in range(8)], [55] * 8, name)
+        data = synth_dbc.default_config()
+        data["light"] = {"skybox": "Environments\\Stars\\WintergraspSmokySky.blp"}
+        with self.assertRaisesRegex(forgemod.ForgeError, "no LightSkybox row"):
+            run_forge(data)
+
+    def test_time_of_day_off_and_range(self):
+        for value, want in (("off", -1), (-1, -1), (0, 0), (1440, 1440)):
+            data = synth_dbc.default_config()
+            data["map"]["time_of_day_override"] = value
+            _, tables, _, _ = run_forge(data)
+            maps = tables["Map"]
+            self.assertEqual(maps.get_signed(maps.by_id()[901], "timeOfDayOverride"), want, value)
+        for bad in (1441, -2, "noon", True, 12.5):
+            data = synth_dbc.default_config()
+            data["map"]["time_of_day_override"] = bad
+            with self.assertRaises(configmod.ConfigError, msg=bad):
+                configmod.parse(data)
 
     def test_light_from_another_map(self):
         data = synth_dbc.default_config()

@@ -3,7 +3,8 @@
 preview.png: one pixel per half unit (2.08 yards), north up and east right (world +X up, -Y right). Colour = the
 chunk's texture layers mixed with the textures' preview colours, shaded by the terrain normal (light from the
 north-west), water tinted blue, tile borders dark, WMOs red, doodads yellow (scattered ones a single darker pixel),
-POIs by kind (POI_COLORS; magenta for other kinds), final sites with a ring at the last circle's radius.
+POIs by kind (POI_COLORS; magenta for other kinds), final sites with a ring at the last circle's radius, waterfalls
+and their splashes white, modern doodads (extra assets) cyan.
 heightmap.png: grey levels from the lowest (black) to the highest (white) point.
 """
 
@@ -82,9 +83,10 @@ def render(ctx, tiles: dict, out_preview: str, out_height: str) -> None:
             r0 = (ty * 16 + iy) * 16 - r_base
             c0 = (tx * 16 + ix) * 16 - c_base
             for (cx, cy) in cw.exists:
+                level = cw.levels[(cx, cy)]
                 for r in range(2 * cy, 2 * cy + 3):
                     for c in range(2 * cx, 2 * cx + 3):
-                        if grid.get(r_base + r0 + r, c_base + c0 + c) < cw.height:
+                        if grid.get(r_base + r0 + r, c_base + c0 + c) < level:
                             wet[r0 + r][c0 + c] = True
 
     lx, ly, lz = 0.5, 0.5, 0.7071
@@ -128,8 +130,13 @@ def render(ctx, tiles: dict, out_preview: str, out_height: str) -> None:
             dot(x + radius * coords.dcos(a), y + radius * coords.dsin(a), rgb, 0)
 
     scattered = {p.label for p in getattr(ctx, "scattered", [])}
+    falls = {p.label for p in ctx.spec.generated}
     for d in ctx.doodads:
-        if d.label in scattered:
+        if d.label in falls:
+            dot(d.world[0], d.world[1], (255, 255, 255), 2)
+        elif d.modern:
+            dot(d.world[0], d.world[1], (40, 230, 230), 0 if d.label in scattered else 1)
+        elif d.label in scattered:
             dot(d.world[0], d.world[1], (190, 170, 30), 0)
         else:
             dot(d.world[0], d.world[1], (250, 220, 40), 1)

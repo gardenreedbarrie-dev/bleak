@@ -8,6 +8,8 @@
 --
 -- Two gates before QJOIN goes out: HELLO feature bit 4096 (the realm runs the mode) and the map patch, tested with
 -- Texture:SetTexture on a marker BLP that MapForge packs into patch-Q (a client without it cannot load map 901).
+-- Each map version has its own marker (v1 Marker.blp, v2 MarkerV2.blp), so a client still holding an older
+-- patch-Q, whose terrain no longer matches the server's, cannot queue either.
 local ADDON, ns = ...
 local U, UI, Comm, Data = ns.U, ns.UI, ns.Comm, ns.Data
 local C = UI.C
@@ -22,7 +24,7 @@ ns.Royale = R
 R.MAP_ID = 901                    -- the island (MapForge bleakhold_royale.json); its picture is Art\Royale\Map
 R.ACTIVITY = 901                  -- the mode id QJOIN B carries (the server's Bleakhold.Royale.ActivityId)
 R.ROLES = 4                       -- ignored by the server for Royale; damage, like the Rift's default
-R.MARKER = "Interface\\Bleakhold\\Royale\\Marker"      -- in patch-Q (MapForge archives.marker_texture)
+R.MARKER = "Interface\\Bleakhold\\Royale\\MarkerV2"    -- in v2's patch-Q (MapForge archives.marker_texture)
 R.MAP_TEX = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\Map"
 R.THUMB_TEX = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\MapThumb"
 R.MAP_FILE = "BleakholdRoyale"    -- the WorldMapArea row MapForge writes for the map (world_map_area.name)
@@ -753,7 +755,7 @@ how.label:SetText("HOW IT WORKS")
 how.lines = {}
 local HOW = {
     "Queue alone. At 20 players a ready check goes out; answer it within 15 seconds.",
-    "Brawl on The Overlook while the others arrive, and click the island map to set your landing pin.",
+    "Brawl on Sunwatch Overlook while the others arrive, and click the island map to set your landing pin.",
     "Drop from high above your pin; your parachute opens by itself (or bind a key to open it).",
     "Loot crates, orbs and supply drops, and stay inside the storm circle: it closes in stages.",
     "Eliminated players watch the rest, queue again or leave. Honor and Shards by placement.",
@@ -979,14 +981,18 @@ end)
 -- /bh demo: a short scripted match (Demo.lua routes QJOIN B, QREPLY, QLEAVE, RDROP, RSPEC and GET ROYS/ROYM here)
 ------------------------------------------------------------------------------------------------------
 local DEMO_MATCH = 7001
+-- the places of Bleakhold Royale v2 (MapForge specs/royale_v2.json pois, ids and radii as the server sends them)
 local DEMO_PLACES = {
-    { 1, "L", -266, -266, 88, "The Bleak Hold" }, { 2, "L", 120, 80, 62, "Harrow Farm" },
-    { 3, "L", 180, -760, 54, "Blackvein Pit" }, { 4, "L", -620, -600, 40, "Gloomtimber Mill" },
-    { 5, "L", -700, 60, 26, "The Pale Shrine" }, { 6, "L", 220, -250, 60, "Broken Siege" },
-    { 7, "L", 60, -420, 60, "Crow's Rise" }, { 8, "L", -80, -120, 60, "Wrecked Caravan" },
-    { 9, "L", -520, -260, 70, "Mirefen Hollow" }, { 10, "L", -480, 170, 60, "Forgotten Graves" },
-    { 11, "C", -80, -710, 16, "Old Ford" }, { 12, "C", -560, -700, 18, "Covered Bridge" },
-    { 13, "C", 150, -665, 0, "Pit Bridge" }, { 14, "Y", 455, 455, 32, "The Overlook" },
+    { 5113, "Y", 455, 455, 32, "Sunwatch Overlook" },
+    { 5101, "L", -258, -345, 95, "Sunstair Isle" }, { 5102, "L", -45, -170, 90, "Tidecall Village" },
+    { 5103, "L", 320, -790, 80, "Twinfall Terrace" }, { 5104, "L", -490, -662, 60, "Saltwreck Cove" },
+    { 5105, "L", -776, 339, 80, "Serpent Steps" }, { 5106, "L", -250, 200, 90, "Sunbloom Meadow" },
+    { 5107, "L", 215, -312, 50, "Kingfisher Point" }, { 5108, "L", -255, -745, 80, "Mossvine Hollow" },
+    { 5109, "L", -740, -290, 70, "Bamboo Reach" }, { 5110, "L", 360, 250, 60, "Sunwatch Falls" },
+    { 5115, "L", -790, -784, 70, "Salvagers' Camp" }, { 5116, "L", -425, 50, 50, "Totem Knoll" },
+    { 5117, "L", 80, -520, 50, "Heron Rise" },
+    { 5111, "C", -10, -625, 16, "Stepping Stones" }, { 5112, "C", -785, 263, 18, "Vine Bridge" },
+    { 5114, "C", -150, -275, 14, "Tidewalk" },
 }
 local demo
 
@@ -1030,9 +1036,9 @@ local function demoMap()
 end
 
 local function demoObjects()
-    demoPush("ROYO", { { DEMO_MATCH, 1 }, { 1, "S", 0, -266, -266, 0, 30000 }, { 2, "S", 0, -712, 48, 0, 30000 },
-        { 3, "B", 1, 120, 80, 1, "" }, { 4, "B", 2, -640, -576, 1, "" }, { 5, "B", 3, 180, -760, 1, "" },
-        { 6, "B", 3, 220, -250, 2, 45000 }, { 7, "B", 1, 60, -420, 1, "" }, { 8, "B", 2, -520, -260, 1, "" } })
+    demoPush("ROYO", { { DEMO_MATCH, 1 }, { 1, "S", 0, -351, -249, 0, 30000 }, { 2, "S", 0, -775, 350, 0, 30000 },
+        { 3, "B", 1, -15, -150, 1, "" }, { 4, "B", 2, -460, -712, 1, "" }, { 5, "B", 3, 300, -790, 1, "" },
+        { 6, "B", 3, 205, -306, 2, 45000 }, { 7, "B", 1, -235, 215, 1, "" }, { 8, "B", 2, -720, -310, 1, "" } })
 end
 
 -- A kill feed line, and the kill announcer's BGANN when it carries a multi-kill or streak code (section 18).
@@ -1061,7 +1067,7 @@ local function demoMatch()
     end)
     demoAfter(26, function()
         st.phase, st.ms, st.me = 2, 6000, 1
-        st.myX, st.myY = st.pinX or -80, st.pinY or -120
+        st.myX, st.myY = st.pinX or -45, st.pinY or -170
         demoState()
     end)
     demoAfter(32, function()
@@ -1072,8 +1078,8 @@ local function demoMatch()
     end)
     demoAfter(36, function()
         demoKill("Aldric Stormwind", 1, "Corwin", 5, "P", 2, "D", nil)
-        demoPush("ROYV", { { "D", 0, -80, -180, 20000, "" } })
-        demoPush("ROYO", { { DEMO_MATCH, 0 }, { 20, "D", 0, -80, -180, 3, 20000 } })
+        demoPush("ROYV", { { "D", 0, -67, -267, 20000, "" } })
+        demoPush("ROYO", { { DEMO_MATCH, 0 }, { 20, "D", 0, -67, -267, 3, 20000 } })
     end)
     demoAfter(39, function()
         demoKill(nil, nil, "Eamon", 11, "S", nil)
@@ -1083,7 +1089,7 @@ local function demoMatch()
         st.curX, st.curY, st.curR, st.start, st.stop = -150, -310, 520, "", ""
         st.alive = 10
         demoPush("ROYV", { { "N", 10, "", "", "", "" } })
-        demoPush("ROYO", { { DEMO_MATCH, 0 }, { 20, "D", 0, -80, -180, 1, "" } })
+        demoPush("ROYO", { { DEMO_MATCH, 0 }, { 20, "D", 0, -67, -267, 1, "" } })
         demoState()
     end)
     demoAfter(58, function()

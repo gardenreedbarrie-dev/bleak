@@ -6,7 +6,8 @@
 local FX = host_loadfile(repo .. "/Tools/UiLint/tests/fixtures.lua")()
 
 local ROYALE = { [6] = 4096 }
-local MARKER = "Interface\\Bleakhold\\Royale\\Marker"
+local MARKER = "Interface\\Bleakhold\\Royale\\MarkerV2"   -- in v2's patch-Q
+local MARKER_V1 = "Interface\\Bleakhold\\Royale\\Marker"  -- in v1's
 local MAP = {
     { 901, -1066, 533, -1066, 533, 455, 455, 32, 750, -267, -267 }, { 1, "L", -266, -266, 88, "The Bleak Hold" },
     { 2, "L", 120, 80, 62, "Harrow Farm" }, { 11, "C", -80, -710, 16, "Old Ford" },
@@ -253,6 +254,24 @@ test("royale: without the patch marker the card is disabled and QJOIN is never s
     H.ok(M.textures[MARKER], "the marker was tested")
 end, { before = function(M)
     M.missingTextures[MARKER] = true
+end })
+
+test("royale: v1's patch-Q alone (its marker but not v2's) keeps the card disabled", function(M, ns)
+    connect(M)
+    ns.UI.Open("royale")
+    M.Advance(0.3)
+    local P = ns.Royale.page
+    H.ok(not P.join:IsEnabled(), "Queue disabled")
+    H.eq(P.hero.notice:GetText(), "Install the latest client patch")
+    local before = #M.sent
+    ns.Royale.Join()
+    M.Advance(1)
+    H.eq(#M.sent, before, "no QJOIN with the old map patch")
+    H.ok(M.textures[MARKER] and not M.textures[MARKER_V1], "only v2's marker counts")
+end, { before = function(M)
+    -- a client with v1's patch-Q: v1's marker loads, v2's does not
+    M.missingTextures[MARKER] = true
+    M.missingTextures[MARKER_V1] = nil
 end })
 
 test("royale: the ready check popup accepts and declines with QREPLY, and goes when its time is up", function(M, ns)

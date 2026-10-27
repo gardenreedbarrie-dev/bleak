@@ -10,6 +10,14 @@ h(x, y) = base + sum(noise layers), then every feature in spec order:
 - ramp:     blend toward the straight line from `from` to `to` (z null = terrain height there before the ramp)
 - border:   add `height` near the edge of the tile range (cliffs, or a sunken shore with a negative height): full
             within `inset` yards of the edge (+- `jitter` noise for a natural line), fading out over `width`
+- mountains: a range along the edge of the tile range (see Mountains): a steep cliff at its foot, then layered
+            ridges with noise-shaped peaks, saddles and terraced ledges up to the edge
+- lake:     (spec `lakes`) a basin under the water level inside the shape (low ground on the shelf is raised
+            toward the shore line, so the shore meets it), the shore blended to just above it outside, islands
+            raised out of it
+- river_reaches: (spec `rivers`) a channel under each reach's water level, stepping down at the waterfalls, the
+            banks blended to just above the water; where the ground is lower than the channel, the bed and banks
+            are built up (an embanked channel), except inside lakes
 - clamp:    clamp to [min, max]
 
 Heights are quantized to 1/64 yard (coords.quantize_height) so every shared edge vertex is bit-identical in the
@@ -24,6 +32,119 @@ from array import array
 from . import coords
 from .noise import Fbm
 from .shapes import Polyline, _segment_distance
+
+
+class Mountains:
+    """A mountain range along the whole edge of the tile range.
+
+    For a point, d is its distance in from the tile edge, measured to a rectangle with rounded corners
+    (`corner_radius`) and moved by the `jitter` noise, so the foot of the range wanders. Points with d >= width are
+    the valley. Going out from the foot (t = width - d yards into the range, u = t / width from 0 at the foot to 1 at
+    the edge):
+
+    - cliff = cliff_height * smoothstep(t / cliff_width): a wall at the foot, steeper than the client's walkable
+      50 degrees, all the way round;
+    - E in [lowest, highest] peak height, from low-frequency noise: the range rises and falls along the map;
+    - ridges: `layers` ridge lines across the band (foothills nearest the valley, the back range highest near the
+      edge), each a bump (1 - s^2)^2 across the band times its own ridged noise r = max(0, 1 - 1.7 |n|)^1.5, whose
+      sharp crests run every way, so peaks, spurs and dips alternate; `saddles` sets how far the dips go down
+      (crest = 1 - saddles * (1 - r));
+    - M = (E - cliff_height) * ramp(u) * (0.3 * massif(u) + 0.7 * max(ridges)): the mass rises behind the cliff, so
+      the highest crests reach E above the foot;
+    - ledges: M terraced into shelves `step` yards high (a fraction `flat` of each step level), at heights that a
+      slow noise shifts (no contour rings) and only where a noise mask allows (`coverage`).
+
+    Only +, -, *, /, sqrt and floor, so the same spec gives the same heights everywhere.
+    """
+
+    def __init__(self, f: dict, bounds, seed: int):
+        self.x0, self.x1, self.y0, self.y1 = bounds
+        self.width = f["width"]
+        self.hmin, self.hmax = f["height"]
+        self.cliff_h = f["cliff_height"]
+        self.cliff_w = f["cliff_width"]
+        self.layers = f["layers"]
+        self.saddles = f["saddles"]
+        self.ledges = f["ledges"]
+        self.jitter_amp = f["jitter"]
+        half = min(self.x1 - self.x0, self.y1 - self.y0) * 0.5
+        self.radius = min(max(f["corner_radius"], self.width + self.jitter_amp + self.cliff_w), half)
+        r = self.radius
+        self.core = (self.x0 + r, self.x1 - r, self.y0 + r, self.y1 - r)
+        base = (seed * 7349 + f["seed"] * 2731 + 101) & 0xFFFFFFFF
+        self.jitter = Fbm(base ^ 0x1F, f["jitter_scale"], f["jitter"], 3) if f["jitter"] > 0.0 else None
+        scale = f["peak_scale"]
+        self.envelope = Fbm(base ^ 0x2E, scale * 3.5, 1.0, 2)
+        self.ridges = [Fbm((base + 977 * (k + 1)) & 0xFFFFFFFF, scale * (1.0 + 0.18 * k), 1.0, 3, 0.45)
+                       for k in range(self.layers)]
+        self.ledge_mask = Fbm(base ^ 0x3D, scale * 2.0, 1.0, 2) if self.ledges else None
+        self.ledge_phase = Fbm(base ^ 0x4C, scale * 1.5, 1.0, 2) if self.ledges else None
+        n = self.layers
+        self.layer_shape = []
+        for k in range(n):
+            centre = 0.3 + 0.6 * k / (n - 1) if n > 1 else 0.6
+            self.layer_shape.append((centre, 0.55 / n + 0.18, 0.55 + 0.45 * (k + 1) / n))
+
+    def inside_distance(self, x: float, y: float) -> float:
+        """Distance in from the tile edge, with the corners rounded (no jitter)."""
+        cx0, cx1, cy0, cy1 = self.core
+        dx = cx0 - x if x < cx0 else x - cx1 if x > cx1 else 0.0
+        dy = cy0 - y if y < cy0 else y - cy1 if y > cy1 else 0.0
+        if dx == 0.0:
+            q = dy
+        elif dy == 0.0:
+            q = dx
+        else:
+            q = math.sqrt(dx * dx + dy * dy)
+        return self.radius - q
+
+    def depth(self, x: float, y: float) -> float:
+        """Yards into the range beyond its foot (t); negative in the valley."""
+        d = self.inside_distance(x, y)
+        if d - self.jitter_amp >= self.width:
+            return self.width - d + self.jitter_amp
+        if self.jitter is not None:
+            d += self.jitter(x, y)
+        return self.width - d
+
+    def apply(self, x: float, y: float, h: float) -> float:
+        t = self.depth(x, y)
+        if t <= 0.0:
+            return h
+        width = self.width
+        u = t / width
+        if u > 1.0:
+            u = 1.0
+        cliff = self.cliff_h * coords.smoothstep(t / self.cliff_w)
+        e = 0.5 + self.envelope(x, y) * 1.1
+        e = 0.0 if e < 0.0 else 1.0 if e > 1.0 else e
+        peak = self.hmin + (self.hmax - self.hmin) * e
+        ridge = 0.0
+        for k, (centre, half_width, amp) in enumerate(self.layer_shape):
+            s = (u - centre) / half_width
+            if s <= -1.0 or s >= 1.0:
+                continue
+            bump = (1.0 - s * s) * (1.0 - s * s)
+            r = 1.0 - 1.7 * abs(self.ridges[k](x, y))
+            r = 0.0 if r < 0.0 else r * math.sqrt(r)
+            v = amp * bump * (1.0 - self.saddles * (1.0 - r))
+            if v > ridge:
+                ridge = v
+        ramp = coords.smoothstep(u / 0.3)
+        mass = (peak - self.cliff_h) * ramp * (0.3 * coords.smoothstep(u / 0.75) + 0.7 * ridge)
+        if self.ledges is not None and mass > 0.0:
+            step = self.ledges["step"]
+            flat = self.ledges["flat"]
+            phase = self.ledge_phase(x, y)
+            q = mass / step + phase
+            whole = math.floor(q)
+            frac = q - whole
+            rise = 0.0 if frac <= flat else (frac - flat) / (1.0 - flat)
+            terraced = (whole + rise - phase) * step
+            cover = self.ledges["coverage"]
+            mask = coords.smoothstep((self.ledge_mask(x, y) - (0.6 - 1.2 * cover)) / 0.25 + 0.5)
+            mass += (terraced - mass) * mask * ramp
+        return h + cliff + mass
 
 
 class _Feature:
@@ -93,6 +214,21 @@ class HeightField:
                                              "noise": noise})
         if kind == "clamp":
             return _Feature("clamp", None, {"min": f["min"], "max": f["max"]})
+        if kind == "mountains":
+            return _Feature("mountains", None, {"range": Mountains(f, self.bounds, self.seed)})
+        if kind == "lake":
+            lake = f["lake"]
+            x0, x1, y0, y1 = lake["shape"].bbox()
+            reach = lake["shore"]
+            return _Feature("lake", (x0 - reach, x1 + reach, y0 - reach, y1 + reach), dict(lake))
+        if kind == "river_reaches":
+            river = f["river"]
+            path = river["path"]
+            x0, x1, y0, y1 = path.bbox
+            reach = path.half + river["bank"]
+            return _Feature("river_reaches", (x0 - reach, x1 + reach, y0 - reach, y1 + reach),
+                            {"path": path, "half": path.half, "bank": river["bank"], "depth": river["depth"],
+                             "freeboard": river["freeboard"], "lakes": [lk["shape"] for lk in f["lakes"]]})
         raise ValueError(kind)
 
     @staticmethod
@@ -153,6 +289,12 @@ class HeightField:
                     continue
                 z = d["z0"] + (d["z1"] - d["z0"]) * t
                 h += (z - h) * w
+            elif kind == "mountains":
+                h = d["range"].apply(x, y, h)
+            elif kind == "lake":
+                h = self._lake(d, x, y, h)
+            elif kind == "river_reaches":
+                h = self._river_reaches(d, x, y, h)
             elif kind == "border":
                 bx0, bx1, by0, by1 = self.bounds
                 inside = min(x - bx0, bx1 - x, y - by0, by1 - y)
@@ -168,8 +310,70 @@ class HeightField:
                 h = lo if h < lo else hi if h > hi else h
         return h
 
+    @staticmethod
+    def _lake(d: dict, x: float, y: float, h: float) -> float:
+        shape = d["shape"]
+        level = d["level"]
+        edge = level + d["freeboard"]
+        out = shape.distance(x, y)
+        if out > 0.0:
+            # The shore: blend toward `freeboard` above the water at the shape's edge (raising low ground into a
+            # bank, lowering high ground into a beach).
+            if out >= d["shore"]:
+                return h
+            return edge + (h - edge) * coords.smoothstep(out / d["shore"])
+        k = coords.smoothstep(shape.inside_distance(x, y) / d["shelf"])
+        bottom = edge - (d["depth"] + d["freeboard"]) * k
+        if bottom < h:
+            h = bottom
+        else:
+            # Ground already below the basin: keep it (deeper water), but raise the shelf toward the shore line so
+            # the bottom meets the shore outside without a step.
+            h += (bottom - h) * (1.0 - k)
+        for isl in d["islands"]:
+            dx = x - isl["center"][0]
+            dy = y - isl["center"][1]
+            u2 = (dx * dx + dy * dy) / (isl["radius"] * isl["radius"])
+            if u2 < 1.0:
+                top = level - d["depth"] + (isl["height"] + d["depth"]) * (1.0 - u2) * (1.0 - u2)
+                if top > h:
+                    h = top
+        return h
+
+    @staticmethod
+    def _river_reaches(d: dict, x: float, y: float, h: float) -> float:
+        path = d["path"]
+        dist, seg, t = path.nearest(x, y)
+        half = d["half"]
+        if dist >= half + d["bank"]:
+            return h
+        level = path.terrain_level(path.arc(seg, t))
+        edge = level + d["freeboard"]
+        if dist <= half:
+            # Channel: a rounded bed `depth` below the water at the centre line, up to the bank lip at the edge,
+            # built up where the ground is lower (but never inside a lake, which is deeper already).
+            sn = dist / half
+            bottom = edge - (d["depth"] + d["freeboard"]) * (1.0 - sn * sn)
+            if bottom < h or not any(s.contains(x, y) for s in d["lakes"]):
+                return bottom
+            return h
+        target = edge + (h - edge) * coords.smoothstep((dist - half) / d["bank"])
+        if target > h and any(s.contains(x, y) for s in d["lakes"]):
+            return h  # no banks raised inside a lake: the river runs into it
+        return target
+
     def raw(self, x: float, y: float) -> float:
         return self._eval(x, y)
+
+    def mountain_depth(self, x: float, y: float) -> float | None:
+        """Yards into the deepest mountain range at a point (negative in the valley), or None without mountains."""
+        best = None
+        for feat in self.features:
+            if feat.kind == "mountains":
+                t = feat.data["range"].depth(x, y)
+                if best is None or t > best:
+                    best = t
+        return best
 
     def lattice(self, row: int, col: int) -> float:
         h = coords.quantize_height(self._eval(coords.lattice_x(row), coords.lattice_y(col)))

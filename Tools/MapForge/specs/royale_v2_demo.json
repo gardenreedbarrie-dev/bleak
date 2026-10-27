@@ -1,0 +1,118 @@
+{
+    "_comment": [
+        "Bleakhold Royale v2 demo: a small (2 x 2 tile) bright tropical valley that uses every v2 terrain feature.",
+        "It is a test bed for the tools, not the v2 map: mountains ring the valley (replacing the plain cliff ring),",
+        "a terrace in the north holds a highland tarn, a river falls from the mountains onto the terrace and from",
+        "the terrace into the lagoon (two waterfalls), the lagoon has an island, beaches paint every shore, and",
+        "four extra assets (the beach sand, the waterfall, two palms) name modern files with 3.3.5 fallbacks.",
+        "Paths come from the v2 asset kit (kit_v2.json): every plain path and every fallback is a 3.3.5a listfile",
+        "path; the modern ones are the kit's modern candidates (Mists of Pandaria, Cataclysm, Battle for Azeroth).",
+        "Liquids as the kit recommends: lagoon and river 1 (Water), the still tarn 5 (Slow Water). Offline (no",
+        "--resolution) every extra asset falls back."
+    ],
+    "format": "mapforge-terrain/1",
+    "map": {"directory": "RoyaleV2Demo", "tiles": {"x": [31, 32], "y": [31, 32]}},
+    "seed": 2602,
+    "area_id": 5100,
+    "uid_base": 1,
+    "heightmap": {
+        "base": 9.0,
+        "noise": [
+            {"scale": 240, "amplitude": 4.0, "octaves": 3, "persistence": 0.5},
+            {"scale": 52, "amplitude": 1.0, "octaves": 2, "seed": 3}
+        ],
+        "features": [
+            {"_": "the northern terrace (z 26), its edge at X 100-140 is where the lower waterfall drops",
+             "type": "flatten", "shape": {"rect": {"min": [140, -540], "max": [540, 540]}}, "height": 26,
+             "falloff": 40, "mode": "raise"},
+            {"type": "hill", "center": [-60, 260], "radius": 120, "height": 9},
+            {"type": "hill", "center": [-260, 120], "radius": 90, "height": 6},
+            {"_": "the mountain range all round: peaks 80-160 yd, a 32 yd wall at the foot that nobody climbs",
+             "type": "mountains", "width": 150, "height": [80, 160], "cliff": {"height": 32, "width": 12},
+             "layers": 3, "peak_scale": 110, "saddles": 0.45, "ledges": {"step": 16, "flat": 0.45, "coverage": 0.35},
+             "jitter": 18, "jitter_scale": 200, "corner_radius": 230, "seed": 5},
+            {"_": "the lagoon, the tarn and the river carve here", "type": "water_bodies"}
+        ]
+    },
+    "lakes": [
+        {"_": "the lagoon in the south-east lowland, with an island",
+         "name": "lagoon", "level": 4.0, "depth": 8, "shelf": 40, "shore": 35, "freeboard": 0.7,
+         "shape": {"polygon": {"points": [[-40, -62], [-52, -150], [-78, -238], [-118, -300], [-172, -330],
+                                          [-238, -322], [-296, -286], [-330, -222], [-338, -160], [-318, -100],
+                                          [-282, -58], [-226, -30], [-160, -22], [-96, -36]]}},
+         "islands": [{"center": [-205, -185], "radius": 46, "height": 8}]},
+        {"_": "a highland tarn on the terrace",
+         "name": "tarn", "liquid_type": 5, "level": 24.5, "depth": 6, "shelf": 18, "shore": 20, "freeboard": 0.6,
+         "shape": {"circle": {"center": [255, 230], "radius": 48}}}
+    ],
+    "rivers": [
+        {"_": "from a gorge in the north range onto the terrace (fall 1), over its edge (fall 2), into the lagoon",
+         "name": "cascade", "width": 14, "depth": 2.5, "bank": 12, "freeboard": 0.6, "fall_run": 6,
+         "reaches": [
+             {"level": 46, "path": [[452, -40], [391, -60]]},
+             {"level": 24, "path": [[300, -92], [200, -110], [128, -118]]},
+             {"level": 4, "path": [[60, -128], [-15, -118], [-80, -135]]}
+         ],
+         "waterfall": {
+             "model": {
+                 "modern": "World\\Expansion03\\Doodads\\LostIsles\\Waterfalls\\LostIsles_WaterFall01.M2",
+                 "fallback": "World\\AZEROTH\\STRANGLETHORN\\PASSIVEDOODADS\\WATERFALL\\StranglethornWaterfall01.m2",
+                 "kind": "doodad"},
+             "splash": "World\\Expansion02\\Doodads\\Generic\\Waterfalls\\WaterFalls_Set1_Med_Ripples.M2",
+             "height": 20, "anchor": "top", "splash_offset": 4, "radius": 8}}
+    ],
+    "textures": [
+        {"name": "grass", "color": "#4f8a36",
+         "path": {"modern": "TILESET\\EXPANSION04\\ZONED\\MZ_WarmGrass01_1024.blp",
+                  "fallback": "TILESET\\Stranglethorn\\StrangleThornGrass.blp", "kind": "texture"}},
+        {"name": "jungle", "path": "TILESET\\Stranglethorn\\StrangleThornplants01.blp", "color": "#3f7a2c"},
+        {"name": "moss", "path": "TILESET\\EXPANSION02\\SHOLAZARBASIN\\SB_MossyA.blp", "color": "#3d6e2a"},
+        {"name": "rock", "path": "TILESET\\Stranglethorn\\StrangleThornRock05.blp", "color": "#857a6a"},
+        {"name": "sand", "color": "#e3d39a",
+         "path": {"modern": "TILESET\\EXPANSION04\\ValleyofFourWinds\\JF_ShoreA.blp",
+                  "fallback": "TILESET\\Durotar\\DurotarShoreSand.blp", "kind": "texture"}},
+        {"name": "wetsand", "path": "TILESET\\Durotar\\DurotarShoreSandWet.blp", "color": "#b9a777",
+         "mtxf_flags": 1},
+        {"name": "riverbed", "path": "TILESET\\EXPANSION02\\SHOLAZARBASIN\\SB_UnderwaterA.blp", "color": "#6f7d6a"}
+    ],
+    "texture_rules": [
+        {"_": "jungle floor in the western lowland, away from every shore (a chunk holds 4 textures)",
+         "texture": "jungle", "shape": {"rect": {"min": [-380, 30], "max": [100, 380]}}, "fade": 25,
+         "noise": {"scale": 60, "threshold": 0.05, "fade": 0.3, "seed": 4}},
+        {"_": "moss on the mountain slopes", "texture": "moss", "height": {"min": 45, "fade": 15},
+         "noise": {"scale": 70, "threshold": 0.0, "fade": 0.3, "seed": 2}},
+        {"_": "rock on cliffs and steep faces", "texture": "rock", "slope": {"min": 32, "max": 46}},
+        {"_": "the shores paint last", "beaches": true}
+    ],
+    "beaches": {"sand": "sand", "wet_sand": "wetsand", "riverbed": "riverbed", "width": 16, "fade": 5,
+                "height": 2.6, "wet_width": 3, "wet_depth": 0.9, "slope_max": 30,
+                "_": "no sand in the mountain gorge, nor within a chunk of each waterfall (rock there)",
+                "fall_clearance": 34, "exclude": [{"circle": {"center": [428, -50], "radius": 46}}]},
+    "doodads": [
+        {"model": "World\\Expansion02\\Doodads\\Scholazar\\Rocks\\Sholazar_RockA.M2", "position": [-120, -45],
+         "facing": 40, "radius": 6, "label": "beach rock"},
+        {"model": "World\\Expansion02\\Doodads\\Scholazar\\Trees\\SholazarPalm_FallenTree01.M2",
+         "position": [-300, -40], "facing": 120, "radius": 7, "label": "fallen palm"}
+    ],
+    "scatter": [
+        {"name": "palms", "seed": 11, "density": 1.4, "min_spacing": 10,
+         "models": [
+             {"model": {"modern": "World\\Expansion03\\Doodads\\LostIsles\\Bushes\\LostIsles_FanPalm_01.M2",
+                        "fallback": "World\\Expansion02\\Doodads\\Scholazar\\Trees\\SholazarPalm_Tree01.M2",
+                        "kind": "doodad"}, "weight": 2, "radius": 5, "scale": [0.85, 1.2]},
+             {"model": {"modern": "world\\expansion07\\doodads\\zuldazarzone\\8zul_palmtree_b01.m2",
+                        "fallback": "World\\Expansion02\\Doodads\\Scholazar\\Trees\\SholazarPalm_Tree02.M2",
+                        "kind": "doodad"}, "weight": 1, "radius": 5, "scale": [0.85, 1.15]},
+             {"model": "World\\KALIMDOR\\Durotar\\PassiveDoodads\\Trees\\DurotarPalm01.m2", "weight": 1,
+              "radius": 5, "scale": [0.9, 1.2]}
+         ],
+         "slope": {"max": 24}, "height": {"max": 40}, "clearance": {"river": 4}},
+        {"name": "ferns", "seed": 12, "density": 3, "min_spacing": 4,
+         "models": [{"model": "World\\AZEROTH\\STRANGLETHORN\\PASSIVEDOODADS\\Detail\\StrangleThornFern01.m2",
+                     "radius": 2, "scale": [0.8, 1.3]},
+                    {"model": "World\\Expansion02\\Doodads\\Scholazar\\Bushes\\Sholazar_FernA.M2", "radius": 2,
+                     "scale": [0.8, 1.2]}],
+         "slope": {"max": 28}, "height": {"min": 6, "max": 45}, "clearance": {"river": 2},
+         "noise": {"scale": 60, "threshold": 0.1, "fade": 0.3}}
+    ]
+}

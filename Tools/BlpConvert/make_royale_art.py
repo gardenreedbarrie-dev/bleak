@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Renders the Bleakhold Royale HUD art and writes it as BLP2 into Interface/AddOns/Bleakhold/Art/Royale.
 
-Usage: python3 -I make_royale_art.py [--spec ../MapForge/specs/royale_v1.json] [--out DIR] [--preview DIR]
+Usage: python3 -I make_royale_art.py [--spec ../MapForge/specs/royale_v2.json] [--out DIR] [--preview DIR]
                                      [--skip-map]
 
 Needs Pillow (pip install Pillow) for drawing and resampling; the BLP encoding is blpconvert.py next to this file.
 Everything here is drawn by this script (no game data):
 
   Map.blp        512 x 512, the island map of the HUD (Royale.lua, RoyaleMap.lua). Built in memory from the
-                 MapForge terrain spec (terrain/build.py, about half a minute): the terrain's texture colours,
+                 MapForge terrain spec (terrain/build.py, a few minutes): the terrain's texture colours,
                  shaded by the slope, the water, the buildings (WMOs) as dark footprints and the dressing as specks.
                  Unlike MapForge's preview.png it has no tile grid and none of the server's points (crate spots,
                  orbs, supply and final sites are never shown to players: docs/BleakholdProtocol.md section 17,
@@ -49,7 +49,7 @@ except ImportError:
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
 MAPFORGE = os.path.join(REPO, "Tools", "MapForge")
 OUT = os.path.join(REPO, "Interface", "AddOns", "Bleakhold", "Art", "Royale")
-SPEC = os.path.join(MAPFORGE, "specs", "royale_v1.json")
+SPEC = os.path.join(MAPFORGE, "specs", "royale_v2.json")  # the current map (v1: specs/royale_v1.json)
 SS = 4  # supersampling for anti-aliased shapes
 
 
@@ -256,7 +256,7 @@ def main():
     ap.add_argument("--spec", default=SPEC, help="MapForge terrain spec of the Royale map")
     ap.add_argument("--out", default=OUT)
     ap.add_argument("--preview", help="also write PNG copies here")
-    ap.add_argument("--skip-map", action="store_true", help="only the shapes (the map takes half a minute)")
+    ap.add_argument("--skip-map", action="store_true", help="only the shapes (the map takes a few minutes)")
     a = ap.parse_args()
     os.makedirs(a.out, exist_ok=True)
     pics = []

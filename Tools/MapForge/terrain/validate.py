@@ -19,6 +19,11 @@ against what the readers expect:
   subtracts 84), all 256 MCNKs present, MCVT size 580, MCLQ magic at ofsMCLQ, MH2O instances, LiquidType ids;
 - AzerothCore's vmap4_extractor (adtfile.cpp): walks the top-level chunks by size, maps MDDF/MODF name ids to the
   n-th string of MMDX/MWMO (so MMID/MWID must list the strings in order), dedups by unique id.
+
+With --listfile (a 3.3.5a listfile or asset kit) every texture, _s.blp companion and model the tiles name must be
+a 3.3.5 path or an extra asset the output ships (extra_assets/, checked against --resolution when given). When the
+output has the server's extract copy (server/World/Maps/<NAME>), it must be the same map without the extra-asset
+doodads.
 """
 
 from __future__ import annotations
@@ -55,6 +60,7 @@ class Report:
         self.main: set = set()
         self.wdl: dict = {}  # (tx, ty) -> list of 545 heights
         self.summary_pois: dict | None = None  # kind -> count, when the output has a pois.json
+        self.summary_extra: dict | None = None  # path checks and the server copy, when the output has them
 
     def error(self, where: str, msg: str) -> None:
         self.errors.append(f"{where}: {msg}")
@@ -439,6 +445,9 @@ def _parse_mh2o(p: bytes, where: str, info: AdtInfo, rep: Report) -> None:
             continue
         if ofs_attr and ofs_attr + 16 > len(p):
             rep.error(cw, "attributes offset out of range")
+        if layers > 1:
+            rep.warn(cw, f"{layers} liquid instances: AzerothCore's map_extractor reads only the first "
+                         "(adt_MH2O::GetLiquidInstance), so the server ignores the others")
         for k in range(layers):
             (ltype, fmt, hmin, hmax, xo, yo, w, h, ofs_bits, ofs_verts) = struct.unpack_from("<HHffBBBBII", p,
                                                                                                ofs_inst + 24 * k)
@@ -450,6 +459,8 @@ def _parse_mh2o(p: bytes, where: str, info: AdtInfo, rep: Report) -> None:
             if w < 1 or h < 1 or xo + w > 8 or yo + h > 8:
                 rep.error(cw, f"liquid rect x {xo}+{w}, y {yo}+{h} does not fit 8 x 8")
                 continue
+            if not (math.isfinite(hmin) and math.isfinite(hmax)):
+                rep.error(cw, "minHeight/maxHeight are not finite")
             if hmin > hmax:
                 rep.error(cw, "minHeight > maxHeight")
             nbits = (w * h + 7) // 8
@@ -465,9 +476,28 @@ def _parse_mh2o(p: bytes, where: str, info: AdtInfo, rep: Report) -> None:
             heights = []
             if ofs_verts and fmt in (0, 1) and ofs_verts + 4 * nverts <= len(p):
                 heights = list(struct.unpack_from(f"<{nverts}f", p, ofs_verts))
-                if any(not (hmin - 0.01 <= v <= hmax + 0.01) for v in heights):
-                    rep.warn(cw, "vertex heights outside [minHeight, maxHeight]")
+                if not all(math.isfinite(v) for v in heights):
+                    rep.error(cw, "a liquid vertex height is not finite")
+                elif any(not (hmin - 0.01 <= v <= hmax + 0.01) for v in heights):
+                    rep.error(cw, "vertex heights outside [minHeight, maxHeight]: the client culls the water by "
+                                  "that box (CChunkLiquid::GetAaBox)")
             bits = int.from_bytes(p[ofs_bits:ofs_bits + nbits], "little") if ofs_bits else (1 << (w * h)) - 1
+            if ofs_bits and ofs_bits + nbits <= len(p):
+                if not bits & ((1 << (w * h)) - 1):
+                    rep.error(cw, "the exists bitmap has no cell set: map_extractor reports 'Wrong liquid detect "
+                                  "in MH2O chunk' and the client draws nothing")
+                if bits >> (w * h):
+                    rep.warn(cw, "exists bits set beyond width x height (ignored by the readers)")
+            if k == 0 and heights:
+                sloped = [(xo + x, yo + y) for y in range(h) for x in range(w) if bits >> (y * w + x) & 1
+                          and len({heights[y * (w + 1) + x], heights[y * (w + 1) + x + 1],
+                                   heights[(y + 1) * (w + 1) + x], heights[(y + 1) * (w + 1) + x + 1]}) > 1]
+                if sloped:
+                    rep.error(cw, f"{len(sloped)} wet cells (first {sloped[0][0]},{sloped[0][1]}) have corners at "
+                                  "different heights: the client interpolates the corners (CChunkLiquid::GetHeight), "
+                                  "the server holds the top-left one over the whole cell "
+                                  "(GridTerrainData::GetLiquidData), so it puts players under water the client "
+                                  "does not draw")
             if k == 0:
                 info.mh2o[(i % 16, i // 16)] = {"type": ltype, "format": fmt, "min": hmin, "max": hmax, "x": xo,
                                                 "y": yo, "w": w, "h": h, "bits": bits, "heights": heights}
@@ -1077,8 +1107,195 @@ def _check_pois(rep: Report, path: str, name: str) -> None:
     rep.summary_pois = dict(sorted(kinds.items()))
 
 
-def validate_map(path: str, name: str | None = None, assets: str | None = None, dbc: str | None = None) -> Report:
-    """Check a map. `assets` (extracted client files) and `dbc` (a DBC folder) enable the real-data checks."""
+def _norm(path: str) -> str:
+    return path.replace("/", "\\").lower()
+
+
+def load_listfile(path: str) -> set[str]:
+    """3.3.5 paths from a listfile (`path` or `path<TAB>archives` lines) or an asset kit JSON (every "path" and
+    "specular" value, but none under "modern_candidates"), lower case with backslashes."""
+    with open(path, "rb") as f:
+        text = f.read().decode("utf-8", "replace")
+    out: set[str] = set()
+    if path.lower().endswith(".json"):
+        stack = [json.loads(text)]
+        while stack:
+            node = stack.pop()
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if key == "modern_candidates":
+                        continue
+                    if key in ("path", "specular") and isinstance(value, str):
+                        out.add(_norm(value))
+                    else:
+                        stack.append(value)
+            elif isinstance(node, list):
+                stack.extend(node)
+        return out
+    for line in text.splitlines():
+        line = line.strip().lstrip("\ufeff")
+        if line and not line.startswith("#"):
+            out.add(_norm(line.split("\t", 1)[0].strip()))
+    return out
+
+
+def _model_key(name: str) -> str:
+    key = _norm(name)
+    return key[:-4] + ".m2" if key.endswith(".mdx") else key
+
+
+def _shipped_extra(root: str) -> dict:
+    """The extra assets the output ships (extra_assets/, packed into the map archive): key -> (path, file)."""
+    base = os.path.join(root, "extra_assets")
+    out = {}
+    for folder, _dirs, files in os.walk(base):
+        for f in files:
+            full = os.path.join(folder, f)
+            rel = os.path.relpath(full, base).replace(os.sep, "\\")
+            out[_norm(rel)] = (rel, full)
+    return out
+
+
+def _check_extra(rep: Report, root: str, listfile: set | None, resolution: str | None) -> dict:
+    """Every path the tiles name is a 3.3.5 listfile path or an extra asset the output ships."""
+    import hashlib  # noqa: PLC0415
+
+    shipped = _shipped_extra(root)
+    summary = {"shipped_extra_files": len(shipped), "listfile_checked": listfile is not None}
+    fell_back = set()
+    if resolution:
+        where = os.path.basename(resolution)
+        try:
+            with open(resolution, encoding="utf-8") as f:
+                doc = json.load(f)
+        except (OSError, ValueError) as e:
+            rep.error(where, f"unreadable: {e}")
+            doc = {}
+        if doc and (doc.get("format") != "mapforge-assets/1" or not isinstance(doc.get("assets"), list)):
+            rep.error(where, "not a mapforge-assets/1 resolution file")
+            doc = {}
+        resolved = 0
+        for entry in doc.get("assets", []):
+            if not isinstance(entry, dict) or not isinstance(entry.get("modern"), str):
+                rep.error(where, "an asset entry without a modern path")
+                continue
+            if entry.get("status") != "resolved":
+                fell_back.add(_model_key(entry["modern"]))
+                continue
+            resolved += 1
+            for f in entry.get("files", []):
+                hit = shipped.get(_norm(f.get("path", "")))
+                if hit is None:
+                    continue  # resolved but not used by this map (the build copies only what the tiles use)
+                with open(hit[1], "rb") as fh:
+                    digest = hashlib.sha256(fh.read()).hexdigest()
+                if digest != f.get("sha256"):
+                    rep.error("extra_assets", f"{hit[0]} differs from the resolution's copy (sha256)")
+        summary["resolution"] = {"resolved": resolved, "fell_back": len(fell_back)}
+    known = (listfile or set()) | set(shipped)
+    done: set = set()
+
+    def check(key: str, label: str, where: str, allow_extra: bool = True) -> None:
+        if key in done:
+            return
+        done.add(key)
+        if key in fell_back and key not in shipped:
+            rep.error(where, f"{label} is an extra asset that fell back in the resolution, but the tile names it")
+            return
+        if not allow_extra and key in shipped and (listfile is None or key not in listfile):
+            rep.error(where, f"{label} is an extra asset; WMOs must be 3.3.5 files (vmap4_extractor reads them)")
+            return
+        if listfile is not None and key not in known:
+            rep.error(where, f"{label} is neither a 3.3.5 listfile path nor an extra asset this output ships")
+
+    for (tx, ty), info in sorted(rep.adts.items()):
+        where = f"tile {tx},{ty}"
+        flags = info.mtxf if info.mtxf else [0] * len(info.textures)
+        for i, tex in enumerate(info.textures):
+            check(_norm(tex), f"texture {tex!r}", where)
+            if i < len(flags) and not flags[i] & 1:
+                spec_name = tex[:-4] + "_s.blp"
+                check(_norm(spec_name), f"{spec_name!r} (MTXF flag 1 is off, so the client loads it)", where)
+        for m in info.m2_names:
+            if m:
+                check(_model_key(m), f"model {m!r}", where)
+        for m in info.wmo_names:
+            if m:
+                check(_norm(m), f"WMO {m!r}", where, allow_extra=False)
+    if listfile is None:
+        rep.info.append("paths not checked against a 3.3.5 listfile (pass --listfile with the asset kit's listfile)")
+    return summary
+
+
+def _check_server_copy(rep: Report, root: str, name: str, summary: dict) -> None:
+    """server/World/Maps/<name>: the map the server's extractors read, which leaves out the extra-asset doodads."""
+    shipped = {k for k in _shipped_extra(root)}
+    folder = os.path.join(root, "server", "World", "Maps", name)
+    modern_in_client = sorted({m for info in rep.adts.values() for m in info.m2_names if _model_key(m) in shipped})
+    if not os.path.isdir(folder):
+        if modern_in_client:
+            rep.error("server copy", f"the client tiles place extra-asset doodads ({modern_in_client[0]} ...) but "
+                                     f"there is no server/World/Maps/{name} without them: vmap4_extractor would read "
+                                     "them")
+        return
+    srep = Report()
+    files = {f.lower(): f for f in os.listdir(folder)}
+    wdt = files.get(f"{name.lower()}.wdt")
+    if wdt is None:
+        rep.error("server copy", f"server/World/Maps/{name} has no {name}.wdt (map_extractor needs it)")
+        return
+    parse_wdt(os.path.join(folder, wdt), srep)
+    if srep.main != rep.main:
+        rep.error("server copy", "its WDT lists other tiles than the client's")
+    left_out = 0
+    for (tx, ty) in sorted(rep.main):
+        fname = files.get(f"{name.lower()}_{tx}_{ty}.adt")
+        if fname is None:
+            rep.error("server copy", f"{name}_{tx}_{ty}.adt is missing")
+            continue
+        sinfo = parse_adt(os.path.join(folder, fname), tx, ty, srep)
+        cinfo = rep.adts.get((tx, ty))
+        if sinfo is None or cinfo is None:
+            continue
+        srep.adts[(tx, ty)] = sinfo
+        where = f"server copy tile {tx},{ty}"
+        same = all(sinfo.chunks.get(k, {}).get(field) == ch.get(field) for k, ch in cinfo.chunks.items()
+                   for field in ("heights", "holes", "area"))
+        if not same:
+            rep.error(where, "terrain (heights, holes or areas) differs from the client tile")
+        if sinfo.mh2o != cinfo.mh2o:
+            rep.error(where, "water differs from the client tile")
+        strip = ("name_id",)
+        if [{k: v for k, v in e.items() if k not in strip} for e in sinfo.modf] != \
+                [{k: v for k, v in e.items() if k not in strip} for e in cinfo.modf]:
+            rep.error(where, "WMO placements differ from the client tile")
+        client_doodads = {e["uid"]: e for e in cinfo.mddf}
+        server_uids = set()
+        for e in sinfo.mddf:
+            server_uids.add(e["uid"])
+            c = client_doodads.get(e["uid"])
+            if c is None or (c["name"], c["pos"], c["rot"], c["scale"]) != (e["name"], e["pos"], e["rot"], e["scale"]):
+                rep.error(where, f"doodad uid {e['uid']} is not the client tile's")
+            if e["name"] and _model_key(e["name"]) in shipped:
+                rep.error(where, f"places the extra asset {e['name']!r}: vmap4_extractor would read a modern model")
+        for uid, c in client_doodads.items():
+            if uid in server_uids:
+                continue
+            if c["name"] and _model_key(c["name"]) in shipped:
+                left_out += 1
+            else:
+                rep.error(where, f"leaves out the 3.3.5 doodad uid {uid} ({c['name']}); only extra assets stay "
+                                 "out of the server copy")
+    for e in srep.errors:
+        rep.errors.append(f"server copy: {e}")
+    summary["server_tiles"] = len(srep.adts)
+    summary["server_doodads_left_out"] = left_out
+
+
+def validate_map(path: str, name: str | None = None, assets: str | None = None, dbc: str | None = None,
+                 listfiles: list[str] | None = None, resolution: str | None = None) -> Report:
+    """Check a map. `assets` (extracted client files) and `dbc` (a DBC folder) enable the real-data checks;
+    `listfiles` (3.3.5 listfiles or asset kits) and `resolution` (asset_resolution.json) the path checks."""
     rep = Report()
     try:
         folder, name = find_map(path, name)
@@ -1123,6 +1340,16 @@ def validate_map(path: str, name: str | None = None, assets: str | None = None, 
     _check_trs(rep, root, name)
     if os.path.isfile(os.path.join(root, "pois.json")):
         _check_pois(rep, os.path.join(root, "pois.json"), name)
+    listfile = None
+    if listfiles:
+        listfile = set()
+        for lf in listfiles:
+            listfile |= load_listfile(lf)
+    extra_summary = _check_extra(rep, root, listfile, resolution) \
+        if (listfile is not None or resolution or os.path.isdir(os.path.join(root, "extra_assets"))) else {}
+    _check_server_copy(rep, root, name, extra_summary)
+    if extra_summary:
+        rep.summary_extra = extra_summary
     if dbc:
         _check_dbc(rep, dbc)
     if assets:
@@ -1172,6 +1399,7 @@ def _summary(name: str, rep: Report) -> dict:
         "max_normal_error_deg": round(normal_err, 2),
         "wdl_tiles": len(rep.wdl),
         "pois_by_kind": rep.summary_pois,
+        **({"extra_assets": rep.summary_extra} if rep.summary_extra is not None else {}),
         "errors": len(rep.errors),
         "warnings": len(rep.warnings),
     }
@@ -1186,9 +1414,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--assets", help="folder of extracted client files: check that every texture, _s.blp companion "
                                      "and model exists, and MODF extents against the real WMO boxes")
     ap.add_argument("--dbc", help="DBC folder (LiquidType, AreaTable, GroundEffectTexture) to check ids against")
+    ap.add_argument("--listfile", action="append", help="3.3.5a listfile (path or path<TAB>archives lines) or asset "
+                                                        "kit JSON: every path the tiles name must be in it or be a "
+                                                        "shipped extra asset (repeatable)")
+    ap.add_argument("--resolution", help="asset_resolution.json (package.py resolve-assets): the shipped extra files "
+                                         "must match it, and a fallen-back modern path must not be named")
     args = ap.parse_args(argv)
     try:
-        rep = validate_map(args.path, args.map, assets=args.assets, dbc=args.dbc)
+        rep = validate_map(args.path, args.map, assets=args.assets, dbc=args.dbc, listfiles=args.listfile,
+                           resolution=args.resolution)
     except OSError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
