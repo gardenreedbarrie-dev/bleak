@@ -293,7 +293,7 @@ namespace Bleakhold
         }
         c.repairMinSkill = sConfigMgr->GetOption<uint32_t>("BleakholdUi.Repair.MinSkill", 75);
         c.repairDiscountPct = std::min<uint32_t>(sConfigMgr->GetOption<uint32_t>("BleakholdUi.Repair.BlacksmithDiscountPct", 10), 100);
-        c.glideRaces = CampRules::ParseIds(sConfigMgr->GetOption<std::string>("BleakholdUi.Glide.Races", "22"));
+        c.glideRaces = CampRules::ParseIds(sConfigMgr->GetOption<std::string>("BleakholdUi.Glide.Races", "15"));
         c.glideCooldownSec = sConfigMgr->GetOption<uint32_t>("BleakholdUi.Glide.Cooldown", 90);
         c.glideSec = std::clamp<uint32_t>(sConfigMgr->GetOption<uint32_t>("BleakholdUi.Glide.Duration", 10), 1, 600);
         c.glideSpell = sConfigMgr->GetOption<uint32_t>("BleakholdUi.Glide.Spell", CampRules::WalkOnAirSpell);

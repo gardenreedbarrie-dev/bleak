@@ -349,8 +349,11 @@ BleakholdUi.Case.CooldownMs = 1000
 #                     0 - Disabled
 #
 #    BleakholdUi.Glide.Races
-#        Description: Race ids that can glide (any separator; 22 = High Elf, Tools/RaceForge/races.json).
-#        Default:     "22"
+#        Description: Race ids that can glide (any separator): the High Elf's race id on this realm, the same
+#                     as Bleakhold.Racials.HighElfRace of mod-bleakhold. 15 on the Bleakhold realm, whose own
+#                     race patch put the High Elf in that stock slot (Tools/RaceForge/races.json, realm_id);
+#                     22 on a realm built with RaceForge's build.
+#        Default:     "15"
 #
 #    BleakholdUi.Glide.Cooldown
 #        Description: Seconds between two glides of one player (a relog does not reset it).
@@ -442,7 +445,7 @@ BleakholdUi.Repair.Enable = 1
 BleakholdUi.Repair.MinSkill = 75
 BleakholdUi.Repair.BlacksmithDiscountPct = 10
 BleakholdUi.Glide.Enable = 1
-BleakholdUi.Glide.Races = "22"
+BleakholdUi.Glide.Races = "15"
 BleakholdUi.Glide.Cooldown = 90
 BleakholdUi.Glide.Duration = 10
 BleakholdUi.Glide.Spell = 100800

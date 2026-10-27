@@ -2,10 +2,14 @@
 
 Adds the Bleakhold races to your own 3.3.5a game data:
 
-| Race | Id | Faction | Template race (models, sounds, classes) | Faction race (language, reputation, start zone) | Racials |
-|---|---|---|---|---|---|
-| High Elf | 22 | Alliance | Blood Elf (10), helmet prefix `Be` | Human (1), starts in Northshire | Wind Blessed (90500); not Blood Elf's |
-| Eredar | 23 | Horde | Draenei (11), helmet prefix `Dr` | Orc (2), starts in the Valley of Trials | Elemental Insight (90501), Read Ley Line (90502); not Draenei's |
+| Race | Id (build) | Id on the Bleakhold realm | Faction | Template race (models, sounds, classes) | Faction race (language, reputation, start zone) | Racials |
+|---|---|---|---|---|---|---|
+| High Elf | 22 | 15 | Alliance | Blood Elf (10), helmet prefix `Be` | Human (1), starts in Northshire | Wind Blessed (90500); not Blood Elf's |
+| Eredar | 23 | 19 | Horde | Draenei (11), helmet prefix `Dr` | Orc (2), starts in the Valley of Trials | Elemental Insight (90501), Read Ley Line (90502); not Draenei's |
+
+`build` adds the races after the stock rows 1-21, as 22 and 23. The Bleakhold realm got them from its own race patch
+(`Patch-R.MPQ`), which reuses stock creature display slots: High Elf 15 (stock Skeleton), Eredar 19 (Taunka), and
+Pandaren in 20 and 21. `update` works on the races there (`realm_id` in races.json).
 
 RaceForge reads the DBC files of your client and writes:
 
@@ -233,7 +237,8 @@ Some race handling is in AzerothCore's code, not its data, and needs a module or
 
 | Field | Meaning |
 |---|---|
-| `id` | Race id, 1-31 (the client keeps races in 32-bit masks). 24-26 are refused: later clients use them for Pandaren, which Bleakhold does not have |
+| `id` | Race id, 1-31 (the client keeps races in 32-bit masks), the one `build` gives. 24-26 are refused: later clients use them for Pandaren, which Bleakhold does not have |
+| `realm_id` | The race's id on the realm `update` works on, when that realm's own race patch put it in another ChrRaces slot (Bleakhold: High Elf 15, Eredar 19); `null` or missing: `id`. `update` refuses to run unless the realm's ChrRaces holds the race there under its `client_file_string`. `build` ignores it |
 | `name`, `names` | Name for every locale; `names` overrides single locales (`enUS`, `koKR`, `frFR`, `deDE`, `zhCN`, `zhTW`, `esES`, `esMX`, `ruRU`) |
 | `name_female`, `name_male` | Gendered names. `null`: the race's name wherever the template has a gendered name (German, French, ...), empty elsewhere |
 | `client_file_string` | 1-13 letters or digits; names portraits, corpse skeletons and Lua race tokens (`UnitRace`) |
@@ -288,56 +293,126 @@ General tab, and the server teaches them (mod-bleakhold in bleakserv). The Bleak
 takes the racials (and any later change to `spells` or `racials`) with `update`, which works like Tools/MapForge's DBC
 placement and reuses its archive code (`Tools/MapForge/dbc/patches.py`):
 
-- for SkillRaceClassInfo, SkillLineAbility and Spell, and for every combination of the launcher's optional packs
+- the races are the realm's: each race at its `realm_id` (15 and 19 on the Bleakhold realm; its `id` without one). For
+  every combination of the launcher's optional packs, the ChrRaces.dbc the client reads must hold the race there
+  under its `client_file_string` (`HighElf`, `Eredar`); otherwise it stops before it writes anything and says where
+  the race is instead (`HighElf is race 22 there: set realm_id 22 ...`) or that the realm has no such race;
+- for SkillRaceClassInfo, SkillLineAbility and Spell, and for every combination of the optional packs
   (`archives.optional_packs`: with and without the HD pack), it finds the copy the client reads today: the archive that
   sorts last among those holding the file;
-- it forges the change into that copy (clears the new races' bits on the dropped skill lines, adds the spells, or
+- it forges the change into that copy (clears the races' bits on the dropped skill lines, adds the spells, or
   replaces an earlier version of the same spell; an id that holds any other spell stops it) and rebuilds that archive
-  with every other file kept. Players with and without a pack each keep the copy they load today, plus the change;
+  with every other file kept. Players with and without a pack each keep the copy they load today, plus the change.
+  Every other bit stays as the realm has it (the template race's, the languages, the Pandaren). A row that only a
+  dropping race had gets the mask `0x80000000`, the bit of race 32, which no race has: a mask of 0 would mean every
+  race;
 - where no patch holds a table, the stock copy from `--dbc` gets the change and goes into `archives.own` (patch-R, or
   the realm's file of that name in another case, such as `Patch-R.MPQ`). Every player loads that archive, so when only
   a pack archive holds the table and `archives.own` sorts after it (the HD pack's patch-A to patch-P sort before
   patch-R), the update stops instead of hiding the pack's copy: add the table to a patch every player loads, or set
   `archives.own` to a patch outside every pack that sorts below the pack archive. It also stops when `archives.own`
   is itself in a pack, which the players without it would not load;
-- it never writes into the patch folder: the rebuilt archives go to `--out/client`. Running it again on the updated
-  patches changes nothing ("already up to date").
+- it never writes into the patch folder: the rebuilt archives go to `--out/client`, each at its place in the patch
+  folder (`client/enUS/` for a locale patch). Running it again on the updated patches changes nothing ("already up to
+  date").
 
-On the VPS (the realm's patches in `/srv/bleakhold-launcher/patches`, bleak in `/root/bleak`, bleakserv in
-`/root/bleakserv`):
+The server SQL (`server/sql/bleakhold_racials.sql`) is written from the realm's own rows, never stock ones:
 
-```sh
-cd /root/bleak/Tools/RaceForge
-python3 -I raceforge.py update --patches /srv/bleakhold-launcher/patches --dbc <the server's data/dbc> \
-    --out /root/raceforge-racials \
-    --server-sql /root/bleakserv/data/sql/updates/pending_db_world/<the racials rev file>.sql
-```
+- the `spell_dbc` rows of the racials, the same rows as the client's Spell.dbc (on the Bleakhold realm the same as
+  those bleakserv's pending_db_world already applied);
+- every `skillraceclassinfo_dbc` and `skilllineability_dbc` row of the dropped skill lines (756, 760) as the client
+  reads it, without the races' bits; they override the server's data/dbc by id. `--dbc` is the server's data/dbc:
+  its rows of those lines that the client's copy lacks and that give a race a dropped line are written too. Any other
+  override row of those lines in the world database (earlier work) loses the races' bits by an `UPDATE`;
+- `playercreateinfo_skills`, `_spell_custom` and `_cast_spell`: a row of the race alone for a dropped skill line or
+  spell goes; a row of more races (a mask the realm shares with the template race) keeps the others;
+  `playercreateinfo_action`: the race's own template racial buttons take Read Ley Line (the Eredar) or go; the
+  races' own racials in `playercreateinfo_spell_custom`;
+- where `realm_id` differs from `id`: the rows an earlier update wrote for `id` (racemask `1 << (id - 1)` racials,
+  Read Ley Line's `playercreateinfo_action` rows of race `id`) go, so nothing points at a race the realm does not
+  have.
 
-The exit code is 0 when every check passed; `report.txt` says, per table and pack combination, which archive was
-merged (that is the patch letter it goes in). Then:
+Every statement can run again (it deletes what it adds first, or finds nothing left to change), and it passes
+bleakserv's SQL linter. `--server-sql-out <folder>` also writes it, when every check passed, as a new
+`rev_<nanoseconds>.sql` in that folder (the name `create_sql.sh` gives): `/root/bleakhold-generated-sql/pending_db_world`
+is the server's folder of SQL made on the VPS, which bleakserv's `deploy/update-bleakhold-ui.sh` deploys like the
+repository's pending SQL and `ac-db-import` applies once. A file of that folder that already holds the same SQL is
+kept and nothing is written (running `update` again makes no second file); a `.sql` path in place of the folder is
+never overwritten when it holds other SQL. `--server-sql <file>` compares the DBC rows with another file field for
+field.
 
-1. Client first: put every archive of `/root/raceforge-racials/client/` into the patch folder, replacing the file of
-   the same name (upload under another name, then `mv` it into place). Then publish at once (the hourly run at :17
-   can come after the server update) and wait for `Published build ...`:
+### The Bleakhold realm, step by step
+
+On the VPS, as root: the realm's patches in `/srv/bleakhold-launcher/patches`, the server's data/dbc in the Docker
+volume, bleak in `/root/bleak`, bleakserv in `/root/bleakserv`. bleakserv's `deploy/README.md` ("High Elf and Eredar
+racials") has the same steps with what each check prints.
+
+1. The new code:
    ```sh
+   cd /root/bleak && git pull
+   cd /root/bleakserv && git pull
+   ```
+2. The racials from the realm's own files (nothing on the server changes yet):
+   ```sh
+   cd /root/bleak/Tools/RaceForge
+   python3 -I raceforge.py update --patches /srv/bleakhold-launcher/patches \
+     --dbc /var/lib/docker/volumes/azerothcore-wotlk_ac-client-data/_data/dbc \
+     --out /root/raceforge-racials --force \
+     --server-sql-out /root/bleakhold-generated-sql/pending_db_world
+   echo "exit code: $?"
+   ```
+   It must print `exit code: 0`, the line `ChrRaces.dbc (Patch-R.MPQ, for ...): race 15 is HighElf, race 19 is Eredar`,
+   `... checks, 0 failed` and `Server SQL rev: /root/bleakhold-generated-sql/pending_db_world/rev_....sql (written)`.
+3. The client archives into the patch folder, then publish. `client/` holds each rebuilt archive at its place in the
+   patch folder (`enUS/` for a locale patch). `Patch-R.MPQ` there is a link to the download site's
+   `/root/wow-site/site/public/downloads/Patch-R.MPQ`: `readlink -f` finds the real file, so the link stays and the
+   site gets the new archive too. Each archive is copied next to the real file as `.new` (publish skips files that
+   do not end in `.MPQ`) and moved into place in one step; `old-patches` keeps the archives as they were:
+   ```sh
+   cd /root/raceforge-racials/client && find . -type f -iname '*.mpq' | sed 's|^\./||' | while read -r f; do
+     dest="$(readlink -f "/srv/bleakhold-launcher/patches/$f")"
+     old="/root/raceforge-racials/old-patches/$f"
+     mkdir -p "$(dirname "$old")"
+     if [ -e "$dest" ] && [ ! -e "$old" ]; then cp -p -- "$dest" "$old"; fi
+     cp -- "$f" "$dest.new" && mv -f -- "$dest.new" "$dest" && echo "replaced: $dest"
+   done
    bash /root/bleakserv/deploy/launcher/publish.sh
    ```
-   Players get the archives once their launcher has updated the game and they restart it: give them time before
-   step 2, as bleakserv's `deploy/README.md` release steps do.
-2. Server: the world rows are bleakserv's pending_db_world file (`server/sql/bleakhold_racials.sql` is the same SQL;
-   `--server-sql` compares them field for field) and the code is mod-bleakhold's `bh_racials.cpp`, committed and
-   pushed in bleakserv (its deploy script deploys the last commit). Check, then update:
+   Wait for `Published build ...`. Players get the archives when their launcher has updated the game and they
+   restart it: give them time before step 5.
+4. The glide settings (the update script keeps a value the server already has, so these are set by hand):
    ```sh
-   cd /root/bleakserv && git pull && bash deploy/update-bleakhold-ui.sh --check
-   bash deploy/update-bleakhold-ui.sh
+   C=/root/azerothcore-wotlk/env/dist/etc/modules/mod_bleakhold_ui.conf
+   cp -p "$C" /root/raceforge-racials/mod_bleakhold_ui.conf.before
+   sed -i -E \
+     -e 's/^([[:space:]]*BleakholdUi\.Glide\.Races[[:space:]]*=).*/\1 "15"/' \
+     -e 's/^([[:space:]]*BleakholdUi\.Glide\.Spell[[:space:]]*=).*/\1 100800/' \
+     -e 's/^([[:space:]]*BleakholdUi\.Glide\.Cooldown[[:space:]]*=).*/\1 90/' "$C"
+   grep -nE '^[[:space:]]*BleakholdUi\.Glide\.(Races|Spell|Cooldown)[[:space:]]*=' "$C"
    ```
-   The check must list the racials `rev_*.sql` as `new`, mod-bleakhold's `bh_racials.cpp`, `bh_racials_rules.h` and
-   `mod_bleakhold_loader.cpp`, and the new settings `Bleakhold.Racials.Enable` and
-   `Bleakhold.Racials.ReadLeyLine.RestedSec` (`config: mod_bleakhold.conf: ... new setting(s)`). The update copies
-   them to the server, rebuilds the world server and `ac-db-import` images and restarts the world server, after
-   `ac-db-import` has applied the SQL. A plain `docker compose restart ac-worldserver` applies and builds none of it
-   (bleakserv's `deploy/README.md`). `data/dbc` can stay as it is (the rows override it by id); `server/dbc` holds
-   the merged copies if you want it in sync anyway.
+   The grep must show `BleakholdUi.Glide.Races = "15"`, `BleakholdUi.Glide.Spell = 100800` and
+   `BleakholdUi.Glide.Cooldown = 90`.
+5. The server: check, then update:
+   ```sh
+   cd /root/bleakserv && bash deploy/update-bleakhold-ui.sh --check
+   tmux new -s update
+   cd /root/bleakserv && bash deploy/update-bleakhold-ui.sh
+   ```
+   The check lists the rev file of step 2 as `new ... (made on this server: /root/bleakhold-generated-sql)`,
+   mod-bleakhold's `bh_racials.cpp` and `bh_racials_rules.h`, and `config: mod_bleakhold.conf: ... new setting(s)
+   added with their defaults: ... Bleakhold.Racials.HighElfRace Bleakhold.Racials.EredarRace` (15 and 19). The update
+   rebuilds the world server and `ac-db-import`, which applies the rev file before the world server starts.
+6. The log:
+   ```sh
+   docker logs --tail 5000 ac-worldserver 2>&1 | grep -E 'mod-bleakhold: racials|BleakholdUi\.Glide'
+   ```
+   It must show this line, and no `BleakholdUi.Glide.Spell` error:
+   ```text
+   mod-bleakhold: racials on (High Elf race 15: 90500; Eredar race 19: 90501, 90502; Read Ley Line 120 s while resting)
+   ```
+   Lines `mod-bleakhold: racials: ...` and `racials stay off ...` say what is still wrong; nothing was taken from any
+   character then. Each High Elf and Eredar logs `mod-bleakhold: racials of <name> (race 15)` (or `race 19`) at its
+   first login after the update.
 
 ## Checks
 
@@ -374,7 +449,12 @@ the default against `taken_patches.json` and the client's order, the refusal, `-
 a tampered SQL row) and `update` on made-up realms: RaceForge's earlier patch-R only, Spell.dbc in a later realm patch
 with a custom row, an optional pack with its own copy, a pack archive below patch-R as the only holder (refused) and
 one above it, the realm's archive spelled `Patch-R.MPQ`, a bad spell field, a taken id, a realm without the races,
-the SQL on a model of the world database (run twice) and against bleakserv's linter. With a bleakserv checkout next
+the SQL on a model of the world database (run twice) and against bleakserv's linter. The Bleakhold realm's layout has
+tests of its own: High Elf and Eredar in the slots 15 and 19 of `Patch-R.MPQ` with masks of the realm's own (rows of
+a race alone, a Pandaren bit, the languages) and a server data/dbc with rows the client lacks; ChrRaces without the
+races there, in an HD pack's copy, and a wrong `realm_id`; the SQL on a model of that realm's world database after the
+earlier update for races 22 and 23 (run twice); `--server-sql-out` (one rev file, never a changed one, none when a
+check fails). With a bleakserv checkout next
 to this repository it
 also compares the server's `spell_dbc` columns, the pending world-database file and mod-bleakhold's racial table with
 races.json.

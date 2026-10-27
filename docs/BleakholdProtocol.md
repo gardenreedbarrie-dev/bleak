@@ -851,9 +851,9 @@ less). It is allowed for a blacksmith with at least `BleakholdUi.Repair.MinSkill
 and for anyone at a fire with a camp anvil (feature 512). It is all or nothing: a player who cannot pay for all of it
 pays nothing. The result is a `TOAST` (kind `I`).
 
-**Glide (Walk on Air).** `GLIDE` lets a player of a race in `BleakholdUi.Glide.Races` (22, the High Elf) turn a fall
-into a glide they steer, every `BleakholdUi.Glide.Cooldown` (90 s; a relog does not reset it). It never flies and never
-gains altitude:
+**Glide (Walk on Air).** `GLIDE` lets a player of a race in `BleakholdUi.Glide.Races` (15, the High Elf on the
+Bleakhold realm; 22 after RaceForge's build) turn a fall into a glide they steer, every `BleakholdUi.Glide.Cooldown`
+(90 s; a relog does not reset it). It never flies and never gains altitude:
 
 - The server puts Walk on Air on the player (`BleakholdUi.Glide.Spell`, spell 100800: a feather fall aura for
   `BleakholdUi.Glide.Duration`, 10 s), a triggered cast: no reagent, no cost and no spell cooldown on the client.

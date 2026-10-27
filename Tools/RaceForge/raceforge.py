@@ -3,7 +3,8 @@
 
     python3 -I raceforge.py build --dbc <your DBFilesClient folder> --out <output folder> [--mpq] [--customization <package>]
     python3 -I raceforge.py validate --dbc <same folder> --out <output folder>
-    python3 -I raceforge.py update --patches <the realm's patch folder> --dbc <stock DBCs> --out <output folder>
+    python3 -I raceforge.py update --patches <the realm's patch folder> --dbc <the server's data/dbc> --out <output folder>
+                                   [--server-sql-out <the server's generated-SQL folder>]
     python3 -I raceforge.py schemas --check
     python3 -I raceforge.py [<DBC folder> [<customization package>]]   (double-click or drop folders: builds next to it)
 
@@ -17,6 +18,7 @@ import argparse
 import os
 import shutil
 import sys
+import textwrap
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -466,7 +468,8 @@ def cmd_validate(args) -> int:
 
 
 def format_update_report(config: configmod.Config, patches_dir: str, plan: update.UpdatePlan, written: list, sql_path: str,
-                         server_files: list[str], result: validate.Validation, warnings: list[str]) -> str:
+                         server_files: list[str], result: validate.Validation, warnings: list[str], server_sql_out: str | None = None,
+                         rev: tuple[str, bool] | None = None, rev_error: str = "") -> str:
     lines = ["RaceForge update report", "=======================", ""]
     lines.append(f"Realm patches: {os.path.abspath(patches_dir)}")
     lines.append(f"Config:        {os.path.abspath(config.path) if config.path else '(built in)'}")
@@ -477,7 +480,8 @@ def format_update_report(config: configmod.Config, patches_dir: str, plan: updat
 
     for race in config.races:
         spells = ", ".join(f"{s} {config.spells[s].name}" for s in race.racial_spells) or "none"
-        lines.append(f"{race.id} {race.name}: drops template skill lines {race.drop_skill_lines or 'none'}; racial spells {spells}")
+        moved = f" (races.json id {race.build_id}; the realm has it at {race.id})" if race.build_id and race.build_id != race.id else ""
+        lines.append(f"{race.id} {race.name}{moved}: drops template skill lines {race.drop_skill_lines or 'none'}; racial spells {spells}")
 
     lines.append("")
     lines.append("Where each table goes")
@@ -524,26 +528,46 @@ def format_update_report(config: configmod.Config, patches_dir: str, plan: updat
         lines.append(f"Server DBC (optional, for data/dbc): {path}")
 
     lines.append(f"Server SQL: {sql_path}")
+
+    if server_sql_out:
+        if rev is not None:
+            lines.append(f"Server SQL rev: {rev[0]} ({'written' if rev[1] else 'already there with the same SQL: nothing written'})")
+        elif rev_error:
+            lines.append(f"Server SQL rev: not written ({rev_error})")
+        else:
+            lines.append(f"Server SQL rev: not written to {server_sql_out} (a check failed)")
+
     lines.append("")
     lines.append("Next steps")
     lines.append("----------")
-    lines.append("1. Client: put every archive of client/ into the realm's patch folder, replacing the file of the same name")
-    lines.append("   (upload it under another name, then mv it into place), then publish it at once (the hourly run can come after")
+    lines.append("1. Client: put every archive of client/ into the realm's patch folder at the same place (client/enUS/ into enUS/),")
+    lines.append("   replacing the file of the same name (copy it next to the real file under another name, then mv it into place;")
+    lines.append("   a link in the patch folder: replace the file it points at), then publish it at once (the hourly run can come after")
     lines.append("   step 2): bash /root/bleakserv/deploy/launcher/publish.sh, and wait for \"Published build ...\". Players need the")
     lines.append("   new archives and a client restart: give them time before step 2.")
-    lines.append(f"2. Server: {SQL_NOTE}")
+    lines += textwrap.wrap(f"2. Server: {SQL_NOTE}", 117, subsequent_indent="   ")
+    high_elf = next((r for r in config.races if r.client_file_string.lower() == "highelf"), None)
+    eredar = next((r for r in config.races if r.client_file_string.lower() == "eredar"), None)
+
+    if high_elf and eredar:
+        lines.append(f"3. Settings for these race ids, in the server's etc/modules: mod_bleakhold.conf Bleakhold.Racials.HighElfRace = {high_elf.id}")
+        lines.append(f"   and Bleakhold.Racials.EredarRace = {eredar.id}; mod_bleakhold_ui.conf BleakholdUi.Glide.Races = \"{high_elf.id}\" (the update")
+        lines.append("   script keeps a value the server already has).")
+
     return "\n".join(lines) + "\n"
 
 
-SQL_NOTE = ("add server/sql/bleakhold_racials.sql to bleakserv as data/sql/updates/pending_db_world/rev_<timestamp>.sql (or compare it "
-            "with the one there: --server-sql), commit and push it with mod-bleakhold's bh_racials.cpp, then deploy both on the realm: "
-            "cd /root/bleakserv && git pull && bash deploy/update-bleakhold-ui.sh --check, then bash deploy/update-bleakhold-ui.sh "
-            "(it rebuilds the world server, and ac-db-import applies the SQL before it starts; a plain worldserver restart does "
-            "neither). data/dbc can stay as it is: the rows override it by id.")
+SQL_NOTE = ("the world rows are server/sql/bleakhold_racials.sql, written from this realm's own rows. Run update with --server-sql-out "
+            "/root/bleakhold-generated-sql/pending_db_world, which writes it there as a new rev_<nanoseconds>.sql (or copy it there under "
+            "such a name); deploy/update-bleakhold-ui.sh of bleakserv deploys that folder like the repository's pending SQL, and "
+            "ac-db-import applies each file once. Then: cd /root/bleakserv && git pull && bash deploy/update-bleakhold-ui.sh --check, "
+            "then bash deploy/update-bleakhold-ui.sh (it rebuilds the world server, and ac-db-import applies the SQL before it starts; "
+            "a plain worldserver restart does neither). data/dbc can stay as it is: the rows override it by id.")
 
 
 def cmd_update(args) -> int:
-    config = configmod.load(args.config)
+    # the races at their ids on the realm (realm_id), checked against the realm's ChrRaces before anything is written
+    config = configmod.load(args.config).for_realm()
     tables = update.changed_tables(config)
 
     if not tables:
@@ -576,12 +600,14 @@ def cmd_update(args) -> int:
 
     try:
         out_dir = os.path.abspath(args.out)
-        update.clean_out_dir(out_dir, args.force)
         plan = update.make_plan(config, patchset, args.dbc)
         problems, skipped = update.check_spells(plan, config)
 
         if problems:
             raise ForgeError("; ".join(problems))
+
+        # only now: a refusal above leaves an earlier output folder as it was
+        update.clean_out_dir(out_dir, args.force)
 
         warnings += [f"not checked: {s}" for s in skipped]
         written = update.write_archives(plan, patchset, out_dir)
@@ -633,19 +659,25 @@ def cmd_update(args) -> int:
         for name, sql_table, columns in (("Spell", "spell_dbc", spellmod.SERVER_SPELL_COLUMNS),
                                          ("SkillRaceClassInfo", "skillraceclassinfo_dbc", spellmod.server_columns(spellmod.SERVER_SKILL_RACE_CLASS_COLUMNS)),
                                          ("SkillLineAbility", "skilllineability_dbc", spellmod.server_columns(spellmod.SERVER_SKILL_LINE_ABILITY_COLUMNS))):
-            table = plan.server.get(name)
+            sources = update.server_rows(plan, name)
             rows = spellmod.parse_sql_rows(sql_text, sql_table)
 
-            if table is None or not rows:
+            if not sources or not rows:
                 continue
 
-            by_id = table.by_id()
             differences = []
 
             for row_id, sql_row in rows.items():
-                differences += [f"{row_id} {d}" for d in spellmod.compare_row(table, by_id[row_id], sql_row, columns)]
+                if row_id not in sources:
+                    differences.append(f"{row_id} is in no copy of {name}.dbc")
+                    continue
 
-            result.expect(not differences, f"{sql_table}: {len(rows)} rows match {name}.dbc (the server copy) field for field ({len(columns)} columns)", "; ".join(differences[:5]))
+                table, row = sources[row_id]
+                differences += [f"{row_id} {d}" for d in spellmod.compare_row(table, row, sql_row, columns)]
+                differences += [f"{row_id}: race {r.id} still has its bit" for r in config.races if name != "Spell" and update.has_dropped_bit(name, table, row, r)]
+
+            result.expect(not differences, f"{sql_table}: {len(rows)} rows match {name}.dbc (the server copy) field for field ({len(columns)} columns)"
+                          + (", without the races' bits" if name != "Spell" else ""), "; ".join(differences[:5]))
 
         server_spells = plan.server.get("Spell")
 
@@ -665,13 +697,27 @@ def cmd_update(args) -> int:
     finally:
         patchset.close()
 
-    report_text = format_update_report(config, args.patches, plan, written, sql_path, server_files, result, warnings)
+    rev = None
+    rev_error = ""
+
+    # A rev file reaches the server with the next update-bleakhold-ui.sh: only when every check passed.
+    if args.server_sql_out and not result.failed:
+        try:
+            rev = update.write_rev(args.server_sql_out, sql_text)
+        except (update.UpdateError, OSError) as e:
+            rev_error = str(e)
+
+    report_text = format_update_report(config, args.patches, plan, written, sql_path, server_files, result, warnings, args.server_sql_out, rev, rev_error)
 
     with open(os.path.join(out_dir, "report.txt"), "w", encoding="utf-8") as f:
         f.write(report_text)
 
     print(report_text)
-    return 1 if result.failed else 0
+
+    if rev_error:
+        print(f"error: {rev_error}", file=sys.stderr)
+
+    return 1 if result.failed or rev_error else 0
 
 
 def cmd_schemas(args) -> int:
@@ -814,11 +860,14 @@ def main(argv: list[str] | None = None) -> int:
 
     p = sub.add_parser("update", help="put races.json's racials into a realm that already has the races (merges into the winning archives)")
     p.add_argument("--patches", required=True, help="the realm's patch folder (patch-?.MPQ, <locale>/patch-<locale>-?.MPQ) or a client's Data folder")
-    p.add_argument("--dbc", required=True, help="stock DBCs (the server's data/dbc) for tables no patch holds")
+    p.add_argument("--dbc", required=True, help="the server's data/dbc: the copy of a table no patch holds, and the server's own rows of the dropped skill lines")
     p.add_argument("--out", required=True, help="output folder")
     p.add_argument("--config", default=DEFAULT_CONFIG)
     p.add_argument("--force", action="store_true", help="replace earlier output in --out")
     p.add_argument("--server-sql", help="an SQL file to compare (the bleakserv pending_db_world file): its DBC rows must match field for field")
+    p.add_argument("--server-sql-out", help="also write the server SQL as a world-database update of its own when every check passed: a folder "
+                   "(a new rev_<nanoseconds>.sql goes there, e.g. /root/bleakhold-generated-sql/pending_db_world) or a .sql path; a file of "
+                   "the folder with the same SQL is kept and nothing is written, a different file at the path stops it")
 
     p = sub.add_parser("schemas", help="check (or regenerate) rflib/schemas.py against the client's Rec classes")
     p.add_argument("--rec-dir", help="WoW/Source/DB/Rec of the decompilation (default: found next to Tools/)")

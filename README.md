@@ -179,7 +179,9 @@ Or double-click `Tools\BleakholdRaceForge.exe` from the CI package and drag the 
 - Character creation shows the new races with the Bleakhold glue files installed (see below).
 - Until their own art exists, both races use the models, scenes, voices and portraits of their template race.
 
-See `Tools/RaceForge/README.md` for the race settings (`races.json`) and what the server still needs.
+See `Tools/RaceForge/README.md` for the race settings (`races.json`) and what the server still needs. The Bleakhold
+realm itself has the two races in the stock slots 15 and 19 of its own race patch (`realm_id` in `races.json`); its
+racials go in with `raceforge.py update` ("Updating a live realm" there).
 
 ## Bleakhold UI
 

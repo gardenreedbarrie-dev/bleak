@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
 import re
@@ -80,6 +81,11 @@ class RaceConfig:
     drop_skill_lines: list[int] = field(default_factory=list)
     # Ids of the race's own racial spells (Config.spells): new Spell.dbc rows and spell_dbc rows.
     racial_spells: list[int] = field(default_factory=list)
+    # The race's id on the realm `update` works on, when that realm's own race patch put it in another ChrRaces slot
+    # (the Bleakhold realm reuses stock creature display slots: High Elf 15, Eredar 19). None: id. build always uses id.
+    realm_id: int | None = None
+    # Set by Config.for_realm() to races.json's id: an earlier update may have written rows for it (see update.py).
+    build_id: int | None = None
 
     @property
     def bit(self) -> int:
@@ -180,6 +186,12 @@ class Config:
         """The spells whose spell_dbc row RaceForge writes: those no other SQL file (server_row) holds."""
         return [s for s in self.spell_ids() if not self.spells[s].server_row]
 
+    def for_realm(self) -> "Config":
+        """The config as `update` sees the realm: every race at its realm_id (when set), build_id keeping races.json's
+        id. Everything race-specific (the bits, the SQL) then follows from id as for a build."""
+        races = [dataclasses.replace(r, id=r.realm_id or r.id, realm_id=None, build_id=r.id) for r in self.races]
+        return dataclasses.replace(self, races=races)
+
     def action_bar_spell(self, race: RaceConfig) -> int:
         """The race's first active (not passive) racial: it takes the start action bar buttons of the template's
         dropped racials. 0 when the race has none."""
@@ -227,6 +239,7 @@ def parse_race(data: dict, index: int) -> RaceConfig:
         cinematic_sequence_id=_optional_int(data, "cinematic_sequence_id", where) or 0,
         start=Position.parse(data["start"], f"{where}.start") if data.get("start") else None,
         death_knight_start=Position.parse(data["death_knight_start"], f"{where}.death_knight_start") if data.get("death_knight_start") else None,
+        realm_id=_optional_int(data, "realm_id", where),
     )
 
     if data.get("stats") is not None:
@@ -244,6 +257,16 @@ def parse_race(data: dict, index: int) -> RaceConfig:
 
     if race.id in PANDAREN_RACE_IDS or "pandaren" in race.name.lower() or "pandaren" in race.client_file_string.lower():
         raise ConfigError(f"{where}: Bleakhold has no Pandaren (ids {PANDAREN_RACE_IDS} stay unused)")
+
+    if race.realm_id is not None:
+        if not 1 <= race.realm_id <= MAX_RACE_ID:
+            raise ConfigError(f"{where}: realm_id must be between 1 and {MAX_RACE_ID} (the client keeps race ids in 32-bit masks)")
+
+        if race.realm_id in PANDAREN_RACE_IDS:
+            raise ConfigError(f"{where}: realm_id {race.realm_id}: Bleakhold has no Pandaren (ids {PANDAREN_RACE_IDS} stay unused)")
+
+        if race.realm_id in (race.template_race, race.faction_race):
+            raise ConfigError(f"{where}: realm_id {race.realm_id} is the race's template_race or faction_race, a stock race of its own")
 
     if not race.name.strip():
         raise ConfigError(f"{where}: name is empty")
@@ -384,6 +407,11 @@ def parse(data: dict, path: str = "") -> Config:
 
     if len(set(ids)) != len(ids):
         raise ConfigError(f"{path}: two races have the same id")
+
+    realm_ids = [r.realm_id or r.id for r in races]
+
+    if len(set(realm_ids)) != len(realm_ids):
+        raise ConfigError(f"{path}: two races have the same realm_id (or id)")
 
     file_strings = [r.client_file_string.lower() for r in races]
 

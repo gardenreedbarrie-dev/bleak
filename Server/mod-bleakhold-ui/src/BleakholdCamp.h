@@ -74,7 +74,7 @@ namespace Bleakhold
         std::vector<CampRules::Profession> professions;
         uint32_t repairMinSkill = 75;
         uint32_t repairDiscountPct = 10;
-        std::vector<uint32_t> glideRaces{ 22 };
+        std::vector<uint32_t> glideRaces{ 15 };
         uint32_t glideCooldownSec = 90;
         uint32_t glideSec = 10;
         uint32_t glideSpell = CampRules::WalkOnAirSpell;   // falls back to CampRules::SlowFallSpell when missing

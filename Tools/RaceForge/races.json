@@ -1,8 +1,9 @@
 {
-    "_readme": "Bleakhold races for RaceForge. Every race clones its template race (models, sounds, class list) and joins the faction of faction_race (language, reputations, faction template, start zone). racials drops the template's racial skill lines and names the race's own racial spells; spells defines them (and the server-cast spells) as Spell.dbc rows. See README.md for every field.",
+    "_readme": "Bleakhold races for RaceForge. Every race clones its template race (models, sounds, class list) and joins the faction of faction_race (language, reputations, faction template, start zone). racials drops the template's racial skill lines and names the race's own racial spells; spells defines them (and the server-cast spells) as Spell.dbc rows. id is the race id build gives (after the stock rows 1-21); realm_id is the race's id on the Bleakhold realm, whose own race patch (Patch-R.MPQ) put High Elf and Eredar in the stock slots 15 and 19: raceforge.py update works there. See README.md for every field.",
     "races": [
         {
             "id": 22,
+            "realm_id": 15,
             "name": "High Elf",
             "names": {},
             "name_female": null,
@@ -28,6 +29,7 @@
         },
         {
             "id": 23,
+            "realm_id": 19,
             "name": "Eredar",
             "names": {},
             "name_female": null,
