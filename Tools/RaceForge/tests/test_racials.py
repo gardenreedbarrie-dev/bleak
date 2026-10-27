@@ -986,7 +986,6 @@ class BleakholdRealmTests(unittest.TestCase):
         self.assertTrue(ok, output)
 
 
-@unittest.skipUnless(os.path.isfile(os.path.join(SERVER_SRC, "data", "sql", "base", "db_world", "spell_dbc.sql")), "bleakserv checkout not found")
 class WriteRevTests(unittest.TestCase):
     """update.write_rev(): the rev file is there whole or not at all, and never over a file that is there."""
 
@@ -1074,6 +1073,7 @@ class WriteRevTests(unittest.TestCase):
         self.assertEqual(self.read(target), self.text)
 
 
+@unittest.skipUnless(os.path.isfile(os.path.join(SERVER_SRC, "data", "sql", "base", "db_world", "spell_dbc.sql")), "bleakserv checkout not found")
 class BleakservTests(unittest.TestCase):
     """races.json against the server: the spell_dbc columns, the pending world-database file, mod-bleakhold's table."""
 
