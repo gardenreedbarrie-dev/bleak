@@ -157,7 +157,7 @@ defs.V = {
     [2] = { name = "Challenger", color = "1EFF00", text = "The top 35% of the ladder with 1500 rating (1450 in 5v5)." },
     [3] = { name = "Rival", color = "0070DD", text = "The top 10% of the ladder with 1650 rating (1550 in 5v5)." },
     [4] = { name = "Duelist", color = "A335EE",
-        text = "The top 3% of the ladder with 1800 rating (1700 in 5v5) and 10 games in the last 21 days." },
+        text = "The top 3% of the ladder with 1800 rating (1700 in 5v5), 10 games in the last 21 days." },
     [5] = { name = "Gladiator", color = "FF8000", text = "The top 0.5% of the ladder with 50 wins." },
     [6] = { name = "Rank One", color = "E6CC80", text = "The first team of the ladder." },
     [7] = { name = "Class Champion", color = "3FC7EB",

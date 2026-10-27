@@ -735,7 +735,8 @@ end
 ------------------------------------------------------------------------------------------------------
 function Comm.SendHello()
     local locale = GetLocale and GetLocale() or "enUS"
-    local dataVer = (ns.db.defsVer and tonumber(ns.db.defsVer)) or 0
+    -- a cache of another DEF schema (State.lua DEF_SCHEMA) is fetched again: its dataVer is no hint
+    local dataVer = (ns.db.defsSchema == ns.DEF_SCHEMA and ns.db.defsVer and tonumber(ns.db.defsVer)) or 0
     Comm.Send("HELLO", ns.PROTO, ns.VERSION, dataVer, locale)
 end
 

@@ -101,6 +101,33 @@ test("server definitions override the built-in fallback and persist per dataVer"
     H.eq(ns.DefName("A", 3), "Bolstering", "built-in fallback for the rest")
 end)
 
+local function defGets(M)
+    local n = 0
+    for _, it in ipairs(H.intents(M)) do
+        if it.op == "GET" and it.payload:find("^DEF,0") then n = n + 1 end
+    end
+    return n
+end
+
+test("a definitions cache of an older addon (no DEF schema) is fetched again, even with the server's dataVer",
+    function(M, ns)
+    H.eq(H.lastIntent(M, "HELLO").fields[3], "0", "HELLO gives no dataVer for a cache of another schema")
+    FX.connect(M, H, { [5] = 9 })
+    H.eq(defGets(M), 1, "the cache of dataVer 9 without V and Q is not trusted")
+    H.eq(M.env.BleakholdDB.defsSchema, nil, "cleared until the new set is complete")
+    H.send(M, "DEF", { { "Q", 9 }, { 101, 0, 3, 2, "T", 2090, 1, "Challenger" } })
+    H.send(M, "DEF", { { "Z", 9 } })
+    H.eq(M.env.BleakholdDB.defsVer, 9)
+    H.eq(M.env.BleakholdDB.defsSchema, ns.DEF_SCHEMA)
+    H.hello(M, { [5] = 9 })
+    M.Advance(0.3)
+    H.eq(defGets(M), 1, "a complete cache of this schema is kept")
+    ns.Comm.SendHello()
+    H.eq(H.lastIntent(M, "HELLO").fields[3], "9", "and its dataVer is the hint again")
+end, { before = function(M)
+    M.env.BleakholdDB = { defsVer = 9, defs = { A = { [1] = { name = "Fortified (old)", text = "" } } } }
+end })
+
 test("globals created at runtime are Bleakhold-prefixed (or required by FrameXML)", function(M, ns)
     local allowed = { SLASH_BLEAKHOLD1 = true, SLASH_BLEAKHOLD2 = true, ToggleCollectionsJournal = true, BINDING_HEADER_BLEAKHOLD = true }
     local fresh = {}

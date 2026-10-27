@@ -185,6 +185,11 @@ local DEF_PARSERS = {
     end,
 }
 ns.DEF_PARSERS = DEF_PARSERS
+-- The kinds above, as a number: raise it whenever DEF_PARSERS gains a kind. A cache saved under another schema (an
+-- addon that skipped kinds it did not know, such as V and Q before the arena) is fetched again even when its dataVer
+-- matches the server's.
+local DEF_SCHEMA = 2
+ns.DEF_SCHEMA = DEF_SCHEMA
 
 Comm.Handle("DEF", function(r)
     local head = r[1] or {}
@@ -193,6 +198,7 @@ Comm.Handle("DEF", function(r)
     if kind == "Z" then
         if not Comm.demo then
             ns.db.defsVer = U.Int(head[2], Comm.server.dataVer, 0, INT32)
+            ns.db.defsSchema = DEF_SCHEMA
         end
         ns.Fire("STATE", "DEF")
         return
@@ -1298,9 +1304,11 @@ end)
 -- After the handshake: definitions and the topics the always-visible parts need
 ------------------------------------------------------------------------------------------------------
 ns.On("HELLO", function(s)
-    if s.dataVer and s.dataVer > 0 and tostring(ns.db.defsVer) ~= tostring(s.dataVer) then
+    if s.dataVer and s.dataVer > 0
+        and (tostring(ns.db.defsVer) ~= tostring(s.dataVer) or ns.db.defsSchema ~= DEF_SCHEMA) then
         ns.db.defs = {}
         ns.db.defsVer = nil
+        ns.db.defsSchema = nil
         Comm.Get("DEF", 0)
     end
     Comm.Get("WEEK")
@@ -1321,8 +1329,11 @@ ns.On("HELLO", function(s)
         S.camp = nil
         changed("CAMPST")
     end
-    -- the server pushes ARENA after HELLO while bit 65536 is on (section 20); without it the season is gone
-    if not Comm.HasFeature(F.ARENA) and S.arena then
+    -- the server pushes ARENA after HELLO while bit 65536 is on (section 20); asking makes sure (the login push
+    -- can come before HELLO, and /reload has none). Without the bit the season is gone
+    if Comm.HasFeature(F.ARENA) then
+        Comm.Get("ARENA")
+    elseif S.arena then
         S.arena = nil
         changed("ARENA")
     end

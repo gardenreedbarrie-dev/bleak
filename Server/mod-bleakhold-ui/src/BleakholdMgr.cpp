@@ -365,6 +365,9 @@ namespace Bleakhold
                 // the camping state follows HELLO when a camping feature is on (section 16)
                 if (_cfg.featureBits & (FeatureCamp | FeatureGlide | FeatureFieldRepair))
                     Refresh(player, Topic::CampState);
+                // ARENA follows HELLO while the arena system runs (section 20; the login push came before HELLO)
+                if (FeatureOn(FeatureArena))
+                    Refresh(player, Topic::Arena);
                 std::function<void(Player*, Intent const&)> observer;
                 {
                     std::lock_guard<std::recursive_mutex> guard(_lock);

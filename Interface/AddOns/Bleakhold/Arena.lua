@@ -1339,7 +1339,7 @@ ns.On("HELLO", function()
         lastSeen = nil
         return
     end
-    -- the server pushes ARENA after HELLO: the next GET only if that one does not come
+    -- the server pushes ARENA after HELLO and State.lua asks for it too: the next GET only if neither comes
     AR.askedAt = GetTime()
     if P:IsVisible() then
         P:Refresh()

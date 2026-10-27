@@ -327,7 +327,9 @@ The client has built-in fallback names, but the server is the source of truth. F
 | `Z` end | header only: `Z, dataVer` |
 
 Send `DEF Z,<dataVer>` after the last kind: the client keeps the definitions for that `dataVer` only once
-the set is complete.
+the set is complete. The client also stores the set of kinds it parsed (its DEF schema): a cache saved by an addon
+that did not know some kinds (V and Q before section 20) is fetched again after an addon update even when `dataVer`
+matches, and its `HELLO` then says `dataVer` 0.
 
 ```
 S> 1 DEF 4 1/1 A,7;1,Fortified,Non-boss enemies have more health and hit harder.;3,Bolstering,When a non-boss enemy dies%2C its allies nearby grow stronger.
@@ -616,8 +618,9 @@ when the timer starts, then `MP` on every change -> end: `MP state 2/3`, `MPE`, 
 **Bleakhold Royale.** `QJOIN B` -> `QUEUE` state 1 -> ready check (`QUEUE` state 2, `QREPLY`) -> the match: `ROYM`,
 `ROYS`, `ROYO`, `ROYK`, `ROYV` -> `ROYE` -> `QUEUE` state 0. The whole flow is in section 17 ("A match").
 
-**Arena.** `HELLO` (feature bit 65536) -> `ARENA`; the Arena page: `GET ARENA` -> `QJOIN A` -> `QUEUE` kind `A` state 1
--> the game's invite dialog -> `QUEUE` state 3 -> the match ends: `ARENA` (with the match in `M`) and `QUEUE` state 0.
+**Arena.** `HELLO` (feature bit 65536) -> `ARENA` (and the client's `GET ARENA`); the Arena page: `GET ARENA` ->
+`QJOIN A` -> `QUEUE` kind `A` state 1 -> the game's invite dialog -> `QUEUE` state 3 -> the match ends: `ARENA` (with
+the match in `M`) and `QUEUE` state 0.
 The arena leaderboard: `LBQ A` -> `LB` and `LBME`. Season changes: `ARENA` to everyone (section 20).
 
 ## 12. Versioning
@@ -1447,8 +1450,10 @@ Then records tagged by their first field:
   5 only. `grant`: 0 the rewards are coming, 1 delivered, 2 held for review.
 
 The server sends `ARENA` after `HELLO` while feature bit 65536 is on, for `GET ARENA`, to every player of a rated match
-after it ends, and to every player when the season's `state` changes. Cutoffs move with every match: the client asks
-with `GET ARENA` again (every 30 s at most) while it shows them. Unrevisioned; the last one counts.
+after it ends, and to every player when the season's `state` changes. The client also sends `GET ARENA` after each
+`HELLO` with the bit (a push made at login, before the client's `HELLO`, does not reach it, and `/reload` has none).
+Cutoffs move with every match: the client asks with `GET ARENA` again (every 30 s at most) while it shows them.
+Unrevisioned; the last one counts.
 
 ### LB and LBME, board A
 

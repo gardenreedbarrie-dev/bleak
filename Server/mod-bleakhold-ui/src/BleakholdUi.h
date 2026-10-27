@@ -198,8 +198,9 @@ namespace Bleakhold::Ui
     void SendBgAnnounce(Player* player, BgAnnounce const& announce);
     void SendBgAnnounce(std::vector<Player*> const& players, BgAnnounce const& announce);
     // Arena seasons (section 20): ARENA, the player's arena season (unrevisioned, never remembered: answer GET ARENA
-    // with it). Push it after HELLO while FeatureArena is on, after each of the player's rated matches, and to
-    // everyone on every change of the season's state.
+    // with it). After HELLO, while FeatureArena is on, the UI asks your OnRequest(Topic::Arena) provider itself (a
+    // push from a login hook comes before the client's HELLO and is dropped). Push it after each of the player's rated
+    // matches, and to everyone on every change of the season's state.
     void SendArena(Player* player, ArenaState const& state);
     // Low-level keystone run messages for one player. Prefer the run tracker below.
     void SendKeyRunStart(Player* player, Bleakhold::KeyRunStart const& start);   // MPS
