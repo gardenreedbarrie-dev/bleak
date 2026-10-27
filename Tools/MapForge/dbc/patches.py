@@ -30,6 +30,7 @@ import shutil
 import struct
 import zlib
 from dataclasses import dataclass, field
+from typing import Callable
 
 import mpqpack  # noqa: E402  (Tools/MpqPack, added to sys.path by the package)
 
@@ -345,15 +346,18 @@ def archive_contents(reader: PatchArchive, where: str) -> list[str]:
     return names
 
 
-def rebuild(source: Archive, replacements: dict[str, str], out_path: str, staging: str) -> list[str]:
+def rebuild(source: Archive, replacements: dict[str, str], out_path: str, staging: str,
+            drop: Callable[[str], bool] | None = None) -> list[str]:
     """Write out_path: every file of source, with replacements {archive name: file on disk} replacing or adding
-    files. Returns the names that were replaced (the others were added)."""
+    files, and without the files of source for which drop(name) is true (a name of replacements is never dropped).
+    Returns the names that were replaced (the others were added)."""
     if source.reader is None:
         raise PatchError(f"{source.name}: {source.error}")
 
     names = archive_contents(source.reader, source.name)
     keys = {mpqpack.name_key(n): n for n in names}
     replaced = [keys[mpqpack.name_key(n)] for n in replacements if mpqpack.name_key(n) in keys]
+    replacement_keys = {mpqpack.name_key(n) for n in replacements}
 
     if os.path.isdir(staging):
         shutil.rmtree(staging)
@@ -363,7 +367,7 @@ def rebuild(source: Archive, replacements: dict[str, str], out_path: str, stagin
 
     try:
         for i, name in enumerate(names):
-            if mpqpack.name_key(name) in {mpqpack.name_key(n) for n in replacements}:
+            if mpqpack.name_key(name) in replacement_keys or (drop is not None and drop(name)):
                 continue
 
             path = os.path.join(staging, f"{i:06d}")

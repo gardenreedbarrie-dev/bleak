@@ -340,9 +340,10 @@ def make_plan(config: Config, patchset, stock_dir: str) -> UpdatePlan:
     return plan
 
 
-def race_problems(config: Config, races: DbcTable, where: str) -> list[str]:
+def race_problems(config: Config, races: DbcTable, where: str, command: str = "update") -> list[str]:
     """Each race must be the ChrRaces row of its id, under its client_file_string (which names its portraits, corpse
-    skeletons and Lua race token): what is wrong, with where the race is instead."""
+    skeletons and Lua race token): what is wrong, with where the race is instead. command: the raceforge.py command
+    the hints tell to run again."""
     file_strings = {to_signed(r[0]): races.get_str(r, "clientFileString") for r in races.rows}
     problems = []
 
@@ -357,9 +358,10 @@ def race_problems(config: Config, races: DbcTable, where: str) -> list[str]:
 
         if elsewhere:
             hint = (f"{race.client_file_string} is race {elsewhere[0]} there: set realm_id {elsewhere[0]} for {race.name} in races.json "
-                    "(and the realm's race settings of mod-bleakhold and mod-bleakhold-ui), then run update again")
+                    f"(and the realm's race settings of mod-bleakhold and mod-bleakhold-ui), then run {command} again")
         else:
-            hint = "install the races first (raceforge.py build, or the realm's own race patch), then update"
+            then = "update" if command == "update" else f"run {command}"
+            hint = f"install the races first (raceforge.py build, or the realm's own race patch), then {then}"
 
         problems.append(f"{race.name}: the realm's ChrRaces.dbc ({where}) {what}; {hint}")
 
@@ -818,8 +820,13 @@ def compare_sql(generated: str, other: str, tables=("spell_dbc", "skillraceclass
     return problems
 
 
-def clean_out_dir(out_dir: str, force: bool):
-    entries = [e for e in ("client", "server", "merged", "staging", "report.txt") if os.path.exists(os.path.join(out_dir, e))]
+# What --force replaces in an output folder of update. old-patches and old-patches-<n> (the archives installs replaced,
+# and their record) are never removed.
+OUT_ENTRIES = ("client", "server", "merged", "staging", "report.txt", "install.json")
+
+
+def clean_out_dir(out_dir: str, force: bool, entries: tuple[str, ...] = OUT_ENTRIES):
+    entries = [e for e in entries if os.path.exists(os.path.join(out_dir, e))]
 
     if entries and not force:
         raise UpdateError(f"{out_dir} already holds output ({', '.join(entries)}); use --force to replace it")

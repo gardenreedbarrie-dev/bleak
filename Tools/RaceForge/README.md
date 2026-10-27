@@ -315,7 +315,8 @@ placement and reuses its archive code (`Tools/MapForge/dbc/patches.py`):
   `archives.own` to a patch outside every pack that sorts below the pack archive. It also stops when `archives.own`
   is itself in a pack, which the players without it would not load;
 - it never writes into the patch folder: the rebuilt archives go to `--out/client`, each at its place in the patch
-  folder (`client/enUS/` for a locale patch). Running it again on the updated patches changes nothing ("already up to
+  folder (`client/enUS/` for a locale patch), with `install.json` (the archives it read, for `raceforge.py install`,
+  see "Installing an output folder"). Running it again on the updated patches changes nothing ("already up to
   date").
 
 The server SQL (`server/sql/bleakhold_racials.sql`) is written from the realm's own rows, never stock ones:
@@ -369,19 +370,16 @@ racials") has the same steps with what each check prints.
    `... checks, 0 failed` and `Server SQL rev: /root/bleakhold-generated-sql/pending_db_world/rev_....sql (written)`.
 3. The client archives into the patch folder, then publish. `client/` holds each rebuilt archive at its place in the
    patch folder (`enUS/` for a locale patch). `Patch-R.MPQ` there is a link to the download site's
-   `/root/wow-site/site/public/downloads/Patch-R.MPQ`: `readlink -f` finds the real file, so the link stays and the
-   site gets the new archive too. Each archive is copied next to the real file as `.new` (publish skips files that
-   do not end in `.MPQ`) and moved into place in one step; `old-patches` keeps the archives as they were:
+   `/root/wow-site/site/public/downloads/Patch-R.MPQ`: install replaces the file the link points at, so the link stays
+   and the site gets the new archive too, and keeps the archives as they were in `old-patches` (see "Installing an
+   output folder"):
    ```sh
-   cd /root/raceforge-racials/client && find . -type f -iname '*.mpq' | sed 's|^\./||' | while read -r f; do
-     dest="$(readlink -f "/srv/bleakhold-launcher/patches/$f")"
-     old="/root/raceforge-racials/old-patches/$f"
-     mkdir -p "$(dirname "$old")"
-     if [ -e "$dest" ] && [ ! -e "$old" ]; then cp -p -- "$dest" "$old"; fi
-     cp -- "$f" "$dest.new" && mv -f -- "$dest.new" "$dest" && echo "replaced: $dest"
-   done
+   cd /root/bleak/Tools/RaceForge
+   python3 -I raceforge.py install --from /root/raceforge-racials --patches /srv/bleakhold-launcher/patches
    bash /root/bleakserv/deploy/launcher/publish.sh
    ```
+   It prints `replaced: <file>` for every archive (or stops, changing nothing, when a patch changed since step 2: run
+   step 2 again).
    Wait for `Published build ...`. Players get the archives when their launcher has updated the game and they
    restart it: give them time before step 5.
 4. The glide settings (the update script keeps a value the server already has, so these are set by hand):
@@ -426,6 +424,209 @@ mod-bleakhold it puts back knows races 22 and 23 only, so races 15 and 19 then h
 racials come back only with a new rev that gives races 15 and 19 the skill lines 756 and 760 again: fixing what the
 log names and updating again is the way out.
 
+## Skins (`raceforge.py skins`)
+
+`skins` gives a race of races.json new skin colours on the realm that already has it. On the Bleakhold realm the High
+Elf becomes night-elf-like purple, from pale lavender to deep violet, in place of the fair Blood Elf skin; Blood Elves
+stay exactly as they are.
+
+### What changes
+
+- The High Elf's CharSections rows (race 15, from the realm's race patch) name the Blood Elf's textures: the same files
+  as the Blood Elf's rows. Those files are never changed. For every High Elf row of the sections in `skins.json` (0
+  skin and 1 face), each texture is recoloured into a new file
+
+  ```text
+  Character\BleakholdSkins\HighElf\<hash>\<the original path>
+  ```
+
+  and only that row's texture name changes to it. The rows and their order stay, every other field of every row stays,
+  and the new names are appended to the string block. Hair and facial hair rows are not changed (they have colours of
+  their own), nor underwear rows: section 4 can be listed, but its cloth colours sit near skin hues and would turn
+  purple too.
+- Each new texture keeps the original's format, size, header and alpha: a palette texture gets a new palette; a DXT1,
+  DXT3 or DXT5 texture (the type the client takes from preferredFormat) new endpoint colours in every block of every
+  level, each block in the mode it had (endpoints whose order flips swap places and the indices follow; a four-colour
+  block whose endpoints become equal gets one moved by one step of blue, so no texel turns transparent); a BGRA texture
+  new pixels in every level. The levels are walked as the client walks them (CalcLevelCount, the header's offsets and
+  sizes). A JPEG or BLP1 texture, or any other format, stops the run with the texture's name and format.
+- The colours, in OKLab (a perceptual colour space): the skin colour of a sex and skin colour index is the median of
+  the opaque pixels of mid lightness of its skin texture (section 0, variation 0, texture 0). A sex's skin colours are
+  ranked by lightness and spread over `palette`, lightest first, so the palest Blood Elf skin gets the palest lavender
+  and the darkest the deepest violet (the Death Knight rows, flag 0x4, over `dk_palette`). Every pixel of a texture then
+  moves with its skin colour: the skin's lightness becomes the target's through a curve on lightness, so the shading
+  stays; its chroma and hue become the target's, and colours near the skin's keep part of their difference from it.
+  Colours far from the skin's hue (green eyes) or far more colourful barely move or not at all. A nearly grey skin (a
+  Death Knight's) has hardly a hue of its own, so a colour on it is weighed against the nearer of that hue and the hue
+  of the sex's other skins: its lips move with it, its green eyes still do not. The faces of a skin colour use the
+  same numbers as its body texture, so the seams match.
+- The hash is 10 hex digits of a SHA-1 over the original's bytes, the colour numbers and an algorithm version: the same
+  input always gives the same file. Every new name is checked to stay under 260 characters, the client's limit.
+
+The server needs nothing: AzerothCore reads CharSections.dbc without its texture names (`CharSectionsEntryfmt` is
+`diiixxxiii`, bleakserv's `src/server/shared/DataStores/DBCfmt.h`), and the ids, races, sections, flags, variations
+and colours stay as they are.
+
+### Where the files go
+
+The game's files are the launcher's: `--client` (the game folder it ships, `/srv/bleakhold-launcher/base`) with
+`--patches` over it, a file of `--patches` replacing the one of the same path. The client loads the base archives of
+`s_archives` (`WoW/Source/Client.cpp`: an earlier one wins, `<locale>\locale-<locale>.MPQ` and the like under the
+locale's folder), then `patch.MPQ` and `patch-<locale>.MPQ`, then every `patch-?.MPQ` and
+`<locale>\patch-<locale>-?.MPQ` above all of them (see "Art archive names and sizes"). An `alternate.MPQ` loads above
+every patch: skins warns about it. For every combination of the launcher's optional packs (`archives.optional_packs`),
+the CharSections.dbc the client reads is forged, and:
+
+- the archive that holds it gets the forged copy and the new textures, when every combination that reads it gets the
+  same result. On the Bleakhold realm that is `Patch-R.MPQ`, for every player;
+- when a pack replaces a source texture under the same name (an HD pack's own Blood Elf skin), its players get other
+  skin colours from the same CharSections.dbc. The combination with the fewest packs keeps that archive; each other
+  one needs an archive of a pack the first one lacks, which its players load above that archive (`Patch-Y.MPQ` above
+  `Patch-R.MPQ` for the HD pack) and which no players with other skins load: every combination that loads it and
+  takes CharSections.dbc from below it would read the copy there. The highest such archive gets their own
+  CharSections.dbc and textures, and `Character\BleakholdSkins\CharSections-copy.json`, which names that copy (by its
+  SHA-1) and the archive it was made from. When there is none, nothing is written, and the error names the pack and
+  the archive it would need to load after, or the players in the way;
+- such a copy hides the CharSections.dbc below it from its players, so it never stays as it was: every run passes over
+  it (the report says so) and makes it again from the archive below, so a later change there, such as a new row of the
+  race patch, reaches those players too, and it removes the copy, its textures and its `CharSections-copy.json` once
+  no combination needs them. A copy that changed since (its SHA-1 is not the one named) is the realm's own again
+  (a warning says so);
+- a CharSections.dbc that comes from a base archive stops it (the realm's race patch must hold the race's rows), and so
+  does a ChrRaces.dbc without the race at its `realm_id` (`HighElf` at 15), for any combination.
+
+Before anything is written, the client's view of every combination is worked out from the planned archives: it must
+read its own forged CharSections.dbc, and every new texture name must resolve to exactly the recoloured file. After
+writing, the same check runs on the written archives, read back from disk, with every other row (every other race,
+and the race's rows of other sections) compared with the realm's field for field, and every new texture parsed and
+decoded as the client reads it, at its original's size. Each rebuilt archive keeps every other file, and drops the
+files under `Character\BleakholdSkins\HighElf\` that the new plan does not use (and skins' own copy of
+CharSections.dbc, above). `--out` must have room for the rebuilt
+archives first ("needs X GB free ..., has Y GB"). A rebuilt archive is downloaded again by every player who has it:
+a rebuilt HD pack archive is large.
+
+### Running it again
+
+A row that already names one of these files is read through it: its source is the original path after the hash
+folder. So on the updated realm `skins` finds the same files, prints `already up to date` and writes no archive. A
+pack's own copy of CharSections.dbc is made again from the one below it, from the same string block plus its own
+names, so it comes out the same too. A change of `skins.json` gives new names: the rows move to them, and the old
+files leave every archive that is rebuilt (an archive the new plan does not write keeps its old files, unused; the
+report lists them).
+
+### The way back
+
+`raceforge.py install --restore --from <the skins output> --patches <the patch folder>` puts the archives install
+replaced back (see "Installing an output folder"), then publish. Or set `"sections": []` for the race in `skins.json`
+and run `skins` and `install` again: every row goes back to its original textures, the new files leave the archive,
+and a pack archive's own copy of CharSections.dbc goes too.
+
+### Output
+
+| Path | Contents |
+|---|---|
+| `client\<archive>` | Each rebuilt archive at its place in the patch folder (`client\enUS\` for a locale patch) |
+| `report.txt` | The archives in the client's order, every skin colour with its target, where each file goes, warnings and checks |
+| `install.json` | For `install`: each archive with the file it replaces as skins read it (size, modification time) |
+| `preview\<race>-<sex>.png` | With `--preview`: a row per skin colour (lightest first, Death Knights last), its body texture and its first face's lower and upper textures, each before and after |
+
+The exit code is 0 only when every check passed. It prints, for every combination, the archive the client reads
+CharSections.dbc from, how many rows and textures changed and where they go, and the archives written.
+
+### skins.json
+
+| Key | Meaning |
+|---|---|
+| `races` | One entry per race to recolour, found in races.json by its `client_file_string` (at its `realm_id`). Only `HighElf` is there; an Eredar entry would take its own palette |
+| `sections` | CharSections sections to recolour: 0 skin, 1 face, 4 underwear (default `[0, 1]`). Hair (3) and facial hair (2) are refused. `[]` puts every row back on its original textures |
+| `palette` | Target colours `#RRGGBB`, lightest first; any number of entries (linear in OKLab between them) |
+| `dk_palette` | The same for the Death Knight rows (flag 0x4) |
+| `transform` | How far each colour moves (for every race; a race's own `transform` overrides single keys) |
+
+`transform` (the defaults were tuned on previews of made-up elf textures):
+
+| Key | Default | Meaning |
+|---|---|---|
+| `hue_full_within`, `hue_none_beyond` | 35, 65 | Degrees of hue from the skin's: a colour within the first moves fully, beyond the second not at all (green eyes) |
+| `hue_unreliable_below` | 0.35 | A colour of less chroma than this share of the skin's (or than `chroma_floor`) has no reliable hue: it moves fully and takes the target hue |
+| `chroma_full_within`, `chroma_none_beyond` | 0.07, 0.13 | OKLab chroma above the skin's: up to the first a colour moves fully, from the second not at all |
+| `gamma_min`, `gamma_max` | 0.5, 2.5 | Limits of the lightness curve that takes the skin's lightness to the target's |
+| `chroma_exponent`, `chroma_max` | 0.7, 0.16 | New chroma = target chroma x (chroma / skin chroma) ^ exponent, at most chroma_max |
+| `chroma_floor` | 0.02 | A colour of less chroma is nearly grey: it has no reliable hue. A skin of less chroma (a Death Knight's) takes a gentler chroma ratio, and a colourful colour on it is weighed against the nearer of its hue and the hue of the sex's other skins: lips move, an eye keeps its colour |
+| `hue_spread` | 0.3 | Share of a colour's hue difference from the skin that it keeps |
+| `stats_alpha_min`, `stats_lightness_min`, `stats_lightness_max` | 128, 0.2, 0.97 | Which pixels count for the skin colour: alpha at least (when the texture has alpha), OKLab lightness between |
+
+To tune it, run `skins` with `--preview` into a scratch folder (it writes nothing into the patch folder), look at the
+PNGs, change `palette` (lighter or darker, more or less colourful) and run again. Lips or shadows that turn too blue:
+lower `hue_spread`; too colourful: lower `chroma_max`. Any change gives new file names, which is fine: the old ones
+leave the archive.
+
+### The Bleakhold realm, step by step (skins)
+
+On the VPS, as root, with the patches in `/srv/bleakhold-launcher/patches` and the game folder in
+`/srv/bleakhold-launcher/base`:
+
+1. The new code: `cd /root/bleak && git pull`.
+2. The new skins, from the realm's own files (nothing on the realm changes yet):
+   ```sh
+   cd /root/bleak/Tools/RaceForge
+   python3 -I raceforge.py skins --patches /srv/bleakhold-launcher/patches --client /srv/bleakhold-launcher/base \
+     --out /root/raceforge-skins --force --preview
+   echo "exit code: $?"
+   ```
+   It must print `exit code: 0`, for every pack combination a line like
+   `all packs: CharSections.dbc from Patch-R.MPQ; <n> rows on <m> recoloured textures (<n> rows changed) -> Patch-R.MPQ`
+   (the numbers are the realm's), `written: /root/raceforge-skins/client/Patch-R.MPQ (...)`, `... checks, 0 failed` and
+   a `Next:` line with the install command. Look at `/root/raceforge-skins/preview/*.png` (copy them to your PC, for
+   example with `scp root@<server>:/root/raceforge-skins/preview/*.png .`).
+3. Into the patch folder, then publish:
+   ```sh
+   python3 -I raceforge.py install --from /root/raceforge-skins --patches /srv/bleakhold-launcher/patches
+   bash /root/bleakserv/deploy/launcher/publish.sh
+   ```
+   Wait for `Published build ...`. Players see the new skins once their launcher has the new archive and they restart
+   the game. The server needs nothing.
+4. Optionally check: the same command as step 2 with `--out /root/raceforge-skins-check` prints `already up to date`.
+
+## Installing an output folder (`raceforge.py install`)
+
+`install` puts the archives of an output folder of `skins` or `update` into the realm's patch folder:
+
+```sh
+python3 -I raceforge.py install --from /root/raceforge-skins --patches /srv/bleakhold-launcher/patches [--dry-run]
+```
+
+- Each archive under `client/` goes to the same place in the patch folder (`client/enUS/` to `enUS/`). When the patch
+  folder holds a link there (`Patch-R.MPQ` links to the download site's copy), the link stays and the file it points at
+  is replaced.
+- With `install.json` (which `skins` and `update` write), every file it replaces must still be the one the tool read,
+  by size and modification time; otherwise the patches changed since, nothing is changed, and the tool must run again.
+  An archive that came from the game folder (a patch of `base/Data`) or that is new must not be in the patch folder
+  yet. A run whose checks failed is not installed. An output folder of an older RaceForge, without `install.json`, is
+  installed anyway, and install says that this check was skipped.
+- The file it replaces is kept in `<output folder>/old-patches/<path>`: a hard link when both are on one filesystem
+  (no copy, no space), else a copy. A later install from the same folder keeps that backup while the patch folder
+  still holds what the earlier one put there (`backup already there`), so it stays the file of before the first
+  install. When another install (another tool's, from its own folder) has replaced the archive in between, the old
+  backup moves to `old-patches-<n>/<path>` and the file replaced now is kept in its place (`older backup moved to
+  ...`): going back from this folder then never undoes that other install.
+- The new archive goes next to its destination as `<name>.new` (publish.sh only takes files that end in `.MPQ`) and is
+  renamed over it in one step, so neither a player nor the publisher sees half a file. Where both are on one
+  filesystem, the output's archive is moved, not copied. It prints `replaced: <file>` (or `added: <file>`) for each, and
+  the publish command at the end. Running it again prints `already installed: <file>`.
+- Each install writes `old-patches/installed.json`: per archive, the backup (or that install added the archive) and the
+  file it put there, by size and modification time, written before the archive moves. `--force` of `skins` and
+  `update` never removes `old-patches` or `old-patches-<n>`.
+- `--dry-run` only lists what it would do, backups included. `--restore` goes by `installed.json`, not by
+  `install.json`, so a later run of the tool into the same folder (`already up to date`, a new output not installed,
+  or a run that failed) does not change what it undoes. It puts each backup back the same way (and removes an archive
+  install added) when the patch folder still holds what install put there and the backup is still the file it
+  replaced; when another install has replaced that archive since, it refuses and changes nothing (putting the old
+  copy back would undo that one too). An archive already put back prints `already put back: <file>`. A folder without
+  `installed.json` (an install by hand with the runbooks' earlier shell loop) is restored only where the patch
+  folder's file is byte for byte the one in its `client/`, which that loop copied there; an archive such an install
+  added stays.
+
 ## Checks
 
 `build` re-reads what it wrote and checks:
@@ -469,5 +670,19 @@ earlier update for races 22 and 23 (run twice); `--server-sql-out` (one rev file
 check fails, and none at all when the disk fills up or Ctrl-C comes while it is written). With a bleakserv checkout
 next to this repository it also compares the server's `spell_dbc` columns, the pending world-database file and
 mod-bleakhold's racial table with races.json.
+
+`test_skins.py` covers `skins` and `install` with made-up textures and archives (`tests/synth_skins.py`, with a texture
+painted like a fair elf skin: shading, pink lips, a green iris, an eye white, a dark-red cloth patch): the recolouring
+of every format (palette with every alpha size; DXT1 four- and three-colour blocks with transparent texels, an order
+flip, endpoints that become equal; DXT3; DXT5; BGRA; the levels as the client walks them; the refused formats), the
+skin colours, their ranking and the palette, the eyes and lips on a Death Knight's nearly grey skin and a very pale
+one, the client's archive order (base archives, patches over the game folder, locale archives), and the placement on
+made-up realms: everything in `Patch-R.MPQ`; an HD pack archive below it that replaces a texture, with a pack archive
+above it (its copy made again after a new row in `Patch-R.MPQ`, and removed by `"sections": []`) and without one
+(refused); a second pack whose higher archive other players load; CharSections.dbc in two archives; running again, a
+palette change and `"sections": []`; the refusals. `install`: a dry run, a linked destination (the link stays, the file behind
+it is replaced and backed up), a patch that changed since, `--restore` (twice; after the tool ran again into the same
+folder; after another tool's install in between, from either folder; a folder installed by hand), a folder without
+`install.json`, and `update`'s output with its install line.
 
 After a change to the Rec classes, regenerate the layouts with `py -3 -I Tools\RaceForge\raceforge.py schemas --write`.

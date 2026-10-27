@@ -5,6 +5,10 @@
     python3 -I raceforge.py validate --dbc <same folder> --out <output folder>
     python3 -I raceforge.py update --patches <the realm's patch folder> --dbc <the server's data/dbc> --out <output folder>
                                    [--server-sql-out <the server's generated-SQL folder>]
+    python3 -I raceforge.py skins --patches <the realm's patch folder> --client <the launcher's game folder>
+                                  --out <output folder> [--preview]
+    python3 -I raceforge.py install --from <output folder of update or skins> --patches <the realm's patch folder>
+                                    [--dry-run] [--restore]
     python3 -I raceforge.py schemas --check
     python3 -I raceforge.py [<DBC folder> [<customization package>]]   (double-click or drop folders: builds next to it)
 
@@ -29,10 +33,12 @@ for path in (HERE, os.path.join(os.path.dirname(HERE), "MpqPack")):
 
 from rflib import config as configmod  # noqa: E402
 from rflib import customize, patchnames, recparse, schema_access, spells as spellmod, sqlgen, update, validate  # noqa: E402
+from rflib import install  # noqa: E402
 from rflib.dbc import DbcError, DbcTable  # noqa: E402
 from rflib.forge import OPTIONAL_TABLES, REQUIRED_TABLES, Forge, ForgeError, find_dbc  # noqa: E402
 
 DEFAULT_CONFIG = os.path.join(HERE, "races.json")
+DEFAULT_SKINS = os.path.join(HERE, "skins.json")
 DEFAULT_MPQ = "patch-R.MPQ"
 OUTPUT_ENTRIES = ("client", "server", "customization", "report.txt")
 # Art archives of a customization package: patch-<character>.MPQ. Every letter but F K O W belongs to a patch the
@@ -469,7 +475,7 @@ def cmd_validate(args) -> int:
 
 def format_update_report(config: configmod.Config, patches_dir: str, plan: update.UpdatePlan, written: list, sql_path: str,
                          server_files: list[str], result: validate.Validation, warnings: list[str], server_sql_out: str | None = None,
-                         rev: tuple[str, bool] | None = None, rev_error: str = "") -> str:
+                         rev: tuple[str, bool] | None = None, rev_error: str = "", out_dir: str = "") -> str:
     lines = ["RaceForge update report", "=======================", ""]
     lines.append(f"Realm patches: {os.path.abspath(patches_dir)}")
     lines.append(f"Config:        {os.path.abspath(config.path) if config.path else '(built in)'}")
@@ -540,11 +546,14 @@ def format_update_report(config: configmod.Config, patches_dir: str, plan: updat
     lines.append("")
     lines.append("Next steps")
     lines.append("----------")
-    lines.append("1. Client: put every archive of client/ into the realm's patch folder at the same place (client/enUS/ into enUS/),")
-    lines.append("   replacing the file of the same name (copy it next to the real file under another name, then mv it into place;")
-    lines.append("   a link in the patch folder: replace the file it points at), then publish it at once (the hourly run can come after")
-    lines.append("   step 2): bash /root/bleakserv/deploy/launcher/publish.sh, and wait for \"Published build ...\". Players need the")
-    lines.append("   new archives and a client restart: give them time before step 2.")
+    lines.append("1. Client: put every archive of client/ into the realm's patch folder at the same place")
+    lines.append("   (client/enUS/ into enUS/):")
+    lines.append(f"   python3 -I {os.path.join(HERE, 'raceforge.py')} install --from {os.path.abspath(out_dir or '.')} "
+                 f"--patches {os.path.abspath(patches_dir)}")
+    lines.append("   (it replaces the file a link points at and keeps the old archives in old-patches/),")
+    lines.append("   then publish it at once (the hourly run can come after step 2):")
+    lines.append("   bash /root/bleakserv/deploy/launcher/publish.sh, and wait for \"Published build ...\".")
+    lines.append("   Players need the new archives and a client restart: give them time before step 2.")
     lines += textwrap.wrap(f"2. Server: {SQL_NOTE}", 117, subsequent_indent="   ")
     high_elf = next((r for r in config.races if r.client_file_string.lower() == "highelf"), None)
     eredar = next((r for r in config.races if r.client_file_string.lower() == "eredar"), None)
@@ -596,6 +605,8 @@ def cmd_update(args) -> int:
         # An archive RaceForge cannot read might hold a later copy of a table, so the placement could be wrong.
         raise ForgeError("cannot read every archive of the patch folder, so the winning copies are unknown: " + "; ".join(unreadable))
 
+    # the archives as read, for install.json: install refuses a file that changed since
+    read_at = {a.client_path.lower(): install.fingerprint(a.path) for a in patchset.archives}
     warnings = []
 
     try:
@@ -608,6 +619,8 @@ def cmd_update(args) -> int:
 
         # only now: a refusal above leaves an earlier output folder as it was
         update.clean_out_dir(out_dir, args.force)
+        # until the run is complete, install refuses this folder (a full disk or Ctrl-C leaves it unfinished)
+        install.write_manifest(out_dir, "raceforge.py update", patchset.folder, None, [], False)
 
         warnings += [f"not checked: {s}" for s in skipped]
         written = update.write_archives(plan, patchset, out_dir)
@@ -707,7 +720,21 @@ def cmd_update(args) -> int:
         except (update.UpdateError, OSError) as e:
             rev_error = str(e)
 
-    report_text = format_update_report(config, args.patches, plan, written, sql_path, server_files, result, warnings, args.server_sql_out, rev, rev_error)
+    entries = []
+
+    for target, path, _ in written:
+        archive = patchset.find(target)
+        rel = os.path.relpath(path, os.path.join(out_dir, "client")).replace(os.sep, "/")
+
+        if archive is not None:
+            size, mtime_ns = read_at[archive.client_path.lower()]
+            entries.append(install.entry(rel, archive.client_path, "patches", archive.path, size, mtime_ns, path))
+        else:
+            entries.append(install.entry(rel, "Data\\" + target, "new", "", None, None, path))
+
+    install.write_manifest(out_dir, "raceforge.py update", patchset.folder, None, entries, not result.failed)
+    report_text = format_update_report(config, args.patches, plan, written, sql_path, server_files, result, warnings, args.server_sql_out, rev, rev_error,
+                                       out_dir)
 
     with open(os.path.join(out_dir, "report.txt"), "w", encoding="utf-8") as f:
         f.write(report_text)
@@ -718,6 +745,83 @@ def cmd_update(args) -> int:
         print(f"error: {rev_error}", file=sys.stderr)
 
     return 1 if result.failed or rev_error else 0
+
+
+def cmd_skins(args) -> int:
+    from rflib import skins  # noqa: E402  (loads Tools/MapForge's archive code)
+
+    # the races at their ids on the realm (realm_id), checked against the realm's ChrRaces before anything is written
+    config = configmod.load(args.config).for_realm()
+    out_dir = os.path.abspath(args.out)
+
+    for flag, folder in (("--patches", args.patches), ("--client", args.client)):
+        real = os.path.realpath(folder)
+
+        try:
+            inside = os.path.commonpath([os.path.realpath(out_dir), real]) == real
+        except ValueError:  # another drive
+            inside = False
+
+        if inside:
+            raise ForgeError(f"--out {out_dir} is inside {flag} {folder}: the launcher would publish it; give a folder "
+                             "elsewhere")
+
+    try:
+        races = skins.load(args.skins, config)
+        game = skins.game_archives(args.client, args.patches, config.archives.optional_packs, args.locale)
+    except skins.SkinsError as e:
+        raise ForgeError(str(e)) from None
+
+    try:
+        plan = skins.make_plan(game, config, races)
+        up_to_date = not plan.writes
+        need = skins.space_needed(plan) if plan.writes else 0
+        free = skins.free_space(out_dir) + (skins.entries_size(out_dir, skins.OUT_ENTRIES) if args.force else 0)
+
+        if need > free:
+            raise ForgeError(f"--out {out_dir} needs {skins.gb(need)} free for the rebuilt archives "
+                             f"({', '.join(t.archive.name for t in plan.writes)}), has {skins.gb(free)}")
+
+        # only now: a refusal above leaves an earlier output folder as it was
+        update.clean_out_dir(out_dir, args.force, skins.OUT_ENTRIES)
+        # until the run is complete, install refuses this folder (a full disk or Ctrl-C leaves it unfinished)
+        install.write_manifest(out_dir, "raceforge.py skins", game.patches_dir, game.client_data, [], False)
+        written = skins.write(plan, out_dir)
+        result = skins.check(plan, written)
+        previews = skins.write_previews(plan, out_dir) if args.preview else []
+    except (skins.SkinsError, update.UpdateError) as e:
+        raise ForgeError(str(e)) from None
+    finally:
+        game.close()
+
+    report = skins.format_report(plan, args, written, result, previews, up_to_date)
+
+    with open(os.path.join(out_dir, "report.txt"), "w", encoding="utf-8") as f:
+        f.write(report)
+
+    install.write_manifest(out_dir, "raceforge.py skins", game.patches_dir, game.client_data,
+                           skins.manifest_entries(plan, written), not result.failed)
+    print(skins.summary(plan, out_dir, written, result, up_to_date))
+
+    for warning in game.warnings + plan.leftovers:
+        print(f"warning: {warning}")
+
+    if result.failed:
+        print("Some checks failed: do not install this output.", file=sys.stderr)
+    elif up_to_date:
+        print("already up to date")
+    else:
+        print(f"Next: python3 -I {os.path.join(HERE, 'raceforge.py')} install --from {out_dir} "
+              f"--patches {os.path.abspath(args.patches)}")
+
+    return 1 if result.failed else 0
+
+
+def cmd_install(args) -> int:
+    try:
+        return install.run(args.source, args.patches, args.dry_run, args.restore)
+    except install.InstallError as e:
+        raise ForgeError(str(e)) from None
 
 
 def cmd_schemas(args) -> int:
@@ -754,7 +858,7 @@ def cmd_schemas(args) -> int:
 
 
 EASY_OUT = "Bleakhold-RaceForge-Output"
-COMMANDS = ("build", "validate", "update", "schemas", "-h", "--help")
+COMMANDS = ("build", "validate", "update", "skins", "install", "schemas", "-h", "--help")
 
 
 def easy_mode(argv: list[str]) -> int:
@@ -869,6 +973,28 @@ def main(argv: list[str] | None = None) -> int:
                    "(a new rev_<nanoseconds>.sql goes there, e.g. /root/bleakhold-generated-sql/pending_db_world) or a .sql path; a file of "
                    "the folder with the same SQL is kept and nothing is written, a different file at the path stops it")
 
+    p = sub.add_parser("skins", help="recolour the skins of races.json's races on the realm (skins.json: High Elf "
+                                     "purple) into new textures")
+    p.add_argument("--patches", required=True, help="the realm's patch folder (/srv/bleakhold-launcher/patches): its "
+                                                    "archives load over --client's")
+    p.add_argument("--client", required=True, help="the game folder the launcher ships (/srv/bleakhold-launcher/base, "
+                                                   "holding Data/common.MPQ)")
+    p.add_argument("--out", required=True, help="output folder (not inside --patches or --client)")
+    p.add_argument("--force", action="store_true", help="replace earlier output in --out")
+    p.add_argument("--config", default=DEFAULT_CONFIG, help="races config (default: races.json next to raceforge.py)")
+    p.add_argument("--skins", default=DEFAULT_SKINS, help="skin colours (default: skins.json next to raceforge.py)")
+    p.add_argument("--locale", help="the client's locale (default: the one of Data/<locale>/locale-<locale>.MPQ)")
+    p.add_argument("--preview", action="store_true", help="also write PNG contact sheets of every skin colour, before "
+                                                          "and after, to --out/preview")
+
+    p = sub.add_parser("install", help="put the archives of an update or skins output folder into the realm's patch "
+                                       "folder")
+    p.add_argument("--from", dest="source", required=True, help="the output folder of update or skins")
+    p.add_argument("--patches", required=True, help="the realm's patch folder the archives go into")
+    p.add_argument("--dry-run", action="store_true", help="only list what it would do")
+    p.add_argument("--restore", action="store_true", help="put the archives of --from's old-patches back (undo an "
+                                                          "install)")
+
     p = sub.add_parser("schemas", help="check (or regenerate) rflib/schemas.py against the client's Rec classes")
     p.add_argument("--rec-dir", help="WoW/Source/DB/Rec of the decompilation (default: found next to Tools/)")
     p.add_argument("--write", action="store_true", help="regenerate rflib/schemas.py")
@@ -883,6 +1009,10 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_validate(args)
         if args.command == "update":
             return cmd_update(args)
+        if args.command == "skins":
+            return cmd_skins(args)
+        if args.command == "install":
+            return cmd_install(args)
         if args.command == "schemas":
             return cmd_schemas(args)
     except (configmod.ConfigError, ForgeError, DbcError, recparse.RecParseError, spellmod.SpellError, OSError) as e:
