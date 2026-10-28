@@ -1,25 +1,26 @@
 """19300 EspressoSW, the Royal Brass Engine (Stormwind hero machine), CAFE.SPEC.md section 5.8.1. M1 draft.
 
-Polished brass and copper, royal-blue enamel, a lion crest. Chunky Warcraft proportions: a walnut plinth, a
-tapered enamel body framed in riveted brass with four turned corner posts and a three-sided cup rail, a tall
-domed brass boiler with three copper hoops (a bold base band, a thin strap, a shoulder band) crowned by a gold
-lion finial (a lobed 3D mane with ears, a painted face), two copper group heads with walnut-handled
-portafilters, a pressure gauge on the boiler front, the heraldic maker's plate (a "ROYAL BRASS" chief over the
-lion), a chrome steam wand (left, +Y) and hot-water tap (right, -Y), a bronze drip tray with a bold grille and
-two porcelain cups on the warmer. 1.3 (Y) x 0.7 (X; 0.9 with the handles) x 0.9 yd, front (+X) toward the
-barista.
+A two-group lever espresso machine in polished brass and copper, royal-blue enamel and a lion crest, shaped so it
+reads as a café machine at a glance: two cocked pull levers standing over the group heads, portafilters with long
+walnut handles toward the barista, a fresh cup under each spout and a tall boiler column. Chunky Warcraft
+proportions: a walnut plinth, a low tapered enamel body framed in riveted brass (its top is the cup warmer, with
+two porcelain cups), a slim brass boiler with three copper hoops (a bold base band, a thin strap, a shoulder band)
+under a low dome crowned by a gold lion finial (a lobed 3D mane, small ears, a painted face), a pressure gauge on
+the boiler front, the heraldic maker's plate between the group heads (a "ROYAL BRASS" chief over the lion), a
+chrome steam wand (left, +Y) and hot-water tap (right, -Y), and a bronze drip tray with a bold grille. 1.3 (Y) x
+0.7 (X; 0.9 with the handles) x 0.9 yd, front (+X) toward the barista.
 
-Deviations from the section 5.8.1 numbers, forced by the section 5.8 size (H 0.9 +- 2 cm, which the design
-numbers overshoot by 0.08 before the finial) and the readability rule (>= 0.06 yd):
-- plinth 0.11 and body 0.28 tall (not 0.12 and 0.4), so the boiler can be a 0.17 cylinder under a 0.165 dome
-  (0.69 of its radius, not a full hemisphere) and the lion finial still ends at 0.91;
-- the finial is a little under the design size so it fits that height: head r 0.058, a seven-lobed mane torus
-  (major r 0.056, minor 0.026, the lobes reaching 0.092) with a lobed back cap, ears r 0.024 above the mane;
-- the hoops differ in width (0.044, 0.024 and 0.036 tall); the gauge (r 0.082) sits on a stem on the boiler front
-  over the thin middle strap, which frees the body front for the heraldic plate (0.30 x 0.24);
+Deviations from the section 5.8.1 numbers, forced by the section 5.8 size (H 0.9 +- 2 cm) and the readability
+rule (>= 0.06 yd):
+- plinth 0.09 and body 0.29 tall (not 0.12 and 0.4), so a cup fits under each portafilter and the boiler can be
+  a 0.25 column (r 0.15, slimmer than the design's 0.24 so it reads as a column) under a 0.073 dome, with the
+  lion finial ending at 0.91;
+- lever group heads (not plain ones): each has a brass hub, a 0.27 arm leaning 15 degrees toward the barista and
+  a walnut grip with a gold knob, ending under the finial;
 - the group heads stand at Y +-0.30 (not +-0.22) so the portafilters clear the plate in the 3/4 views;
-- the drip tray is 0.05 tall (not 0.04) so its dark front band reads at eye height;
-- the cup rail runs on three sides, so the front stays clear.
+- the gauge (r 0.07) sits on a stem on the boiler front over the thin middle strap, which frees the body front
+  for the heraldic plate (0.30 x 0.24);
+- the cup warmer has no rail: its cups stand at the back corners, beside the boiler.
 """
 
 import math
@@ -37,21 +38,27 @@ DISPLAY = 19300
 ENAMEL = T.hexc("2E4E8C")
 
 FEET_H = 0.03
-PLINTH_H = 0.11
-BODY_Z0, BODY_Z1 = 0.11, 0.39
-BODY_X = -0.06            # body centre on X
-BODY_D, BODY_W = 0.55, 1.1
-TAPER = 0.07
-BOILER_R = 0.24
-CYL_Z0, CYL_Z1 = 0.405, 0.575
-DOME_TOP = 0.74
-HEAD_Z = 0.818
+PLINTH_H = 0.09
+BODY_Z0, BODY_Z1 = 0.09, 0.38
+BODY_X = -0.10            # body centre on X
+BODY_D, BODY_W = 0.46, 1.1
+TAPER = 0.05
+FRONT_X = BODY_X + BODY_D / 2     # body front at its foot
+BOILER_R = 0.15
+CYL_Z0, CYL_Z1 = 0.40, 0.652
+DOME_TOP = 0.725
+HEAD_Z = 0.815
 # copper hoops: (centre z, half height, depth out of the boiler wall)
-HOOPS = ((0.427, 0.022, 0.015), (0.492, 0.012, 0.010), (0.556, 0.018, 0.013))
-GH_Y = 0.30               # group heads at Y +-GH_Y
-CUP_Y = 0.37
-CUP_Z0 = BODY_Z1 + 0.011
-TRAY_H = 0.05
+HOOPS = ((0.418, 0.02, 0.014), (0.55, 0.011, 0.009), (0.636, 0.016, 0.012))
+GH_X, GH_Y = FRONT_X + 0.075, 0.30   # group heads at (GH_X, +-GH_Y)
+PF_Z = 0.245              # portafilter basket bottom; its spout ends 0.023 lower
+LEVER_Z = 0.457           # lever pivot above the group head
+LEVER_DEG = 15.0          # cocked lever: up, leaning toward the barista
+TRAY_H = 0.045
+TRAY_Z1 = PLINTH_H + TRAY_H
+SHOT_CUPS = [(GH_X, GH_Y), (GH_X, -GH_Y)]                 # under the spouts, on the drip tray
+WARM_CUPS = [(BODY_X - 0.06, 0.42), (BODY_X - 0.06, -0.42)]  # on the warmer
+SAUCER_H = 0.011
 
 MANE = dict(light_c=T.hexc("FFD27A"), base=T.hexc("B8741A"), dark=T.hexc("4A2604"), bounce=T.hexc("A0601A"),
             patina=T.hexc("7A6A2A"))
@@ -61,7 +68,7 @@ HEAD_R = 0.058
 HEAD_C = (BODY_X + 0.014, 0.0, HEAD_Z - 0.004)
 SNOUT_R = 0.03
 SNOUT_C = (BODY_X + 0.064, 0.0, HEAD_Z - 0.026)
-EAR_R, EAR_DEG = 0.09, 40.0                    # ears: distance from the mane centre, angle from vertical
+EAR_R, EAR_DEG = 0.08, 44.0                    # ears: distance from the mane centre, angle from vertical
 
 
 # ----------------------------------------------------------------------------------------------- paints
@@ -125,7 +132,7 @@ def p_body(ctx, seed, p):
     if e < frame:
         c = T.g_brass(ctx, seed, {"streak": True, "patina": 0.12})
         # the front's top row sits in the gaps between the plate, the group heads and the posts
-        top = (-0.43, -0.18, 0.18, 0.43) if ctx.chart == "+x" else None
+        top = (-0.46, -0.185, 0.185, 0.46) if ctx.chart == "+x" else None
         return frame_rivets(ctx, c, frame * 0.5, 0.125, 0.0145, top)
     c = T.g_enamel(ctx, seed + 5, {"color": ENAMEL, "chips": 2, "chip_r": 0.03, "gloss": 0.35})
     if e < frame + 0.01:
@@ -248,38 +255,41 @@ def p_iron(ctx, seed, p):
     return T.g_iron(ctx, seed, {"rust": 0.05})
 
 
-def p_cup(ctx, seed, p):
-    """White porcelain with a bold royal-blue band and a gold line under it on the upper outer wall (painted by
-    height and facing, so the inside stays white)."""
-    c = T.g_ceramic(ctx, seed, {})
-    x, y, z = ctx.pos
-    lz = z - CUP_Z0
-    ry = y - (CUP_Y if y > 0 else -CUP_Y)
-    rx = x - BODY_X
-    rr = math.hypot(rx, ry) or 1.0
-    outward = (ctx.n[0] * rx + ctx.n[1] * ry) / rr
-    if outward > 0.2:
-        if 0.03 <= lz <= 0.052:
-            c = T.mix(ENAMEL, T.scale(ENAMEL, 1.25), T.clamp01(ctx.n[0] * 0.5 + 0.5))
-        elif 0.024 <= lz < 0.03:
-            c = T.hexc("E8B848")
-    return c
+def cup_paints(base_z, centres):
+    """Paints for one set of cups: white porcelain with a royal-blue band and a gold line under it on the upper
+    outer wall (by height and facing, so the inside stays white), crema with a darker rim and a pale heart in
+    the middle, saucers with a blue rim. base_z: the cups' foot; centres: their (x, y)."""
+    def near(x, y):
+        return min(centres, key=lambda c: (x - c[0]) ** 2 + (y - c[1]) ** 2)
 
+    def p_cup(ctx, seed, p):
+        c = T.g_ceramic(ctx, seed, {})
+        x, y, z = ctx.pos
+        cx, cy = near(x, y)
+        lz = z - base_z
+        rx, ry = x - cx, y - cy
+        rr = math.hypot(rx, ry) or 1.0
+        if (ctx.n[0] * rx + ctx.n[1] * ry) / rr > 0.2:
+            if 0.03 <= lz <= 0.052:
+                c = T.mix(ENAMEL, T.scale(ENAMEL, 1.25), T.clamp01(ctx.n[0] * 0.5 + 0.5))
+            elif 0.024 <= lz < 0.03:
+                c = T.hexc("E8B848")
+        return c
 
-def p_coffee(ctx, seed, p):
-    """Crema with a darker rim and a pale heart-ish swirl in the middle."""
-    r = math.hypot(ctx.pos[0] - BODY_X, abs(ctx.pos[1]) - CUP_Y)
-    c = T.mix(T.hexc("D8B98A"), T.hexc("6A3C1C"), T.smoothstep(0.02, 0.04, r))
-    return T.mix(c, T.hexc("F4E6C8"), T.smoothstep(0.014, 0.004, r) * 0.8)
+    def p_coffee(ctx, seed, p):
+        cx, cy = near(ctx.pos[0], ctx.pos[1])
+        r = math.hypot(ctx.pos[0] - cx, ctx.pos[1] - cy)
+        c = T.mix(T.hexc("D8B98A"), T.hexc("6A3C1C"), T.smoothstep(0.02, 0.04, r))
+        return T.mix(c, T.hexc("F4E6C8"), T.smoothstep(0.014, 0.004, r) * 0.8)
 
+    def p_saucer(ctx, seed, p):
+        c = T.g_ceramic(ctx, seed, {})
+        cx, cy = near(ctx.pos[0], ctx.pos[1])
+        if math.hypot(ctx.pos[0] - cx, ctx.pos[1] - cy) > 0.058 and ctx.n[2] > 0.0:
+            c = T.mix(c, ENAMEL, 0.85)      # a blue rim
+        return c
 
-def p_saucer(ctx, seed, p):
-    c = T.g_ceramic(ctx, seed, {})
-    r = math.hypot(ctx.pos[0] - BODY_X, abs(ctx.pos[1]) - CUP_Y)
-    if r > 0.058 and ctx.n[2] > 0.0:
-        c = T.mix(c, ENAMEL, 0.85)      # a blue rim
-    return c
-
+    return p_cup, p_coffee, p_saucer
 
 def p_dial_case(ctx, seed, p):
     if ctx.chart.endswith("_top"):
@@ -419,13 +429,7 @@ def d_side_crest(w, h):
 
 # ------------------------------------------------------------------------------------------------ parts
 
-def _post(x, y):
-    prof = [(0.05, BODY_Z0), (0.04, BODY_Z0 + 0.03), (0.035, 0.365), (0.048, 0.385), (0.03, 0.405),
-            (0.05, 0.445), (0.03, 0.482), (0.0, 0.492)]
-    return G.translate(G.lathe(prof, 8), x, y, 0.0)
-
-
-def _hoop(z, hh, d, sides=16):
+def _hoop(z, hh, d, sides=14):
     """An outward band on the boiler wall (only the visible outer half of a torus): a lathe of four points."""
     r0 = BOILER_R - 0.004
     prof = [(r0, z - hh), (BOILER_R + d * 0.9, z - hh * 0.5), (BOILER_R + d * 0.9, z + hh * 0.5), (r0, z + hh)]
@@ -453,6 +457,27 @@ def _cross(r, w):
             (h, r)]
 
 
+def _along_y(mesh_z, x, y, z):
+    """A mesh built along +Z (centred on z 0), turned to lie along Y and moved to (x, y, z)."""
+    return G.transform(mesh_z, G.mat_chain(G.mat_translate(x, y, z), G.mat_rot_x(math.pi / 2)))
+
+
+def _cups(add, name, centres, saucer_z, seed):
+    """Porcelain cups (1.5x real size) on saucers, with crema; a real wall thickness, so the bake does not see
+    the inner wall poking through the outer one."""
+    base_z = saucer_z + SAUCER_H
+    p_cup, p_coffee, p_saucer = cup_paints(base_z, centres)
+    cprof = [(0.0, 0.0), (0.03, 0.0), (0.047, 0.06), (0.049, 0.066), (0.043, 0.063), (0.033, 0.026), (0.0, 0.024)]
+    sprof = [(0.0, 0.0), (0.05, 0.0), (0.069, 0.009), (0.066, 0.012), (0.0, 0.009)]
+    cups = [G.translate(G.lathe(cprof, 8), x, y, base_z) for x, y in centres]
+    saucers = [G.translate(G.lathe(sprof, 8), x, y, saucer_z) for x, y in centres]
+    coffee = [G.translate(G.lathe([(0.0405, 0.05), (0.0, 0.05)], 8, cap_top=False), x, y, base_z)
+              for x, y in centres]
+    add(B.Part(name, G.merge(cups), paint=p_cup, seed=seed, weight=1.6, ao_floor=0.8))
+    add(B.Part(name + "_coffee", G.merge(coffee), paint=p_coffee, seed=seed + 1, weight=0.7, ao_floor=0.6))
+    add(B.Part(name + "_saucers", G.merge(saucers), paint=p_saucer, seed=seed + 2, weight=0.8, ao_floor=0.8))
+
+
 def build(opts=None):
     d = B.PropDef(NAME)
     d.display = DISPLAY
@@ -475,27 +500,19 @@ def build(opts=None):
     feet = [G.translate(G.lathe(bun, 6), sx * 0.27, sy * 0.57, 0.0) for sx in (1, -1) for sy in (1, -1)]
     add(B.Part("feet", G.merge(feet), paint=p_gold, seed=13, weight=0.4))
 
-    # body: tapered enamel box framed in riveted brass
+    # body: a low tapered enamel box framed in riveted brass; its top is the cup warmer
     body = G.box(BODY_W, BODY_D, BODY_Z1 - BODY_Z0, 0.04, faces="+x -x +y -y +z", z0=BODY_Z0)
     body = G.taper(body, TAPER, BODY_Z0, BODY_Z1)
     body = G.translate(body, BODY_X, 0.0, 0.0)
     for ch in body.charts:
         ch.weight = {"+x": 1.35, "-x": 0.55, "+z": 0.6}.get(ch.name, 1.0)
     add(B.Part("body", body, paint=p_body, seed=21, decals={"+y": d_side_crest, "-y": d_side_crest}))
-    fx = BODY_X + BODY_D / 2       # body front at its foot
+    fx = FRONT_X
+    fx_top = BODY_X + BODY_D / 2 * (1.0 - TAPER)
 
-    # corner posts and the three-sided cup rail
-    px0, px1 = BODY_X - BODY_D / 2 + 0.045, fx - 0.04
-    py = BODY_W / 2 - 0.04
-    add(B.Part("posts", G.merge([_post(px1, py), _post(px1, -py), _post(px0, py), _post(px0, -py)]),
-               paint=p_gold, seed=31, weight=0.9))
-    rz = 0.445
-    rails = [G.sweep([(px1, py, rz), (px0, py, rz)], 0.016, 6), G.sweep([(px1, -py, rz), (px0, -py, rz)], 0.016, 6),
-             G.sweep([(px0, py, rz), (px0, -py, rz)], 0.016, 6)]
-    add(B.Part("rail", G.merge(rails), paint=p_brass, seed=33, weight=0.6))
-
-    # boiler: flange, cylinder, tall elliptic dome (painted brass, not sphere-mapped)
-    prof = [(0.262, 0.375), (0.262, 0.398), (0.25, 0.404), (BOILER_R, CYL_Z0), (BOILER_R, CYL_Z1)]
+    # boiler: a tall brass column with a flange, three copper hoops and a domed cap (painted, not sphere-mapped)
+    prof = [(BOILER_R + 0.024, BODY_Z1 - 0.01), (BOILER_R + 0.024, BODY_Z1 + 0.012), (BOILER_R + 0.01, CYL_Z0 - 0.002),
+            (BOILER_R, CYL_Z0), (BOILER_R, CYL_Z1)]
     dome_h = DOME_TOP - CYL_Z1
     for k in range(1, 6):
         a = (math.pi / 2) * k / 5
@@ -504,75 +521,94 @@ def build(opts=None):
     hoops = [G.translate(_hoop(hz, hh, dd), BODY_X, 0.0, 0.0) for hz, hh, dd in HOOPS]
     add(B.Part("hoops", G.merge(hoops), paint=p_hoop, seed=43, weight=1.2))
 
-    # lion finial: pedestal, a lobed mane torus facing +X with a lobed back cap, head, muzzle, ears
-    ped = G.translate(G.lathe([(0.074, DOME_TOP - 0.02), (0.058, DOME_TOP + 0.004), (0.036, DOME_TOP + 0.018),
-                               (0.032, DOME_TOP + 0.03), (0.0, DOME_TOP + 0.034)], 10), BODY_X, 0.0, 0.0)
+    # lion finial: pedestal, a lobed mane torus facing +X with a lobed back cap, head, muzzle, small ears
+    ped = G.translate(G.lathe([(0.07, DOME_TOP - 0.02), (0.055, DOME_TOP + 0.004), (0.036, DOME_TOP + 0.016),
+                               (0.032, DOME_TOP + 0.026), (0.0, DOME_TOP + 0.03)], 10), BODY_X, 0.0, 0.0)
     to_front = G.mat_chain(G.mat_translate(*MANE_C), G.mat_rot_y(math.pi / 2))
     mane = G.transform(G.torus(0.056, 0.026, 21, 5), to_front)
-    mane = _lobed(mane, MANE_C, MANE_LOBES, 0.12)
+    mane = _lobed(mane, MANE_C, MANE_LOBES, 0.15)
     cap = G.transform(G.dome(0.086, 0.05, 3, 14), G.mat_chain(G.mat_translate(*MANE_C),
                                                               G.mat_rot_y(-math.pi / 2)))
-    cap = _lobed(cap, MANE_C, MANE_LOBES, 0.1)
+    cap = _lobed(cap, MANE_C, MANE_LOBES, 0.12)
     head = G.translate(G.sphere(HEAD_R, 10, 6), *HEAD_C)
     snout = G.translate(G.sphere(SNOUT_R, 8, 4), *SNOUT_C)
     ears = []
     for s in (1, -1):
         a = math.radians(EAR_DEG)
-        ear = G.transform(G.sphere(0.024, 8, 4), G.mat_chain(
-            G.mat_translate(MANE_C[0] + 0.016, s * math.sin(a) * EAR_R, MANE_C[2] + math.cos(a) * EAR_R),
-            G.mat_rot_x(-s * a), G.mat_scale(0.5, 0.95, 1.15)))
+        ear = G.transform(G.sphere(0.019, 8, 4), G.mat_chain(
+            G.mat_translate(MANE_C[0] + 0.02, s * math.sin(a) * EAR_R, MANE_C[2] + math.cos(a) * EAR_R),
+            G.mat_rot_x(-s * a), G.mat_scale(0.5, 0.95, 1.05)))
         ears.append(ear)
     add(B.Part("finial_mane", G.merge([mane, cap, ped]), paint=p_mane, seed=51, weight=1.5))
     add(B.Part("finial_head", G.merge([head, snout]), paint=p_lion, seed=53, weight=1.9))
     add(B.Part("finial_ears", G.merge(ears), paint=p_ear, seed=55, weight=1.5))
 
-    # group heads (copper bells on brass brackets), iron baskets, walnut handles
-    gh, brackets, baskets, handles = [], [], [], []
+    # two lever group heads on the body front: copper bells on brass brackets, portafilters with long walnut
+    # handles toward the barista, and the cocked pull levers standing up over them
+    gh, brackets, baskets, spouts, handles, tips = [], [], [], [], [], []
+    hubs, arms, grips, knobs = [], [], [], []
+    hdeg = math.radians(96)
+    hdir = (math.sin(hdeg), 0.0, math.cos(hdeg))
+    ldeg = math.radians(LEVER_DEG)
+    ldir = (math.sin(ldeg), 0.0, math.cos(ldeg))
     for s in (1, -1):
         y = s * GH_Y
-        gprof = [(0.05, 0.258), (0.064, 0.268), (0.071, 0.288), (0.068, 0.31), (0.06, 0.325), (0.074, 0.345),
-                 (0.088, 0.362), (0.088, 0.382), (0.0, 0.385)]
-        gh.append(G.translate(G.lathe(gprof, 10), fx + 0.08, y, 0.0))
-        brackets.append(G.translate(G.box(0.1, 0.09, 0.045, faces="+x +y -y +z -z", z0=0.345), fx + 0.03, y, 0.0))
-        baskets.append(G.translate(G.cylinder(0.058, 0.042, 10, (True, False)), fx + 0.08, y, 0.218))
-        hdl = G.capsule(0.035, 0.215, 6)
-        hdl = G.transform(hdl, G.mat_chain(G.mat_translate(fx + 0.1, y, 0.238), G.mat_rot_y(math.radians(96))))
-        handles.append(hdl)
+        gprof = [(0.062, PF_Z + 0.045), (0.072, PF_Z + 0.055), (0.076, PF_Z + 0.08), (0.07, PF_Z + 0.103),
+                 (0.062, PF_Z + 0.113), (0.078, PF_Z + 0.138), (0.09, PF_Z + 0.163), (0.09, PF_Z + 0.183),
+                 (0.06, PF_Z + 0.198), (0.0, PF_Z + 0.201)]
+        gh.append(G.translate(G.lathe(gprof, 10), GH_X, y, 0.0))
+        bl = GH_X - fx_top + 0.01
+        brackets.append(G.translate(G.box(0.1, bl, 0.06, faces="+x +y -y +z -z", z0=PF_Z + 0.12),
+                                    fx_top - 0.01 + bl / 2, y, 0.0))
+        baskets.append(G.translate(G.cylinder(0.06, 0.045, 10, (True, False)), GH_X, y, PF_Z))
+        spouts.append(G.translate(G.cylinder(0.018, 0.026, 6, (True, False)), GH_X, y, PF_Z - 0.023))
+        h0 = (GH_X + 0.03, y, PF_Z + 0.023)
+        handles.append(G.transform(G.capsule(0.033, 0.28, 6), G.mat_chain(G.mat_translate(*h0),
+                                                                           G.mat_rot_y(hdeg))))
+        tips.append(G.translate(G.sphere(0.036, 6, 4), h0[0] + hdir[0] * 0.275, y, h0[2] + hdir[2] * 0.275))
+        # the lever: a hub across the group head, a tapered brass arm, a walnut grip and a gold knob
+        hubs.append(_along_y(G.cylinder(0.034, 0.13, 8, True, z0=-0.065), GH_X, y, LEVER_Z))
+        a0 = (GH_X, y, LEVER_Z)
+        a1 = (GH_X + ldir[0] * 0.27, y, LEVER_Z + ldir[2] * 0.27)
+        arms.append(G.sweep([a0, a1], lambda t: 0.025 - 0.007 * t, 8, caps=(True, False), up=(0.0, 1.0, 0.0)))
+        grips.append(G.transform(G.capsule(0.034, 0.15, 6), G.mat_chain(
+            G.mat_translate(a1[0] - ldir[0] * 0.02, y, a1[2] - ldir[2] * 0.02), G.mat_rot_y(ldeg))))
+        g1 = 0.15 - 0.02
+        knobs.append(G.translate(G.sphere(0.03, 6, 4), a1[0] + ldir[0] * g1, y, a1[2] + ldir[2] * g1))
     add(B.Part("group_heads", G.merge(gh), paint=p_copper, seed=61, weight=1.1))
     add(B.Part("brackets", G.merge(brackets), paint=p_brass, seed=62, weight=0.6))
-    add(B.Part("baskets", G.merge(baskets), paint=p_iron, seed=63, weight=0.7))
+    add(B.Part("baskets", G.merge(baskets + spouts), paint=p_iron, seed=63, weight=0.7))
     add(B.Part("handles", G.merge(handles), paint=p_dark_walnut, seed=65))
-    tips = []
-    for s_ in (1, -1):
-        d_ = (math.sin(math.radians(96)), 0.0, math.cos(math.radians(96)))
-        tip = (fx + 0.1 + d_[0] * 0.21, s_ * GH_Y, 0.238 + d_[2] * 0.21)
-        tips.append(G.translate(G.sphere(0.037, 8, 4), *tip))
     add(B.Part("handle_caps", G.merge(tips), paint=p_gold, seed=66, weight=0.5))
+    add(B.Part("lever_hubs", G.merge(hubs), paint=p_brass, seed=68, weight=0.6))
+    add(B.Part("levers", G.merge(arms), paint=p_brass, seed=69, weight=0.9))
+    add(B.Part("lever_grips", G.merge(grips), paint=p_dark_walnut, seed=70, weight=0.9))
+    add(B.Part("lever_knobs", G.merge(knobs), paint=p_gold, seed=72, weight=0.5))
 
-    # copper pipes from the boiler down into the group heads
+    # copper pipes from the boiler into the backs of the group heads
     pipes = []
     for s in (1, -1):
-        path = G.bezier_path((BODY_X + 0.1, s * 0.18, 0.47), (BODY_X + 0.26, s * 0.27, 0.53),
-                             (fx + 0.06, s * GH_Y, 0.47), (fx + 0.08, s * GH_Y, 0.383), 7)
+        path = G.bezier_path((BODY_X + BOILER_R - 0.04, s * 0.12, 0.47), (BODY_X + 0.2, s * 0.2, 0.5),
+                             (GH_X - 0.1, s * GH_Y, 0.46), (GH_X - 0.06, s * GH_Y, PF_Z + 0.175), 7)
         pipes.append(G.sweep(path, 0.019, 6))
     add(B.Part("pipes", G.merge(pipes), paint=p_copper, seed=67, weight=0.7))
 
     # pressure gauge on a copper stem from the boiler front, tilted up: brass case, dial decal, brass bezel
-    gz = 0.50
+    gz = 0.55
     tilt = G.mat_rot_y(math.radians(-12))
     gpos = G.mat_translate(BODY_X + BOILER_R + 0.035, 0.0, gz)
-    case = G.transform(G.cylinder(0.082, 0.04, 16, (False, True)), G.mat_chain(gpos, tilt, G.MAT_DISC_FRONT))
+    case = G.transform(G.cylinder(0.07, 0.04, 16, (False, True)), G.mat_chain(gpos, tilt, G.MAT_DISC_FRONT))
     add(B.Part("gauge_case", case, paint=p_dial_case, seed=71, decals={"cyl_top": d_gauge}, weight=2.4))
-    bezel = G.transform(G.torus(0.084, 0.016, 16, 4), G.mat_chain(gpos, tilt, G.MAT_DISC_FRONT,
+    bezel = G.transform(G.torus(0.072, 0.015, 16, 4), G.mat_chain(gpos, tilt, G.MAT_DISC_FRONT,
                                                                   G.mat_translate(0, 0, 0.04)))
     stem = G.transform(G.cylinder(0.02, 0.06, 6, False), G.mat_chain(
         G.mat_translate(BODY_X + BOILER_R - 0.02, 0.0, gz), G.MAT_DISC_FRONT))
     add(B.Part("gauge_bezel", G.merge([bezel, stem]), paint=p_brass, seed=73, weight=0.8))
 
-    # maker's plate: a heater shield leaning back with the body's taper
+    # maker's plate between the group heads: a heater shield leaning back with the body's taper
     plate = G.extrude(SHIELD, 0.022, 0.007)
     lean = math.atan(TAPER * BODY_D / 2 / (BODY_Z1 - BODY_Z0))
-    plate = G.transform(plate, G.mat_chain(G.mat_translate(fx - 0.013, 0.0, 0.243), G.mat_rot_y(-lean),
+    plate = G.transform(plate, G.mat_chain(G.mat_translate(fx - 0.013, 0.0, 0.245), G.mat_rot_y(-lean),
                                            G.MAT_EXTRUDE_FRONT))
     for ch in plate.charts:
         ch.weight = 3.2 if ch.name.endswith("_front") else 0.5
@@ -582,59 +618,49 @@ def build(opts=None):
     wx = fx - 0.09
     side = BODY_W / 2
     wand_path = G.polyline_join(
-        [(wx, side - 0.02, 0.345)],
-        G.arc_path((wx, side + 0.035, 0.305), 0.04, math.pi / 2, 0.0, 4, ("y", "z"))[1:],
-        [(wx + 0.01, side + 0.075, 0.22)],
-        G.arc_path((wx + 0.045, side + 0.075, 0.19), 0.04, math.pi, math.pi * 1.25, 2, ("x", "z"))[1:],
-        [(wx + 0.06, side + 0.078, 0.155)])
+        [(wx, side - 0.02, 0.31)],
+        G.arc_path((wx, side + 0.035, 0.27), 0.04, math.pi / 2, 0.0, 4, ("y", "z"))[1:],
+        [(wx + 0.01, side + 0.075, 0.2)],
+        G.arc_path((wx + 0.045, side + 0.075, 0.17), 0.04, math.pi, math.pi * 1.25, 2, ("x", "z"))[1:],
+        [(wx + 0.06, side + 0.078, 0.14)])
     wand = G.sweep(wand_path, lambda t: 0.024 - 0.006 * t, 6, caps=(False, True))
     tap_path = G.polyline_join(
-        [(wx, -side + 0.02, 0.33)],
-        G.arc_path((wx, -side - 0.03, 0.29), 0.04, math.pi / 2, math.pi, 4, ("y", "z"))[1:],
-        [(wx + 0.005, -side - 0.07, 0.21)])
+        [(wx, -side + 0.02, 0.3)],
+        G.arc_path((wx, -side - 0.03, 0.26), 0.04, math.pi / 2, math.pi, 4, ("y", "z"))[1:],
+        [(wx + 0.005, -side - 0.07, 0.19)])
     tap = G.sweep(tap_path, 0.022, 6, caps=(False, True))
     add(B.Part("wand", wand, "chrome", "ChromeEnv"))
     add(B.Part("tap", tap, "chrome", "ChromeEnv"))
-    wheel_m = G.mat_chain(G.mat_translate(wx, side + 0.03, 0.39), G.mat_rot_x(math.pi / 2))
+    wheel_m = G.mat_chain(G.mat_translate(wx, side + 0.03, 0.34), G.mat_rot_x(math.pi / 2))
     wheel = G.merge([
         G.transform(G.torus(0.05, 0.012, 12, 4), wheel_m),
         G.transform(G.extrude(_cross(0.05, 0.016), 0.014), G.mat_chain(wheel_m, G.mat_translate(0, 0, -0.007),
                                                                          G.mat_rot_z(math.pi / 4))),
-        G.transform(G.cylinder(0.018, 0.04, 6, False), G.mat_chain(G.mat_translate(wx, side - 0.01, 0.39),
+        G.transform(G.cylinder(0.018, 0.04, 6, False), G.mat_chain(G.mat_translate(wx, side - 0.01, 0.34),
                                                                    G.mat_rot_x(-math.pi / 2)))])
     add(B.Part("valve_wheel", wheel, paint=p_brass, seed=91, weight=0.6))
-    knob = G.translate(G.sphere(0.032, 6, 4), wx, -side - 0.012, 0.375)
+    knob = G.translate(G.sphere(0.032, 6, 4), wx, -side - 0.012, 0.335)
     add(B.Part("tap_knob", knob, paint=p_gold, seed=93, weight=0.6))
 
-    # drip tray: dark bronze, a bold painted grille, a dark front band between brass lips
-    tray = G.box(0.9, 0.19, TRAY_H, 0.01, z0=PLINTH_H, faces="+x -x +y -y +z")
-    tray = G.translate(tray, 0.245, 0.0, 0.0)
+    # drip tray in front of the body: dark bronze, a bold painted grille, a dark front band between brass lips
+    tray_d = 0.34 - fx
+    tray = G.box(0.9, tray_d, TRAY_H, 0.01, z0=PLINTH_H, faces="+x -x +y -y +z")
+    tray = G.translate(tray, fx + tray_d / 2, 0.0, 0.0)
     for ch in tray.charts:
         ch.weight = {"+z": 0.9, "+x": 1.0}.get(ch.name, 0.4)
     add(B.Part("drip_tray", tray, paint=p_tray, seed=95, decals={"+z": d_grille}))
 
-    # porcelain cups (1.5x real size) on the warmer, with saucers; a real wall thickness, so the bake does not
-    # see the inner wall poking through the outer one
-    cups, saucers = [], []
-    for s in (1, -1):
-        cprof = [(0.0, 0.0), (0.03, 0.0), (0.047, 0.06), (0.049, 0.066), (0.043, 0.063), (0.033, 0.026),
-                 (0.0, 0.024)]
-        cups.append(G.translate(G.lathe(cprof, 10), BODY_X, s * CUP_Y, CUP_Z0))
-        sprof = [(0.0, 0.0), (0.05, 0.0), (0.069, 0.009), (0.066, 0.012), (0.0, 0.009)]
-        saucers.append(G.translate(G.lathe(sprof, 10), BODY_X, s * CUP_Y, BODY_Z1))
-    add(B.Part("cups", G.merge(cups), paint=p_cup, seed=97, weight=1.6, ao_floor=0.8))
-    coffee = [G.translate(G.lathe([(0.0, 0.05), (0.0405, 0.05)][::-1], 10, cap_top=False), BODY_X, s * CUP_Y,
-                          CUP_Z0) for s in (1, -1)]
-    add(B.Part("coffee", G.merge(coffee), paint=p_coffee, seed=98, weight=0.7, ao_floor=0.6))
-    add(B.Part("saucers", G.merge(saucers), paint=p_saucer, seed=99, weight=0.8, ao_floor=0.8))
+    # a fresh shot under each spout, two clean cups on the warmer
+    _cups(add, "shot_cups", SHOT_CUPS, TRAY_Z1, 97)
+    _cups(add, "cups", WARM_CUPS, BODY_Z1, 101)
 
     # boiler safety valve on the dome (the vent wisp rises from it)
-    vx, vy = BODY_X - 0.13, 0.10
+    vx, vy = BODY_X - 0.09, 0.07
     rho = math.hypot(vx - BODY_X, vy)
     vz = CYL_Z1 + dome_h * math.sin(math.acos(min(1.0, rho / BOILER_R))) - 0.01
-    vent = G.translate(G.lathe([(0.026, vz - 0.02), (0.026, vz + 0.03), (0.034, vz + 0.035), (0.034, vz + 0.045),
+    vent = G.translate(G.lathe([(0.024, vz - 0.02), (0.024, vz + 0.03), (0.032, vz + 0.035), (0.032, vz + 0.045),
                                 (0.0, vz + 0.05)], 8), vx, vy, 0.0)
-    add(B.Part("vent", vent, paint=p_brass, seed=101, weight=0.6))
+    add(B.Part("vent", vent, paint=p_brass, seed=105, weight=0.6))
 
     # collision: walls to 0.45, a gable roof to 0.9 (roof n.z 0.61 < 0.6428: too steep to stand on)
     hx, hy, wz, top = 0.35, 0.65, 0.45, 0.9
