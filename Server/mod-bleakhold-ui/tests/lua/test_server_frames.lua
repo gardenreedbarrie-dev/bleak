@@ -373,8 +373,31 @@ for _, size in ipairs({ 1000, 251, 64 }) do
         -- inside a battleground, so the kill announcer plays its BGANN lines
         M.inInstance, M.instanceType = true, "pvp"
         local played, announced = {}, {}
-        M.env.PlaySoundFile = function(path) played[#played + 1] = path end
+        -- the announcer's lines only (the drop HUD plays canopy.wav and land.wav from Sounds\Royale)
+        M.env.PlaySoundFile = function(path)
+            if path:find("\\Sounds\\Announcer\\", 1, true) then played[#played + 1] = path end
+        end
         ns.On("BG_ANNOUNCE", function(a) announced[#announced + 1] = (a.multi or "-") .. (a.streak or "-") end)
+        -- every ROYS of the drop (me 1), as it arrived
+        local falls = {}
+        -- the storm beast (ROYO X 30) as each ROYO left it: subtype (its health) and state; every ROYV kind in order
+        local beast, events = {}, {}
+        ns.On("STATE", function(topic)
+            local r = ns.S.royale
+            if topic == "ROYS" and r and r.me == 1 then
+                falls[#falls + 1] = r.phase .. ":" .. tostring(r.fallMsLeft) .. ":" .. tostring(r.landMsLeft) .. ":"
+                    .. tostring(r.fallMs)
+            end
+            local x = topic == "ROYO" and ns.S.royaleObjects and ns.S.royaleObjects.byId[30]
+            if x and beast[#beast] ~= x.subtype .. "/" .. x.state then
+                beast[#beast + 1] = x.subtype .. "/" .. x.state
+            end
+        end)
+        local stirs
+        ns.On("ROYALE_EVENT", function(e)
+            events[#events + 1] = e.kind
+            stirs = e.kind == "B" and e or stirs
+        end)
         feed(M, data)
         M.Advance(1)
         local drops = {}
@@ -410,16 +433,33 @@ for _, size in ipairs({ 1000, 251, 64 }) do
         H.eq(m.curR, 1080); H.eq(m.nextX, -150); H.eq(m.nextY, -310); H.eq(m.nextR, 520)
         H.eq(m.shrinkStartMs, 0); H.eq(m.shrinkEndMs, 170000); H.eq(m.dmgPermille, 10)
         H.eq(m.watchName, "Aldric Stormwind"); H.eq(m.myX, nil); H.eq(m.myY, nil); H.eq(m.stages, 6)
+        H.eq(m.fallMsLeft, nil); H.eq(m.landMsLeft, nil); H.eq(m.fallMs, nil)
+        -- ROYS fields 25-27: the drop as the fall starts, then as the parachute opens
+        H.eq(table.concat(falls, " "), "2:8000:20000:8000 2:0:12000:8000")
         -- ROYO: the full list, then the change (the supply drop opened)
         local o = S.royaleObjects
-        H.eq(o.matchId, 7001); H.eq(#o.list, 11)
+        H.eq(o.matchId, 7001); H.eq(#o.list, 13)
         H.eq(o.byId[1].kind, "S"); H.eq(o.byId[1].state, 2); H.eq(o.byId[1].msLeft, 61000)
         H.eq(o.byId[2].state, 1); H.eq(o.byId[2].msLeft, nil)
         H.eq(o.byId[10].kind, "B"); H.eq(o.byId[10].subtype, 2); H.eq(o.byId[10].x, 130); H.eq(o.byId[10].y, -260)
         H.eq(o.byId[20].kind, "D"); H.eq(o.byId[20].state, 4); H.eq(o.byId[20].msLeft, nil)
-        -- ROYK: the triple kill, then the storm with nobody credited (no announcement)
+        -- ROYO X and H: the storm beast incoming (wakes in 30 s), awake at full health (the encoder clamped an
+        -- over-range value to 100), hurt, gone once slain; its hoard ready, then opened
+        H.eq(table.concat(beast, " "), "100/3 100/1 57/1 0/0")
+        H.eq(o.byId[30].kind, "X"); H.eq(o.byId[30].x, 60); H.eq(o.byId[30].y, -420); H.eq(o.byId[30].msLeft, nil)
+        H.eq(o.byId[31].kind, "H"); H.eq(o.byId[31].subtype, 0); H.eq(o.byId[31].state, 4); H.eq(o.byId[31].x, 62)
+        -- ROYV: every kind as it came, the storm beast's B A K among them, the winner last
+        H.eq(table.concat(events, ""), "RSDLONBAKW")
+        H.eq(stirs.name, "Crow's Rise"); H.eq(stirs.msLeft, 30000); H.eq(stirs.x, 60); H.eq(stirs.y, -420)
+        -- ROYK: the triple kill, then the storm with nobody credited (no announcement), then the storm beast twice:
+        -- itself (class 0, no tally), and with Aldric's credit
         local feed = S.royaleFeed
-        H.eq(#feed, 2)
+        H.eq(#feed, 4)
+        H.eq(feed[3].killer, "Thundermaw"); H.eq(feed[3].killerClassId, 0); H.eq(feed[3].victim, "Ysolde")
+        H.eq(feed[3].cause, "B"); H.eq(feed[3].byBoss, true); H.eq(feed[3].killerKills, nil)
+        H.eq(feed[3].aliveAfter, 21)
+        H.eq(feed[4].killer, "Aldric Stormwind"); H.eq(feed[4].cause, "B"); H.eq(feed[4].byBoss, nil)
+        H.eq(feed[4].killerKills, 4); H.eq(S.royaleKills["Aldric Stormwind"], 4); H.eq(S.royaleKills.Thundermaw, nil)
         H.eq(feed[1].killer, "Aldric Stormwind"); H.eq(feed[1].killerClassId, 1); H.eq(feed[1].victim, "Br\195\169nna")
         H.eq(feed[1].victimClassId, 8); H.eq(feed[1].cause, "P"); H.eq(feed[1].aliveAfter, 23);
         H.eq(feed[1].killerKills, 3)

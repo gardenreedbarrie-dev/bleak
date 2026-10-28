@@ -1579,6 +1579,30 @@ TEST("royale: the encoders keep to the document")
     RoyaleState few;
     few.stages = 16;   // the empty watchName, myX and myY before it stay
     CHECK_EQ(EncodeRoyaleState(few), "0,0,0,0,0,0,0,,,,0,0,0,0,,,,,,0,,,,16");
+    // fields 25-27, the drop (me 1 only): until the parachute opens, until the planned touchdown, the free fall's
+    // length. As the fall starts: 8 s of free fall, then 12 s under the parachute.
+    RoyaleState fall;
+    fall.matchId = 7001; fall.phase = RoyalePhase::Drop; fall.phaseMsLeft = 20000; fall.alive = 24; fall.total = 24;
+    fall.me = RoyaleMe::Dropping; fall.pinX = 104; fall.pinY = 96; fall.stage = 1; fall.curX = -267; fall.curY = -267;
+    fall.curR = 1080; fall.nextX = -150; fall.nextY = -310; fall.nextR = 520; fall.shrinkStartMs = 119800u;
+    fall.shrinkEndMs = 289800u; fall.myX = 104; fall.myY = 96; fall.stages = 6;
+    fall.fallMsLeft = 8000u; fall.landMsLeft = 20000u; fall.fallMs = 8000u;
+    CHECK_EQ(EncodeRoyaleState(fall), "7001,2,20000,24,24,1,0,,104,96,1,-267,-267,1080,-150,-310,520,119800,289800,0,,"
+        "104,96,6,8000,20000,8000");
+    CHECK_EQN(SplitStr(EncodeRoyaleState(fall), ',').size(), 27u);
+    fall.phaseMsLeft = 12000; fall.shrinkStartMs = 111800u; fall.shrinkEndMs = 281800u;
+    fall.fallMsLeft = 0u; fall.landMsLeft = 12000u;   // the parachute is open: 0, not empty
+    CHECK_EQ(EncodeRoyaleState(fall), "7001,2,12000,24,24,1,0,,104,96,1,-267,-267,1080,-150,-310,520,111800,281800,0,,"
+        "104,96,6,0,12000,8000");
+    fall.fallMsLeft.reset(); fall.landMsLeft.reset(); fall.fallMs.reset();   // landed, or an older module: they go
+    CHECK_EQ(EncodeRoyaleState(fall), "7001,2,12000,24,24,1,0,,104,96,1,-267,-267,1080,-150,-310,520,111800,281800,0,,"
+        "104,96,6");
+    fall.stages.reset(); fall.fallMsLeft = 4294967295u; fall.landMsLeft = 0u; fall.fallMs = 0u;   // the full range
+    CHECK_EQ(EncodeRoyaleState(fall), "7001,2,12000,24,24,1,0,,104,96,1,-267,-267,1080,-150,-310,520,111800,281800,0,,"
+        "104,96,,4294967295,0,0");
+    RoyaleState last;
+    last.fallMs = 8000u;   // every empty field before the last one stays
+    CHECK_EQ(EncodeRoyaleState(last), "0,0,0,0,0,0,0,,,,0,0,0,0,,,,,,0,,,,,,,8000");
 
     RoyaleMap mp;
     mp.mapId = 566; mp.minX = 1500; mp.maxX = 2800; mp.minY = 900; mp.maxY = 2200; mp.lobbyX = 2166; mp.lobbyY = 1564;
@@ -1646,6 +1670,108 @@ TEST("royale: ROYK announce is superseded by BGANN: the field is never written, 
     k.killerKills.reset();
     k.announce = RoyaleAnnounce::Godlike;
     CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,P,23");   // the empty fields at the end go
+}
+
+// One "### " block of the document: from its heading to the next heading of any level.
+static std::string DocBlock(std::string const& doc, std::string const& heading)
+{
+    std::size_t const at = doc.find("\n" + heading);
+    if (at == std::string::npos)
+        return std::string();
+    std::size_t const end = doc.find("\n#", at + 1);
+    return doc.substr(at, end == std::string::npos ? std::string::npos : end - at);
+}
+
+TEST("royale: the storm beast: ROYV B A K F, ROYO X with its health (0-100) and H, ROYK cause B")
+{
+    static_assert(BLEAKHOLD_UI_ROYALE_BOSS == 1, "a server module tests this macro before it sends the boss");
+    // ROYV: it stirs at a place (a place name, cut at 40 bytes like ROYM's), wakes, is slain (the name is who dealt it
+    // the most damage, a character: 48 bytes) or flees
+    RoyaleEvent ev;
+    ev.kind = RoyaleEventKind::BossIncoming; ev.x = -150; ev.y = -310; ev.msLeft = 30000u; ev.name = "Crow's Rise";
+    CHECK_EQ(EncodeRoyaleEvent(ev), "B,0,-150,-310,30000,Crow's Rise");
+    ev.name = std::string(60, 'p');
+    CHECK_EQN(SplitStr(EncodeRoyaleEvent(ev), ',')[5].size(), RoyalePlaceBytes);
+    ev.kind = RoyaleEventKind::BossAwake; ev.msLeft.reset(); ev.name.clear();
+    CHECK_EQ(EncodeRoyaleEvent(ev), "A,0,-150,-310");
+    ev.kind = RoyaleEventKind::BossSlain; ev.name = std::string(60, 'n');
+    CHECK_EQN(SplitStr(EncodeRoyaleEvent(ev), ',')[5].size(), RoyaleNameBytes);
+    ev.name = "Aldric Stormwind";
+    CHECK_EQ(EncodeRoyaleEvent(ev), "K,0,-150,-310,,Aldric Stormwind");
+    ev.kind = RoyaleEventKind::BossFled; ev.name.clear();
+    CHECK_EQ(EncodeRoyaleEvent(ev), "F,0,-150,-310");
+
+    // ROYO X: incoming (wakes in msLeft), awake, gone; its subtype is its health in percent. H: ready, opened.
+    RoyaleObjects ob;
+    ob.matchId = 7001; ob.full = false;
+    RoyaleObject boss;
+    boss.objId = 30; boss.kind = RoyaleObjectKind::Boss; boss.subtype = 100; boss.x = -150; boss.y = -310;
+    boss.state = RoyaleObjectState::Incoming; boss.msLeft = 30000u;
+    RoyaleObject hoard;
+    hoard.objId = 31; hoard.kind = RoyaleObjectKind::Hoard; hoard.x = -148; hoard.y = -305;
+    hoard.state = RoyaleObjectState::Ready;
+    ob.objects = { boss, hoard };
+    CHECK_EQ(EncodeRoyaleObjects(ob), "7001,0;30,X,100,-150,-310,3,30000;31,H,0,-148,-305,1");
+    // the health is clamped to 0-100 whatever the caller computed (a heal past the maximum, a wrapped subtraction)
+    struct { uint32_t in; char const* out; } const health[] = {
+        { 0u, "0" }, { 1u, "1" }, { 57u, "57" }, { 100u, "100" }, { 101u, "100" }, { 4294967295u, "100" } };
+    boss.state = RoyaleObjectState::Ready; boss.msLeft.reset();
+    for (auto const& h : health)
+    {
+        boss.subtype = h.in;
+        ob.objects = { boss };
+        CHECK_EQ(EncodeRoyaleObjects(ob), "7001,0;30,X," + std::string(h.out) + ",-150,-310,1");
+    }
+    boss.subtype = 0; boss.state = RoyaleObjectState::Hidden;   // slain or fled: gone from the map
+    hoard.state = RoyaleObjectState::Opened;
+    RoyaleObject buff;   // the other kinds' subtypes are as before
+    buff.objId = 4; buff.kind = RoyaleObjectKind::Buff; buff.subtype = static_cast<uint32_t>(RoyaleBuff::Berserk);
+    buff.x = 220; buff.y = -250; buff.state = RoyaleObjectState::Ready;
+    ob.objects = { boss, hoard, buff };
+    CHECK_EQ(EncodeRoyaleObjects(ob), "7001,0;30,X,0,-150,-310,0;31,H,0,-148,-305,4;4,B,3,220,-250,1");
+
+    // ROYK cause B: the beast itself (class 0, no tally), or the player credited for the elimination
+    RoyaleKill k;
+    k.killerName = "Thundermaw"; k.killerClassId = 0u; k.victimName = "Brenna"; k.victimClassId = 8;
+    k.cause = RoyaleCause::Boss; k.aliveAfter = 21;
+    CHECK_EQ(EncodeRoyaleKill(k), "Thundermaw,0,Brenna,8,B,21");
+    k.killerName = "Aldric"; k.killerClassId = 1u; k.killerKills = 4u;
+    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,B,21,4");
+
+    // the new letters are new in their message, and the document lists every one of them
+    auto L = [](auto e) { return static_cast<char>(e); };
+    using EK = RoyaleEventKind;
+    using OK = RoyaleObjectKind;
+    using RC = RoyaleCause;
+    std::string const events{ L(EK::Revealed), L(EK::StormMoving), L(EK::SupplyIncoming), L(EK::SupplyLanded),
+        L(EK::SupplyOpened), L(EK::PlayersLeft), L(EK::Winner), L(EK::BossIncoming), L(EK::BossAwake),
+        L(EK::BossSlain), L(EK::BossFled) };
+    std::string const objects{ L(OK::ShadowSight), L(OK::Buff), L(OK::Supply), L(OK::Boss), L(OK::Hoard) };
+    std::string const causes{ L(RC::Player), L(RC::Storm), L(RC::Fall), L(RC::Left), L(RC::Afk), L(RC::Boss) };
+    CHECK_EQ(events, "RSDLONWBAKF");
+    CHECK_EQ(objects, "SBDXH");
+    CHECK_EQ(causes, "PSFLAB");
+    for (std::string const* s : { &events, &objects, &causes })
+        CHECK_EQN(std::set<char>(s->begin(), s->end()).size(), s->size());
+    std::string const doc = bhtest::ReadFile(g_repo + "/docs/BleakholdProtocol.md");
+    std::string const royv = DocBlock(doc, "### ROYV");
+    std::string const royo = DocBlock(doc, "### ROYO");
+    std::string const royk = DocBlock(doc, "### ROYK");
+    CHECK(!royv.empty() && !royo.empty() && !royk.empty());
+    for (char c : events)
+        CHECK_MSG(royv.find("| `" + std::string(1, c) + "` |") != std::string::npos, std::string("ROYV ") + c);
+    for (char c : objects)
+        CHECK_MSG(royo.find("`" + std::string(1, c) + "` ") != std::string::npos, std::string("ROYO ") + c);
+    for (char c : causes)
+        CHECK_MSG(royk.find("`" + std::string(1, c) + "` ") != std::string::npos, std::string("ROYK ") + c);
+    // the health's range and the cadence, read as running text (the document wraps its lines)
+    std::string flat;
+    for (char c : royo)
+        if (!(c == '\n' || c == ' ') || (!flat.empty() && flat.back() != ' '))
+            flat += c == '\n' ? ' ' : c;
+    CHECK(flat.find("its health in percent, 0 to 100") != std::string::npos);
+    CHECK(flat.find("moved by 2 points or more") != std::string::npos);
+    CHECK(flat.find("at most once a second") != std::string::npos);
 }
 
 // ---------------------------------------------------------------------------------------------------

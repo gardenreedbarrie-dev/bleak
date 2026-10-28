@@ -1,11 +1,18 @@
 -- Bleakhold: Bleakhold Royale (docs/BleakholdProtocol.md section 17), the core. Everything shown is server state
 -- (QUEUE kind B, ROYS ROYM ROYO ROYK ROYV ROYE, parsed in State.lua); the client counts the timers down and sends
--- only the player's wishes: QJOIN B / QLEAVE / QREPLY (the queue and its ready check), RDROP (a landing pin),
--- RDEPLOY (the parachute) and RSPEC (the spectator camera). Bleakhold.exe also draws the storm circle as a wall in the
--- world (RoyaleHud.lua hands it the circle: BleakholdStorm_Set). This file holds what the map (RoyaleMap.lua) and the
--- HUD (RoyaleHud.lua) share: the match helpers (storm circle now, the player's own position), the intents with their
--- client-side gates, the patch gate, and the queue side: the Royale page of Activities, the ready check popup, the
--- minimap orb, /bh royale and a scripted match for /bh demo.
+-- only the player's wishes: QJOIN B / QLEAVE / QREPLY (the queue and its ready check), RDROP (a landing pin) and
+-- RSPEC (the spectator camera); the parachute opens by itself (RoyaleDrop.lua shows the drop, RDEPLOY goes unused).
+-- Bleakhold.exe also draws the storm circle as a wall in the world (RoyaleHud.lua hands it the circle:
+-- BleakholdStorm_Set). This file holds what the map (RoyaleMap.lua) and the HUD (RoyaleHud.lua) share: the match
+-- helpers (storm circle now, the player's own position), the intents with their client-side gates, the patch gate,
+-- and the queue side: the Royale page of Activities, the ready check popup, the minimap orb, /bh royale with the
+-- Royale options (motion, sounds, view distance, minimap storm, HUD scale), the routing of Royale toasts to the
+-- banner during a match, sample screens for /bh royale preview and a scripted match for /bh demo. Both feed sample
+-- frames through the real receive path (Demo.Push); a preview answers its own intents and never sends them.
+--
+-- The client's Lua (Lua 5.1.1-5.1.3's code generator, Engine/Source/lua-5.1/src/lcode.c) miscompiles an arithmetic
+-- whose constant operand sits past index 255 of its function: the frames and pages here are built inside functions,
+-- each with its own constants, so this file's main chunk stays under that (test_royale_glue.lua checks it).
 --
 -- Two gates before QJOIN goes out: HELLO feature bit 4096 (the realm runs the mode) and the map patch, tested with
 -- Texture:SetTexture on a marker BLP that MapForge packs into patch-Q (a client without it cannot load map 901).
@@ -17,16 +24,16 @@ local C = UI.C
 local S = ns.S
 local A = ns.Activities
 
-local floor, ceil, max, min, sqrt = math.floor, math.ceil, math.max, math.min, math.sqrt
+local floor, ceil, max, min, sqrt, cos, sin = math.floor, math.ceil, math.max, math.min, math.sqrt, math.cos, math.sin
 
 local R = {}
 ns.Royale = R
 
-R.MAP_ID = 901                    -- the island (MapForge bleakhold_royale.json); its picture is Art\Royale\Map
+R.MAP_ID = 901                    -- the island (MapForge bleakhold_royale.json); its picture is Art\Royale\IslandMap
 R.ACTIVITY = 901                  -- the mode id QJOIN B carries (the server's Bleakhold.Royale.ActivityId)
 R.ROLES = 4                       -- ignored by the server for Royale; damage, like the Rift's default
 R.MARKER = "Interface\\Bleakhold\\Royale\\MarkerV2"    -- in v2's patch-Q (MapForge archives.marker_texture)
-R.MAP_TEX = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\Map"
+R.MAP_TEX = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\IslandMap"
 R.THUMB_TEX = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\MapThumb"
 R.MAP_FILE = "BleakholdRoyale"    -- the WorldMapArea row MapForge writes for the map (world_map_area.name)
 R.WORLD_MAP_ASPECT = 1002 / 668   -- MapForge widens that row to the world map's frame (dbc/forge.py world_map_bounds)
@@ -37,6 +44,7 @@ R.PATCH_TEXT = "Install the latest client patch"
 R.KICKER = "BLEAKHOLD ROYALE"
 -- a little above the server's limits (section 8): RDROP and RSPEC 0.5 s, RDEPLOY 1 s, the queue 1 s
 R.GAP = { QJOIN = 1.1, QLEAVE = 1.1, QREPLY = 1.1, RDROP = 0.55, RSPEC = 0.55, RDEPLOY = 1.05 }
+R.MATCH_INTENTS = { RDROP = true, RSPEC = true, RDEPLOY = true }   -- a preview answers these itself
 
 R.PHASE = { ARRIVING = 0, COUNTDOWN = 1, DROP = 2, FIGHT = 3, OVERTIME = 4, VICTORY = 5, ENDED = 6, CANCELLED = 7 }
 R.ME = { LOBBY = 0, DROPPING = 1, ALIVE = 2, SPECTATING = 3, LEFT = 4, WINNER = 5 }
@@ -333,16 +341,23 @@ end
 -- Intents (one gate per op, a little above the server's limits; ERR busy waits a full gap)
 ------------------------------------------------------------------------------------------------------
 local nextAt = {}
+local previewRespond      -- the previews' own answer to a match intent (below), while their sample match runs
 
 local function send(op, ...)
-    if not connected() then
+    local sample = R.MATCH_INTENTS[op] and R.InPreview()
+    if not sample and not connected() then
         return false
     end
     local now = GetTime()
     if nextAt[op] and now < nextAt[op] then
         return false
     end
-    local ok = Comm.Send(op, ...)
+    local ok
+    if sample then
+        ok = previewRespond(op, ...)   -- never to the realm: it knows nothing of the sample match
+    else
+        ok = Comm.Send(op, ...)
+    end
     if ok then
         nextAt[op] = now + (R.GAP[op] or 1)
     end
@@ -421,7 +436,7 @@ local function flushPin()
 end
 
 function R.SetPin(x, y)
-    if not connected() then
+    if not R.InPreview() and not connected() then
         return false
     end
     local m = R.Match()
@@ -442,7 +457,8 @@ function R.SetPin(x, y)
     return true
 end
 
--- The parachute: only while falling from the drop, once, 0.5 s into the fall (else the server drops it anyway).
+-- RDEPLOY, kept for the protocol: the UI never sends it (the server opens the parachute by itself and ignores it).
+-- Only while falling from the drop, once, 0.5 s into the fall.
 function R.Deploy()
     local m = R.Match()
     if not m or m.me ~= R.ME.DROPPING or R.deployed or not R.dropAt or GetTime() - R.dropAt < 0.5 then
@@ -454,18 +470,6 @@ function R.Deploy()
         return true
     end
     return false
-end
-
--- Whether the parachute is open: sent, the Slow Fall aura on the player, or past the server's 2.5 s auto-deploy.
-function R.IsDeployed()
-    if R.deployed then
-        return true
-    end
-    if R.dropAt and GetTime() - R.dropAt > 3 then
-        return true
-    end
-    local name = GetSpellInfo and GetSpellInfo(130)
-    return name ~= nil and UnitBuff ~= nil and UnitBuff("player", name) ~= nil
 end
 
 function R.Spectate(dir)
@@ -490,11 +494,6 @@ function R.LeaveMatch()
     else
         go()
     end
-end
-
--- Key binding entry point (Bindings.xml).
-function BleakholdRoyaleDeploy()
-    R.Deploy()
 end
 
 ------------------------------------------------------------------------------------------------------
@@ -574,48 +573,141 @@ ns.On("HELLO", function()
 end)
 
 ------------------------------------------------------------------------------------------------------
--- The ready check popup (QUEUE kind B state 2): a draining ring, Accept and Decline
+-- The ready check (QUEUE kind B state 2): MATCH FOUND on an iron plate, the mode and the match's size, a bronze ring
+-- around the seconds left in the metal numerals, the count who accepted, Accept (gold) and Decline (iron). The ring
+-- is CountRingSmall (128 px at 80 units: 1.1x minified at 1080p). The countdown's Notch art cannot go that small (its
+-- 64 px at 6 units would be minified 7x, and Interface textures have no mipmaps), so a faceted Gem (a 32-px cell at 11
+-- units: 2.1x) sits in each of the ring's 15 sockets, white like a cut stone (a gold one vanished into the bronze).
+-- While n fifteenths of the answer time are left the first n gems, from the top clockwise, stay set, as the
+-- countdown's notches stay lit; a spent one leaves its dark socket, and the last three seconds burn ember.
 ------------------------------------------------------------------------------------------------------
-local rc = CreateFrame("Frame", "BleakholdRoyaleReady", UIParent)
-rc:SetSize(340, 196)
-rc:SetPoint("TOP", UIParent, "TOP", 0, -170)
-rc:SetFrameStrata("DIALOG")
-rc:SetToplevel(true)
-rc:EnableMouse(true)
-UI.Backdrop(rc, C.panel, C.purple, 0.97)
-rc:Hide()
-R.ready = rc
+R.READY = { w = 360, h = 226, top = 18, title = 22, bodyY = -50, ring = 80, ringY = -112, gem = 11, num = 22,
+    countY = -160, button = 28, bottom = 16, acceptW = 140, declineW = 116, gap = 10, hot = 3, lit = "safe",
+    burn = "ember", fade = 0.25, stagger = 0.02, rulePad = 30, ruleGap = 10 }
+local RDY = R.READY
+local rc
 
-rc.top = UI.Solid(rc, C.purple, "BORDER")
-rc.top:SetPoint("TOPLEFT", rc, "TOPLEFT", 1, -1)
-rc.top:SetPoint("TOPRIGHT", rc, "TOPRIGHT", -1, -1)
-rc.top:SetHeight(3)
-rc.kicker = UI.Text(rc, 11, C.purple, "body", "CENTER")
-rc.kicker:SetPoint("TOP", rc, "TOP", 0, -14)
-rc.kicker:SetText(R.KICKER)
-rc.title = UI.Text(rc, 20, C.goldPale, "title", "CENTER")
-rc.title:SetPoint("TOP", rc.kicker, "BOTTOM", 0, -6)
-rc.title:SetText("Your match is ready")
-rc.ring = UI.Ring(rc, 58, 5)
-rc.ring:SetPoint("TOP", rc.title, "BOTTOM", 0, -10)
-rc.count = UI.Text(rc, 12, C.mid, "body", "CENTER")
-rc.count:SetPoint("TOP", rc.ring, "BOTTOM", 0, -6)
-rc.accept = UI.Button(rc, 140, 30, "Accept", "teal", 13)
-rc.accept:SetPoint("BOTTOMRIGHT", rc, "BOTTOM", -6, 14)
-rc.decline = UI.Button(rc, 140, 30, "Decline", "dark", 13)
-rc.decline:SetPoint("BOTTOMLEFT", rc, "BOTTOM", 6, 14)
-rc.waiting = UI.Text(rc, 13, C.teal, "body", "CENTER")
-rc.waiting:SetPoint("BOTTOM", rc, "BOTTOM", 0, 22)
-rc.waiting:Hide()
-
-rc.accept:SetScript("OnClick", function()
-    R.Reply(true)
-end)
-rc.decline:SetScript("OnClick", function()
-    if R.Reply(false) then
-        rc:Hide()
+-- The lit gems for `left` of `total` seconds (all of them while the time is unknown); `fresh` lights them one after
+-- another (the popup's entrance), else a gem going dark fades out.
+local function readyRing(left, total, fresh)
+    local RS = ns.RoyaleStyle
+    local gems = rc.gems
+    local n = #gems
+    local lit = left and U.Clamp(ceil(left / total * n - 1e-6), 0, n) or n
+    local hot = left ~= nil and left <= RDY.hot
+    for i, g in ipairs(gems) do
+        local on = i <= lit
+        if g.hot ~= hot then
+            g.hot = hot
+            g:SetVertexColor(RS.Rgb(hot and RDY.burn or RDY.lit))
+        end
+        if fresh then
+            g.on = on
+            RS.Stop(g, "alpha")
+            g:SetAlpha(0)
+            if on then
+                RS.Tween(g, "alpha", 0, 1, 0.12, "outCubic", { delay = 0.1 + (i - 1) * RDY.stagger })
+            end
+        elseif g.on ~= on then
+            g.on = on
+            RS.Tween(g, "alpha", nil, on and 1 or 0, RDY.fade, on and "outCubic" or "inCubic")
+        end
     end
-end)
+    -- the seconds: a short punch on each new one, an ember flare on the last three
+    local sec = left and ceil(left - 1e-6) or nil
+    local num = rc.num
+    if sec ~= rc.shownSec then
+        local had = rc.shownSec ~= nil
+        rc.shownSec = sec
+        num:SetValue(sec or "")
+        num:SetGlowColor(hot and RDY.burn or "gold")
+        if had and not fresh and sec then
+            RS.Tween(num, "zoom", 1.14, 1, 0.18, "outBack")
+            if hot then
+                RS.Tween(num.glow, "alpha", 0.7, 0, 0.45, "outCubic")
+            end
+        end
+    end
+end
+
+local function buildReady()
+    local RS = ns.RoyaleStyle
+    local DATA = ns.RoyaleArt
+    rc = CreateFrame("Frame", "BleakholdRoyaleReady", UIParent)
+    rc:SetSize(RDY.w, RDY.h)
+    rc:SetPoint("TOP", UIParent, "TOP", 0, -170)
+    rc:SetFrameStrata("DIALOG")
+    rc:SetToplevel(true)
+    rc:EnableMouse(true)
+    rc:Hide()
+    RS.RegisterRoot(rc)
+    R.ready = rc
+    rc.art = RS.Plate(rc, "Plate")
+    rc.shine = RS.Shine(rc.art, 0.5)
+    rc.title = RS.Title(rc, "MATCH FOUND", RDY.title, "gold")
+    rc.title:SetPoint("TOP", rc, "TOP", 0, -RDY.top)
+    rc.body = RS.Text(rc, "body", 13, "parchment", "CENTER")
+    rc.body:SetPoint("TOP", rc, "TOP", 0, RDY.bodyY)
+    UI.OneLine(rc.body, RDY.w - 48)
+    -- the ring, its gems and the seconds in its dark disc
+    local ring = CreateFrame("Frame", nil, rc)
+    ring:SetSize(RDY.ring, RDY.ring)
+    ring:SetPoint("CENTER", rc, "TOP", 0, RDY.ringY)
+    rc.ring = ring
+    rc.ringArt = RS.Art(ring, "CountRingSmall", RDY.ring, RDY.ring, "BORDER")
+    rc.ringArt:SetPoint("CENTER", ring, "CENTER", 0, 0)
+    -- an engraved rule either side, so the ring sits on a line like a medallion
+    local half = RDY.ring / 2 + RDY.ruleGap
+    rc.rules = {}
+    for i, side in ipairs({ -1, 1 }) do
+        local t = RS.Hairline(rc, RDY.w / 2 - RDY.rulePad - half, "bronzeLo", false, "BORDER", 0.9)
+        t:SetPoint(side < 0 and "RIGHT" or "LEFT", rc, "TOP", side * half, RDY.ringY)
+        rc.rules[i] = t
+    end
+    rc.gems = {}
+    for i, s in ipairs(DATA.ring.sockets) do
+        local g = RS.Art(ring, "Gem", RDY.gem, RDY.gem, "ARTWORK", DATA.gem.gem)
+        g:SetPoint("CENTER", ring, "CENTER", cos(s.angle) * s.r * RDY.ring, sin(s.angle) * s.r * RDY.ring)
+        g:SetVertexColor(RS.Rgb(RDY.lit))
+        g.hot, g.on = false, true
+        rc.gems[i] = g
+    end
+    rc.num = RS.Numeral(ring, { cap = RDY.num, glowColor = "gold", glowOver = true })
+    rc.num:SetPoint("CENTER", ring, "CENTER", 0, 0)
+    rc.count = RS.Text(rc, "body", 12, "ash", "CENTER")
+    rc.count:SetPoint("TOP", rc, "TOP", 0, RDY.countY)
+    UI.OneLine(rc.count, RDY.w - 48)
+    -- the answer
+    local bw = RDY.acceptW + RDY.gap + RDY.declineW
+    rc.accept = RS.Button(rc, RDY.acceptW, RDY.button, "Accept", "gold", 13)
+    rc.accept:SetPoint("BOTTOMLEFT", rc, "BOTTOM", -bw / 2, RDY.bottom)
+    rc.decline = RS.Button(rc, RDY.declineW, RDY.button, "Decline", "iron", 13)
+    rc.decline:SetPoint("BOTTOMRIGHT", rc, "BOTTOM", bw / 2, RDY.bottom)
+    rc.waiting = RS.Text(rc, "body", 13, "gold", "CENTER")
+    rc.waiting:SetPoint("BOTTOM", rc, "BOTTOM", 0, RDY.bottom + 7)
+    rc.waiting:SetText("Accepted. Waiting for the others.")
+    rc.waiting:Hide()
+
+    rc.accept:SetScript("OnClick", function()
+        R.Reply(true)
+    end)
+    rc.decline:SetScript("OnClick", function()
+        if R.Reply(false) then
+            RS.Tween(rc, "alpha", nil, 0, 0.2, "inCubic", { onDone = function()
+                rc:Hide()
+            end })
+        end
+    end)
+    local acc = 0
+    rc:SetScript("OnUpdate", function(self, elapsed)
+        acc = acc + (elapsed or 0)
+        if acc >= 0.1 then
+            acc = 0
+            R.UpdateReady()
+        end
+    end)
+end
+buildReady()
 
 function R.ReadyLeft(q)
     q = q or royaleQueue()
@@ -625,7 +717,8 @@ function R.ReadyLeft(q)
     return max(0, q.timeoutSec - (GetTime() - (q.recvAt or GetTime())))
 end
 
-function R.UpdateReady()
+-- Lays the popup out from the queue's state (`fresh`: it just opened); hides it when the proposal is over.
+function R.UpdateReady(fresh)
     local q = royaleQueue()
     if not q or q.state ~= 2 or not q.proposalId then
         rc:Hide()
@@ -637,34 +730,41 @@ function R.UpdateReady()
         return
     end
     local total = q.timeoutSec and q.timeoutSec > 0 and q.timeoutSec or 15
-    rc.ring:SetProgress((left or total) / total, C.purple, C.track)
-    rc.ring.label:SetText(left and tostring(ceil(left)) or "")
-    if q.accepted and q.proposalSize then
-        rc.count:SetText(q.accepted .. " / " .. q.proposalSize .. " accepted")
-    else
-        rc.count:SetText("")
+    readyRing(left, total, fresh)
+    local size = q.proposalSize
+    local body = size and ("Bleakhold Royale · " .. size .. " players") or "Bleakhold Royale"
+    local count = (q.accepted and size) and (q.accepted .. " of " .. size .. " accepted") or ""
+    if rc.body:GetText() ~= body then
+        rc.body:SetText(body)
+    end
+    if (rc.count:GetText() or "") ~= count then
+        rc.count:SetText(count)
     end
     local answered = R.answered and R.answered.id == q.proposalId and R.answered.accept
-    if answered then
-        rc.accept:Hide()
-        rc.decline:Hide()
-        rc.waiting:SetText("Accepted - waiting for the others")
-        rc.waiting:Show()
-    else
-        rc.accept:Show()
-        rc.decline:Show()
-        rc.waiting:Hide()
+    for _, r in ipairs({ rc.accept, rc.decline, rc.waiting }) do
+        if (r == rc.waiting) == (answered and true or false) then
+            r:Show()
+        else
+            r:Hide()
+        end
     end
 end
 
-local rcAcc = 0
-rc:SetScript("OnUpdate", function(self, elapsed)
-    rcAcc = rcAcc + (elapsed or 0)
-    if rcAcc >= 0.2 then
-        rcAcc = 0
-        R.UpdateReady()
-    end
-end)
+-- A new proposal: the plate enters (0.2 s), the title punches in with its glow, a shine crosses it, the gems light
+-- one after another.
+local function showReady()
+    local RS = ns.RoyaleStyle
+    RS.Stop(rc)
+    rc.shownSec = nil
+    rc:SetAlpha(0)
+    rc:Show()
+    R.UpdateReady(true)
+    RS.Tween(rc, "alpha", 0, 1, 0.2, "outCubic")
+    RS.Tween(rc, "offset", { 0, 12 }, { 0, 0 }, 0.2, "outCubic")
+    RS.Tween(rc.title, "zoom", 1.15, 1, 0.22, "outBack")
+    RS.Tween(rc.title.glow, "alpha", 0.8, 0, 0.8, "outCubic")
+    RS.Sweep(rc.shine, 0.1, 0.6)
+end
 
 -- A new Royale proposal opens the popup (with the queue pop sound); any QUEUE redraws or closes it.
 ns.On("STATE", function(topic)
@@ -675,7 +775,7 @@ ns.On("STATE", function(topic)
     if q and q.state == 2 and q.proposalId and q.proposalId ~= R.shownProposal then
         R.shownProposal = q.proposalId
         R.answered = nil
-        rc:Show()
+        showReady()
         if PlaySound then
             PlaySound("PVPTHROUGHQUEUE")
         end
@@ -689,223 +789,227 @@ end)
 -- Activities: the Royale page (the mode's card, the last match). The kill announcer's settings are on the Tasks page
 -- (Activities.lua): the announcer plays in every battleground, Royale or not.
 ------------------------------------------------------------------------------------------------------
-local P = A.NewPage()
-A.AddPage("royale", P)
-R.page = P
+local function buildPage()
+    local P = A.NewPage()
+    A.AddPage("royale", P)
+    R.page = P
 
-local HERO_H = 268
-local THUMB = 236
-local TEXT_X = THUMB + 34
-local TEXT_W = A.PW - TEXT_X - 18
+    local HERO_H = 268
+    local THUMB = 236
+    local TEXT_X = THUMB + 34
+    local TEXT_W = A.PW - TEXT_X - 18
 
-local hero = UI.Box(P, A.PW, HERO_H, C.eraBg, C.eraBorder)
-hero:SetPoint("TOPLEFT", P, "TOPLEFT", 0, 0)
-P.hero = hero
-hero.thumbFrame = UI.Box(hero, THUMB, THUMB, C.bg, C.eraBorder)
-hero.thumbFrame:SetPoint("TOPLEFT", hero, "TOPLEFT", 16, -16)
-hero.thumb = hero.thumbFrame:CreateTexture(nil, "ARTWORK")
-hero.thumb:SetPoint("TOPLEFT", hero.thumbFrame, "TOPLEFT", 1, -1)
-hero.thumb:SetPoint("BOTTOMRIGHT", hero.thumbFrame, "BOTTOMRIGHT", -1, 1)
-hero.thumb:SetTexture(R.THUMB_TEX)
-hero.kicker = UI.Text(hero, 11, C.purple)
-hero.kicker:SetPoint("TOPLEFT", hero, "TOPLEFT", TEXT_X, -22)
-hero.kicker:SetText(R.KICKER)
-hero.title = UI.Text(hero, 26, C.goldPale, "title")
-hero.title:SetPoint("TOPLEFT", hero.kicker, "BOTTOMLEFT", 0, -4)
-hero.title:SetText("Last one standing")
-hero.facts = UI.Text(hero, 13, C.goldLight)
-hero.facts:SetPoint("TOPLEFT", hero.title, "BOTTOMLEFT", 0, -6)
-hero.facts:SetText("Solo · Level 80 · 20-40 players")
-hero.text = UI.Text(hero, 12, C.mid)
-hero.text:SetPoint("TOPLEFT", hero.facts, "BOTTOMLEFT", 0, -10)
-hero.text:SetWidth(TEXT_W)
-hero.text:SetJustifyV("TOP")
-hero.text:SetHeight(48)
-hero.text:SetText("Drop onto the island with up to 39 others, loot crates and orbs and outlast the storm. One life: "
-    .. "the last player standing wins. Your own gear counts; the island's loot is yours for the match.")
-hero.status = UI.Text(hero, 15, C.text)
-hero.status:SetPoint("TOPLEFT", hero.text, "BOTTOMLEFT", 0, -10)
-UI.OneLine(hero.status, TEXT_W)
-hero.detail = UI.Text(hero, 12, C.dim)
-hero.detail:SetPoint("TOPLEFT", hero.status, "BOTTOMLEFT", 0, -4)
-UI.OneLine(hero.detail, TEXT_W)
-hero.join = UI.Button(hero, 200, 36, "Queue", "gold", 14)
-hero.join:SetPoint("BOTTOMLEFT", hero, "BOTTOMLEFT", TEXT_X, 18)
-hero.notice = UI.Text(hero, 12, C.red)
-hero.notice:SetPoint("LEFT", hero.join, "RIGHT", 14, 0)
-UI.OneLine(hero.notice, TEXT_W - 214)
-P.join = hero.join
+    local hero = UI.Box(P, A.PW, HERO_H, C.eraBg, C.eraBorder)
+    hero:SetPoint("TOPLEFT", P, "TOPLEFT", 0, 0)
+    P.hero = hero
+    hero.thumbFrame = UI.Box(hero, THUMB, THUMB, C.bg, C.eraBorder)
+    hero.thumbFrame:SetPoint("TOPLEFT", hero, "TOPLEFT", 16, -16)
+    hero.thumb = hero.thumbFrame:CreateTexture(nil, "ARTWORK")
+    hero.thumb:SetPoint("TOPLEFT", hero.thumbFrame, "TOPLEFT", 1, -1)
+    hero.thumb:SetPoint("BOTTOMRIGHT", hero.thumbFrame, "BOTTOMRIGHT", -1, 1)
+    hero.thumb:SetTexture(R.THUMB_TEX)
+    hero.kicker = UI.Text(hero, 11, C.purple)
+    hero.kicker:SetPoint("TOPLEFT", hero, "TOPLEFT", TEXT_X, -22)
+    hero.kicker:SetText(R.KICKER)
+    hero.title = UI.Text(hero, 26, C.goldPale, "title")
+    hero.title:SetPoint("TOPLEFT", hero.kicker, "BOTTOMLEFT", 0, -4)
+    hero.title:SetText("Last one standing")
+    hero.facts = UI.Text(hero, 13, C.goldLight)
+    hero.facts:SetPoint("TOPLEFT", hero.title, "BOTTOMLEFT", 0, -6)
+    hero.facts:SetText("Solo · Level 80 · 20-40 players")
+    hero.text = UI.Text(hero, 12, C.mid)
+    hero.text:SetPoint("TOPLEFT", hero.facts, "BOTTOMLEFT", 0, -10)
+    hero.text:SetWidth(TEXT_W)
+    hero.text:SetJustifyV("TOP")
+    hero.text:SetHeight(48)
+    hero.text:SetText("Drop onto the island with up to 39 others, loot crates and orbs and outlast the storm. "
+        .. "One life: the last player standing wins. Your own gear counts; the island's loot is yours for the match.")
+    hero.status = UI.Text(hero, 15, C.text)
+    hero.status:SetPoint("TOPLEFT", hero.text, "BOTTOMLEFT", 0, -10)
+    UI.OneLine(hero.status, TEXT_W)
+    hero.detail = UI.Text(hero, 12, C.dim)
+    hero.detail:SetPoint("TOPLEFT", hero.status, "BOTTOMLEFT", 0, -4)
+    UI.OneLine(hero.detail, TEXT_W)
+    hero.join = UI.Button(hero, 200, 36, "Queue", "gold", 14)
+    hero.join:SetPoint("BOTTOMLEFT", hero, "BOTTOMLEFT", TEXT_X, 18)
+    hero.notice = UI.Text(hero, 12, C.red)
+    hero.notice:SetPoint("LEFT", hero.join, "RIGHT", 14, 0)
+    UI.OneLine(hero.notice, TEXT_W - 214)
+    P.join = hero.join
 
-hero.join:SetScript("OnClick", function()
-    local q = royaleQueue()
-    if q and (q.state == 1 or q.state == 2) then
-        R.Leave()
-    else
-        R.Join()
-    end
-end)
-
-local CARD_W = floor((A.PW - 12) / 2)
-local CARD_H = A.PH - HERO_H - 12
-
-local how = UI.Box(P, CARD_W, CARD_H, C.card, C.border)
-how:SetPoint("TOPLEFT", hero, "BOTTOMLEFT", 0, -12)
-how.label = UI.Text(how, 11, C.dim)
-how.label:SetPoint("TOPLEFT", how, "TOPLEFT", 12, -12)
-how.label:SetText("HOW IT WORKS")
-how.lines = {}
-local HOW = {
-    "Queue alone. At 20 players a ready check goes out; answer it within 15 seconds.",
-    "Brawl on Sunwatch Overlook while the others arrive, and click the island map to set your landing pin.",
-    "Drop from high above your pin; your parachute opens by itself (or bind a key to open it).",
-    "Loot crates, orbs and supply drops, and stay inside the storm circle: it closes in stages.",
-    "Eliminated players watch the rest, queue again or leave. Honor and Shards by placement.",
-}
-for i, line in ipairs(HOW) do
-    local num = UI.Text(how, 13, C.purple, "title")
-    num:SetPoint("TOPLEFT", how, "TOPLEFT", 12, -34 - (i - 1) * 38)
-    num:SetText(tostring(i))
-    local t = UI.Text(how, 12, C.mid)
-    t:SetPoint("TOPLEFT", how, "TOPLEFT", 32, -34 - (i - 1) * 38)
-    t:SetWidth(CARD_W - 44)
-    t:SetJustifyV("TOP")
-    t:SetHeight(34)
-    t:SetText(line)
-    how.lines[i] = t
-end
-P.how = how
-
-local last = UI.Box(P, CARD_W, CARD_H, C.card, C.border)
-last:SetPoint("TOPRIGHT", hero, "BOTTOMRIGHT", 0, -12)
-last.label = UI.Text(last, 11, C.dim)
-last.label:SetPoint("TOPLEFT", last, "TOPLEFT", 12, -12)
-last.label:SetText("YOUR LAST MATCH")
-last.place = UI.Text(last, 22, C.goldPale, "title")
-last.place:SetPoint("TOPLEFT", last.label, "BOTTOMLEFT", 0, -6)
-UI.OneLine(last.place, CARD_W - 24)
-last.lines = {}
-for i = 1, 4 do
-    local l = UI.Text(last, 12, i == 1 and C.text or C.mid)
-    l:SetPoint("TOPLEFT", last, "TOPLEFT", 12, -64 - (i - 1) * 18)
-    UI.OneLine(l, CARD_W - 24)
-    last.lines[i] = l
-end
-P.last = last
-
-local QUEUE_STATUS = { [1] = "In the queue", [2] = "Match found - answer the ready check", [3] = "In a match" }
-
--- "#1 Victory" or "#7 of 32".
-function R.PlaceText(placement, total)
-    if placement == 1 then
-        return "#1 Victory"
-    end
-    return "#" .. placement .. (total and (" of " .. total) or "")
-end
-
-function P:Tick()
-    local q = royaleQueue()
-    if not q then
-        return
-    end
-    local since = GetTime() - (q.recvAt or GetTime())
-    if q.state == 1 then
-        local txt = "Waiting " .. U.Clock((q.queuedSec or 0) + since)
-        if q.matchesRunning and q.matchesRunning > 0 then
-            txt = txt .. "  -  " .. q.matchesRunning .. (q.matchesRunning == 1 and " match" or " matches") .. " running"
+    hero.join:SetScript("OnClick", function()
+        local q = royaleQueue()
+        if q and (q.state == 1 or q.state == 2) then
+            R.Leave()
+        else
+            R.Join()
         end
-        hero.detail:SetText(txt)
-    elseif q.state == 2 then
-        local left = R.ReadyLeft(q)
-        hero.detail:SetText(left and ("Answer within " .. ceil(left) .. " s") or "")
-    end
-end
+    end)
 
-function P:Refresh()
-    local q = royaleQueue()
-    local st = q and q.state or 0
-    local block = R.QueueBlock()
-    if st == 1 or st == 2 then
-        local n = q.queued and q.minPlayers and (q.queued .. " / " .. q.minPlayers .. " queued") or QUEUE_STATUS[st]
-        hero.status:SetText(st == 2 and QUEUE_STATUS[2] or n)
-        UI.SetColor(hero.status, st == 2 and C.teal or C.goldLight)
-        hero.join:SetLabel("Leave queue")
-        hero.join:SetStyle("dark")
-        hero.join:SetActive(true)
-    elseif st == 3 or R.Match() then
-        hero.status:SetText(QUEUE_STATUS[3])
-        UI.SetColor(hero.status, C.teal)
-        hero.detail:SetText("")
-        local m = R.Match()
-        local spectator = m and (m.me == R.ME.SPECTATING or m.me == R.ME.LEFT)
-        hero.join:SetLabel(spectator and "Queue again" or "In a match")
-        hero.join:SetStyle("gold")
-        hero.join:SetActive(spectator and not block)
-    else
-        local status = "Not queued"
-        if q and q.queued and q.minPlayers then
-            status = q.queued .. " / " .. q.minPlayers .. " queued"
+    local CARD_W = floor((A.PW - 12) / 2)
+    local CARD_H = A.PH - HERO_H - 12
+
+    local how = UI.Box(P, CARD_W, CARD_H, C.card, C.border)
+    how:SetPoint("TOPLEFT", hero, "BOTTOMLEFT", 0, -12)
+    how.label = UI.Text(how, 11, C.dim)
+    how.label:SetPoint("TOPLEFT", how, "TOPLEFT", 12, -12)
+    how.label:SetText("HOW IT WORKS")
+    how.lines = {}
+    local HOW = {
+        "Queue alone. At 20 players a ready check goes out; answer it within 15 seconds.",
+        "Brawl on Sunwatch Overlook while the others arrive, and click the island map to set your landing pin.",
+        "You drop from high above your landing, fall for 8 s, and your parachute opens by itself.",
+        "Loot crates, orbs and supply drops, and stay inside the storm circle: it closes in stages.",
+        "Eliminated players watch the rest, queue again or leave. Honor and Shards by placement.",
+    }
+    for i, line in ipairs(HOW) do
+        local num = UI.Text(how, 13, C.purple, "title")
+        num:SetPoint("TOPLEFT", how, "TOPLEFT", 12, -34 - (i - 1) * 38)
+        num:SetText(tostring(i))
+        local t = UI.Text(how, 12, C.mid)
+        t:SetPoint("TOPLEFT", how, "TOPLEFT", 32, -34 - (i - 1) * 38)
+        t:SetWidth(CARD_W - 44)
+        t:SetJustifyV("TOP")
+        t:SetHeight(34)
+        t:SetText(line)
+        how.lines[i] = t
+    end
+    P.how = how
+
+    local last = UI.Box(P, CARD_W, CARD_H, C.card, C.border)
+    last:SetPoint("TOPRIGHT", hero, "BOTTOMRIGHT", 0, -12)
+    last.label = UI.Text(last, 11, C.dim)
+    last.label:SetPoint("TOPLEFT", last, "TOPLEFT", 12, -12)
+    last.label:SetText("YOUR LAST MATCH")
+    last.place = UI.Text(last, 22, C.goldPale, "title")
+    last.place:SetPoint("TOPLEFT", last.label, "BOTTOMLEFT", 0, -6)
+    UI.OneLine(last.place, CARD_W - 24)
+    last.lines = {}
+    for i = 1, 4 do
+        local l = UI.Text(last, 12, i == 1 and C.text or C.mid)
+        l:SetPoint("TOPLEFT", last, "TOPLEFT", 12, -64 - (i - 1) * 18)
+        UI.OneLine(l, CARD_W - 24)
+        last.lines[i] = l
+    end
+    P.last = last
+
+    local QUEUE_STATUS = { [1] = "In the queue", [2] = "Match found - answer the ready check", [3] = "In a match" }
+
+    -- "#1 Victory" or "#7 of 32".
+    function R.PlaceText(placement, total)
+        if placement == 1 then
+            return "#1 Victory"
         end
-        hero.status:SetText(status)
-        UI.SetColor(hero.status, C.text)
-        hero.detail:SetText("")
-        hero.join:SetLabel("Queue")
-        hero.join:SetStyle("gold")
-        hero.join:SetActive(block == nil)
+        return "#" .. placement .. (total and (" of " .. total) or "")
     end
-    UI.SetText(hero.notice, block or "")
-    P:Tick()
-    -- the last match (this session, or the one saved for this character)
-    local res = S.royaleResult
-    local saved = ns.cdb.royaleLast
-    for _, l in ipairs(last.lines) do
-        l:SetText("")
-    end
-    if res and res.placement then
-        last.place:SetText(R.PlaceText(res.placement, res.total))
-        local kills = res.kills .. (res.kills == 1 and " elimination" or " eliminations")
-        local lines = { kills .. "  -  survived " .. U.Clock(res.survivedSec) }
-        for _, rw in ipairs(res.rewards) do
-            if #lines < #last.lines then
-                lines[#lines + 1] = "+ " .. rw.line
+
+    function P:Tick()
+        local q = royaleQueue()
+        if not q then
+            return
+        end
+        local since = GetTime() - (q.recvAt or GetTime())
+        if q.state == 1 then
+            local txt = "Waiting " .. U.Clock((q.queuedSec or 0) + since)
+            if q.matchesRunning and q.matchesRunning > 0 then
+                txt = txt .. "  -  " .. q.matchesRunning .. (q.matchesRunning == 1 and " match" or " matches")
+                    .. " running"
             end
+            hero.detail:SetText(txt)
+        elseif q.state == 2 then
+            local left = R.ReadyLeft(q)
+            hero.detail:SetText(left and ("Answer within " .. ceil(left) .. " s") or "")
         end
-        for i, l in ipairs(last.lines) do
-            if lines[i] then
-                UI.SetText(l, lines[i])
-            end
-        end
-    elseif type(saved) == "table" and type(saved.placement) == "number" then
-        last.place:SetText(R.PlaceText(saved.placement, type(saved.total) == "number" and saved.total or nil))
-        if type(saved.kills) == "number" then
-            last.lines[1]:SetText(saved.kills .. (saved.kills == 1 and " elimination" or " eliminations"))
-        end
-    else
-        last.place:SetText("No match yet")
     end
-end
 
-function P:OnOpen()
-    Comm.Get("QUEUE")
-end
-
-P:SetScript("OnUpdate", function(self, elapsed)
-    self.acc = (self.acc or 0) + (elapsed or 0)
-    if self.acc >= 0.5 then
-        self.acc = 0
+    function P:Refresh()
+        local q = royaleQueue()
+        local st = q and q.state or 0
+        local block = R.QueueBlock()
+        if st == 1 or st == 2 then
+            local n = q.queued and q.minPlayers and (q.queued .. " / " .. q.minPlayers .. " queued") or QUEUE_STATUS[st]
+            hero.status:SetText(st == 2 and QUEUE_STATUS[2] or n)
+            UI.SetColor(hero.status, st == 2 and C.teal or C.goldLight)
+            hero.join:SetLabel("Leave queue")
+            hero.join:SetStyle("dark")
+            hero.join:SetActive(true)
+        elseif st == 3 or R.Match() then
+            hero.status:SetText(QUEUE_STATUS[3])
+            UI.SetColor(hero.status, C.teal)
+            hero.detail:SetText("")
+            local m = R.Match()
+            local spectator = m and (m.me == R.ME.SPECTATING or m.me == R.ME.LEFT)
+            hero.join:SetLabel(spectator and "Queue again" or "In a match")
+            hero.join:SetStyle("gold")
+            hero.join:SetActive(spectator and not block)
+        else
+            local status = "Not queued"
+            if q and q.queued and q.minPlayers then
+                status = q.queued .. " / " .. q.minPlayers .. " queued"
+            end
+            hero.status:SetText(status)
+            UI.SetColor(hero.status, C.text)
+            hero.detail:SetText("")
+            hero.join:SetLabel("Queue")
+            hero.join:SetStyle("gold")
+            hero.join:SetActive(block == nil)
+        end
+        UI.SetText(hero.notice, block or "")
         P:Tick()
+        -- the last match (this session, or the one saved for this character)
+        local res = S.royaleResult
+        local saved = ns.cdb.royaleLast
+        for _, l in ipairs(last.lines) do
+            l:SetText("")
+        end
+        if res and res.placement then
+            last.place:SetText(R.PlaceText(res.placement, res.total))
+            local kills = res.kills .. (res.kills == 1 and " elimination" or " eliminations")
+            local lines = { kills .. "  -  survived " .. U.Clock(res.survivedSec) }
+            for _, rw in ipairs(res.rewards) do
+                if #lines < #last.lines then
+                    lines[#lines + 1] = "+ " .. rw.line
+                end
+            end
+            for i, l in ipairs(last.lines) do
+                if lines[i] then
+                    UI.SetText(l, lines[i])
+                end
+            end
+        elseif type(saved) == "table" and type(saved.placement) == "number" then
+            last.place:SetText(R.PlaceText(saved.placement, type(saved.total) == "number" and saved.total or nil))
+            if type(saved.kills) == "number" then
+                last.lines[1]:SetText(saved.kills .. (saved.kills == 1 and " elimination" or " eliminations"))
+            end
+        else
+            last.place:SetText("No match yet")
+        end
     end
-end)
 
-ns.On("STATE", function(topic)
-    if (topic == "QUEUE" or topic == "ROYS" or topic == "ROYE") and P:IsVisible() then
-        P:Refresh()
+    function P:OnOpen()
+        Comm.Get("QUEUE")
     end
-end)
 
--- The last result, kept per character for the card after a relog.
-ns.On("ROYALE_RESULT", function(res)
-    ns.cdb.royaleLast = { placement = res.placement, total = res.total, kills = res.kills, matchId = res.matchId }
-end)
+    P:SetScript("OnUpdate", function(self, elapsed)
+        self.acc = (self.acc or 0) + (elapsed or 0)
+        if self.acc >= 0.5 then
+            self.acc = 0
+            P:Tick()
+        end
+    end)
+
+    ns.On("STATE", function(topic)
+        if (topic == "QUEUE" or topic == "ROYS" or topic == "ROYE") and P:IsVisible() then
+            P:Refresh()
+        end
+    end)
+
+    -- The last result, kept per character for the card after a relog.
+    ns.On("ROYALE_RESULT", function(res)
+        ns.cdb.royaleLast = { placement = res.placement, total = res.total, kills = res.kills, matchId = res.matchId }
+    end)
+end
+buildPage()
 
 ------------------------------------------------------------------------------------------------------
 -- Opening: /bh royale, the TOAST target `royale`, the minimap orb
@@ -939,36 +1043,104 @@ local function orbLines()
     return lines
 end
 
-R.orb = ns.Orbs.Add({
-    key = "royale", glyph = "sword", title = "Bleakhold Royale", angle = 115,
-    available = R.Live,
-    onClick = function()
-        if R.Match() and S.royaleMap then
-            UI.Open("royalemap", true)
-        else
-            openPage(true)
-        end
-    end,
-    lines = orbLines,
-    update = function(b)
-        local q = royaleQueue()
-        if q and (q.state == 1 or q.state == 2) then
-            b.pulse = (b.pulse or 0) + 0.25
-            b.ring:SetAlpha(0.55 + 0.45 * math.abs(math.sin(b.pulse * 2)))
-        else
-            b.ring:SetAlpha(1)
-        end
-    end,
-})
+local function addOrb()
+    R.orb = ns.Orbs.Add({
+        key = "royale", glyph = "sword", title = "Bleakhold Royale", angle = 115,
+        available = R.Live,
+        onClick = function()
+            if R.Match() and S.royaleMap then
+                UI.Open("royalemap", true)
+            else
+                openPage(true)
+            end
+        end,
+        lines = orbLines,
+        update = function(b)
+            local q = royaleQueue()
+            if q and (q.state == 1 or q.state == 2) then
+                b.pulse = (b.pulse or 0) + 0.25
+                b.ring:SetAlpha(0.55 + 0.45 * math.abs(math.sin(b.pulse * 2)))
+            else
+                b.ring:SetAlpha(1)
+            end
+        end,
+    })
+end
+addOrb()
 
-local ROYALE_USAGE = "Bleakhold Royale: /bh royale [map|leave|wall [on|off|test|stop]|voice off|male|female|quiet"
-    .. "|normal]"
-ns.AddCommand("royale", ROYALE_USAGE, function(args)
-    local a, b = (args or ""):lower():match("^(%S*)%s*(%S*)")
+------------------------------------------------------------------------------------------------------
+-- The Royale options: /bh royale motion|sounds|farclip on|off, /bh royale minimap on|off, /bh royale scale 0.8-1.4.
+-- Each answers with its state in a line: on its own, or after the change.
+--   motion   royaleMotion (RoyaleStyle.lua): off makes every tween jump to its end and keeps the loops still
+--   sounds   royaleSounds (RoyaleStyle.lua): the ticks, hammer blows, gong, wind, canopy, landing and kill clang
+--   farclip  royaleFarclip (RoyaleDrop.lua): the view distance rises to 1277 for the drop and goes back after it
+--   minimap  royaleMinimap and Bleakhold.exe's bleakStormMinimap (RoyaleMinimap.lua prints its own line)
+--   scale    royaleHudScale (RoyaleStyle.lua): every Royale root frame, and the docked map's fit
+------------------------------------------------------------------------------------------------------
+R.OPTIONS = { motion = true, sounds = true, farclip = true, scale = true }
+
+function R.OptionText(name)
+    local RS = ns.RoyaleStyle
+    if name == "motion" then
+        return "Royale motion: " .. (RS.Motion() and "on." or "off. Every animation jumps to its end.")
+    elseif name == "sounds" then
+        return "Royale sounds: " .. (RS.Sounds() and "on." or "off. No ticks, gong, wind or clang.")
+    elseif name == "farclip" then
+        local RD = ns.RoyaleDrop
+        if RD.FarclipOption() then
+            return "Royale view distance: on. It rises to " .. RD.FARCLIP .. " for the drop and goes back after it."
+        end
+        return "Royale view distance: off. Yours stays as it is."
+    elseif name == "scale" then
+        return string.format("Royale HUD scale: %.2f (%.1f to %.1f).", RS.HudScale(), RS.HUD_SCALE_MIN,
+            RS.HUD_SCALE_MAX)
+    end
+    return nil
+end
+
+-- Sets an option from a command word ("on" or "off"; a number for the scale; nothing leaves it) and returns its line.
+function R.SetOption(name, value)
+    local RS = ns.RoyaleStyle
+    value = value or ""
+    if name == "scale" then
+        if value ~= "" then
+            RS.SetHudScale(value)    -- a word that is no number changes nothing
+        end
+    elseif value == "on" or value == "off" then
+        local on = value == "on"
+        if name == "motion" then
+            RS.SetMotion(on)
+        elseif name == "sounds" then
+            RS.SetSounds(on)
+        elseif name == "farclip" then
+            ns.RoyaleDrop.SetFarclipOption(on)   -- off puts a raised view distance back at once
+        end
+    end
+    return R.OptionText(name)
+end
+
+R.USAGE = "Bleakhold Royale: /bh royale [map|leave|preview countdown|drop|banner|end|map|motion|sounds|farclip"
+    .. "|minimap on|off|scale 0.8-1.4|wall on|off|test|stop|voice off|male|female|quiet|normal]"
+R.PREVIEW_USAGE = "Royale previews: /bh royale preview countdown|drop|banner|end [eliminated]|map"
+
+local function command(args)
+    args = args or ""
+    local a, b = args:lower():match("^(%S*)%s*(%S*)")
+    local rest = args:match("^%S*%s*(.*)$") or ""
     if a == "map" then
         UI.Open("royalemap", true)
     elseif a == "wall" then
-        ns.RoyaleHud.WallCommand((args or ""):match("^%S*%s*(.*)$"))   -- the storm wall (Bleakhold.exe)
+        ns.RoyaleHud.WallCommand(rest)   -- the storm wall (Bleakhold.exe)
+    elseif a == "minimap" then
+        ns.RoyaleMinimap.Command(rest)   -- the storm on the minimap: Bleakhold.exe's, or the addon's dots
+    elseif R.OPTIONS[a] then
+        ns.Print(R.SetOption(a, b))
+    elseif a == "preview" then
+        local kind, arg = rest:lower():match("^(%S*)%s*(%S*)")
+        local ok, why = R.Preview(kind, arg)
+        if not ok then
+            ns.Print(why or R.PREVIEW_USAGE)
+        end
     elseif a == "leave" then
         R.LeaveMatch()
     elseif a == "voice" and (b == "off" or b == "male" or b == "female") then
@@ -980,25 +1152,277 @@ ns.AddCommand("royale", ROYALE_USAGE, function(args)
     else
         openPage(false)
     end
-end)
+end
+ns.AddCommand("royale", R.USAGE, command)
 
 ------------------------------------------------------------------------------------------------------
--- /bh demo: a short scripted match (Demo.lua routes QJOIN B, QREPLY, QLEAVE, RDROP, RSPEC and GET ROYS/ROYM here)
+-- Royale toasts during a match. Toast.lua's plate sits at TOP -110, on the banner's band (RoyaleHud.lua), so while
+-- R.Match() a toast for the Royale page becomes the banner when its title is one of the baked titles (MATCH
+-- CANCELLED, RoyaleHud.lua's), after the countdown's own MATCH CANCELLED has left; any other (the realm's queue
+-- notices, "Bleakhold Royale" over a line) goes to the chat as a line. Outside a match toasts are as they were.
+------------------------------------------------------------------------------------------------------
+R.TOAST_BANNERS = { ["MATCH CANCELLED"] = "blood" }    -- a baked title -> its colour
+R.TOAST_WAIT = 3                                       -- s a banner waits at most for the countdown to leave
+
+local function toastBanner(d, color, waited)
+    local RC = ns.RoyaleCountdown
+    if RC and RC.frame and RC.frame:IsShown() and waited < R.TOAST_WAIT then
+        ns.After(0.1, function()
+            toastBanner(d, color, waited + 0.1)
+        end)
+        return
+    end
+    ns.RoyaleHud.Banner({ key = "toast", title = d.title, color = color, line = d.sub or "" })
+end
+
+-- Returns true when the toast went to the banner or the chat.
+function R.RouteToast(d)
+    if type(d) ~= "table" or d.target ~= "royale" or not R.Match() or not ns.RoyaleHud then
+        return false
+    end
+    local color = R.TOAST_BANNERS[d.title or ""]
+    if color then
+        toastBanner(d, color, 0)
+    else
+        local text = (d.sub and d.sub ~= "") and d.sub or d.title
+        ns.Print(U.Safe(tostring(text or "")))
+    end
+    return true
+end
+
+local function routeToasts()
+    local push = ns.Toast.Push
+    ns.Toast.Push = function(d)
+        if R.RouteToast(d) then
+            return
+        end
+        return push(d)
+    end
+end
+routeToasts()
+
+------------------------------------------------------------------------------------------------------
+-- Sample matches: the frames /bh royale preview and /bh demo feed through the real receive path (Demo.Push)
+------------------------------------------------------------------------------------------------------
+-- The places of Bleakhold Royale v2 (MapForge specs/royale_v2.json pois, ids and radii as the server sends them).
+local function samplePlaces()
+    return {
+        { 5213, "Y", 455, 455, 32, "Sunwatch Overlook" },
+        { 5201, "L", -258, -345, 95, "Sunstair Isle" }, { 5202, "L", -45, -170, 90, "Tidecall Village" },
+        { 5203, "L", 320, -790, 80, "Twinfall Terrace" }, { 5204, "L", -490, -662, 60, "Saltwreck Cove" },
+        { 5205, "L", -776, 339, 80, "Serpent Steps" }, { 5206, "L", -250, 200, 90, "Sunbloom Meadow" },
+        { 5207, "L", 215, -312, 50, "Kingfisher Point" }, { 5208, "L", -255, -745, 80, "Mossvine Hollow" },
+        { 5209, "L", -740, -290, 70, "Bamboo Reach" }, { 5210, "L", 360, 250, 60, "Sunwatch Falls" },
+        { 5215, "L", -790, -784, 70, "Salvagers' Camp" }, { 5216, "L", -425, 50, 50, "Totem Knoll" },
+        { 5217, "L", 80, -520, 50, "Heron Rise" },
+        { 5211, "C", -10, -625, 16, "Stepping Stones" }, { 5212, "C", -785, 263, 18, "Vine Bridge" },
+        { 5214, "C", -150, -275, 14, "Tidewalk" },
+    }
+end
+
+local function samplePush(op, records)
+    if ns.Demo then
+        ns.Demo.Push(op, records)
+    end
+end
+
+-- ROYM: the island's picture frame, the lobby, the storm's bounds and the places.
+local function sampleMap()
+    local recs = { { R.MAP_ID, -1066, 533, -1066, 533, 455, 455, 32, 750, -267, -267 } }
+    for _, p in ipairs(samplePlaces()) do
+        recs[#recs + 1] = p
+    end
+    samplePush("ROYM", recs)
+end
+
+-- The ms from now to `at` (a GetTime() deadline), as a ROYS time field carries them; nil without one.
+local function msTo(at)
+    return at and max(0, floor((at - GetTime()) * 1000 + 0.5)) or nil
+end
+
+-- ROYS of match `id` in state `s`. Its times are GetTime() deadlines (phaseAt, shrinkFrom, shrinkTo, openAt for the
+-- parachute, landAt), so a state sent again later (a pin, the spectator camera, GET ROYS) carries the time left, as
+-- the realm's does; fields 25-27 only while falling.
+local function sampleState(id, s)
+    local fall = s.me == R.ME.DROPPING and s.landAt
+    samplePush("ROYS", { { id, s.phase, msTo(s.phaseAt) or 0, s.alive, s.total or 24, s.me, s.kills or 0,
+        s.placement or "", s.pinX or "", s.pinY or "", s.stage or 0, s.curX, s.curY, s.curR, s.nextX or "",
+        s.nextY or "", s.nextR or "", msTo(s.shrinkFrom) or "", msTo(s.shrinkTo) or "", s.dmg or 0, s.watch or "",
+        s.myX or "", s.myY or "", 6, fall and msTo(s.openAt) or "", fall and msTo(s.landAt) or "",
+        fall and s.fallMs or "" } })
+end
+
+-- ROYO: two supply drops still falling and six orbs.
+local function sampleObjects(id)
+    samplePush("ROYO", { { id, 1 }, { 1, "S", 0, -351, -249, 0, 30000 }, { 2, "S", 0, -775, 350, 0, 30000 },
+        { 3, "B", 1, -15, -150, 1, "" }, { 4, "B", 2, -460, -712, 1, "" }, { 5, "B", 3, 300, -790, 1, "" },
+        { 6, "B", 3, 205, -306, 2, 45000 }, { 7, "B", 1, -235, 215, 1, "" }, { 8, "B", 2, -720, -310, 1, "" } })
+end
+
+------------------------------------------------------------------------------------------------------
+-- /bh royale preview countdown|drop|banner|end|map: each screen with sample data outside a match, for screenshots and
+-- the owner's review. The countdown and the map run a sample match through the real receive path, as /bh demo does,
+-- so the top bar, the docked map, the countdown and the map's layers all show as in a match; a click on the map
+-- (RDROP) is answered here and never reaches the realm. The drop, the banners and the end card play their modules'
+-- own samples (RoyaleDrop.lua RD.Preview, RoyaleHud.lua H.Preview). The player's last result is kept for the
+-- Activities card. A real match (or /bh demo's) refuses previews and ends a running one.
+--   countdown  the lobby just under 16 s before the drop: the map opens docked, the realm's ROYS at 15000 ms brings
+--              circle 1, the ring and its numerals count 15 to 1, the pin locks and the map closes at T-3.6, DROP!
+--   map        the fight: the storm (circle 2 of 6, closing in 1:24), the next circle, the way to it, the places, the
+--              orbs and supply drops; it runs until the map is closed (at most R.PREVIEW_MAP_MAX s)
+------------------------------------------------------------------------------------------------------
+R.PREVIEW_MATCH = 2147483000         -- the sample match's id: far above any id a realm hands out
+R.PREVIEW_LEAD = 15.9                -- s before the sample's drop when the countdown preview starts (no farclip raise)
+R.PREVIEW_MAP_MAX = 300
+R.PREVIEW_HEARTBEAT = 5              -- s between the sample's ROYS (a match goes stale without one, R.STALE)
+local pv                             -- the running sample match: { kind, run, result, at, st, pushedAt }
+local previewRuns = 0
+
+function R.InPreview(m)
+    m = m or S.royale
+    return pv ~= nil and m ~= nil and m.matchId == R.PREVIEW_MATCH
+end
+
+function R.PreviewKind()
+    return pv and pv.kind or nil
+end
+
+local function previewAfter(sec, fn)
+    local run = pv and pv.run
+    ns.After(sec, function()
+        if pv and pv.run == run and R.InPreview() then
+            fn()
+        end
+    end)
+end
+
+-- Ends the sample match (the HUD it brought goes with it) and gives the player's last result back.
+function R.EndPreview()
+    local p = pv
+    if not p then
+        return false
+    end
+    pv = nil
+    if S.royale and S.royale.matchId == R.PREVIEW_MATCH then
+        R.ForgetMatch()
+    end
+    if p.result and not S.royaleResult then
+        S.royaleResult = p.result
+    end
+    return true
+end
+
+local function startSample(kind, st)
+    previewRuns = previewRuns + 1
+    pv = { kind = kind, run = previewRuns, result = S.royaleResult, at = GetTime(), st = st, pushedAt = GetTime() }
+    sampleMap()
+    sampleState(R.PREVIEW_MATCH, st)
+end
+
+local function previewCountdown()
+    local lead = R.PREVIEW_LEAD
+    local st = { phase = R.PHASE.COUNTDOWN, phaseAt = GetTime() + lead, alive = 24, me = R.ME.LOBBY, curX = -267,
+        curY = -267, curR = 860, pinX = -45, pinY = -170, myX = 452, myY = 450 }
+    startSample("countdown", st)
+    previewAfter(lead - 15, function()
+        -- the realm's exact ROYS at 15000 ms reveals circle 1 (the countdown carries its banner in the lobby)
+        st.nextX, st.nextY, st.nextR = -150, -310, 520
+        samplePush("ROYV", { { "R", 1, -150, -310, "", "" } })
+        sampleState(R.PREVIEW_MATCH, st)
+        pv.pushedAt = GetTime()
+    end)
+    previewAfter(lead + 1.5, R.EndPreview)   -- DROP! has shown and faded by then
+end
+
+local function previewMap()
+    local now = GetTime()
+    local st = { phase = R.PHASE.FIGHT, alive = 17, me = R.ME.ALIVE, kills = 2, stage = 2, curX = -150, curY = -310,
+        curR = 520, nextX = -60, nextY = -380, nextR = 300, shrinkFrom = now + 84, shrinkTo = now + 124, dmg = 20,
+        myX = 170, myY = -40 }
+    startSample("map", st)
+    sampleObjects(R.PREVIEW_MATCH)
+    ns.RoyaleMap.Open(false)
+end
+
+-- Keeps a map preview going while its map is open; a sample match that something else replaced or dropped is over.
+local function previewTick()
+    local p = pv
+    if not p then
+        return
+    end
+    if not R.InPreview() then
+        pv = nil
+        if not S.royale and p.result and not S.royaleResult then
+            S.royaleResult = p.result
+        end
+        return
+    end
+    if p.kind ~= "map" then
+        return
+    end
+    local now = GetTime()
+    local MP = ns.RoyaleMap
+    if not (MP.frame and MP.frame:IsShown()) or now - p.at > R.PREVIEW_MAP_MAX then
+        R.EndPreview()
+        return
+    end
+    if now - p.pushedAt >= R.PREVIEW_HEARTBEAT then
+        p.pushedAt = now
+        local st = p.st
+        if st.shrinkTo and now >= st.shrinkTo then
+            st.curX, st.curY, st.curR, st.shrinkFrom, st.shrinkTo = st.nextX, st.nextY, st.nextR, nil, nil
+        end
+        sampleState(R.PREVIEW_MATCH, st)
+    end
+end
+ns.Every(0.5, previewTick)
+
+-- A preview's own answer to a match intent: a landing pin moves the sample's pin (the map shows it as the realm's
+-- snapped pin), anything else is accepted and ignored. Returns true like a sent intent.
+previewRespond = function(op, x, y)
+    if op == "RDROP" and pv and pv.st and R.CanPin() then
+        local st = pv.st
+        st.pinX, st.pinY = x, y
+        ns.After(0.1, function()
+            if pv and pv.st == st and R.InPreview() then
+                sampleState(R.PREVIEW_MATCH, st)
+            end
+        end)
+    end
+    return true
+end
+
+-- /bh royale preview <kind> [eliminated]. Returns true when it plays, else false and why.
+function R.Preview(kind, arg)
+    local m = R.Match()
+    if m and not R.InPreview(m) then
+        return false, "Royale previews play outside a match."
+    end
+    R.EndPreview()
+    if kind == "countdown" then
+        previewCountdown()
+        return true
+    elseif kind == "map" then
+        previewMap()
+        return true
+    elseif kind == "drop" then
+        return ns.RoyaleDrop.Preview()
+    elseif kind == "banner" then
+        return ns.RoyaleHud.Preview("banner")
+    elseif kind == "end" then
+        return ns.RoyaleHud.Preview("end", arg == "eliminated" and arg or nil)
+    end
+    return false, R.PREVIEW_USAGE
+end
+
+------------------------------------------------------------------------------------------------------
+-- /bh demo: a short scripted match (Demo.lua routes QJOIN B, QREPLY, QLEAVE, RDROP, RSPEC and GET ROYS/ROYM here).
+-- The drop runs as the realm runs it by default: ROYS me 1 at the teleport, again at the start gun 0.2 s later (the
+-- fall from rest, the times from there), again when the parachute opens by itself 8 s later; the touchdown 12 s after
+-- that is seen 0.5 s later (ROYS me 2).
 ------------------------------------------------------------------------------------------------------
 local DEMO_MATCH = 7001
--- the places of Bleakhold Royale v2 (MapForge specs/royale_v2.json pois, ids and radii as the server sends them)
-local DEMO_PLACES = {
-    { 5213, "Y", 455, 455, 32, "Sunwatch Overlook" },
-    { 5201, "L", -258, -345, 95, "Sunstair Isle" }, { 5202, "L", -45, -170, 90, "Tidecall Village" },
-    { 5203, "L", 320, -790, 80, "Twinfall Terrace" }, { 5204, "L", -490, -662, 60, "Saltwreck Cove" },
-    { 5205, "L", -776, 339, 80, "Serpent Steps" }, { 5206, "L", -250, 200, 90, "Sunbloom Meadow" },
-    { 5207, "L", 215, -312, 50, "Kingfisher Point" }, { 5208, "L", -255, -745, 80, "Mossvine Hollow" },
-    { 5209, "L", -740, -290, 70, "Bamboo Reach" }, { 5210, "L", 360, 250, 60, "Sunwatch Falls" },
-    { 5215, "L", -790, -784, 70, "Salvagers' Camp" }, { 5216, "L", -425, 50, 50, "Totem Knoll" },
-    { 5217, "L", 80, -520, 50, "Heron Rise" },
-    { 5211, "C", -10, -625, 16, "Stepping Stones" }, { 5212, "C", -785, 263, 18, "Vine Bridge" },
-    { 5214, "C", -150, -275, 14, "Tidewalk" },
-}
+R.DEMO_DROP = { at = 26, gun = 0.2, fall = 8, canopy = 12, hold = 0.5 }
 local demo
 
 local function demoAfter(sec, fn)
@@ -1011,9 +1435,7 @@ local function demoAfter(sec, fn)
 end
 
 local function demoPush(op, records)
-    if ns.Demo then
-        ns.Demo.Push(op, records)
-    end
+    samplePush(op, records)
 end
 
 local function demoQueue(state, extra)
@@ -1026,97 +1448,109 @@ local function demoQueue(state, extra)
 end
 
 local function demoState()
-    local s = demo.st
-    demoPush("ROYS", { { DEMO_MATCH, s.phase, s.ms or 0, s.alive, 24, s.me, s.kills or 0, s.placement or "",
-        s.pinX or "", s.pinY or "", s.stage or 0, s.curX, s.curY, s.curR, s.nextX or "", s.nextY or "", s.nextR or "",
-        s.start or "", s.stop or "", s.dmg or 0, s.watch or "", s.myX or "", s.myY or "", 6 } })
+    sampleState(DEMO_MATCH, demo.st)
 end
 
 local function demoMap()
-    local recs = { { R.MAP_ID, -1066, 533, -1066, 533, 455, 455, 32, 750, -267, -267 } }
-    for _, p in ipairs(DEMO_PLACES) do
-        recs[#recs + 1] = p
-    end
-    demoPush("ROYM", recs)
+    sampleMap()
 end
 
 local function demoObjects()
-    demoPush("ROYO", { { DEMO_MATCH, 1 }, { 1, "S", 0, -351, -249, 0, 30000 }, { 2, "S", 0, -775, 350, 0, 30000 },
-        { 3, "B", 1, -15, -150, 1, "" }, { 4, "B", 2, -460, -712, 1, "" }, { 5, "B", 3, 300, -790, 1, "" },
-        { 6, "B", 3, 205, -306, 2, 45000 }, { 7, "B", 1, -235, 215, 1, "" }, { 8, "B", 2, -720, -310, 1, "" } })
+    sampleObjects(DEMO_MATCH)
 end
 
 -- A kill feed line, and the kill announcer's BGANN when it carries a multi-kill or streak code (section 18).
 local function demoKill(killer, kc, victim, vc, cause, kills, multi, streak)
     demo.st.alive = demo.st.alive - 1
-    demoPush("ROYK", { { killer or "", killer and kc or "", victim, vc, cause, demo.st.alive, killer and kills or "" } })
+    demoPush("ROYK", { { killer or "", killer and kc or "", victim, vc, cause, demo.st.alive,
+        killer and kills or "" } })
     if killer and (multi or streak) then
         demoPush("BGANN", { { killer, kc, victim, vc, multi or "", streak or "" } })
     end
 end
 
+-- The drop: ROYS at the teleport, at the start gun and when the parachute opens; returns when the landing is seen.
+local function demoDrop(st)
+    local D = R.DEMO_DROP
+    local function plan(fall, canopy)
+        local now = GetTime()
+        st.openAt, st.landAt = now + fall, now + fall + canopy
+        st.phaseAt = st.landAt     -- phase 2 lasts until the last planned touchdown
+        demoState()
+    end
+    demoAfter(D.at, function()
+        st.phase, st.me, st.stage, st.fallMs = R.PHASE.DROP, R.ME.DROPPING, 1, D.fall * 1000
+        st.myX, st.myY = st.pinX or -45, st.pinY or -170
+        plan(D.fall, D.canopy)
+    end)
+    demoAfter(D.at + D.gun, function()
+        plan(D.fall, D.canopy)
+    end)
+    demoAfter(D.at + D.gun + D.fall, function()
+        plan(0, D.canopy)
+    end)
+    return D.at + D.gun + D.fall + D.canopy + D.hold
+end
+
 local function demoMatch()
-    local st = { phase = 0, ms = 6000, alive = 24, me = 0, curX = -267, curY = -267, curR = 860, myX = 452,
-        myY = 450 }
+    local st = { phase = 0, phaseAt = GetTime() + 6, alive = 24, me = 0, curX = -267, curY = -267, curR = 860,
+        myX = 452, myY = 450 }
     demo.st = st
     demoMap()
     demoState()
     demoAfter(6, function()
-        st.phase, st.ms = 1, 20000
+        st.phase, st.phaseAt = 1, GetTime() + 20
         demoState()
     end)
     demoAfter(11, function()
         -- circle 1 is shown; like the server, the stage stays 0 until the drop
         st.nextX, st.nextY, st.nextR = -150, -310, 520
         demoPush("ROYV", { { "R", 1, -150, -310, "", "" } })
-        st.ms = 15000
         demoState()
     end)
-    demoAfter(26, function()
-        st.phase, st.ms, st.me, st.stage = 2, 6000, 1, 1
-        st.myX, st.myY = st.pinX or -45, st.pinY or -170
-        demoState()
-    end)
-    demoAfter(32, function()
-        st.phase, st.ms, st.me, st.start, st.stop, st.dmg = 3, 0, 2, 20000, 50000, 10
+    local land = demoDrop(st)
+    demoAfter(land, function()
+        local now = GetTime()
+        st.phase, st.phaseAt, st.me, st.shrinkFrom, st.shrinkTo, st.dmg = 3, nil, 2, now + 20, now + 50, 10
+        st.openAt, st.landAt, st.fallMs = nil, nil, nil
         demoState()
         demoObjects()
         demoKill("Aldric Stormwind", 1, "Brenna", 8, "P", 1, nil, "F")
     end)
-    demoAfter(36, function()
+    demoAfter(land + 4, function()
         demoKill("Aldric Stormwind", 1, "Corwin", 5, "P", 2, "D", nil)
         demoPush("ROYV", { { "D", 0, -67, -267, 20000, "" } })
         demoPush("ROYO", { { DEMO_MATCH, 0 }, { 20, "D", 0, -67, -267, 3, 20000 } })
     end)
-    demoAfter(39, function()
+    demoAfter(land + 7, function()
         demoKill(nil, nil, "Eamon", 11, "S", nil)
         demoKill("Dalia", 11, "Fenna", 3, "P", 1)
     end)
-    demoAfter(52, function()
-        st.curX, st.curY, st.curR, st.start, st.stop = -150, -310, 520, "", ""
+    demoAfter(land + 20, function()
+        st.curX, st.curY, st.curR, st.shrinkFrom, st.shrinkTo = -150, -310, 520, nil, nil
         st.alive = 10
         demoPush("ROYV", { { "N", 10, "", "", "", "" } })
         demoPush("ROYO", { { DEMO_MATCH, 0 }, { 20, "D", 0, -67, -267, 1, "" } })
         demoState()
     end)
-    demoAfter(58, function()
+    demoAfter(land + 26, function()
         demoKill("Aldric Stormwind", 1, ns.PlayerName() or "You", 1, "P", 3, nil, "S")
         demoPush("ROYE", { { DEMO_MATCH, 9, 24, demo.kills or 0, 9400, 0, 26, "", "", "", 1 },
             { "H", 120, "", "Placement" }, { "S", 12, "", "Placement" } })
         st.me, st.placement, st.watch, st.myX, st.myY = 3, 9, "Aldric Stormwind", nil, nil
         demoState()
     end)
-    demoAfter(72, function()
+    demoAfter(land + 40, function()
         st.alive = 1
         demoKill("Dalia", 11, "Aldric Stormwind", 1, "P", 7, nil, "W")
         demoPush("ROYV", { { "W", 7, "", "", "", "Dalia" } })
-        st.phase, st.ms, st.watch = 5, 12000, "Dalia"
+        st.phase, st.phaseAt, st.watch = 5, GetTime() + 12, "Dalia"
         demoState()
         demoPush("ROYE", { { DEMO_MATCH, 9, 24, demo.kills or 0, 9400, 0, 26, "Dalia", 11, 7, 1 },
             { "H", 120, "", "Placement" }, { "S", 12, "", "Placement" } })
     end)
-    demoAfter(84, function()
-        st.phase, st.ms = 6, 120000
+    demoAfter(land + 52, function()
+        st.phase, st.phaseAt = 6, GetTime() + 120
         demoState()
     end)
 end

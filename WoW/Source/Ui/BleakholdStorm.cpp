@@ -1,26 +1,32 @@
 // BLEAKHOLD(storm): the game side of the Bleakhold Royale storm wall (BleakholdStorm.h). RoyaleHud.lua calls
 // BleakholdStorm_Set with each ROYS; CGWorldFrame::OnWorldRender calls OnWorldRender once a frame, right after the
-// liquids.
+// liquids, and CGMinimapFrame::Render calls OnMinimapRender right after the minimap's tiles.
 
 #include "WoW/Source/Ui/BleakholdStorm.h"
 #include <cmath>
 #include <cstdint>
+#include "Engine/Source/Base/Coordinate.h"
 #include "Engine/Source/BleakFx/BleakFx.h"
 #include "Engine/Source/BleakFx/BleakStorm.h"
 #include "Engine/Source/ConsoleBase/ConsoleVar.h"
 #include "Engine/Source/ConsoleBase/Types.h"
 #include "Engine/Source/FrameScript/FrameScript.h"
 #include "Engine/Source/Gx/CGxDevice/CGxDevice.h"
+#include "Engine/Source/Gx/CGxTex.h"
+#include "Engine/Source/Gx/CGxTexFlags.h"
 #include "Engine/Source/Gx/Gx.h"
+#include "Engine/Source/Gxu/GxuFont.h"
 #include "Engine/Source/Os/TimeManager.h"
 #include "Engine/Source/Tempest/C2Vector.h"
 #include "Engine/Source/Tempest/C3Vector.h"
 #include "Engine/Source/Tempest/C44Matrix.h"
+#include "Engine/Source/Tempest/CImVector.h"
 #include "Engine/Source/lua-5.1/src/lua.h"
 #include "WoW/Source/Object/ObjectClient/Object_C.h"
 #include "WoW/Source/Object/ObjectClient/Unit_C.h"
 #include "WoW/Source/ObjectMgrClient/ObjectMgrClient.h"
 #include "WoW/Source/UIUtil/Camera.h"
+#include "WoW/Source/Ui/MinimapFrame.h"
 #include "WoW/Source/Ui/WorldFrame.h"
 #include "WoW/Source/WorldClient/DayNight.h"
 #include "WoW/Source/WorldClient/DayNight__DNInfo.h"
@@ -43,7 +49,20 @@ namespace {
     // The ground of a column whose area is not loaded, when no column has one: this far below the camera.
     const float kUnknownGroundBelowCamera = 5.0f;
 
+    // The storm on the minimap: shade, hatch, front, keylines, edge and next circle (BGRA bytes and alpha; the
+    // shade is drawn twice, plain and then hatched). The palette of the addon's Royale UI (RS.C): stormDeep, storm,
+    // safe. The shade is stronger than the island map's (0.43 there): over the island's greens less of it mixes to
+    // grey rather than violet.
+    const CImVector kMinimapShade(0x6E, 0x2A, 0x4B, 140);
+    const CImVector kMinimapHatch(0xE0, 0x6B, 0xA6, 70);
+    const CImVector kMinimapGlow(0xE0, 0x6B, 0xA6, 110);
+    const CImVector kMinimapKeyline(0x00, 0x00, 0x00, 150);
+    const CImVector kMinimapEdge(0xE0, 0x6B, 0xA6, 230);
+    const CImVector kMinimapNextKeyline(0x00, 0x00, 0x00, 140);
+    const CImVector kMinimapNext(0xFF, 0xFF, 0xFF, 200);
+
     CVar* s_wallCVar;
+    CVar* s_minimapCVar;
     bool s_hasState;
     BleakStorm::State s_state;
 
@@ -72,6 +91,19 @@ namespace {
     BleakStorm::Vertex s_ringVertices[BleakStorm::kMaxVertices];
     uint16_t s_ringIndices[BleakStorm::kMaxIndices];
 
+    // The minimap: the space its quads were last built in, the layer being drawn and its colours, and the two
+    // textures of stage 0 (a white one for the plain colours, and the hatch), made the first time it draws.
+    bool s_hasMinimapSpace;
+    BleakStorm::MinimapSpace s_minimapSpace;
+    BleakStorm::MinimapVertex s_minimapVertices[BleakStorm::kMinimapMaxVertices];
+    uint16_t s_minimapIndices[BleakStorm::kMinimapMaxIndices];
+    CImVector s_minimapColors[BleakStorm::kMinimapMaxVertices];
+    CGxTex* s_whiteTex;
+    CGxTex* s_hatchTex;
+    bool s_minimapTexFailed;
+    const uint32_t kWhiteSize = 4;
+    uint8_t s_white[kWhiteSize * kWhiteSize * 4];
+
     double Now() {
         return OsGetAsyncTimeMs() * 0.001;
     }
@@ -79,6 +111,11 @@ namespace {
     // 0 off, 1 the wall and the next circle's ring, 2 the wall only.
     int32_t Mode() {
         return s_wallCVar ? s_wallCVar->m_intValue : 1;
+    }
+
+    // 0 off, 1 the storm on the minimap.
+    int32_t MinimapMode() {
+        return s_minimapCVar ? s_minimapCVar->m_intValue : 1;
     }
 
     // Why nothing is drawn now ("" when the wall draws), for BleakholdStorm_Status.
@@ -178,6 +215,96 @@ namespace {
 
         BleakStorm::FillUnknown(s_frameGround, columns.known, segments + 1, static_cast<float>(eyeZ) - kUnknownGroundBelowCamera);
         return BleakStorm::Build(c, kind, segments, s_visible, s_frameGround, origin, eye, vertices, BleakStorm::kMaxVertices, indices, BleakStorm::kMaxIndices, indexCount);
+    }
+
+    void WhiteTexUserFunc(EGxTexCommand command, uint32_t width, uint32_t height, uint32_t face, uint32_t level, void* userArg, uint32_t& texelStrideInBytes, const void*& texels) {
+        if (command != GxTex_Latch) {
+            return;
+        }
+
+        texels = s_white;
+        texelStrideInBytes = kWhiteSize * 4;
+    }
+
+    void HatchTexUserFunc(EGxTexCommand command, uint32_t width, uint32_t height, uint32_t face, uint32_t level, void* userArg, uint32_t& texelStrideInBytes, const void*& texels) {
+        if (command != GxTex_Latch) {
+            return;
+        }
+
+        uint32_t clamped = level < BleakStorm::kHatchLevels ? level : BleakStorm::kHatchLevels - 1;
+        texels = BleakStorm::HatchLevels() + BleakStorm::HatchLevelOffset(clamped);
+        texelStrideInBytes = BleakStorm::HatchLevelSize(clamped) * 4;
+    }
+
+    // The minimap's two textures (managed: they survive device resets). The hatch repeats (wrap) and has its mip
+    // levels, so its fine lines stay calm at every zoom; without it the shade is drawn plain.
+    bool MinimapTextures() {
+        if (!s_whiteTex && !s_minimapTexFailed) {
+            for (uint32_t i = 0; i < sizeof(s_white); i++) {
+                s_white[i] = 0xFF;
+            }
+
+            CGxTexFlags flags(GxTex_Linear, GxTex_Clamp, GxTex_Clamp, 0, 0, 0, 1);
+
+            if (!GxTexCreate(GxTex_2d, kWhiteSize, kWhiteSize, 0, GxTex_Argb8888, GxTex_Argb8888, flags, nullptr, WhiteTexUserFunc, "BleakholdStorm::MinimapWhite", s_whiteTex)) {
+                s_whiteTex = nullptr;
+                s_minimapTexFailed = true;
+            }
+        }
+
+        if (s_whiteTex && !s_hatchTex && !s_minimapTexFailed) {
+            CGxTexFlags flags(GxTex_LinearMipLinear, GxTex_Wrap, GxTex_Wrap, 0, 0, 0, 1);
+
+            if (!GxTexCreate(GxTex_2d, BleakStorm::kHatchSize, BleakStorm::kHatchSize, 0, GxTex_Argb8888, GxTex_Argb8888, flags, nullptr, HatchTexUserFunc, "BleakholdStorm::MinimapHatch", s_hatchTex)) {
+                s_hatchTex = nullptr;
+                s_minimapTexFailed = true;
+            }
+        }
+
+        return s_whiteTex != nullptr;
+    }
+
+    void DestroyMinimapTextures() {
+        if (s_whiteTex) {
+            GxTexDestroy(s_whiteTex);
+            s_whiteTex = nullptr;
+        }
+
+        if (s_hatchTex) {
+            GxTexDestroy(s_hatchTex);
+            s_hatchTex = nullptr;
+        }
+
+        s_minimapTexFailed = false;
+    }
+
+    // One layer of the minimap's storm, as MINIMAPTILE::Render draws a tile: `texture` on stage 0 and the mask on
+    // stage 1, both modulated by the vertex colour: the layer's, its alpha scaled by the vertex's fade and the
+    // frame's alpha.
+    void DrawMinimapLayer(const BleakStorm::MinimapMesh& mesh, CGxTex* texture, CGxTex* mask, const CImVector& color, uint8_t alpha) {
+        if (!texture || mesh.vertexCount < 3 || mesh.indexCount < 3) {
+            return;
+        }
+
+        float a = color.a * (alpha / 255.0f);
+
+        for (uint32_t i = 0; i < mesh.vertexCount; i++) {
+            s_minimapColors[i] = color;
+            s_minimapColors[i].a = static_cast<uint8_t>(a * mesh.vertices[i].fade + 0.5f);
+        }
+
+        g_theGxDevicePtr->RsSet(GxRs_Texture0, texture);
+        GxRsSet(GxRs_ColorOp0, 0);
+        GxRsSet(GxRs_AlphaOp0, 0);
+        g_theGxDevicePtr->RsSet(GxRs_Texture1, mask);
+        GxRsSet(GxRs_ColorOp1, 0);
+        GxRsSet(GxRs_AlphaOp1, 0);
+        C3Vector normal(0.0f, 0.0f, 1.0f);
+        const uint32_t stride = sizeof(BleakStorm::MinimapVertex);
+        const BleakStorm::MinimapVertex& first = mesh.vertices[0];
+        GxPrimLockVertexPtrs(mesh.vertexCount, reinterpret_cast<const C3Vector*>(first.pos), stride, &normal, 0, s_minimapColors, sizeof(CImVector), nullptr, 0, reinterpret_cast<const C2Vector*>(first.tex), stride, reinterpret_cast<const C2Vector*>(first.mask), stride);
+        GxDrawLockedElements(GxPrim_Triangles, mesh.indexCount, mesh.indices);
+        GxPrimUnlockVertexPtrs();
     }
 
     // A number argument, or false (nil, absent, or not a finite number).
@@ -304,6 +431,50 @@ namespace {
         return 1;
     }
 
+    // BleakholdUI_ScreenPixels() -> width, height: the pixels the client draws into, as its font rasteriser counts
+    // them (g_widthPixels, g_heightPixels: right in a resized window too, unlike gxResolution); nil before they are
+    // known. For the addon's pixel snapping and text sizes (RoyaleStyle.lua RS.PxPerUnit).
+    int32_t Script_ScreenPixels(lua_State* L) {
+        if (!g_widthPixels || !g_heightPixels) {
+            lua_pushnil(L);
+            return 1;
+        }
+
+        lua_pushnumber(L, static_cast<lua_Number>(g_widthPixels));
+        lua_pushnumber(L, static_cast<lua_Number>(g_heightPixels));
+        return 2;
+    }
+
+    // BleakholdStorm_MinimapViewRadius() -> yards from the minimap's centre to the middle of its edge at its zoom
+    // (indoors or out), as the client draws it (MinimapGetViewRadius). For the addon's icons on the minimap.
+    int32_t Script_MinimapViewRadius(lua_State* L) {
+        lua_pushnumber(L, static_cast<lua_Number>(MinimapGetViewRadius()));
+        return 1;
+    }
+
+    // BleakholdStorm_Altitude() -> yards from the active player's feet down to the terrain, or the water on it where
+    // that is higher (below 0 under water); nil without a player, where the ground is not loaded, over a hole, or
+    // in a map of map objects only. Roofs and trees are not counted.
+    int32_t Script_Altitude(lua_State* L) {
+        CGUnit_C* unit = static_cast<CGUnit_C*>(ClntObjMgrObjectPtr(ClntObjMgrGetActivePlayer(), TYPEMASK_UNIT, __FILE__, __LINE__));
+        float ground = 0.0f;
+
+        if (!unit) {
+            lua_pushnil(L);
+            return 1;
+        }
+
+        C3Vector position = unit->GetPosition();
+
+        if (!GroundHeight(position.x, position.y, ground)) {
+            lua_pushnil(L);
+            return 1;
+        }
+
+        lua_pushnumber(L, static_cast<lua_Number>(position.z - ground));
+        return 1;
+    }
+
     struct ScriptFunction {
         const char* name;
         int32_t (*function)(lua_State*);
@@ -314,16 +485,23 @@ namespace {
         { "BleakholdStorm_Clear", &Script_Clear },
         { "BleakholdStorm_Status", &Script_Status },
         { "BleakholdStorm_Test", &Script_Test },
+        { "BleakholdStorm_MinimapViewRadius", &Script_MinimapViewRadius },
+        { "BleakholdStorm_Altitude", &Script_Altitude },
+        { "BleakholdUI_ScreenPixels", &Script_ScreenPixels },
     };
 }
 
 void CGBleakholdStorm::InitializeGame() {
     // Flags 0: saved in Config.wtf, never deleted. setCommand false, so Lua's GetCVar/SetCVar find it.
     s_wallCVar = CVar::Register("bleakStormWall", "Bleakhold Royale storm wall in the world (0 off, 1 the wall and the next circle, 2 the wall only)", 0, "1", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
+    // The storm on the minimap; the addon draws dotted arcs of its own when this is 0 (RoyaleMinimap.lua).
+    s_minimapCVar = CVar::Register("bleakStormMinimap", "Bleakhold Royale storm on the minimap (0 off, 1 on)", 0, "1", nullptr, CATEGORY_GRAPHICS, false, nullptr, false);
 }
 
 void CGBleakholdStorm::ShutdownGame() {
     CGBleakholdStorm::ClearAll();
+    s_hasMinimapSpace = false;
+    DestroyMinimapTextures();
 }
 
 void CGBleakholdStorm::ClearAll() {
@@ -424,6 +602,68 @@ void CGBleakholdStorm::OnWorldRender() {
     draw.fogStart = dayNight->m_fog.m_start;
     draw.fogEnd = dayNight->m_fog.m_end;
     BleakFx::RenderStorm(draw);
+}
+
+void CGBleakholdStorm::SetMinimapSpace(const C3Vector& position, const C2Vector& center, float scale, float layoutScale, float width) {
+    s_minimapSpace.x = position.x;
+    s_minimapSpace.y = position.y;
+    s_minimapSpace.centerX = center.x;
+    s_minimapSpace.centerY = center.y;
+    s_minimapSpace.scale = scale;
+    // UpdateQuads hands BuildQuad layoutScale and width, which it multiplies in float.
+    s_minimapSpace.extent = layoutScale * width;
+    s_minimapSpace.layoutScale = layoutScale;
+    s_hasMinimapSpace = BleakStorm::MinimapSpaceValid(s_minimapSpace);
+}
+
+void CGBleakholdStorm::OnMinimapRender(CGxTex* mask, uint8_t alpha) {
+    if (!s_hasState || !s_hasMinimapSpace || !mask || !alpha || MinimapMode() == 0 || !g_theGxDevicePtr) {
+        return;
+    }
+
+    double now = Now();
+
+    // A stale circle is forgotten by OnWorldRender.
+    if (BleakStorm::Stale(s_state, now) || s_state.mapId != s_mapId) {
+        return;
+    }
+
+    BleakStorm::Circle circle = BleakStorm::CircleAt(s_state, now, nullptr);
+
+    if (!MinimapTextures()) {
+        return;
+    }
+
+    // The quads' vertices are in DDC units, the frame's rect: one screen pixel is the screen's DDC height over its
+    // height in pixels (lines fade out over it).
+    double pixel = g_heightPixels ? NDCToDDCHeight(1.0f) / static_cast<double>(g_heightPixels) : 0.0;
+    const BleakStorm::Circle* next = s_state.hasNext ? &s_state.next : nullptr;
+    BleakStorm::MinimapMesh mesh = { s_minimapVertices, BleakStorm::kMinimapMaxVertices, 0, s_minimapIndices, BleakStorm::kMinimapMaxIndices, 0 };
+    bool drawn = false;
+
+    // Bottom to top. The lobby lies outside the circle but takes no storm damage (Set's noTint): its edge, no shade.
+    for (uint32_t i = 0; i < BleakStorm::Minimap_Layers; i++) {
+        BleakStorm::MinimapLayer layer = static_cast<BleakStorm::MinimapLayer>(i);
+
+        if (!BleakStorm::BuildMinimap(s_minimapSpace, layer, circle, !s_state.noTint, next, pixel, mesh)) {
+            continue;
+        }
+
+        drawn = true;
+
+        if (layer == BleakStorm::Minimap_Shade) {
+            DrawMinimapLayer(mesh, s_whiteTex, mask, kMinimapShade, alpha);
+            // The hatch, so the storm reads without its colour.
+            DrawMinimapLayer(mesh, s_hatchTex, mask, kMinimapHatch, alpha);
+        } else {
+            const CImVector& color = layer == BleakStorm::Minimap_Glow ? kMinimapGlow : layer == BleakStorm::Minimap_EdgeOutline ? kMinimapKeyline : layer == BleakStorm::Minimap_Edge ? kMinimapEdge : layer == BleakStorm::Minimap_NextOutline ? kMinimapNextKeyline : kMinimapNext;
+            DrawMinimapLayer(mesh, s_whiteTex, mask, color, alpha);
+        }
+    }
+
+    if (drawn) {
+        GxRsSet(GxRs_Texture1, 0);
+    }
 }
 
 void CGBleakholdStorm::RegisterScriptFunctions() {

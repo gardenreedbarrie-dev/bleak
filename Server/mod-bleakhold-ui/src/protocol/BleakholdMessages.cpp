@@ -294,7 +294,8 @@ namespace Bleakhold
         w.Int(m.matchId).Int(Num(m.phase)).Int(m.phaseMsLeft).Int(m.alive).Int(m.total).Int(Num(m.me)).Int(m.kills)
             .Opt(m.placement).Opt(m.pinX).Opt(m.pinY).Int(m.stage).Int(m.curX).Int(m.curY).Int(m.curR).Opt(m.nextX)
             .Opt(m.nextY).Opt(m.nextR).Opt(m.shrinkStartMs).Opt(m.shrinkEndMs).Int(m.dmgPermille)
-            .Text(m.watchName, RoyaleNameBytes).Opt(m.myX).Opt(m.myY).Opt(m.stages);
+            .Text(m.watchName, RoyaleNameBytes).Opt(m.myX).Opt(m.myY).Opt(m.stages).Opt(m.fallMsLeft)
+            .Opt(m.landMsLeft).Opt(m.fallMs);
         return w.Take();
     }
 
@@ -308,7 +309,7 @@ namespace Bleakhold
         {
             if (n++ >= MaxRoyalePois)
                 break;
-            w.Record().Int(p.id).Char(Letter(p.kind)).Int(p.x).Int(p.y).Int(p.r).Text(p.name, 40);
+            w.Record().Int(p.id).Char(Letter(p.kind)).Int(p.x).Int(p.y).Int(p.r).Text(p.name, RoyalePlaceBytes);
         }
         return w.Take();
     }
@@ -322,7 +323,10 @@ namespace Bleakhold
         {
             if (n++ >= MaxRoyaleObjects)
                 break;
-            w.Record().Int(o.objId).Char(Letter(o.kind)).Int(o.subtype).Int(o.x).Int(o.y).Int(Num(o.state))
+            // the storm beast's subtype is its health in percent: never over 100, whatever the caller computed
+            uint32_t const subtype =
+                o.kind == RoyaleObjectKind::Boss ? std::min(o.subtype, MaxRoyaleBossHealthPct) : o.subtype;
+            w.Record().Int(o.objId).Char(Letter(o.kind)).Int(subtype).Int(o.x).Int(o.y).Int(Num(o.state))
                 .Opt(o.msLeft);
         }
         return w.Take();
@@ -340,7 +344,9 @@ namespace Bleakhold
     std::string EncodeRoyaleEvent(RoyaleEvent const& m)
     {
         PayloadWriter w;
-        w.Char(Letter(m.kind)).Int(m.value).Opt(m.x).Opt(m.y).Opt(m.msLeft).Text(m.name, RoyaleNameBytes);
+        // the storm beast's B names the place it stirs at (a place name, as in ROYM); every other name is a character's
+        std::size_t const nameBytes = m.kind == RoyaleEventKind::BossIncoming ? RoyalePlaceBytes : RoyaleNameBytes;
+        w.Char(Letter(m.kind)).Int(m.value).Opt(m.x).Opt(m.y).Opt(m.msLeft).Text(m.name, nameBytes);
         return w.Take();
     }
 

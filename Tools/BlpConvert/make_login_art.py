@@ -23,41 +23,16 @@ sys.dont_write_bytecode = True  # keep the repository free of __pycache__
 import blpconvert as bc  # noqa: E402
 
 try:
-    from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
+    from PIL import Image, ImageChops, ImageDraw, ImageFont
 except ImportError:
     raise SystemExit("make_login_art.py needs Pillow: pip install Pillow")
+
+from artkit import SS, gradient_v, mask_polygon, paint, rgb, shadow  # noqa: E402  (shared with make_royale_hud_art.py)
 
 REPO = os.path.normpath(os.path.join(HERE, "..", ".."))
 GLUE = os.path.join(REPO, "Interface", "Bleakhold", "Glue")
 FONT_REGULAR = os.path.join(GLUE, "Fonts", "Marcellus-Regular.ttf")
 FONT_SC = os.path.join(GLUE, "Fonts", "MarcellusSC-Regular.ttf")
-SS = 4  # supersampling for anti-aliased polygons
-
-
-def rgb(hexstr, alpha=255):
-    hexstr = hexstr.lstrip("#")
-    return (int(hexstr[0:2], 16), int(hexstr[2:4], 16), int(hexstr[4:6], 16), alpha)
-
-
-def lerp(a, b, t):
-    return tuple(int(round(x + (y - x) * t)) for x, y in zip(a, b))
-
-
-def gradient_v(w, h, stops, y0=0, span=None):
-    """Vertical gradient image; stops are (position 0..1, colour) over rows y0..y0+span."""
-    span = span or h
-    img = Image.new("RGBA", (w, h))
-    draw = ImageDraw.Draw(img)
-    for y in range(h):
-        t = min(1.0, max(0.0, (y - y0 + 0.5) / span))
-        for (p0, c0), (p1, c1) in zip(stops, stops[1:]):
-            if p0 <= t <= p1:
-                colour = lerp(c0, c1, 0.0 if p1 == p0 else (t - p0) / (p1 - p0))
-                break
-        else:
-            colour = stops[-1][1] if t > stops[-1][0] else stops[0][1]
-        draw.line([(0, y), (w, y)], fill=colour)
-    return img
 
 
 def gradient_h_centre(w, h, colour, alpha):
@@ -79,31 +54,6 @@ def hexagon(x, y, w, h, chamfer):
 def octagon(x, y, w, h, c):
     return [(x + c, y), (x + w - c, y), (x + w, y + c), (x + w, y + h - c), (x + w - c, y + h),
             (x + c, y + h), (x, y + h - c), (x, y + c)]
-
-
-def mask_polygon(size, points):
-    w, h = size
-    big = Image.new("L", (w * SS, h * SS), 0)
-    ImageDraw.Draw(big).polygon([(px * SS, py * SS) for px, py in points], fill=255)
-    return big.resize((w, h), Image.LANCZOS)
-
-
-def paint(canvas, fill, mask):
-    """Composites `fill` (RGBA, canvas-sized) onto canvas through the coverage mask (L)."""
-    layer = fill.copy()
-    layer.putalpha(ImageChops.multiply(fill.getchannel("A"), mask))
-    return Image.alpha_composite(canvas, layer)
-
-
-def shadow(size, mask, dx, dy, sigma, colour):
-    """CSS drop-shadow: the shape's silhouette moved, blurred and tinted."""
-    m = Image.new("L", size, 0)
-    m.paste(mask, (int(round(dx)), int(round(dy))))
-    if sigma > 0:
-        m = m.filter(ImageFilter.GaussianBlur(sigma))
-    layer = Image.new("RGBA", size, colour[:3] + (0,))
-    layer.putalpha(Image.eval(m, lambda v: v * colour[3] // 255))
-    return layer
 
 
 # ------------------------------------------------------------------------------------------- pieces

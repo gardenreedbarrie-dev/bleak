@@ -555,7 +555,6 @@ BINDING_NAME_BLEAKHOLD_ANIMATIONS = "Toggle Animations"
 BINDING_NAME_BLEAKHOLD_GRAPHICS = "Toggle Graphics settings"
 BINDING_NAME_BLEAKHOLD_MAKECAMP = "Make camp"
 BINDING_NAME_BLEAKHOLD_GLIDE = "Walk on Air (glide)"
-BINDING_NAME_BLEAKHOLD_ROYALE_DEPLOY = "Bleakhold Royale: open the parachute"
 BINDING_NAME_BLEAKHOLD_ROYALE_MAP = "Bleakhold Royale: island map"
 
 SLASH_BLEAKHOLD1 = "/bh"

@@ -369,9 +369,11 @@ A solo free-for-all battle royale: 20 to 40 players at level 80 on their own isl
   has the current map patch (`patch-Q.MPQ`, which carries `Interface\Bleakhold\Royale\MarkerV2.blp`; v1's
   patch-Q had `Marker.blp` and no longer counts).
 - Lobby: the island map opens by itself; click it to set your landing pin (the pins lock 3 seconds before the
-  drop). The last 10 seconds count down in the middle of the screen.
-- Drop: "Open parachute" while you fall (or a key: Key Bindings, Bleakhold, "Bleakhold Royale: open the
-  parachute"); it opens by itself 2.5 seconds into the fall.
+  drop). The last 15 seconds count down in an engraved ring beside the map, then DROP!.
+- Drop: you fall for 8 seconds (FREEFALL and a counter on a plate low on the screen, an altimeter right of your
+  character, speed lines and wind), then the parachute opens by itself and floats you down for about 12 seconds
+  ("Landing in 12" over a draining bar) until LANDED. There is no button or key for it. Your view distance is raised
+  to 1277 for the drop if it was lower, and put back 8 seconds after you land.
 - Fight: the top bar (players alive, your eliminations, the storm's timer and stage, its damage while you are
   outside the circle), the kill feed, the kill announcer (a banner and a voice line), a purple screen edge while you
   are outside, an arrow at the minimap's edge to the safe zone with its distance (dimmed, with how far inside you
@@ -390,10 +392,20 @@ A solo free-for-all battle royale: 20 to 40 players at level 80 on their own isl
   `/bh royale wall test [radius] [seconds]` puts a closing test circle around you on any map (`stop` ends it). It
   needs the Direct3D 9 renderer with shader model 3, but not BleakFx: it draws with `bleakFx 0` too; the soft line
   where it meets the ground needs BleakFx's depth buffer (Multisampling 1x).
+- Storm beast (when the realm turns it on; its `Boss.Enable` is off by default): A BEAST STIRS names the place
+  Thundermaw will wake in 30 seconds; the bar's tab says to follow the green beam there, and the island map marks
+  its den with a green beam and the time until it wakes. Awake, it is a horned skull in a pulsing green ring with
+  its health under it, on the map and on the minimap (pinned to the edge when it is out of view, beside the
+  safe-zone arrow). THUNDERMAW SLAIN names who struck hardest and marks its hoard; THUNDERMAW FLEES when the storm
+  or the last few players drive it off. Its kills show a claw and its name in green in the kill feed.
 - Eliminated: the spectator bar (Killer, Prev, Next, Queue again, Leave) and the end card (placement,
   eliminations, damage, healing, time survived, rewards).
 - The kill announcer is the battleground one (below): it plays in Royale matches too.
 - The bar, the kill feed and the spectator bar can be dragged or placed in AddicatUI's editor mode.
+- Options: `/bh royale motion on|off` (the HUD's animations), `/bh royale sounds on|off` (its own ticks, gong and
+  wind), `/bh royale farclip on|off` (the drop's view distance), `/bh royale minimap on|off` (the storm on the
+  minimap) and `/bh royale scale 0.8-1.4` (the size of every Royale panel).
+  `/bh royale preview countdown|drop|banner|end|map` plays each screen with sample data outside a match.
 - Art: `python3 -I Tools/BlpConvert/make_royale_art.py` draws the island map from the MapForge terrain spec (with
   none of the server's crate spots, orbs or final sites on it) and the HUD's rings, arrows and pin (needs Pillow).
 

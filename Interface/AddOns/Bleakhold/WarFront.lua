@@ -39,7 +39,7 @@ WF.BANNER_TIME = 3                -- s a banner holds (fade in and out included)
 WF.REWARD_TIME = 6                -- s the reward line stays
 WF.MAX_ARROWS = 3
 WF.MAP_ASPECT = 1002 / 668        -- a zone map's width in yards over its height (WorldMapArea frames match the map)
-WF.ARROW = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\Arrow"
+WF.ARROW = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\SafeArrow"
 WF.KICKER = { F = "BLEAK FRONT", L = "LEVELLING FRONT" }
 WF.STATE_TEXT = {
     [0] = "Neutral", [1] = "Held by the Alliance", [2] = "Held by the Horde",

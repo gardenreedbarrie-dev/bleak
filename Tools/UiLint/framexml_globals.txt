@@ -47,3 +47,13 @@ DragonUI_QuestTrackerFrame
 AddicatUI_QuestTrackerFrame
 DragonUIObjectiveTracker
 DBM
+# Bleakhold Royale's island map and storm edge (FrameXML 3.3.5a): the M key's redirect hides the stock map out of
+# combat (UIParent.lua's HideUIPanel); the covers sit on the world map's detail frame (WorldMapFrame.xml) and on
+# Shift-M's battlefield minimap (Blizzard_BattlefieldMinimap, load-on-demand: always checked for nil); the storm edge
+# and the speed lines hang off WorldFrame (WorldFrame.xml), which Alt-Z does not hide. The mock creates the frames
+# when a test asks (M.LoadWorldFrame, M.LoadWorldMap, M.LoadBattlefieldMinimap)
+HideUIPanel
+WorldMapDetailFrame
+WorldFrame
+BattlefieldMinimap
+BattlefieldMinimap1

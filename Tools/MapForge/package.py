@@ -3,7 +3,8 @@
 
     python3 -I Tools/MapForge/package.py build --config <map.json> --dbc <folder> --out <folder>
         [--terrain <terrain output>] [--patches <realm patch folder>] [--server-sql <bleakserv/data/sql> ...]
-        [--minimap <tile folder>] [--force]
+        [--minimap <tile folder>] [--worldmap <tile folder>] [--trs <file or client Data folder>]
+        [--drop-map-art] [--force]
     python3 -I Tools/MapForge/package.py pull --patches <folder> --out <folder> [--config <map.json>]
     python3 -I Tools/MapForge/package.py doctor --patches <folder> [--config <map.json>]
     python3 -I Tools/MapForge/package.py validate --config <map.json> --out <folder>
@@ -22,7 +23,9 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
+import struct
 import sys
 import time
 
@@ -36,7 +39,7 @@ from dbc import SIBLINGS  # noqa: E402,F401  (import also extends sys.path)
 from dbc import config as configmod  # noqa: E402
 from dbc import forge as forgemod  # noqa: E402
 from dbc import layout, minimap, plan as planmod, sqlgen  # noqa: E402
-from dbc.patches import PatchError, PatchSet, outranks, rebuild  # noqa: E402
+from dbc.patches import LOCALES, PatchArchive, PatchError, PatchSet, outranks, rebuild  # noqa: E402
 from dbc.sources import SourceReadError, SourceSet  # noqa: E402
 from terrain import extra_assets  # noqa: E402
 from terrain.spec import load_spec  # noqa: E402
@@ -46,6 +49,18 @@ import mpqpack  # noqa: E402
 from rflib.dbc import DbcError, DbcTable  # noqa: E402
 
 MARKER_FILE = "MapForge\\mapforge.txt"
+MAP_ART_FILE = "MapForge\\mapart.txt"  # which map art the archive holds and the terrain it was made for
+TRS_FILE = "Textures\\Minimap\\md5translate.trs"
+TILE_SIZE = 256
+# NUM_WORLDMAP_DETAIL_TILES: the stock world map shows Interface\WorldMap\<area>\<area>1..12 as 4 x 3 tiles of 256,
+# row-major, in a 1024 x 768 picture whose top-left 1002 x 668 is the map frame (WorldMapFrame_Update). A tile it
+# cannot load keeps the picture it showed before (a failed SetTexture keeps the old texture), so it is all or none.
+WORLD_MAP_TILES = 12
+# The base archives under every patch, highest priority first: OpenArchives (WoW/Source/Client.cpp) opens the
+# patches from priority 64 up, then the base archives of s_archives at falling priorities in the table's order
+# ("****" is the locale). Only these can hold a stock md5translate.trs.
+BASE_ARCHIVES = ("expansion.MPQ", "lichking.MPQ", "common.MPQ", "common-2.MPQ", "****\\locale-****.MPQ",
+                 "****\\expansion-locale-****.MPQ", "****\\lichking-locale-****.MPQ")
 EXTRACT_PATCH = "patch-5.MPQ"
 LOADING_SIZE = (1024, 1024)
 LOADING_WIDE_SIZE = (2048, 1024)
@@ -203,11 +218,205 @@ def convert_loading_screens(cfg: configmod.Config, staging: dict[str, str], work
     return notes
 
 
-def stage_minimap(cfg: configmod.Config, tile_folder: str, trs_base: str | None, patchset: PatchSet | None,
-                  staging: dict[str, str], work_dir: str, wdt_tiles: set[tuple[int, int]]) -> list[str]:
-    """Stage Textures\\Minimap tiles and the merged md5translate.trs."""
+def minimap_tile_name(directory: str, tile: tuple[int, int]) -> str:
+    return f"Textures\\Minimap\\{directory}\\map{tile[0]}_{tile[1]:02d}.blp"
+
+
+def world_map_tile_name(area: str, n: int) -> str:
+    return f"Interface\\WorldMap\\{area}\\{area}{n}.blp"
+
+
+def tile_blp_problems(blob: bytes) -> list[str]:
+    """What keeps a BLP from being a map tile the client draws: BLP2, 256 x 256, DXT1, every level it declares
+    present and as long as CalcLevelSize wants (Engine/Source/Images/MippedImg.cpp)."""
+    import blpconvert  # noqa: PLC0415  (Tools/BlpConvert, on sys.path)
+
+    try:
+        header = blpconvert.read_blp_header(blob)
+    except (ValueError, struct.error) as e:
+        return [str(e)]
+
+    problems = []
+
+    if header["magic"] != b"BLP2" or header["version"] != 1:
+        problems.append(f"not a BLP2 file (magic {header['magic']!r}, version {header['version']})")
+
+    if (header["width"], header["height"]) != (TILE_SIZE, TILE_SIZE):
+        problems.append(f"{header['width']} x {header['height']}, not {TILE_SIZE} x {TILE_SIZE}")
+
+    if header["encoding"] != 2 or header["preferredFormat"] != blpconvert.PIXEL_DXT1:
+        problems.append(f"not DXT1 (encoding {header['encoding']}, format {header['preferredFormat']})")
+    elif not problems:
+        levels = blpconvert.level_count(TILE_SIZE, TILE_SIZE) if header["hasMips"] & 0xF else 1
+
+        for i in range(levels):
+            offset, size = header["offsets"][i], header["sizes"][i]
+
+            if size < blpconvert.level_size(i, TILE_SIZE, TILE_SIZE, "dxt1") or offset + size > len(blob):
+                problems.append(f"level {i} is missing or cut off (the client then fails the whole texture)")
+                break
+
+    return problems
+
+
+def collect_world_map_tiles(folder: str, area: str) -> dict[int, str]:
+    """{n: path} of <area>1..12 (.png or .blp) in folder: every tile, each once."""
+    if not os.path.isdir(folder):
+        raise BuildError(f"--worldmap: {folder} is not a folder")
+
+    pattern = re.compile(rf"(?i){re.escape(area)}([1-9][0-9]*)\.(?:blp|png)")
+    tiles = {}
+
+    for entry in sorted(os.listdir(folder)):
+        if os.path.splitext(entry)[1].lower() not in (".blp", ".png"):
+            continue
+
+        match = pattern.fullmatch(entry)
+
+        if not match or int(match.group(1)) > WORLD_MAP_TILES:
+            raise BuildError(f"--worldmap: {folder}/{entry}: the world map tiles are {area}1 to "
+                             f"{area}{WORLD_MAP_TILES} (.png or .blp), named after the config's world_map_area")
+
+        n = int(match.group(1))
+
+        if n in tiles:
+            raise BuildError(f"--worldmap: {folder}: tile {n} is there twice (.png and .blp)")
+
+        tiles[n] = os.path.join(folder, entry)
+
+    missing = [n for n in range(1, WORLD_MAP_TILES + 1) if n not in tiles]
+
+    if missing:
+        raise BuildError(f"--worldmap: {folder} lacks {', '.join(f'{area}{n}' for n in missing)}: a tile the client "
+                         "cannot load keeps the picture of the map shown before")
+
+    return tiles
+
+
+def check_world_map_tiles(tiles: dict[int, str]) -> None:
+    """Each tile is a 256 x 256 PNG or a 256 x 256 DXT1 BLP the client loads."""
+    import blpconvert  # noqa: PLC0415  (Tools/BlpConvert, on sys.path)
+
+    for n, path in sorted(tiles.items()):
+        if path.lower().endswith(".png"):
+            try:
+                image = blpconvert.read_image(path)
+            except SystemExit as e:
+                raise BuildError(f"world map tile {path}: {e}") from None
+
+            if (image.width, image.height) != (TILE_SIZE, TILE_SIZE):
+                raise BuildError(f"world map tile {path} is {image.width} x {image.height}: a tile is a "
+                                 f"{TILE_SIZE} x {TILE_SIZE} piece of one 1024 x 768 picture (never resampled)")
+        else:
+            with open(path, "rb") as f:
+                problems = tile_blp_problems(f.read())
+
+            if problems:
+                raise BuildError(f"world map tile {path}: {'; '.join(problems)}")
+
+
+def stage_worldmap(cfg: configmod.Config, tiles: dict[int, str], staging: dict[str, str], work_dir: str) -> None:
+    """Stage Interface\\WorldMap\\<area>\\<area>1..12.blp (checked by check_world_map_tiles): a PNG becomes DXT1
+    256 x 256 with one level (interface textures are drawn with plain linear filtering and no mips,
+    Engine/Source/Frame/CSimpleRender.cpp), a BLP goes in as it is."""
+    area = cfg.world_map_area.name
+    os.makedirs(work_dir, exist_ok=True)
+
+    for n, path in sorted(tiles.items()):
+        if path.lower().endswith(".png"):
+            import blpconvert  # noqa: PLC0415
+
+            out_path = os.path.join(work_dir, f"worldmap{n}.blp")
+
+            try:
+                blpconvert.convert(blpconvert.read_image(path), out_path, fmt="dxt1", mips=False, jobs=1)
+            except SystemExit as e:
+                raise BuildError(f"world map tile {path}: {e}") from None
+
+            staging[world_map_tile_name(area, n)] = out_path
+        else:
+            staging[world_map_tile_name(area, n)] = path
+
+
+def trs_from_folder(folder: str, packs: dict[str, list[str]], map_archive: str) -> tuple[bytes, str]:
+    """The md5translate.trs a client with this Data folder (or a folder holding Data, or a patch folder) loads,
+    leaving the map archive out: the top patch archive that holds it (every pack on), else the first base archive in
+    the client's order that does."""
+    patchset = PatchSet.scan(folder, packs)
+    all_on = frozenset({a.pack for a in patchset.archives if a.pack})
+
+    try:
+        pool = [a for a in patchset.active(all_on) if a.name.lower() != map_archive.lower()]
+        holders = [a for a in pool if a.has(TRS_FILE)]
+        top = holders[-1] if holders else None
+        blind = [a.name for a in pool if a.reader is None and (top is None or a.rank() > top.rank())]
+
+        if blind:
+            raise BuildError(f"--trs {folder}: {', '.join(blind)} cannot be read, so which md5translate.trs the "
+                             "players load cannot be told")
+
+        if top:
+            return top.read(TRS_FILE), top.client_path
+    finally:
+        patchset.close()
+
+    data = patchset.folder
+    locales = [e for e in sorted(os.listdir(data)) if e.lower() in {c.lower() for c in LOCALES}
+               and os.path.isdir(os.path.join(data, e))]
+
+    for pattern in BASE_ARCHIVES:
+        for locale in (locales if "****" in pattern else [""]):
+            rel = pattern.replace("****", locale)
+            path = os.path.join(data, *rel.split("\\"))
+
+            if not os.path.isfile(path):
+                continue
+
+            try:
+                with PatchArchive(path) as archive:
+                    if archive.has_file(TRS_FILE):
+                        return archive.read(TRS_FILE), f"Data\\{rel}"
+            except (mpqpack.MpqError, OSError, struct.error) as e:
+                raise BuildError(f"--trs {folder}: Data\\{rel} cannot be read ({e}), so which md5translate.trs the "
+                                 "players load cannot be told") from None
+
+    raise BuildError(f"--trs {folder}: no archive there holds {TRS_FILE} (looked in the patches and in "
+                     f"{', '.join(p.replace('****', '<locale>') for p in BASE_ARCHIVES)})")
+
+
+def trs_base(trs: str | None, patchset: PatchSet | None, map_archive: str,
+             packs: dict[str, list[str]]) -> tuple[bytes, str]:
+    """The md5translate.trs this map's lines go into: --trs (the file, or the copy a client Data folder loads), else
+    the top copy in the realm's patches outside the map archive, else the map archive's own (an earlier merge)."""
+    if trs:
+        if os.path.isdir(trs):
+            return trs_from_folder(trs, packs, map_archive)
+
+        try:
+            with open(trs, "rb") as f:
+                return f.read(), trs
+        except OSError as e:
+            raise BuildError(f"--trs {trs}: {e.strerror}") from None
+
+    if patchset:
+        all_on = frozenset({a.pack for a in patchset.archives if a.pack})
+        holders = patchset.holders(TRS_FILE, all_on)
+        others = [a for a in holders if a.name.lower() != map_archive.lower()]
+
+        if others or holders:
+            top = (others or holders)[-1]
+            return top.read(TRS_FILE), top.name if others else f"{top.name} (its earlier merge)"
+
+    raise BuildError("--minimap needs the md5translate.trs the players load today, and no archive in --patches holds "
+                     "it: give --trs (the file, or the client's Data folder to read it from, such as build-royale.sh's "
+                     "/root/mapforge/stage); shipping only our lines would break every stock map's minimap")
+
+
+def stage_minimap(cfg: configmod.Config, tiles: dict[tuple[int, int], str], trs: str | None,
+                  patchset: PatchSet | None, staging: dict[str, str], work_dir: str,
+                  wdt_tiles: set[tuple[int, int]]) -> list[str]:
+    """Stage the Textures\\Minimap tiles ({(tx, ty): .blp or .png}) and the merged md5translate.trs."""
     directory = cfg.map.directory
-    tiles = minimap.collect_tiles(tile_folder)
     notes = []
 
     if wdt_tiles and set(tiles) != wdt_tiles:
@@ -218,7 +427,7 @@ def stage_minimap(cfg: configmod.Config, tile_folder: str, trs_base: str | None,
     os.makedirs(work_dir, exist_ok=True)
 
     for (tx, ty), path in sorted(tiles.items()):
-        archive_name = f"Textures\\Minimap\\{directory}\\map{tx}_{ty:02d}.blp"
+        archive_name = minimap_tile_name(directory, (tx, ty))
 
         if path.lower().endswith(".png"):
             import blpconvert  # noqa: PLC0415
@@ -236,35 +445,128 @@ def stage_minimap(cfg: configmod.Config, tile_folder: str, trs_base: str | None,
             staging[archive_name] = path
 
     # The trs is one global file: start from the current one and add this map's lines.
-    base = b""
-    source = ""
-
-    if trs_base:
-        with open(trs_base, "rb") as f:
-            base = f.read()
-
-        source = trs_base
-    elif patchset:
-        all_on = frozenset({a.pack for a in patchset.archives if a.pack})
-        top = patchset.top("Textures\\Minimap\\md5translate.trs", all_on)
-
-        if top:
-            base = top.read("Textures\\Minimap\\md5translate.trs")
-            source = top.name
+    base, source = trs_base(trs, patchset, cfg.archives.map_archive, cfg.archives.optional_packs)
 
     if not base:
-        raise BuildError("--minimap needs the realm's current md5translate.trs (--trs, or --patches with an archive "
-                         "holding it): shipping only our lines would break every stock map's minimap")
+        raise BuildError(f"md5translate.trs from {source} is empty: shipping only our lines would break every stock "
+                         "map's minimap")
 
-    merged = minimap.build(minimap.parse(base, source or "md5translate.trs"), directory, sorted(tiles))
+    merged = minimap.build(minimap.parse(base, source), directory, sorted(tiles))
     trs_path = os.path.join(work_dir, "md5translate.trs")
 
     with open(trs_path, "wb") as f:
         f.write(merged)
 
-    staging["Textures\\Minimap\\md5translate.trs"] = trs_path
-    notes.append(f"md5translate.trs: merged from {source or trs_base} plus {len(tiles)} tile lines")
+    staging[TRS_FILE] = trs_path
+    notes.append(f"md5translate.trs: merged from {source} plus {len(tiles)} tile lines")
     return notes
+
+
+def terrain_digest(terrain_files: list[tuple[str, str]]) -> str:
+    """A short fingerprint of the terrain files the map archive ships (names and bytes), for the map art record."""
+    if not terrain_files:
+        return "none"
+
+    digest = hashlib.sha256()
+
+    for name, path in sorted(terrain_files, key=lambda f: f[0].lower()):
+        with open(path, "rb") as f:
+            digest.update(f"{name.lower()}\0{hashlib.sha256(f.read()).hexdigest()}\n".encode())
+
+    return digest.hexdigest()[:16]
+
+
+def read_art_record(text: str) -> dict[str, tuple[int, str]]:
+    """{kind: (tiles, terrain digest)} from MapForge\\mapart.txt ("minimap 9 <digest>" lines)."""
+    out = {}
+
+    for line in text.splitlines():
+        parts = line.split()
+
+        if len(parts) == 3 and parts[0] in ("minimap", "worldmap") and parts[1].isdigit():
+            out[parts[0]] = (int(parts[1]), parts[2])
+
+    return out
+
+
+def write_art_record(record: dict[str, tuple[int, str]], work_dir: str) -> str:
+    os.makedirs(work_dir, exist_ok=True)
+    path = os.path.join(work_dir, "mapart.txt")
+
+    lines = ["Written by Tools/MapForge (package.py): the map art in this archive (kind, tiles, and the fingerprint "
+             "of the terrain it was made for)."]
+    lines += [f"{kind} {tiles} {made_for}" for kind, (tiles, made_for) in sorted(record.items())]
+
+    with open(path, "w", encoding="utf-8", newline="\r\n") as f:
+        f.write("\n".join(lines) + "\n")
+
+    return path
+
+
+def kept_map_art(cfg: configmod.Config, patchset: PatchSet, wdt_tiles: set[tuple[int, int]], minimap_wanted: bool,
+                 worldmap_wanted: bool, work_dir: str) -> tuple[dict, dict, dict, list[str]]:
+    """The minimap and world map tiles of the realm's current map archive (a MapForge one in --patches), to ship
+    again when this build is not given new ones: a rebuild (a new MapForge, a changed realm patch) must not take the
+    island off the players' minimap and world map. Returns (minimap {(tx, ty): path}, world map {n: path}, their
+    record {kind: (tiles, terrain digest)}, report lines). A kind that is there only in part is not kept."""
+    ours = patchset.find(cfg.archives.map_archive)
+    minimap_tiles, world_tiles, record, lines = {}, {}, {}, []
+
+    if ours is None or not ours.has(MARKER_FILE):
+        return minimap_tiles, world_tiles, record, lines
+
+    old = read_art_record(ours.read(MAP_ART_FILE).decode("utf-8", "replace")) if ours.has(MAP_ART_FILE) else {}
+    kept_dir = os.path.join(work_dir, "kept")
+
+    def keep(names: dict, kind: str, label: str) -> dict:
+        present = {key: name for key, name in names.items() if ours.has(name)}
+
+        if not present:
+            return {}
+
+        if len(present) != len(names):
+            lines.append(f"[WARN] {ours.name} holds only {len(present)} of the {len(names)} {label}: they are not "
+                         "kept (render them again: make_royale_art.py --tiles, then build --minimap/--worldmap)")
+            return {}
+
+        os.makedirs(kept_dir, exist_ok=True)
+        out = {}
+
+        for key, name in sorted(present.items()):
+            path = os.path.join(kept_dir, name.replace("\\", "__"))
+
+            with open(path, "wb") as f:
+                f.write(ours.read(name))
+
+            out[key] = path
+
+        record[kind] = old.get(kind, (len(out), "unknown"))
+        lines.append(f"[NOTE] kept the {len(out)} {label} of the realm's {ours.name} (this build was given none; "
+                     "--drop-map-art leaves them out)")
+        return out
+
+    if minimap_wanted and wdt_tiles:
+        names = {tile: minimap_tile_name(cfg.map.directory, tile) for tile in sorted(wdt_tiles)}
+        listed = set()
+
+        if ours.has(TRS_FILE):
+            listed = {key.lower() for key, value in minimap.parse(ours.read(TRS_FILE), f"{ours.name}: trs")
+                      if key.lower() == value.lower()}
+
+        unlisted = [n for n in names.values() if n[len("Textures\\Minimap\\"):].lower() not in listed]
+
+        if all(ours.has(n) for n in names.values()) and unlisted:
+            lines.append(f"[WARN] {ours.name} holds minimap tiles its md5translate.trs does not list: they are not "
+                         "kept (render them again: make_royale_art.py --tiles, then build --minimap)")
+        else:
+            minimap_tiles = keep(names, "minimap", "minimap tiles")
+
+    if worldmap_wanted and cfg.world_map_area is not None:
+        area = cfg.world_map_area.name
+        names = {n: world_map_tile_name(area, n) for n in range(1, WORLD_MAP_TILES + 1)}
+        world_tiles = keep(names, "worldmap", "world map tiles")
+
+    return minimap_tiles, world_tiles, record, lines
 
 
 def collisions(patchset: PatchSet, map_archive: str, staging: dict[str, str],
@@ -276,7 +578,8 @@ def collisions(patchset: PatchSet, map_archive: str, staging: dict[str, str],
     ours = f"Data\\{map_archive}"
 
     for name in sorted(staging):
-        if name.lower().startswith("dbfilesclient\\") or name == MARKER_FILE or name.lower() in extra:
+        if (name.lower().startswith("dbfilesclient\\") or name in (MARKER_FILE, MAP_ART_FILE)
+                or name.lower() in extra):
             continue
 
         holders = [a for a in patchset.holders(name) if a.name.lower() != map_archive.lower()]
@@ -558,6 +861,23 @@ def cmd_build(args) -> int:
         report.say("[WARN] no --terrain: the archive gets DBCs only; a Map.dbc row without the map files crashes "
                    "players on teleport, so do not install this build")
 
+    # The map art given to this run, checked before the output folder is touched.
+    minimap_tiles = minimap.collect_tiles(args.minimap) if args.minimap else {}
+
+    if minimap_tiles and wdt_tiles and set(minimap_tiles) != wdt_tiles:
+        raise BuildError(f"--minimap: the tiles do not match the WDT (missing {sorted(wdt_tiles - set(minimap_tiles))}"
+                         f", extra {sorted(set(minimap_tiles) - wdt_tiles)})")
+
+    world_tiles = {}
+
+    if args.worldmap:
+        if cfg.world_map_area is None:
+            raise BuildError("--worldmap: the config has no world_map_area, so the client has no world map of this map "
+                             "(its WorldMapArea row names the folder Interface\\WorldMap\\<name>\\)")
+
+        world_tiles = collect_world_map_tiles(args.worldmap, cfg.world_map_area.name)
+        check_world_map_tiles(world_tiles)
+
     # The realm's patches: where the modified DBCs must go.
     patchset = None
     placement = None
@@ -628,9 +948,55 @@ def cmd_build(args) -> int:
         for note in convert_loading_screens(cfg, staging, work_dir):
             report.say(f"[NOTE] {note}")
 
-        if args.minimap:
-            for note in stage_minimap(cfg, args.minimap, args.trs, patchset, staging, work_dir, wdt_tiles):
+        # The map art: the tiles given to this run, else the realm's current map archive's (a rebuild must not take
+        # the island off the minimap and the world map), with a record of the terrain each was made for.
+        digest = terrain_digest(terrain_files)
+        record = {}
+        kept_minimap, kept_world = {}, {}
+
+        if patchset and not args.drop_map_art and not (minimap_tiles and world_tiles):
+            kept_minimap, kept_world, kept_record, lines = kept_map_art(cfg, patchset, wdt_tiles, not minimap_tiles,
+                                                                        not world_tiles, work_dir)
+
+            for line in lines:
+                report.say(line)
+
+            for kind, (_, made_for) in sorted(kept_record.items()):
+                label = "minimap tiles" if kind == "minimap" else "world map tiles"
+
+                if made_for == "unknown":
+                    report.say(f"[NOTE] the kept {label} carry no record of the terrain they were made for")
+                elif made_for != digest and digest != "none":
+                    report.say(f"[WARN] the {label} kept from {cfg.archives.map_archive} were made for other "
+                               "terrain: render them again (make_royale_art.py --tiles; bleakserv "
+                               "deploy/maps/README.md, \"The island on the minimap and the world map\")")
+
+            record.update(kept_record)
+
+        if minimap_tiles:
+            record["minimap"] = (len(minimap_tiles), digest)
+
+        if world_tiles:
+            record["worldmap"] = (len(world_tiles), digest)
+
+        if minimap_tiles or kept_minimap:
+            for note in stage_minimap(cfg, minimap_tiles or kept_minimap, args.trs, patchset, staging, work_dir,
+                                      wdt_tiles):
                 report.say(f"[NOTE] {note}")
+
+        if world_tiles or kept_world:
+            stage_worldmap(cfg, world_tiles or kept_world, staging, work_dir)
+            area = cfg.world_map_area.name
+            source = args.worldmap if world_tiles else f"the realm's {cfg.archives.map_archive}"
+            report.say(f"[NOTE] Interface\\WorldMap\\{area}\\: {area}1-{WORLD_MAP_TILES} (DXT1 {TILE_SIZE} x "
+                       f"{TILE_SIZE}; 4 x 3 tiles of a 1024 x 768 picture whose top-left 1002 x 668 is the map frame) "
+                       f"from {source}")
+
+        if record:
+            staging[MAP_ART_FILE] = write_art_record(record, work_dir)
+        elif cfg.world_map_area is not None:
+            report.say("[NOTE] no minimap or world map tiles: the island's minimap stays black and the addon covers "
+                       "the stock world map (build --minimap/--worldmap; bleakserv deploy/maps/README.md)")
 
         map_archive_tables = placement.map_archive_tables() if placement else list(written)
 
@@ -814,9 +1180,64 @@ def cmd_doctor(args) -> int:
         if trs:
             print(f"\nmd5translate.trs is in: {', '.join(a.name for a in trs)} (the build must merge into the last)")
 
+        ours = patchset.find(map_archive) if cfg else None
+
+        if ours and ours.reader:
+            area = cfg.world_map_area.name if cfg.world_map_area else None
+            world = sum(ours.has(world_map_tile_name(area, n)) for n in range(1, WORLD_MAP_TILES + 1)) if area else 0
+            prefix = cfg.map.directory.lower() + "\\"
+            listed = [v for k, v in minimap.parse(ours.read(TRS_FILE), ours.name)
+                      if k.lower().startswith(prefix)] if ours.has(TRS_FILE) else []
+            mini = sum(ours.has(f"Textures\\Minimap\\{v}") for v in listed)
+            print(f"\nMap art in {ours.name}: {mini} minimap tiles, {world} of {WORLD_MAP_TILES} world map tiles "
+                  "(a build keeps them unless it is given new ones or --drop-map-art)")
+
         return 1 if placement.problems else 0
     finally:
         patchset.close()
+
+
+def check_map_art(cfg: configmod.Config, archive, report: Report) -> None:
+    """The map art in the map archive is whole or absent: every tile md5translate.trs lists for this map, and all
+    twelve world map tiles, each a 256 x 256 DXT1 BLP the client draws. Absent art is a note, not a failure."""
+    name = cfg.archives.map_archive
+
+    def problems_of(path: str) -> str:
+        if not archive.has_file(path):
+            return f"{path} is missing"
+
+        found = tile_blp_problems(archive.read(path))
+        return f"{path}: {'; '.join(found)}" if found else ""
+
+    listed = []
+
+    if archive.has_file(TRS_FILE):
+        prefix = cfg.map.directory.lower() + "\\"
+        listed = [f"Textures\\Minimap\\{value}" for key, value in minimap.parse(archive.read(TRS_FILE), name)
+                  if key.lower().startswith(prefix)]
+
+    if listed:
+        bad = [p for p in map(problems_of, listed) if p]
+        report.check(not bad, f"{name} holds the minimap tiles its md5translate.trs lists ({len(listed)})",
+                     ", ".join(bad))
+    else:
+        report.say(f"[NOTE] {name} has no minimap tiles of {cfg.map.directory}: the minimap stays black there (build "
+                   "--minimap)")
+
+    if cfg.world_map_area is None:
+        return
+
+    area = cfg.world_map_area.name
+    names = [world_map_tile_name(area, n) for n in range(1, WORLD_MAP_TILES + 1)]
+
+    if not any(archive.has_file(n) for n in names):
+        report.say(f"[NOTE] {name} has no world map tiles of {area}: the addon covers the stock world map (build "
+                   "--worldmap)")
+        return
+
+    bad = [p for p in map(problems_of, names) if p]
+    report.check(not bad, f"{name} holds the world map tiles ({area}1-{WORLD_MAP_TILES}, DXT1 {TILE_SIZE} x "
+                 f"{TILE_SIZE})", ", ".join(bad))
 
 
 def cmd_validate(args) -> int:
@@ -854,6 +1275,8 @@ def cmd_validate(args) -> int:
             if cfg.archives.marker_texture:
                 report.check(archive.has_file(cfg.archives.marker_texture),
                              f"{cfg.archives.map_archive} holds the patch marker", cfg.archives.marker_texture)
+
+            check_map_art(cfg, archive, report)
     else:
         report.check(False, "map archive", f"{archive_path} is missing")
 
@@ -1108,7 +1531,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--patches", help="the realm's patch folder (/srv/bleakhold-launcher/patches), for placement")
     p.add_argument("--server-sql", action="append", help="bleakserv SQL roots to check ids against (repeatable)")
     p.add_argument("--minimap", help="folder with minimap tiles map<X>_<Y>.blp or .png")
-    p.add_argument("--trs", help="the realm's current md5translate.trs (default: read from --patches)")
+    p.add_argument("--worldmap", help="folder with the world map tiles <area>1..12 (.png or DXT1 .blp, 256 x 256; "
+                                      "<area> is the config's world_map_area name)")
+    p.add_argument("--trs", help="the md5translate.trs the players load today, or a client Data folder to read it "
+                                 "from (build-royale.sh's stage); default: from --patches")
+    p.add_argument("--drop-map-art", action="store_true",
+                   help="ship no minimap or world map tiles this run is not given (by default a build keeps those of "
+                        "the realm's current map archive in --patches)")
     p.add_argument("--pending", help="also write the install SQL as rev_<ns>.sql into this folder "
                                      "(bleakserv/data/sql/updates/pending_db_world)")
     p.add_argument("--full-extract-dbc", action="store_true",

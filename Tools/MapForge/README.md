@@ -41,8 +41,9 @@ count or row size differs).
   Un'Goro Crater's zone row as the template (`zone.template` 490, brighter character lighting) with
   Stranglethorn's jungle ambience and music (`ambience_id` 32, `zone_music` 3) and its own subzone names; everything
   else equals v1's config.
-- **WorldMapArea.dbc**: next free id, bounds from the terrain's tiles widened to the world map's 1002:668 frame (no
-  world map art yet).
+- **WorldMapArea.dbc**: next free id, bounds from the terrain's tiles widened to the world map's 1002:668 frame. Its
+  name (`world_map_area.name`, `BleakholdRoyale`) is the folder of the world map art, `Interface\WorldMap\<name>\`
+  ("Minimap and world map tiles" below).
 - **BattlemasterList.dbc**: id **12** (a free BattlegroundTypeId), map 901, solo queue, levels 80-80. The client
   lists every BattlemasterList row with InstanceType 3 in its battleground UI.
 - **PvpDifficulty.dbc**: one bracket, range index 7, levels 80-80, next free id (`GetBattlegroundBracketByLevel`
@@ -117,9 +118,10 @@ RaceForge writes customization art to patch-6..9 and refuses taken names
 
 - **The map archive is `patch-Q.MPQ`**: the highest free letter, outside RaceForge's art letters and outside the
   launcher's HD pack (`Data/patch-[ABCDEGIMNPSU].MPQ` and `Data/Patch-Y.MPQ`), so every player has it. It holds
-  `World\Maps\BleakholdRoyale\*.wdt/.wdl/.adt`, the loading screen and minimap textures, a marker file, the
-  patch marker texture, and every modified DBC that no realm patch holds. Its paths are new, so its letter only has
-  to beat the stock archives; the build fails if any other patch already holds one of them.
+  `World\Maps\BleakholdRoyale\*.wdt/.wdl/.adt`, the loading screen, the minimap and world map tiles with the merged
+  `md5translate.trs`, a marker file, the patch marker texture, and every modified DBC that no realm patch holds.
+  Its paths are new, so its letter only has to beat the stock archives; the build fails if any other patch already
+  holds one of them.
 - **A DBC that a realm patch holds cannot simply go into a later letter**: after Z only `{ } ~` sort, and a
   separate copy above Z would silently hide every later change the realm makes to that table. So `"dbc": "auto"`
   works out, for each table and each pack combination (with and without the HD pack), which archive wins today, and
@@ -130,9 +132,9 @@ RaceForge writes customization art to patch-6..9 and refuses taken names
   with `merge_into` forces one archive and refuses when a later one holds the file.
 - Rebuilt archives keep every other file of the original (read and repacked with MpqPack: zlib, a listfile, no
   locale variants). The build refuses an archive whose listfile misses files, or with locale-specific copies.
-- `md5translate.trs` (minimap) is one global file: with `--minimap`, the build starts from the realm's current trs
-  (from `--patches` or `--trs`), adds one line per tile with CR LF line ends (the client drops a last line without
-  one), and packs it into patch-Q; it fails if a later archive holds a trs.
+- `md5translate.trs` (minimap) is one global file: with minimap tiles, the build starts from the trs the players load
+  today, adds one line per tile with CR LF line ends (the client drops a last line without one), and packs it into
+  patch-Q; it fails if a later archive holds a trs. See "Minimap and world map tiles".
 
 `package.py doctor --patches <folder>` lists the archives in load order with their packs and prints where each
 DBC would go, without building anything.
@@ -154,8 +156,13 @@ python3 -I terrain/build.py specs/royale_v2.json /root/mapforge/terrain [--asset
     [--resolution /root/mapforge/assets/asset_resolution.json]
 python3 -I package.py build --config bleakhold_royale_v2.json --dbc /root/mapforge/dbc \
     --terrain /root/mapforge/terrain --patches /srv/bleakhold-launcher/patches \
-    --server-sql /root/bleakserv/data/sql --server-sql /root/bleakserv/modules --out /root/mapforge/out
+    --server-sql /root/bleakserv/data/sql --server-sql /root/bleakserv/modules --out /root/mapforge/out \
+    [--minimap <tiles>/minimap --worldmap <tiles>/worldmap --trs <client Data folder>]
 ```
+
+The last line ships the island's minimap and world map tiles ("Minimap and world map tiles" below). On the realm,
+bleakserv's `deploy/maps/build-royale.sh` runs these commands in one go; its `deploy/maps/README.md` ("The island on
+the minimap and the world map") is the owner's runbook for the tiles.
 
 For v1, use `specs/royale_v1.json` and `bleakhold_royale.json` instead; a spec and a config always go together
 (the subzone names differ). The exit code is 0 when every check passed; read `out/report.txt`. Then:
@@ -190,7 +197,50 @@ For v1, use `specs/royale_v1.json` and `bleakhold_royale.json` instead; a spec a
    GameObjectDisplayInfo.dbc instead. The players' `patch-Q.MPQ` and the rebuilt realm archives are the same
    either way.
 
-`package.py validate --config bleakhold_royale_v2.json --out <folder>` checks an output folder again.
+`package.py validate --config bleakhold_royale_v2.json --out <folder>` checks an output folder again, the map art
+included: every minimap tile the merged trs lists and all twelve world map tiles must be there as 256 x 256 DXT1
+BLPs the client draws; art that is not there at all is a note.
+
+### Minimap and world map tiles
+
+The island on the minimap and on the stock world map (M, Shift-M) is art in patch-Q. It is drawn by
+`Tools/BlpConvert/make_royale_art.py --tiles <tiles>` from the terrain spec (Pillow and numpy; about two minutes,
+most of it the terrain build), from the same render as the HUD's island map, so all three match:
+
+- `<tiles>/minimap/map<X>_<YY>.png`: 256 x 256 per ADT tile of the WDT (9 for the 3 x 3 map), north up, west left.
+- `<tiles>/worldmap/BleakholdRoyale1..12.png`: the 1024 x 768 world map picture in 4 x 3 tiles of 256, row-major,
+  the stock world map's layout (`NUM_WORLDMAP_DETAIL_TILES`). Its top-left 1002 x 668 is the map frame, which
+  WorldMapArea's bounds stretch over the island's tiles widened to 1002:668: the island fills the height, the sea
+  the sides.
+
+Give it `--out <scratch folder>` on the VPS: without it, it also rewrites the HUD art in the checkout, and
+build-royale.sh stops on a clone with local changes.
+
+`package.py build` packs them:
+
+- `--minimap <tiles>/minimap`: each tile as `Textures\Minimap\<Directory>\map<X>_<YY>.blp` (DXT1; the build fails
+  when the tiles are not exactly the WDT's), plus `Textures\Minimap\md5translate.trs`, the client's one global name
+  table (`LoadMD5Names`, `MinimapBuildSource`: a tile it does not list is never drawn). The merged trs starts from the
+  one the players load today: `--trs`, a file or a client's Data folder (or build-royale.sh's stage,
+  `/root/mapforge/stage`), read like the client (the top patch archive that holds it with every pack on, the map
+  archive left out; else the base archives in `OpenArchives`' order: expansion, lichking, common, common-2, the
+  locale ones); without `--trs`, the top copy in `--patches` outside patch-Q, else patch-Q's own (an earlier merge,
+  whose lines for this map are replaced). Shipping only our lines would break every stock map's minimap, so a build
+  with none of these fails.
+- `--worldmap <tiles>/worldmap`: `Interface\WorldMap\<name>\<name>1..12.blp`, `<name>` the config's
+  `world_map_area.name`: all twelve or the build fails (a tile the client cannot load keeps the picture of the map
+  it showed before, Scarlet Monastery's for this map id), each a 256 x 256 PNG (converted to DXT1, one level:
+  interface textures are drawn with plain linear filtering and no mips) or a DXT1 BLP of that size, never resampled.
+- Every name goes through the same collision check as the terrain: a realm archive that already holds one stops the
+  build.
+- **A rebuild keeps them.** A build that is not given `--minimap` or `--worldmap` ships those of patch-Q in
+  `--patches` again (when MapForge wrote it and it holds them whole), so a new MapForge or a changed realm patch,
+  which build-royale.sh rebuilds by itself, never takes the island off the players' minimap and world map.
+  `--drop-map-art` leaves them out. `MapForge\mapart.txt` in the archive records what it holds and a fingerprint of
+  the terrain they were made for; when the terrain changes, the build keeps them but warns: render them again.
+- The patch marker stays `MarkerV2`: the terrain is unchanged, so players with an older patch-Q can still queue;
+  they lack only the tiles (the addon covers the stock world map until they have them).
+- `package.py doctor --config <config>` also says how many minimap and world map tiles the realm's patch-Q holds.
 
 ### Extra assets (art from later expansions)
 
@@ -238,7 +288,7 @@ when it reaches every player: it must end up in patch-Q.
 
 | Path | Contents |
 |---|---|
-| `client/patch-Q.MPQ` | terrain, textures, the extra assets the terrain uses, and the DBCs no realm patch holds |
+| `client/patch-Q.MPQ` | terrain, textures, extra assets, minimap and world map tiles, DBCs no realm patch holds |
 | `client/<realm archive>.MPQ` | each realm archive that wins for a modified DBC, rebuilt with the rows |
 | `client/DBFilesClient/*.dbc` | the modified tables, forged on the input copies |
 | `server/sql/bleakhold_royale.sql` | the install: DELETE + INSERT per table, passes `codestyle-sql.py` |
@@ -278,7 +328,11 @@ files), and check: the layouts against the Rec classes and against AzerothCore's
 columns (when a bleakserv checkout is next to this repository), round trips, that every input row stays byte for
 byte, localized strings and their flags column, ids, area bits, the light and battleground rows, the client's
 archive order and packs, the placement plan, archive rebuilds, the SQL (run against SQLite, twice, then removed)
-and the whole build.
+and the whole build. `tests/test_package_mapart.py` covers the map art: the world map tiles (names, all twelve, 256 x
+256 DXT1 with one level, BLPs passed through, collisions, a config without a world map), the minimap tiles and where
+the merged trs starts (a realm patch, patch-Q's earlier merge, a trs that loads over patch-Q, a client Data folder
+with patch and base archives, an archive that cannot be read), a rebuild that keeps the art byte for byte, new tiles
+over kept ones, `--drop-map-art`, art made for other terrain, art there only in part, and validate and doctor.
 
 ## Terrain
 
@@ -572,8 +626,9 @@ fallbacks) and how `package.py build` ships extra assets.
   knob).
 - One liquid instance per chunk (bodies of another liquid type are dropped where they share a chunk) and one
   liquid type per river (no fast-water rapids below a fall); water surfaces are flat per reach (a step at each
-  fall, no sloped water); no MCLQ, no MCSH shadows, no MCCV vertex colours, no MFBO flight bounds, no minimap tiles
-  (the trs merge must happen on the VPS from the stock file).
+  fall, no sloped water); no MCLQ, no MCSH shadows, no MCCV vertex colours, no MFBO flight bounds.
+- The minimap has tiles only inside the WDT: near the map's edge (the lobby balcony in a corner) the rest of the
+  round minimap stays black.
 - Waterfall models are placed at the step with the spec's `height` as their own drop; the real models' heights
   and origins need checking on the VPS (`--assets` gives their boxes) or in a client.
 - Mountain ledges are flat shelves above the cliff: unreachable on foot, but a player who parachutes onto one

@@ -376,6 +376,35 @@ return function(opts)
         assert(n == 4 or n == 8, "SetTexCoord: 4 or 8 numbers expected")
         for i = 1, n do num(select(i, ...), "SetTexCoord") end
         self.__tc = { ... }
+        if n == 4 then
+            local l, r, t, b = ...
+            self.__tc8 = { l, t, l, b, r, t, r, b }
+        else
+            self.__tc8 = { ... }
+        end
+    end
+    -- The four corners UL, LL, UR, LR as CSimpleTexture keeps them (m_texCoords), also after a 4-number SetTexCoord
+    -- or a SetRotation; __tc keeps the numbers of the last call as they were given.
+    function IMPL.GetTexCoord(self)
+        return unpack(self.__tc8 or { 0, 0, 0, 1, 1, 0, 1, 1 }, 1, 8)
+    end
+    -- Script_SetRotation (CSimpleTexture_Scripts.cpp): all four texcoords become a square of radius 1 around (cx, cy)
+    -- turned by angle - pi/4, so an atlas cell set before is lost. Every call goes to M.rotations with the texture's
+    -- file and its region's size, for the tests that allow it on square standalone art only.
+    M.rotations = {}
+    function IMPL.SetRotation(self, angle, cx, cy)
+        assert(type(angle) == "number",
+            "Usage: " .. tostring(self.__name or "<unnamed>") .. ":SetRotation(angle, [cx, cy])")
+        if type(cx) ~= "number" or type(cy) ~= "number" then
+            cx, cy = 0.5, 0.5
+        end
+        local s, c = math.sin(angle - 0.78539819), math.cos(angle - 0.78539819)
+        self.__tc8 = { s + cx, cy - c, cx - c, cy - s, c + cx, s + cy, cx - s, cy + c }
+        self.__tc = { unpack(self.__tc8) }
+        self.__angle = angle
+        M.rotations[#M.rotations + 1] = {
+            path = self.__texture, width = self.__w, height = self.__h, angle = angle, texture = self,
+        }
     end
     function IMPL.SetDrawLayer(self, layer) assert(LAYERS[layer], "SetDrawLayer: invalid layer " .. tostring(layer)); self.__layer = layer end
     function IMPL.SetBackdrop(self, bd)
@@ -554,11 +583,17 @@ return function(opts)
         M.savedBindings = M.savedBindings + 1
         M.savedBindingSets[#M.savedBindingSets + 1] = which
     end
-    env.GetScreenWidth = function() return 1024 end
-    env.GetScreenHeight = function() return 768 end
+    -- UIParent's size in UI units (Script_GetScreenWidth/Height); M.SetScreen changes it
+    M.screenW, M.screenH = 1024, 768
+    env.GetScreenWidth = function() return M.screenW end
+    env.GetScreenHeight = function() return M.screenH end
     env.PlaySound = function(s) M.sounds[#M.sounds + 1] = s end
     -- CVars the client registered (only those GetCVar/SetCVar find, ConsoleVar.cpp LookupRegistered)
     M.cvars = {}
+    -- the window's size in physical pixels (the UI's own 1024x768 layout above stays the tests' default; M.SetScreen
+    -- sets both together)
+    M.cvars.gxResolution = "1920x1080"
+    M.screenPixels = { 1920, 1080 }
     env.GetCVar = function(name) return M.cvars[name] end
     env.SetCVar = function(name, value)
         assert(M.cvars[name] ~= nil, "Couldn't find CVar named '" .. tostring(name) .. "'")
@@ -593,6 +628,67 @@ return function(opts)
         if not M.inWorld then return end   -- the client does nothing without an active player
         if chatType == "PARTY" and M.party == 0 and M.raid == 0 then return end
         M.sent[#M.sent + 1] = { prefix = prefix, msg = msg, channel = chatType, target = target, t = M.now }
+    end
+    -- Script_IsIndoors (ScriptEvents_Scripts.cpp): 1 while the player is not outdoors; tests set M.indoors
+    env.IsIndoors = function() return M.indoors and 1 or nil end
+    -- Script_GetMapInfo (WorldMap_Scripts.cpp): the file name of the map the world map shows; tests set M.mapInfo
+    env.GetMapInfo = function() return M.mapInfo end
+    -- Script_PlaySoundFile (SoundInterface2_Scripts.cpp): every file in M.soundFiles, its time in M.soundFileTimes
+    M.soundFiles, M.soundFileTimes = {}, {}
+    env.PlaySoundFile = function(path)
+        assert(type(path) == "string" or type(path) == "number", "Usage: PlaySoundFile(\"soundfile\")")
+        M.soundFiles[#M.soundFiles + 1] = tostring(path)
+        M.soundFileTimes[#M.soundFileTimes + 1] = M.now
+        return 1
+    end
+    -- The view distance (GameUI_Scripts.cpp: both read and write the farclip CVar). 777 is a value of the hardware
+    -- table (ConsoleDetect.cpp), below the 1277 a fresh install starts at.
+    M.farclip = 777
+    env.GetFarclip = function() return M.farclip end
+    env.SetFarclip = function(v)
+        assert(type(v) == "number", "Usage: SetFarclip(value)")
+        M.farclip = v
+    end
+    -- Override bindings (UIBindings_Scripts.cpp), owned by a frame. Both are protected, so like the originals they
+    -- fail in combat lockdown: the mock raises. M.overrideBindings lists { owner, priority, key, command } in the
+    -- order they were set; M.OverrideAction(key) answers the command a key runs through them.
+    M.overrideBindings = {}
+    local function bindingOwner(owner, usage)
+        assert(type(owner) == "table" and owner.__otype and isA(owner.__otype, "Frame"), usage)
+    end
+    env.SetOverrideBinding = function(owner, isPriority, key, command)
+        local usage = "Usage: SetOverrideBinding(owner, isPriority, \"KEY\"[, \"COMMAND\"])"
+        bindingOwner(owner, usage)
+        assert(type(key) == "string", usage)
+        assert(not M.combat, "SetOverrideBinding in combat")
+        for i = #M.overrideBindings, 1, -1 do
+            local b = M.overrideBindings[i]
+            if b.owner == owner and b.key == key then
+                table.remove(M.overrideBindings, i)
+            end
+        end
+        if type(command) == "string" then
+            M.overrideBindings[#M.overrideBindings + 1] = { owner = owner, priority = isPriority and true or false,
+                key = key, command = command }
+        end
+    end
+    env.ClearOverrideBindings = function(owner)
+        bindingOwner(owner, "Usage: ClearOverrideBindings(owner)")
+        assert(not M.combat, "ClearOverrideBindings in combat")
+        for i = #M.overrideBindings, 1, -1 do
+            if M.overrideBindings[i].owner == owner then
+                table.remove(M.overrideBindings, i)
+            end
+        end
+    end
+    function M.OverrideAction(key)
+        local found
+        for _, b in ipairs(M.overrideBindings) do
+            if b.key == key and (not found or b.priority or not found.priority) then
+                found = b
+            end
+        end
+        return found and found.command
     end
 
     ------------------------------------------------------------------------------------------------
@@ -672,6 +768,20 @@ return function(opts)
         if env.LFDParentFrame:IsShown() then env.LFDParentFrame:Hide() else env.ShowUIPanel(env.LFDParentFrame) end
     end
     -- GetMinimapShape, DragonUI*, DBM: absent unless a test sets them
+    -- BleakholdUI_ScreenPixels (Bleakhold.exe): absent unless a test sets it (M.screenPixels has the numbers)
+
+    -- The stock error text's own anchor (UIErrorsFrame.xml: 512x60, TOP of UIParent, 122 down); its points are
+    -- recorded like every region's, so a test sees where the addon moved it and that it came back.
+    env.UIErrorsFrame:SetSize(512, 60)
+    env.UIErrorsFrame:SetPoint("TOP", env.UIParent, "TOP", 0, -122)
+    -- WorldFrame and the world map: absent until a test asks (M.LoadWorldFrame, M.LoadWorldMap)
+    -- UIParent.lua's HideUIPanel, reduced to hiding the frame (the panel layout is not modelled); every call is in
+    -- M.hiddenPanels
+    M.hiddenPanels = {}
+    env.HideUIPanel = function(frame)
+        M.hiddenPanels[#M.hiddenPanels + 1] = frame
+        if frame then frame:Hide() end
+    end
 
     ------------------------------------------------------------------------------------------------
     -- Driving the mock
@@ -791,6 +901,148 @@ return function(opts)
         end
         return ns
     end
+
+    -- The 3D world's frame (WorldFrame.xml): not under UIParent, so Alt-Z does not hide it and the UI scale does not
+    -- scale it. Call it in a test's `before` when the addon parents frames to it at load.
+    function M.LoadWorldFrame()
+        local f = new("Frame", "WorldFrame", nil)
+        f:SetSize(768 * M.screenW / M.screenH, 768)
+        return f
+    end
+
+    -- The world map (WorldMapFrame.xml), hidden until opened: the detail frame holds the 1002x668 map tiles, and
+    -- WorldMapButton (the map area the player arrow and the POIs live on) sits over it at frame level 5. Call it in a
+    -- test's `before` when the addon hooks the map at load.
+    function M.LoadWorldMap()
+        local map = new("Frame", "WorldMapFrame", env.UIParent)
+        map.__shown = false
+        map:SetFrameStrata("FULLSCREEN")
+        map:SetSize(1024, 768)
+        local detail = new("Frame", "WorldMapDetailFrame", map)
+        detail:SetSize(1002, 668)
+        detail:SetPoint("TOPLEFT", map, "TOPLEFT", 0, 0)
+        detail:SetFrameLevel(2)
+        local button = new("Button", "WorldMapButton", map)
+        button:SetSize(1002, 668)
+        button:SetPoint("TOPLEFT", detail, "TOPLEFT", 0, 0)
+        button:SetFrameLevel(5)
+        return map
+    end
+
+    -- A window of w x h physical pixels, with the UI scale the player chose (useUiScale 1) or none (nil). UIParent's
+    -- scale follows the client: ScaleToScreenSize without a UI scale (768/h, at least 0.9), SetUIScale with one (at
+    -- least 0.64), and both cap it at aspect * 0.75 on screens narrower than 4:3 (GameUI.cpp, GameUI_CVar.cpp).
+    -- UIParent is then 768 * aspect / scale x 768 / scale units; DISPLAY_SIZE_CHANGED fires.
+    function M.SetScreen(w, h, uiScale)
+        assert(type(w) == "number" and type(h) == "number" and w > 0 and h > 0, "SetScreen(w, h [, uiScale])")
+        local aspect = w / h
+        local scale
+        if uiScale then
+            scale = uiScale
+            M.cvars.useUiScale, M.cvars.uiScale = "1", tostring(uiScale)
+        else
+            scale = h > 768 and 768 / h or 1
+            M.cvars.useUiScale = "0"
+        end
+        if aspect * 3 < 4 and aspect * 0.75 <= scale then
+            scale = aspect * 0.75
+        end
+        scale = math.max(scale, uiScale and 0.64 or 0.9)
+        M.cvars.gxResolution = w .. "x" .. h
+        M.screenPixels = { w, h }
+        env.UIParent:SetScale(scale)
+        M.screenW, M.screenH = 768 * aspect / scale, 768 / scale
+        env.UIParent:SetSize(M.screenW, M.screenH)
+        if env.WorldFrame then
+            env.WorldFrame:SetSize(768 * aspect, 768)
+        end
+        M.FireEvent("DISPLAY_SIZE_CHANGED")
+    end
+
+    -- Combat lockdown in the client's order (GameUI.cpp SetRegenEnabled): PLAYER_REGEN_DISABLED fires while protected
+    -- actions are still allowed, PLAYER_REGEN_ENABLED once they are allowed again.
+    function M.SetCombat(on)
+        if on then
+            M.FireEvent("PLAYER_REGEN_DISABLED")
+            M.combat = true
+        else
+            M.combat = false
+            M.FireEvent("PLAYER_REGEN_ENABLED")
+        end
+    end
+
+    -- Blizzard_BattlefieldMinimap (Shift-M, load-on-demand): its frame, hidden like the stock one until shown, with
+    -- the twelve map tiles BattlefieldMinimap1..12 (4 x 3 of a 225-unit-wide map), then ADDON_LOADED as LoadAddOn
+    -- sends it.
+    function M.LoadBattlefieldMinimap()
+        local f = new("Frame", "BattlefieldMinimap", env.UIParent)
+        f.__shown = false
+        f:SetSize(225, 150)
+        f:SetFrameStrata("LOW")
+        local tile = 225 / 4
+        for i = 1, 12 do
+            local t = f:CreateTexture("BattlefieldMinimap" .. i, "BACKGROUND")
+            t:SetSize(tile, tile)
+            t:SetPoint("TOPLEFT", f, "TOPLEFT", (i - 1) % 4 * tile, -math.floor((i - 1) / 4) * tile)
+        end
+        M.addons.Blizzard_BattlefieldMinimap = true
+        M.FireEvent("ADDON_LOADED", "Blizzard_BattlefieldMinimap")
+        return f
+    end
+
+    -- A quest tracker with quest lines, where it sits by default: AddicatUI's (TOPRIGHT -210,-255 of UIParent,
+    -- AddicatUI/database.lua) or, with opts.stock, the stock WatchFrame. GetNumQuestWatches answers opts.watches (1).
+    function M.QuestTracker(opts)
+        opts = opts or {}
+        local f = opts.stock and env.WatchFrame or new("Frame", "AddicatUI_QuestTrackerFrame", env.UIParent)
+        local w, h = opts.w or 250, opts.h or 300
+        f:SetSize(w, h)
+        f:ClearAllPoints()
+        f:SetPoint("TOPRIGHT", env.UIParent, "TOPRIGHT", -210, -255)
+        f.__cx, f.__cy = M.screenW - 210 - w / 2, M.screenH - 255 - h / 2
+        f:Show()
+        M.questWatches = opts.watches or 1
+        env.GetNumQuestWatches = function() return M.questWatches end
+        return f
+    end
+
+    -- A font file the client cannot load (M.missingFonts[path] = true): like Script_SetFont
+    -- (CSimpleFontString_Scripts.cpp), SetFont answers nil and the font string keeps the font it had.
+    M.missingFonts = {}
+    local setFont = IMPL.SetFont
+    function IMPL.SetFont(self, path, size, flags)
+        if M.missingFonts[path] then
+            assert(type(path) == "string" and type(size) == "number" and size > 0, "SetFont: path and size expected")
+            M.fonts[path] = true
+            return nil
+        end
+        return setFont(self, path, size, flags)
+    end
+
+    -- Script_SetDesaturated and Script_IsDesaturated (CSimpleTexture_Scripts.cpp) work through the texture's pixel
+    -- shader (nil or false: off), and CSimpleTexture::SetTexture (CSimpleRender.cpp) sets the Normal shader again
+    -- whenever it loads a file other than the one it has: a texture greyed before its file comes shows in colour.
+    function IMPL.SetDesaturated(self, on)
+        self.__desat = (on ~= nil and on ~= false and on ~= 0) or nil
+        return 1
+    end
+    function IMPL.IsDesaturated(self) return self.__desat and 1 or nil end
+    local setTexture = IMPL.SetTexture
+    function IMPL.SetTexture(self, a, ...)
+        local before = self.__texture
+        local ok = setTexture(self, a, ...)
+        if ok and type(a) == "string" and a ~= "" and a ~= before then
+            self.__desat = nil
+        end
+        return ok
+    end
+
+    -- EnableMouse and IsMouseEnabled keep the flag, so tests can tell a click-through frame (a frame without it never
+    -- takes the mouse focus from the world frame, CSimpleTop::OnMouseDown).
+    function IMPL.EnableMouse(self, on)
+        self.__mouse = (on ~= nil and on ~= false and on ~= 0) or nil
+    end
+    function IMPL.IsMouseEnabled(self) return self.__mouse and 1 or nil end
 
     return M
 end

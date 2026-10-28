@@ -20,6 +20,7 @@
 #include "BleakholdIntent.h"
 #include "BleakholdMessages.h"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -359,6 +360,13 @@ namespace
         name(f[20], RoyaleNameBytes, "ROYS watchName before stages");
         if (f[23] != std::to_string(*st.stages))
             Die("ROYS: stages is not the one given", text);
+        // fields 25-27, the drop: from the input's first byte, 0 included (the parachute is open)
+        st.fallMsLeft = k * 100u; st.landMsLeft = k * 100u + 12000u; st.fallMs = 8000u;
+        f = fields(records(EncodeRoyaleState(st), 1, "ROYS")[0], 27, "ROYS with the drop");
+        name(f[20], RoyaleNameBytes, "ROYS watchName before the drop");
+        if (f[23] != std::to_string(*st.stages) || f[24] != std::to_string(*st.fallMsLeft) ||
+            f[25] != std::to_string(*st.landMsLeft) || f[26] != "8000")
+            Die("ROYS: the drop's times are not the ones given", text);
 
         RoyaleMap mp;
         mp.pois = { { 1, RoyalePoiKind::Landmark, -1, 1, 2, text }, { 2, RoyalePoiKind::Lobby, 0, 0, k, text } };
@@ -380,6 +388,45 @@ namespace
             Die("ROYV: wrong field count", text);
         if (f.size() == 6)
             name(f[5], RoyaleNameBytes, "ROYV name");
+
+        // the storm beast: ROYV B names a place (40 bytes like ROYM), K a character (48); ROYO X carries its health
+        // from the input's bytes, never over 100; ROYK cause B by the beast itself has no tally
+        ev.kind = RoyaleEventKind::BossIncoming;
+        f = Split(records(EncodeRoyaleEvent(ev), 1, "ROYV B")[0], ',');
+        if (f.size() != 6 && !(f.size() == 5 && CleanText(text, RoyalePlaceBytes).empty()))
+            Die("ROYV B: wrong field count", text);
+        if (f.size() == 6)
+            name(f[5], RoyalePlaceBytes, "ROYV B place");
+        ev.kind = RoyaleEventKind::BossSlain; ev.msLeft.reset();
+        f = Split(records(EncodeRoyaleEvent(ev), 1, "ROYV K")[0], ',');
+        if (f.size() != 6 && !(f.size() == 4 && CleanText(text, RoyaleNameBytes).empty()))
+            Die("ROYV K: wrong field count", text);
+        if (f.size() == 6)
+            name(f[5], RoyaleNameBytes, "ROYV K slayer");
+        uint32_t health = k;
+        for (char c : text)
+            health = health * 131u + static_cast<unsigned char>(c);
+        RoyaleObjects beast;
+        beast.matchId = 1; beast.full = (k & 1) != 0;
+        RoyaleObject boss;
+        boss.objId = 30; boss.kind = RoyaleObjectKind::Boss; boss.subtype = health;
+        boss.state = RoyaleObjectState::Ready;
+        RoyaleObject hoard;
+        hoard.objId = 31; hoard.kind = RoyaleObjectKind::Hoard; hoard.state = RoyaleObjectState::Opened;
+        beast.objects = { boss, hoard };
+        std::vector<std::string> ro = records(EncodeRoyaleObjects(beast), 3, "ROYO");
+        f = fields(ro[1], 6, "ROYO X");
+        if (f[1] != "X" || f[2] != std::to_string(std::min(health, MaxRoyaleBossHealthPct)) || f[5] != "1")
+            Die("ROYO X: the health is not the input's, clamped to 0-100", text);
+        f = fields(ro[2], 6, "ROYO H");
+        if (f[1] != "H" || f[2] != "0" || f[5] != "4")
+            Die("ROYO H: not the hoard as given", text);
+        RoyaleKill byBeast;
+        byBeast.killerName = text; byBeast.killerClassId = 0u; byBeast.victimName = text; byBeast.victimClassId = 5;
+        byBeast.cause = RoyaleCause::Boss; byBeast.aliveAfter = k;
+        f = fields(records(EncodeRoyaleKill(byBeast), 1, "ROYK B")[0], 6, "ROYK B");
+        if (f[1] != "0" || f[4] != "B")
+            Die("ROYK B: the beast's class or the cause moved", text);
 
         // ARENA (section 20): the input as the season, season-list, team and opponent names
         ArenaState ar;

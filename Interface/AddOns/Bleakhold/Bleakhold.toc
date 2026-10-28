@@ -29,8 +29,13 @@ Animations.lua
 Transmog.lua
 Cases.lua
 Camp.lua
+RoyaleArtData.lua
+RoyaleStyle.lua
 Royale.lua
 RoyaleMap.lua
+RoyaleCountdown.lua
+RoyaleDrop.lua
+RoyaleMinimap.lua
 RoyaleHud.lua
 Arena.lua
 AnnouncerData.lua

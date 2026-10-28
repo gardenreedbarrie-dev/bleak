@@ -188,11 +188,15 @@ test("orbs: holder is a UIParent child anchored to the Minimap, never a Minimap 
     M.Advance(1.1)
     local _, rel = holder:GetPoint(1)
     H.eq(rel, M.env.Minimap, "anchored to the minimap centre")
-    for _, c in ipairs(M.env.Minimap.__children) do
-        H.ok(not tostring(c:GetName()):find("Bleakhold"), "nothing of ours is parented to Minimap")
-    end
-    for _, c in ipairs(M.env.MinimapBackdrop.__children) do
-        H.ok(not tostring(c:GetName()):find("Bleakhold"), "nothing of ours is parented to MinimapBackdrop")
+    -- AddicatUI collects the Buttons parented to Minimap and MinimapBackdrop (and one Frame further down): of ours,
+    -- only a plain frame without Buttons may hang there (the Royale minimap layer, RoyaleMinimap.lua)
+    for _, parent in ipairs({ M.env.Minimap, M.env.MinimapBackdrop }) do
+        for _, c in ipairs(parent.__children) do
+            if tostring(c:GetName()):find("Bleakhold") then
+                H.eq(c:GetObjectType(), "Frame", "no Button of ours on " .. parent:GetName())
+                H.eq(#M.Clickables(c), 0, "no Button inside " .. c:GetName())
+            end
+        end
     end
     local orb = M.env.BleakholdOrb_activities
     H.eq(orb:GetParent(), holder)

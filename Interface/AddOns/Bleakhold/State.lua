@@ -1022,9 +1022,16 @@ local ROYALE_NAME = 48            -- character names (two-word names fit)
 local ROYALE_PLACE = 40           -- names of places
 local ROYALE_FEED = 20            -- kill feed lines kept
 local ROYALE_POI_KINDS = { L = true, C = true, Y = true }
-local ROYALE_OBJECT_KINDS = { S = true, B = true, D = true }
-local ROYALE_CAUSES = { P = true, S = true, F = true, L = true, A = true }
-local ROYALE_EVENTS = { R = true, S = true, D = true, L = true, O = true, N = true, W = true }
+-- ROYO: orbs (S, B), supply drops (D), the storm beast (X) and the hoard it leaves (H). A subtype only where the kind
+-- has one, clamped: the buff of a B, the beast's health in percent; 0 for the rest.
+local ROYALE_OBJECT_KINDS = { S = true, B = true, D = true, X = true, H = true }
+local ROYALE_SUBTYPE_MAX = { B = 3, X = 100 }
+-- ROYK: a player, the storm, a fall, left, away, the storm beast; a cause this client does not know shows as P
+local ROYALE_CAUSES = { P = true, S = true, F = true, L = true, A = true, B = true }
+-- ROYV: R S D L O N W, and the storm beast's B (stirs), A (awake), K (slain), F (fled); others are ignored
+local ROYALE_EVENTS = {
+    R = true, S = true, D = true, L = true, O = true, N = true, W = true, B = true, A = true, K = true, F = true,
+}
 ns.ROYALE_MAX_OBJECTS = 64
 ns.ROYALE_MAX_STAGES = 16         -- the server's Storm.Stages takes 1..16; ROYS `stages` (empty: six)
 
@@ -1082,7 +1089,8 @@ Comm.Handle("ROYS", function(r)
         nextX = royalePos(f[15]), nextY = royalePos(f[16]), nextR = U.Int(f[17], nil, 0, ROYALE_POS),
         shrinkStartMs = royaleMs(f[18]), shrinkEndMs = royaleMs(f[19]), dmgPermille = U.Int(f[20], 0, 0, 1000000),
         watchName = U.Str(f[21], nil, ROYALE_NAME), myX = royalePos(f[22]), myY = royalePos(f[23]),
-        stages = U.Int(f[24], nil, 1, ns.ROYALE_MAX_STAGES), recvAt = GetTime(),
+        stages = U.Int(f[24], nil, 1, ns.ROYALE_MAX_STAGES),
+        fallMsLeft = royaleMs(f[25]), landMsLeft = royaleMs(f[26]), fallMs = royaleMs(f[27]), recvAt = GetTime(),
     }
     -- a pair or nothing
     if not (m.pinX and m.pinY) then
@@ -1093,6 +1101,13 @@ Comm.Handle("ROYS", function(r)
     end
     if not (m.myX and m.myY) then
         m.myX, m.myY = nil, nil
+    end
+    -- the drop's times (fields 25-27): all three while falling (me 1), or none (an older server sends none, and the
+    -- drop HUD then goes by the parachute's aura); the planned touchdown never comes before the parachute opens
+    if m.me ~= 1 or not (m.fallMsLeft and m.landMsLeft and m.fallMs) then
+        m.fallMsLeft, m.landMsLeft, m.fallMs = nil, nil, nil
+    elseif m.landMsLeft < m.fallMsLeft then
+        m.landMsLeft = m.fallMsLeft
     end
     if not same then
         S.royaleObjects = nil
@@ -1150,11 +1165,12 @@ end)
 
 local function parseRoyaleObject(o)
     local id = U.Int(o[1], nil, 0, INT32)
-    local kind = U.Str(o[2], nil, 1)
+    local kind = U.Str(o[2], nil, 2)   -- 2: "XH" is no kind, not "X"
     if not id or not kind or not ROYALE_OBJECT_KINDS[kind] then
         return nil
     end
-    return { id = id, kind = kind, subtype = kind == "B" and U.Int(o[3], 0, 0, 3) or 0, x = royalePos(o[4], 0),
+    local maxSubtype = ROYALE_SUBTYPE_MAX[kind]
+    return { id = id, kind = kind, subtype = maxSubtype and U.Int(o[3], 0, 0, maxSubtype) or 0, x = royalePos(o[4], 0),
         y = royalePos(o[5], 0), state = royaleEnum(o[6], 4) or 0, msLeft = royaleMs(o[7]), recvAt = GetTime() }
 end
 
@@ -1200,7 +1216,7 @@ Comm.Handle("ROYK", function(r)
     if not victim then
         return
     end
-    local cause = U.Str(f[5], "P", 1)
+    local cause = U.Str(f[5], "P", 2)   -- 2: "BX" is no cause, not "B"
     local k = {
         killer = U.Str(f[1], nil, ROYALE_NAME), killerClassId = U.Int(f[2], nil, 0, 255), victim = victim,
         victimClassId = U.Int(f[4], 0, 0, 255), cause = ROYALE_CAUSES[cause] and cause or "P",
@@ -1210,6 +1226,9 @@ Comm.Handle("ROYK", function(r)
     -- f[8] (`announce`) is superseded by BGANN (section 18) and ignored, so no announcer line plays twice
     if not k.killer then
         k.killerClassId, k.killerKills = nil, nil
+    elseif k.cause == "B" and k.killerClassId == 0 then
+        -- the storm beast itself (no player has class 0, and a player may be called Thundermaw): no tally of its own
+        k.byBoss, k.killerKills = true, nil
     end
     local feed = S.royaleFeed
     feed[#feed + 1] = k
@@ -1253,12 +1272,14 @@ end)
 Comm.MapOpToTopic("ROYV", "ROYS")
 Comm.Handle("ROYV", function(r)
     local f = r[1]
-    local kind = U.Str(f[1], nil, 1)
+    local kind = U.Str(f[1], nil, 2)   -- 2: "BX" is no kind, not "B"
     if not kind or not ROYALE_EVENTS[kind] then
         return
     end
+    -- the name is a character's, but the place for the storm beast's B
     local e = { kind = kind, value = U.Int(f[2], 0, 0, INT32), x = royalePos(f[3]), y = royalePos(f[4]),
-        msLeft = royaleMs(f[5]), name = U.Str(f[6], nil, ROYALE_NAME), recvAt = GetTime() }
+        msLeft = royaleMs(f[5]), name = U.Str(f[6], nil, kind == "B" and ROYALE_PLACE or ROYALE_NAME),
+        recvAt = GetTime() }
     if not (e.x and e.y) then
         e.x, e.y = nil, nil
     end

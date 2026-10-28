@@ -196,7 +196,7 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `GLIDE` | | Walk on Air, the High Elf glide: the player's fall becomes a glide they steer (section 16) |
 | `REPAIR` | | repair everything the player wears and carries in the bags, for the normal cost (section 16) |
 | `RDROP` | `x, y` | Bleakhold Royale: set the landing pin (section 17). Integer world yards, -17067..17067 each (they may be negative) |
-| `RDEPLOY` | | Bleakhold Royale: open the parachute now (section 17) |
+| `RDEPLOY` | | Bleakhold Royale: accepted and ignored, the parachute opens by itself (section 17) |
 | `RSPEC` | `dir` | Bleakhold Royale spectators: watch another player (section 17). `dir`: 0 the killer (or the first player alive), 1 the next, 2 the previous |
 | `WARMODE` | `on` | turn War Mode on (1) or off (0) (section 19) |
 
@@ -1092,7 +1092,8 @@ Bleakhold Royale is a solo free-for-all battle royale: 20 to 40 players at level
 one life each, and the last player standing wins. The server decides everything: who may queue, the ready check,
 where a landing pin really lands, the storm, the loot, every elimination and every reward. The client shows the state
 it gets and sends only the player's wishes: join or leave the queue (`QJOIN B`, `QLEAVE`), answer the ready check
-(`QREPLY`), set a landing pin (`RDROP`), open the parachute (`RDEPLOY`) and switch the spectator camera (`RSPEC`).
+(`QREPLY`), set a landing pin (`RDROP`) and switch the spectator camera (`RSPEC`). The parachute opens by itself;
+`RDEPLOY`, which used to open it early, is still accepted and ignored.
 
 `HELLO` feature bit 4096 is on while the mode is live. The server turns it on at runtime once its own data checks
 pass, and off again when the mode is switched off; clients already connected get a new `HELLO` (section 7). While the
@@ -1104,7 +1105,7 @@ bit is off the server answers `QJOIN B`, `RDROP` and `RSPEC` with `ERR` `royale_
 |---|---|
 | 0 arriving | players arrive in the lobby, The Overlook, a mesa in a corner of the map. A warm-up brawl: damage is on, nobody dies. Landing pins can be set. |
 | 1 countdown | the big countdown; the first storm circle is shown 15 s before the drop, and the pins lock 3 s before it |
-| 2 drop | everyone falls from high above their pin and opens a parachute (by itself, or at once with `RDEPLOY`); the phase ends when the last player has landed (at most 30 s after the drop). A player who has landed already fights: the client shows the fight's storm timer from `me` 2 on |
+| 2 drop | everyone falls for 8 s from high above their pin, then the parachute opens by itself and they float down under it for about 12 s; the phase ends when the last player has landed (`phaseMsLeft` says when that is planned). A player who has landed already fights: the client shows the fight's storm timer from `me` 2 on |
 | 3 fight | the storm circle closes in `stages` stages (six by default; the first one starts to move 2 minutes after the drop); outside it the storm hurts more with every stage. A late arrival drops on their own during this phase (`me` 1) |
 | 4 overtime | the circle is gone and the storm keeps getting stronger |
 | 5 victory | one player is left: the winner |
@@ -1115,6 +1116,16 @@ A player who would die is eliminated instead and becomes an invisible spectator 
 players still alive (`RSPEC`), queue again (`QJOIN B`) or leave. Until the match has a winner a spectator cannot
 whisper players still in the fight, nor use guild, officer or channel chat. Logging out or leaving the battleground
 while alive forfeits the match.
+
+**The storm beast.** When the server turns it on (its `Boss.Enable`, off by default), one beast wakes once per match
+in the fight: Thundermaw, a storm-touched devilsaur, in a clearing near the next circle's centre (5 minutes after the
+drop by default; not in overtime, nor with fewer than 6 players left). `ROYV B` announces it 30 s ahead with the place
+and the time, and `ROYV A` says it is awake. Its hits take a share of the target's maximum health, and it heals only
+slowly, after 30 s without damage. It flees (`ROYV F`) when the storm comes within 20 yd of its den, in overtime, or
+when 3 players are left, and leaves nothing. Slain (`ROYV K`), it leaves a hoard that any player still in the fight may
+open (damage interrupts the opening); the player who dealt it the most damage gets a reward line. `ROYO` kinds `X` and
+`H` put the beast, with its health, and the hoard on the map; an elimination by the beast is `ROYK` cause `B`. A
+client that does not know these kinds ignores them, and shows cause `B` as `P`.
 
 **Positions** are integer world yards of the Royale map (X points north, Y west, as `.gps` shows them). The client
 draws its island map from `ROYM`'s frame: `u = (maxY - y) / (maxY - minY)`, `v = (maxX - x) / (maxX - minX)` (north
@@ -1177,9 +1188,10 @@ without a pin drops at a random landmark.
 | Bleakhold Royale is off | `ERR` `royale_off` |
 | the player is not in the lobby of a match (phase 0 or 1), or the pins are locked (the last 3 s) | `ERR` `royale_phase` |
 
-`RDEPLOY` opens the parachute at once. It is never answered, not even over its rate limit (section 8): it is dropped
-silently unless the player is falling from the drop, has not opened the parachute yet and fell for at least 0.5 s.
-Without it the parachute opens by itself (2.5 s into the fall, or 70 yd above the ground).
+`RDEPLOY` is accepted but ignored: the parachute opens by itself `fallMs` (`ROYS`) after the fall starts, or sooner
+when the player comes within the server's `Drop.DeployHeight` of the ground (60 yd by default), as over a high ledge
+under the pin. The fall starts when the player has arrived up there, and the server stops any drift at that moment, so
+everyone falls for the same time. `RDEPLOY` is never answered, not even over its rate limit (section 8).
 
 `RSPEC dir` moves a spectator's camera: `dir` 0 to the player who eliminated them (or the first player alive), 1 to
 the next player alive, 2 to the previous one. The server sends `ROYS` with the new `watchName`. It works from the
@@ -1199,11 +1211,11 @@ in a match. After a `/reload` in a match the client sends `GET ROYS;ROYM` once `
 
 ### ROYS (the match as the player sees it)
 
-`matchId, phase, phaseMsLeft, alive, total, me, kills, placement, pinX, pinY, stage, curX, curY, curR, nextX, nextY, nextR, shrinkStartMs, shrinkEndMs, dmgPermille, watchName, myX, myY, stages`
+`matchId, phase, phaseMsLeft, alive, total, me, kills, placement, pinX, pinY, stage, curX, curY, curR, nextX, nextY, nextR, shrinkStartMs, shrinkEndMs, dmgPermille, watchName, myX, myY, stages, fallMsLeft, landMsLeft, fallMs`
 
 - `matchId`: the match; another id is another match.
-- `phase`: the table above. `phaseMsLeft`: until the next phase (the countdown in phase 1; in phase 2 until the last
-  player falling is put on the ground at the latest).
+- `phase`: the table above. `phaseMsLeft`: until the next phase (the countdown in phase 1; in phase 2 until the
+  planned touchdown of the last player still falling).
 - `alive`: players still in the fight; `total`: players in the match (who dropped, or are in the lobby before it).
 - `me`: 0 in the lobby, 1 dropping, 2 alive, 3 spectating, 4 left, 5 the winner.
 - `kills`: the player's eliminations. `placement`: empty while the player is in the fight.
@@ -1219,9 +1231,17 @@ in a match. After a `/reload` in a match the client sends `GET ROYS;ROYM` once `
 - `myX`, `myY`: the player's position (the map arrow when the client cannot place the player itself).
 - `stages`: how many stages the storm has in this match (1 to 16, the server's `Storm.Stages`; six by default). A
   server that leaves it empty has six.
+- `fallMsLeft`, `landMsLeft`, `fallMs`: the drop, only while the player falls (`me` 1), all three or none; empty
+  otherwise. `fallMsLeft`: until the parachute opens by itself, 0 once it is open. `landMsLeft`: until the planned
+  touchdown, never less than `fallMsLeft`. `fallMs`: the whole free fall (the server's `Drop.FreefallMs`, 8000 by
+  default; 0 opens the parachute at once). The player starts as high above the landing as `fallMs` of free fall and
+  then 7 yd/s under the parachute take them, so the touchdown is planned, not guessed: a `ROYS` sent as the fall
+  starts ends `...,6,8000,20000,8000`, the one sent as the parachute opens `...,6,0,12000,8000`. A server that leaves
+  them empty sends no drop times; the client then shows the fall without numbers and switches to the parachute when
+  the player gets its aura.
 
 The server sends `ROYS` when the player arrives, on every change of `phase`, `stage` or `me`, after `RDROP` and
-`RSPEC`, every 5 s, and for `GET ROYS`.
+`RSPEC`, during the drop also when the fall starts and when the parachute opens, every 5 s, and for `GET ROYS`.
 
 The Bleakhold client draws the storm in the world from these fields alone: `cur` as a wall, moved towards `next`
 between `shrinkStartMs` and `shrinkEndMs` exactly as the HUD and the island map move it, and `next` as a ring on the
@@ -1242,24 +1262,31 @@ per place (at most 64): `id, kind, x, y, r, name`.
 
 Sent when the player arrives and for `GET ROYM`.
 
-### ROYO (orbs and supply drops)
+### ROYO (orbs, supply drops and the storm beast)
 
 First record: `matchId, full`. Then one record per object (at most 64): `objId, kind, subtype, x, y, state, msLeft`.
 
 - `full`: 1 replaces every object the client knows; 0 updates only the objects listed.
-- `kind`: `S` Shadow Sight orb (stealth is no cover for a while), `B` buff orb, `D` supply drop. `subtype`: for `B`
-  1 speed, 2 restoration, 3 berserk; 0 otherwise.
+- `kind`: `S` Shadow Sight orb (stealth is no cover for a while), `B` buff orb, `D` supply drop, `X` the storm beast,
+  `H` the hoard it leaves. `subtype`: for `B` 1 speed, 2 restoration, 3 berserk; for `X` its health in percent, 0 to
+  100; 0 otherwise.
 - `state`: 0 hidden (appears in `msLeft`, when given), 1 ready, 2 taken (back in `msLeft`), 3 incoming (lands in
-  `msLeft`), 4 opened.
+  `msLeft`), 4 opened. The storm beast is 3 until it wakes (in `msLeft`), 1 while it is awake, and 0 once it is slain
+  or has fled. Its hoard is 1 until it is opened (4), and 0 once it is gone unopened (not opened in time, or under the
+  storm).
 
-Sent full for `GET ROYS`, and with the objects that changed whenever one does.
+Sent full for `GET ROYS`, and with the objects that changed whenever one does. The storm beast is sent on every change
+of its state, and otherwise only when its health has moved by 2 points or more since the last `ROYO` with it, at most
+once a second.
 
 ### ROYK (the kill feed)
 
 `killerName, killerClassId, victimName, victimClassId, cause, aliveAfter, killerKills, announce`
 
 - `cause`: `P` a player, `S` the storm (the killer is filled in when someone gets the credit), `F` a fall or the
-  world, `L` left the match, `A` eliminated for being away.
+  world, `L` left the match, `A` eliminated for being away, `B` the storm beast (the killer is the player who gets the
+  credit, else the beast itself: `killerName` Thundermaw, `killerClassId` 0, which no player has, and no
+  `killerKills`).
 - `killerName` and `killerClassId` are empty when nobody gets the credit. `killerKills`: the killer's eliminations
   in this match, this one included. `aliveAfter`: players left in the fight.
 - `announce`: **superseded** by the battleground kill announcer (`BGANN`, section 18), which also covers Bleakhold
@@ -1281,6 +1308,10 @@ Sent to every player of the match, spectators included.
 | `O` | the supply drop at `x`, `y` was opened |
 | `N` | `value` players are left (10, 5, 2) |
 | `W` | the match has a winner: `name`, with `value` eliminations |
+| `B` | the storm beast stirs at `x`, `y` and wakes in `msLeft`; `name` = the place (at most 40 bytes, as in `ROYM`) |
+| `A` | the storm beast at `x`, `y` is awake |
+| `K` | the storm beast at `x`, `y` was slain; `name` = the player who dealt it the most damage |
+| `F` | the storm beast at `x`, `y` fled, leaving nothing |
 
 Sent to every player of the match.
 
@@ -1300,9 +1331,11 @@ in; the last one counts.
 
 `QJOIN B` -> `QUEUE` state 1 -> 20 players or more: `QUEUE` state 2 with `proposalId` and `timeoutSec` 15 ->
 `QREPLY` -> `QUEUE` state 3 and the teleport -> `ROYM` and `ROYS` (phase 0) -> `RDROP` (answered by `ROYS`) ->
-`ROYS` phase 1 and `ROYV R` (the first circle) -> phase 2: the drop, `RDEPLOY` -> everyone landed, phase 3:
+`ROYS` phase 1 and `ROYV R` (the first circle) -> phase 2: the drop (`ROYS` `me` 1 with `fallMsLeft`, `landMsLeft`
+and `fallMs` as the fall starts and as the parachute opens) -> everyone landed, phase 3:
 `ROYV S` as the storm moves, `ROYV D`, `L`, `O` for supply drops, `ROYO` for orbs, `ROYK` for every elimination,
-`ROYV N` -> eliminated: `ROYE`, then `ROYS` with `me` 3 and `RSPEC` -> one player left: `ROYV W`, `ROYS` phase 5 and
+`ROYV N`; with the storm beast on, `ROYV B` and `ROYO X` (incoming), `ROYV A`, then `ROYV K` and `ROYO H` or `ROYV F`
+-> eliminated: `ROYE`, then `ROYS` with `me` 3 and `RSPEC` -> one player left: `ROYV W`, `ROYS` phase 5 and
 the winner's `ROYE` -> phase 6 -> back in the world: `QUEUE` state 0. A cancelled match: `ROYS` phase 7 and `QUEUE`
 state 1 again.
 

@@ -2304,7 +2304,13 @@
     {"name": "crate_road_7", "kind": "crate", "position": [-320, -610], "radius": 2, "param": 1},
     {"name": "crate_road_8", "kind": "crate", "position": [160, -540], "radius": 2, "param": 1},
     {"name": "crate_road_9", "kind": "crate", "position": [-60, -420], "radius": 2, "param": 1},
-    {"name": "crate_road_10", "kind": "crate", "position": [-100, 90], "radius": 2, "param": 1}
+    {"name": "crate_road_10", "kind": "crate", "position": [-100, 90], "radius": 2, "param": 1},
+    {"name": "boss_village_north", "kind": "boss_site", "position": [3.3, -251.7], "radius": 12},
+    {"name": "boss_isle_west", "kind": "boss_site", "position": [-286.7, -221.7], "radius": 12},
+    {"name": "boss_lagoon_south", "kind": "boss_site", "position": [-581.7, -266.7], "radius": 12},
+    {"name": "boss_totem_knoll", "kind": "boss_site", "position": [-416.7, 63.3], "radius": 12},
+    {"name": "boss_lagoon_nw", "kind": "boss_site", "position": [-101.7, -86.7], "radius": 12},
+    {"name": "boss_isle_south", "kind": "boss_site", "position": [-371.7, -294.7], "radius": 12}
   ],
   "_comment": [
     "Bleakhold Royale v2 terrain, 'Sunglass Lagoon' (royale-spec.md sections 2, 3.3-3.6, 6.6): the same 3x3-tile",
@@ -2351,7 +2357,9 @@
     "'pois' feed the server's bh_royale_poi table (package.py poi-sql): 1 lobby, 13 landmarks and 3 crossings",
     "(ids = area ids), the centre, 9 final sites (weights, all within 490 yd of C, each dry for 45 yd with stock",
     "collision cover), 2 Shadow Sight orbs, 8 buff orbs (param 1 speed x3, 2 restoration x2, 3 berserk x3),",
-    "16 supply sites, 58 common crates (Crates.Max is 44) and 6 strongboxes. Every landmark, crate, orb and site",
+    "16 supply sites, 58 common crates (Crates.Max is 44), 6 strongboxes and 6 boss sites (the storm beast's dens:",
+    "flat dry clearings, radius 12 for its stomp and sweep, no flatten, so the scatter and the terrain stay as",
+    "they were). Every landmark, crate, orb and site",
     "stands on terrain outside every WMO box; only the Vine Bridge crossing takes its z from a WMO (z_from). A",
     "player without a pin (or sent back inside the square) lands on a landmark's highest surface, so landmarks",
     "stand on open flat ground beside their buildings, never on a roof, the ziggurat or the fountain.",

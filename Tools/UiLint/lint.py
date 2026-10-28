@@ -51,6 +51,7 @@ ART_RE = re.compile(r"(?:UI\.)?ART\s*\.\.\s*[\"']([A-Za-z0-9_]+)[\"']")
 CLIENT_API_SOURCES = (
     ("WoW/Source/Ui/BleakholdDance.cpp", re.compile(r'\{\s*"(BleakholdDance_\w+)",\s*&Script_')),
     ("WoW/Source/Ui/BleakholdStorm.cpp", re.compile(r'\{\s*"(BleakholdStorm_\w+)",\s*&Script_')),
+    ("WoW/Source/Ui/BleakholdStorm.cpp", re.compile(r'\{\s*"(BleakholdUI_\w+)",\s*&Script_')),
 )
 
 
@@ -245,6 +246,35 @@ def lint_addon(addon, api, wowlua, framexml, rep):
             rep.count("art")
     for f in tga_files:
         check_tga(f, rep)
+    check_shipped_names(addon, tga_files, rel, rep)
+
+
+def shipped_blp(addon):
+    """Every .blp the repository's history ever added under `addon`: its path in the addon, lower case, without the
+    extension. Empty outside a git checkout (or in a shallow one that lacks the old commits)."""
+    try:
+        top = subprocess.run(["git", "-C", addon, "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                             check=True).stdout.strip()
+        sub = os.path.relpath(os.path.realpath(addon), os.path.realpath(top)).replace(os.sep, "/")
+        out = subprocess.run(["git", "-C", top, "log", "--all", "--format=", "--name-only", "--diff-filter=A", "--",
+                              sub], capture_output=True, text=True, check=True).stdout
+    except (OSError, subprocess.CalledProcessError):
+        return set()
+    prefix = sub.rstrip("/") + "/"
+    return {p[len(prefix):-4].lower() for p in out.splitlines() if p.startswith(prefix) and p.lower().endswith(".blp")}
+
+
+def check_shipped_names(addon, tga_files, rel, rep):
+    # The client tries a path's .blp before its .tga (TextureCreate, Engine/Source/Services/Texture.cpp), and a manual
+    # upgrade (the package copied over the game folder, Tools/Package/INSTALL.txt) keeps the files a newer package
+    # dropped: a .tga under the name of a .blp an older package shipped stays hidden behind the old file.
+    old = shipped_blp(addon)
+    for f in tga_files:
+        key = rel(f)[:-4].lower()
+        if key in old:
+            rep.err("art", "%s: an older package shipped %s.blp under this name; a manual upgrade keeps it and the "
+                    "client loads it first, so give the new art a new name" % (rel(f), rel(f)[:-4]))
+        rep.count("art")
 
 
 def main():

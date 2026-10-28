@@ -64,7 +64,9 @@ test("every texture the addon sets exists, and fonts are stock client fonts", fu
     H.ok(emojis >= 14, "emoji textures used: " .. emojis)
     local stock = { ["Fonts\\FRIZQT__.TTF"] = true, ["Fonts\\MORPHEUS.TTF"] = true, ["Fonts\\ARIALN.TTF"] = true }
     for path in pairs(M.fonts) do
-        H.ok(stock[path], "stock font: " .. path)
+        -- or a face the addon ships in Fonts\ (the Royale style kit's Marcellus SC, OFL; RoyaleStyle.lua RS.FONT_SC)
+        local own = path:match("^Interface\\AddOns\\Bleakhold\\(Fonts\\[^\\]+%.ttf)$")
+        H.ok(stock[path] or (own and fileExistsCI(addonDir .. "/" .. own:gsub("\\", "/"))), "stock font: " .. path)
     end
 end)
 

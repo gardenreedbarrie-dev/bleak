@@ -337,6 +337,13 @@ namespace
         RoyaleEvent ev;
         ev.kind = RoyaleEventKind::Revealed; ev.value = 1; ev.x = -150; ev.y = -310;
         send("ROYV", EncodeRoyaleEvent(ev));
+        // the drop (fields 25-27): as the fall starts, then as the parachute opens 8 s later
+        st.phase = RoyalePhase::Drop; st.phaseMsLeft = 20000; st.me = RoyaleMe::Dropping; st.stage = 1;
+        st.fallMsLeft = 8000u; st.landMsLeft = 20000u; st.fallMs = 8000u;
+        send("ROYS", EncodeRoyaleState(st));
+        st.phaseMsLeft = 12000; st.fallMsLeft = 0u; st.landMsLeft = 12000u;
+        send("ROYS", EncodeRoyaleState(st));
+        st.fallMsLeft.reset(); st.landMsLeft.reset(); st.fallMs.reset();
         st.phase = RoyalePhase::Fight; st.phaseMsLeft = 0; st.me = RoyaleMe::Alive; st.stage = 1;
         st.nextX = -150; st.nextY = -310; st.nextR = 520; st.shrinkStartMs = 0u; st.shrinkEndMs = 170000u;
         st.dmgPermille = 10; st.myX = 104; st.myY = 96;
@@ -402,6 +409,40 @@ namespace
         RoyaleKill storm;
         storm.victimName = "Corwin"; storm.victimClassId = 12; storm.cause = RoyaleCause::Storm; storm.aliveAfter = 22;
         send("ROYK", EncodeRoyaleKill(storm));
+
+        // the storm beast: it stirs at Crow's Rise, wakes, kills twice (once itself, once with a player's credit),
+        // loses health (an over-range value is clamped to 100), is slain and leaves its hoard, which is opened
+        RoyaleEvent stirs;
+        stirs.kind = RoyaleEventKind::BossIncoming; stirs.x = 60; stirs.y = -420; stirs.msLeft = 30000u;
+        stirs.name = "Crow's Rise";
+        send("ROYV", EncodeRoyaleEvent(stirs));
+        RoyaleObjects beast;
+        beast.matchId = 7001; beast.full = false;
+        beast.objects = { obj(30, RoyaleObjectKind::Boss, 100, 60, -420, RoyaleObjectState::Incoming, 30000u) };
+        send("ROYO", EncodeRoyaleObjects(beast));
+        RoyaleEvent awake;
+        awake.kind = RoyaleEventKind::BossAwake; awake.x = 60; awake.y = -420;
+        send("ROYV", EncodeRoyaleEvent(awake));
+        beast.objects = {
+            obj(30, RoyaleObjectKind::Boss, 4000000000u, 60, -420, RoyaleObjectState::Ready, std::nullopt) };
+        send("ROYO", EncodeRoyaleObjects(beast));
+        RoyaleKill byBeast;
+        byBeast.killerName = "Thundermaw"; byBeast.killerClassId = 0u; byBeast.victimName = "Ysolde";
+        byBeast.victimClassId = 5; byBeast.cause = RoyaleCause::Boss; byBeast.aliveAfter = 21;
+        send("ROYK", EncodeRoyaleKill(byBeast));
+        byBeast.killerName = "Aldric Stormwind"; byBeast.killerClassId = 1u; byBeast.killerKills = 4u;
+        byBeast.victimName = "Corin"; byBeast.victimClassId = 11; byBeast.aliveAfter = 20;
+        send("ROYK", EncodeRoyaleKill(byBeast));
+        beast.objects = { obj(30, RoyaleObjectKind::Boss, 57, 60, -420, RoyaleObjectState::Ready, std::nullopt) };
+        send("ROYO", EncodeRoyaleObjects(beast));
+        beast.objects = { obj(30, RoyaleObjectKind::Boss, 0, 60, -420, RoyaleObjectState::Hidden, std::nullopt),
+            obj(31, RoyaleObjectKind::Hoard, 0, 62, -418, RoyaleObjectState::Ready, std::nullopt) };
+        send("ROYO", EncodeRoyaleObjects(beast));
+        RoyaleEvent slain;
+        slain.kind = RoyaleEventKind::BossSlain; slain.x = 60; slain.y = -420; slain.name = "Aldric Stormwind";
+        send("ROYV", EncodeRoyaleEvent(slain));
+        beast.objects = { obj(31, RoyaleObjectKind::Hoard, 0, 62, -418, RoyaleObjectState::Opened, std::nullopt) };
+        send("ROYO", EncodeRoyaleObjects(beast));
 
         RoyaleResult r;
         r.matchId = 7001; r.placement = 12; r.total = 24; r.kills = 1; r.damage = 18400; r.healing = 2100;

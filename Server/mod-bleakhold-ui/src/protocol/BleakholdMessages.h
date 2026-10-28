@@ -468,12 +468,17 @@ namespace Bleakhold
     };
     enum class RoyaleMe : uint8_t { Lobby = 0, Dropping = 1, Alive = 2, Spectating = 3, Left = 4, Winner = 5 };
     enum class RoyalePoiKind : char { Landmark = 'L', Crossing = 'C', Lobby = 'Y' };
-    enum class RoyaleObjectKind : char { ShadowSight = 'S', Buff = 'B', Supply = 'D' };
+    // ROYO kind: Shadow Sight orb, buff orb, supply drop; the storm beast Thundermaw (subtype = its health in
+    // percent; Incoming until it wakes, Ready while awake, Hidden once slain or fled) and the hoard it leaves (Ready,
+    // Opened; Hidden once it is gone)
+    enum class RoyaleObjectKind : char { ShadowSight = 'S', Buff = 'B', Supply = 'D', Boss = 'X', Hoard = 'H' };
     enum class RoyaleBuff : uint8_t { None = 0, Speed = 1, Restoration = 2, Berserk = 3 };   // ROYO subtype of a B
+    inline constexpr uint32_t MaxRoyaleBossHealthPct = 100;   // ROYO subtype of an X: EncodeRoyaleObjects clamps it
     enum class RoyaleObjectState : uint8_t { Hidden = 0, Ready = 1, Taken = 2, Incoming = 3, Opened = 4 };
     // ROYK cause: killed by a player, the storm (killer filled when credited), a fall or the environment, left
-    // the match, eliminated for being AFK
-    enum class RoyaleCause : char { Player = 'P', Storm = 'S', Fall = 'F', Left = 'L', Afk = 'A' };
+    // the match, eliminated for being AFK, the storm beast (the credited player, else the beast itself: killerName
+    // "Thundermaw", killerClassId 0, no killerKills)
+    enum class RoyaleCause : char { Player = 'P', Storm = 'S', Fall = 'F', Left = 'L', Afk = 'A', Boss = 'B' };
     // ROYK announce: superseded by BGANN (section 18). Kept so older callers still compile; EncodeRoyaleKill ignores it
     // and always leaves the field empty, and the addon ignores the field, so no line plays twice.
     enum class RoyaleAnnounce : char
@@ -481,15 +486,21 @@ namespace Bleakhold
         None = 0, FirstBlood = 'F', DoubleKill = 'D', TripleKill = 'T', MonsterKill = 'M', Rampage = 'R', Godlike = 'G'
     };
     // ROYV kind: circle revealed (value = stage), storm moving (stage), supply incoming, landed, opened, players
-    // left (value 10, 5 or 2), winner (value = kills, name)
+    // left (value 10, 5 or 2), winner (value = kills, name); the storm beast: stirs (x, y, msLeft until it wakes,
+    // name = the place, cut at 40 bytes like ROYM's), awake (x, y), slain (x, y, name = who dealt it the most
+    // damage), fled (x, y)
     enum class RoyaleEventKind : char
     {
         Revealed = 'R', StormMoving = 'S', SupplyIncoming = 'D', SupplyLanded = 'L', SupplyOpened = 'O',
-        PlayersLeft = 'N', Winner = 'W'
+        PlayersLeft = 'N', Winner = 'W', BossIncoming = 'B', BossAwake = 'A', BossSlain = 'K', BossFled = 'F'
     };
+    // RoyaleObjectKind Boss and Hoard, RoyaleEventKind Boss*, RoyaleCause Boss (the storm beast) exist: a server
+    // module may send them. Clients without them ignore the kinds and show cause B as P.
+#define BLEAKHOLD_UI_ROYALE_BOSS 1
     inline constexpr std::size_t MaxRoyalePois = 64;      // ROYM records after the header
     inline constexpr std::size_t MaxRoyaleObjects = 64;   // ROYO records after the header
     inline constexpr std::size_t RoyaleNameBytes = 48;    // character names (two-word names fit)
+    inline constexpr std::size_t RoyalePlaceBytes = 40;   // names of places (ROYM, ROYV B)
 
     struct RoyaleState   // ROYS: the match as this player sees it
     {
@@ -513,9 +524,14 @@ namespace Bleakhold
         std::string watchName;               // spectators: the player they watch
         Opt<int32_t> myX, myY;               // the player's position (the client's map fallback)
         Opt<uint32_t> stages;                // the storm's stage count (1..16); stage stages + 1 is overtime
+        // the drop (me Dropping only, else empty): until the parachute opens by itself (0 once it is open), until the
+        // planned touchdown, and the free fall's full length (the server's Drop.FreefallMs)
+        Opt<uint32_t> fallMsLeft, landMsLeft, fallMs;
     };
     // RoyaleState::stages (ROYS field 24) exists: a server module may fill it.
 #define BLEAKHOLD_UI_ROYALE_STAGES 1
+    // RoyaleState::fallMsLeft, landMsLeft and fallMs (ROYS fields 25-27) exist: a server module may fill them.
+#define BLEAKHOLD_UI_ROYALE_DROP 1
 
     struct RoyalePoi
     {
@@ -540,12 +556,12 @@ namespace Bleakhold
     {
         uint32_t objId = 0;
         RoyaleObjectKind kind = RoyaleObjectKind::ShadowSight;
-        uint32_t subtype = 0;                // RoyaleBuff for kind B, else 0
+        uint32_t subtype = 0;                // RoyaleBuff for kind B, health in percent (0-100) for X, else 0
         int32_t x = 0, y = 0;
         RoyaleObjectState state = RoyaleObjectState::Hidden;
         Opt<uint32_t> msLeft;                // Taken: respawn in; Incoming: lands in; Hidden: appears in
     };
-    struct RoyaleObjects // ROYO: orbs and supply drops
+    struct RoyaleObjects // ROYO: orbs, supply drops, the storm beast and its hoard
     {
         uint32_t matchId = 0;
         bool full = false;                   // true: replaces every object the client knows

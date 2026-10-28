@@ -1,5 +1,5 @@
-// Tests of the storm wall's maths (Engine/Source/BleakFx/BleakStorm.cpp) and noise (BleakFxStormNoise.cpp);
-// run_tests.sh builds and runs them:
+// Tests of the storm wall's maths (Engine/Source/BleakFx/BleakStorm.cpp) and noise (BleakFxStormNoise.cpp), and of
+// the storm on the minimap (held against a copy of the client's own minimap quads); run_tests.sh builds and runs them:
 //   test_storm <dir>    <dir> holds circle_cases.csv, the cases Tools/UiLint/tests/test_royale.lua runs R.Circle on
 #include "Engine/Source/BleakFx/BleakFxStormNoise.h"
 #include "Engine/Source/BleakFx/BleakStorm.h"
@@ -551,6 +551,642 @@ namespace {
     }
 }
 
+namespace {
+    // A copy of the client's minimap quads in its own float arithmetic (WoW/Source/Ui/MinimapFrame.cpp:
+    // MinimapWorldToTileCoords, MinimapUpdatePosition, MINIMAPTILE::UpdateQuad and BuildQuad), to hold the storm
+    // overlay against. Rect has CRect's fields in CRect's order.
+    struct Rect {
+        float minY;
+        float minX;
+        float maxY;
+        float maxX;
+    };
+
+    const Rect kStockQuads[4] = {
+        { 0.0f, 0.0f, 0.5f, 0.5f },
+        { 0.5f, 0.0f, 1.0f, 0.5f },
+        { 0.5f, 0.5f, 1.0f, 1.0f },
+        { 0.0f, 0.5f, 0.5f, 1.0f },
+    };
+    const uint32_t kStockZoomTiles[6] = { 14, 12, 10, 8, 6, 4 };
+    const float kStockViewRadius[6] = { 233.3f, 200.0f, 166.7f, 133.3f, 100.0f, 66.7f };
+
+    struct StockQuad {
+        bool built;
+        Rect rect;
+        float vertices[4][2];
+        float mask[4][2];
+    };
+
+    struct Stock {
+        int32_t baseTile[2];
+        float centerX;
+        float centerY;
+        float scale;
+        StockQuad quads[4];
+    };
+
+    void StockTileCoords(float px, float py, int32_t tile[2]) {
+        float y = (17066.666f - py) * 0.0018750001f;
+        float x = 0.0018750001f * (17066.666f - px);
+
+        if (y < 0.0f) {
+            y = y - 1.0f;
+        }
+
+        tile[0] = static_cast<int32_t>(y);
+        tile[1] = x >= 0.0f ? static_cast<int32_t>(x) : static_cast<int32_t>(x - 1.0f);
+    }
+
+    void StockBuildQuad(StockQuad& q, const Rect& rect, float scale, const Rect& bounds, float layoutScale, float width) {
+        float size = scale * 2.0f;
+        float inv = 1.0f / size;
+        q.mask[0][0] = (rect.minX - bounds.minX) * inv;
+        q.mask[0][1] = (rect.maxY - bounds.minY) * inv;
+        q.mask[1][0] = (rect.maxX - bounds.minX) * inv;
+        q.mask[1][1] = (rect.maxY - bounds.minY) * inv;
+        q.mask[2][0] = (rect.minX - bounds.minX) * inv;
+        q.mask[2][1] = (rect.minY - bounds.minY) * inv;
+        q.mask[3][0] = (rect.maxX - bounds.minX) * inv;
+        q.mask[3][1] = (rect.minY - bounds.minY) * inv;
+        float vertexInv = 1.0f / size;
+        float extent = layoutScale * width;
+        float left = (rect.minX - bounds.minX) * vertexInv * extent;
+        float right = vertexInv * (rect.maxX - bounds.minX) * extent;
+        float top = extent - vertexInv * (rect.maxY - bounds.minY) * extent;
+        float bottom = extent - (rect.minY - bounds.minY) * vertexInv * extent;
+        float corners[4][2] = { { left, top }, { right, top }, { left, bottom }, { right, bottom } };
+        memcpy(q.vertices, corners, sizeof(corners));
+        q.rect = rect;
+    }
+
+    void StockUpdateQuad(StockQuad& q, uint32_t index, float centerX, float centerY, float scale, float layoutScale, float width) {
+        q.built = false;
+        Rect bounds = { centerY - scale, centerX - scale, centerY + scale, centerX + scale };
+        float minY = bounds.minY, minX = bounds.minX, maxY = bounds.maxY, maxX = bounds.maxX;
+        const Rect& quad = kStockQuads[index];
+
+        if (maxX >= quad.maxY) {
+            maxX = quad.maxY;
+        }
+
+        if (quad.maxX <= maxY) {
+            maxY = quad.maxX;
+        }
+
+        if (quad.minY >= minX) {
+            minX = quad.minY;
+        }
+
+        if (quad.minX >= minY) {
+            minY = quad.minX;
+        }
+
+        Rect rect = { minY, minX, maxY, maxX };
+
+        if (quad.minX < maxY && quad.maxX > minY && maxX > quad.minY && quad.maxY > minX) {
+            StockBuildQuad(q, rect, scale, bounds, layoutScale, width);
+            q.built = true;
+        }
+    }
+
+    // MinimapUpdatePosition outdoors, without the tile textures.
+    Stock StockMinimap(float px, float py, uint32_t zoom, float layoutScale, float width) {
+        Stock st = {};
+        StockTileCoords(px + 266.66666f, py + 266.66666f, st.baseTile);
+        float originX = 17066.666f - st.baseTile[1] * 533.33331f;
+        float originY = 17066.666f - 533.33331f * st.baseTile[0];
+        float inv = 1.0f / 1066.6666f;
+        uint32_t halfTiles = kStockZoomTiles[zoom] >> 1;
+        st.centerX = (originY - py) * inv;
+        st.centerY = (originX - px) / 1066.6666f;
+        st.scale = inv * (halfTiles * 33.333332f);
+
+        for (uint32_t i = 0; i < 4; i++) {
+            StockUpdateQuad(st.quads[i], i, st.centerX, st.centerY, st.scale, layoutScale, width);
+        }
+
+        return st;
+    }
+
+    BleakStorm::MinimapSpace SpaceOf(const Stock& st, double px, double py, double layoutScale, double width) {
+        BleakStorm::MinimapSpace s = {};
+        s.x = px;
+        s.y = py;
+        s.centerX = st.centerX;
+        s.centerY = st.centerY;
+        s.scale = st.scale;
+        s.extent = static_cast<float>(layoutScale) * static_cast<float>(width);
+        s.layoutScale = layoutScale;
+        return s;
+    }
+
+    // A space for the overlay's geometry tests: the camera target at (x, y), outdoor zoom `zoom`, a minimap
+    // `width` UI units wide at `layoutScale`.
+    BleakStorm::MinimapSpace Space(double x, double y, uint32_t zoom, double layoutScale, double width) {
+        return SpaceOf(StockMinimap(static_cast<float>(x), static_cast<float>(y), zoom, static_cast<float>(layoutScale), static_cast<float>(width)), x, y, layoutScale, width);
+    }
+
+    struct Mesh {
+        std::vector<BleakStorm::MinimapVertex> vertices;
+        std::vector<uint16_t> indices;
+        BleakStorm::MinimapMesh mesh;
+
+        Mesh() : vertices(BleakStorm::kMinimapMaxVertices), indices(BleakStorm::kMinimapMaxIndices) {
+            mesh = { vertices.data(), BleakStorm::kMinimapMaxVertices, 0, indices.data(), BleakStorm::kMinimapMaxIndices, 0 };
+        }
+    };
+
+    struct Layers {
+        Mesh m[BleakStorm::Minimap_Layers];
+        BleakStorm::MinimapMesh meshes[BleakStorm::Minimap_Layers];
+
+        bool Build(const BleakStorm::MinimapSpace& space, const BleakStorm::Circle& cur, bool shade, const BleakStorm::Circle* next, double pixel = 0.0) {
+            bool any = false;
+
+            for (uint32_t i = 0; i < BleakStorm::Minimap_Layers; i++) {
+                any = BleakStorm::BuildMinimap(space, static_cast<BleakStorm::MinimapLayer>(i), cur, shade, next, pixel, m[i].mesh) || any;
+                meshes[i] = m[i].mesh;
+            }
+
+            return any;
+        }
+    };
+
+    bool InTriangle(double px, double py, const float* a, const float* b, const float* c) {
+        double d1 = (px - b[0]) * (a[1] - b[1]) - (a[0] - b[0]) * (py - b[1]);
+        double d2 = (px - c[0]) * (b[1] - c[1]) - (b[0] - c[0]) * (py - c[1]);
+        double d3 = (px - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (py - a[1]);
+        bool negative = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
+        bool positive = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
+        return !(negative && positive);
+    }
+
+    bool Covered(const BleakStorm::MinimapMesh& mesh, double vx, double vy) {
+        for (uint32_t i = 0; i + 2 < mesh.indexCount; i += 3) {
+            if (InTriangle(vx, vy, mesh.vertices[mesh.indices[i]].pos, mesh.vertices[mesh.indices[i + 1]].pos, mesh.vertices[mesh.indices[i + 2]].pos)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    // A vertex's distance from the circle's centre in yards (vertex space is the world turned and scaled).
+    double YardsFrom(const BleakStorm::MinimapSpace& space, const BleakStorm::MinimapVertex& v, double cx, double cy) {
+        double ox, oy;
+        BleakStorm::MinimapToVertex(space, cx, cy, ox, oy);
+        double perYard = space.extent / (2.0 * space.scale * BleakStorm::kMinimapTileYards);
+        return sqrt((v.pos[0] - ox) * (v.pos[0] - ox) + (v.pos[1] - oy) * (v.pos[1] - oy)) / perYard;
+    }
+
+    // The hatch's texture coordinates at a world point (the first vertex of a band around it, of inner radius 0).
+    void HatchAt(const BleakStorm::MinimapSpace& space, double x, double y, float out[2]) {
+        Mesh probe;
+        BleakStorm::BandShape hard = { 0.0, false, false, false };
+        BleakStorm::MinimapBand(space, x, y, 0.0, 1.0, 0.0, 1.0, 1, hard, probe.mesh);
+        out[0] = probe.vertices[0].tex[0];
+        out[1] = probe.vertices[0].tex[1];
+    }
+
+    bool IndicesInRange(const BleakStorm::MinimapMesh& mesh) {
+        bool ok = mesh.indexCount % 3 == 0 && mesh.vertexCount <= mesh.vertexCapacity && mesh.indexCount <= mesh.indexCapacity;
+
+        for (uint32_t i = 0; i < mesh.indexCount; i++) {
+            ok = ok && mesh.indices[i] < mesh.vertexCount;
+        }
+
+        return ok;
+    }
+
+    void TestMinimapSpace() {
+        const double positions[][2] = { { -267.0, -267.0 }, { 100.5, 820.25 }, { 16000.0, -16500.0 }, { -5000.3, 3000.7 }, { 532.9, -1.2 } };
+        bool vertices = true, masks = true, tiles = true, indexes = true, centre = true, edges = true, ratio = true;
+        int quads = 0;
+
+        for (const double* p : positions) {
+            for (uint32_t zoom = 0; zoom < 6; zoom++) {
+                for (double layoutScale : { 1.0, 1.37, 0.64 }) {
+                    double width = 140.0;
+                    Stock st = StockMinimap(static_cast<float>(p[0]), static_cast<float>(p[1]), zoom, static_cast<float>(layoutScale), static_cast<float>(width));
+                    BleakStorm::MinimapSpace s = SpaceOf(st, p[0], p[1], layoutScale, width);
+                    Check(BleakStorm::MinimapSpaceValid(s), "a stock minimap gives a valid space");
+                    const double Q = BleakStorm::kMinimapTileYards;
+
+                    // Every corner of every quad the client builds: our vertex and mask for that world point are
+                    // BuildQuad's own.
+                    for (uint32_t i = 0; i < 4; i++) {
+                        const StockQuad& q = st.quads[i];
+
+                        if (!q.built) {
+                            continue;
+                        }
+
+                        quads++;
+                        const float corners[4][2] = { { q.rect.minX, q.rect.maxY }, { q.rect.maxX, q.rect.maxY }, { q.rect.minX, q.rect.minY }, { q.rect.maxX, q.rect.minY } };
+
+                        for (uint32_t k = 0; k < 4; k++) {
+                            // Tile space back to the world: X grows east (-y), Y south (-x).
+                            double wy = p[1] - (corners[k][0] - st.centerX) * Q;
+                            double wx = p[0] - (corners[k][1] - st.centerY) * Q;
+                            double vx, vy, u, v;
+                            BleakStorm::MinimapToVertex(s, wx, wy, vx, vy);
+                            BleakStorm::MinimapToMask(s, wx, wy, u, v);
+                            vertices = vertices && Near(vx, q.vertices[k][0], 2e-3) && Near(vy, q.vertices[k][1], 2e-3);
+                            masks = masks && Near(u, q.mask[k][0], 1e-5) && Near(v, q.mask[k][1], 1e-5);
+                        }
+                    }
+
+                    // The camera target is the quads' centre; the mask's middle.
+                    double vx, vy, u, v;
+                    BleakStorm::MinimapToVertex(s, p[0], p[1], vx, vy);
+                    BleakStorm::MinimapToMask(s, p[0], p[1], u, v);
+                    centre = centre && Near(vx, s.extent * 0.5, 1e-6) && Near(vy, s.extent * 0.5, 1e-6) && Near(u, 0.5, 1e-9) && Near(v, 0.5, 1e-9);
+
+                    // One view radius north is the top edge's middle, west the left edge's, south the bottom's.
+                    double r = BleakStorm::MinimapViewYards(s);
+                    BleakStorm::MinimapToVertex(s, p[0] + r, p[1], vx, vy);
+                    BleakStorm::MinimapToMask(s, p[0] + r, p[1], u, v);
+                    edges = edges && Near(vx, s.extent * 0.5, 1e-6) && Near(vy, s.extent, 1e-6) && Near(u, 0.5, 1e-9) && Near(v, 0.0, 1e-9);
+                    BleakStorm::MinimapToVertex(s, p[0], p[1] + r, vx, vy);
+                    edges = edges && Near(vx, 0.0, 1e-6) && Near(vy, s.extent * 0.5, 1e-6);
+                    BleakStorm::MinimapToVertex(s, p[0] - r, p[1], vx, vy);
+                    edges = edges && Near(vx, s.extent * 0.5, 1e-6) && Near(vy, 0.0, 1e-6);
+
+                    // The tile a point is in, as the client's own (17066.666 - pos) * 0.001875 has it; and the
+                    // absolute tile space MinimapUpdatePosition measures from its origin.
+                    for (double off : { -401.0, -12.5, 7.25, 333.0 }) {
+                        double wx = p[0] + off;
+                        double wy = p[1] - 0.6 * off;
+                        double tx, ty;
+                        BleakStorm::MinimapToTile(s, wx, wy, tx, ty);
+                        double originY = 17066.666 - 533.33331 * st.baseTile[0];
+                        double originX = 17066.666 - 533.33331 * st.baseTile[1];
+                        tiles = tiles && Near(tx, (originY - wy) / 1066.6666, 2e-5) && Near(ty, (originX - wx) / 1066.6666, 2e-5);
+                        int32_t tile[2];
+                        StockTileCoords(static_cast<float>(wx), static_cast<float>(wy), tile);
+                        double fx = st.baseTile[0] + 2.0 * tx;
+                        double fy = st.baseTile[1] + 2.0 * ty;
+
+                        if (fabs(fx - floor(fx + 0.5)) > 1e-3 && fabs(fy - floor(fy + 0.5)) > 1e-3) {
+                            indexes = indexes && tile[0] == static_cast<int32_t>(floor(fx)) && tile[1] == static_cast<int32_t>(floor(fy));
+                        }
+
+                        // Vertex and mask agree everywhere: u = x / extent, v = 1 - y / extent.
+                        BleakStorm::MinimapToVertex(s, wx, wy, vx, vy);
+                        BleakStorm::MinimapToMask(s, wx, wy, u, v);
+                        masks = masks && Near(u, vx / s.extent, 1e-9) && Near(v, 1.0 - vy / s.extent, 1e-9);
+                    }
+
+                    // The view radius is the zoom table's (Royale's RM.Geometry tables, MinimapFrame.cpp:194-197).
+                    ratio = ratio && Near(BleakStorm::MinimapViewYards(s), kStockViewRadius[zoom], 0.05) && Near(BleakStorm::MinimapYardsPerUnit(s) * width * 0.5, kStockViewRadius[zoom], 0.05);
+                }
+            }
+        }
+
+        Check(quads > 100, "the stock quads were built");
+        Check(vertices, "MinimapToVertex is BuildQuad's vertex for each quad corner");
+        Check(masks, "MinimapToMask is BuildQuad's m_maskCoords");
+        Check(tiles, "MinimapToTile is MinimapUpdatePosition's tile space");
+        Check(indexes, "and lands in MinimapWorldToTileCoords's tile");
+        Check(centre, "the camera target is the centre of the quads");
+        Check(edges, "a view radius north is the top edge's middle, west the left, south the bottom");
+        Check(ratio, "the view radius is the outdoor zoom table's");
+
+        // The rotating minimap turns the view around the frame's centre by -facing (CGMinimapFrame::Render,
+        // C44Matrix::Rotation about +z: counter-clockwise). The vertices stay the same; whatever lies ahead of the
+        // player then points up.
+        bool ahead = true;
+        BleakStorm::MinimapSpace s = Space(-267.0, -267.0, 3, 1.0, 140.0);
+
+        for (int k = 0; k < 12; k++) {
+            double facing = k * 0.55 - 3.0;
+            double vx, vy;
+            BleakStorm::MinimapToVertex(s, s.x + 50.0 * cos(facing), s.y + 50.0 * sin(facing), vx, vy);
+            double rx = vx - s.extent * 0.5, ry = vy - s.extent * 0.5;
+            double c = cos(-facing), sn = sin(-facing);
+            double ux = rx * c - ry * sn, uy = rx * sn + ry * c;
+            ahead = ahead && Near(ux, 0.0, 1e-6) && uy > 0.0;
+        }
+
+        Check(ahead, "with the minimap rotating, the facing points up");
+
+        BleakStorm::MinimapSpace bad = s;
+        bad.scale = 0.0;
+        Check(!BleakStorm::MinimapSpaceValid(bad), "a space of scale 0 is refused");
+        bad = s;
+        bad.extent = std::numeric_limits<double>::quiet_NaN();
+        Check(!BleakStorm::MinimapSpaceValid(bad), "a NaN extent is refused");
+    }
+
+    void TestMinimapArcs() {
+        double start;
+        Check(Near(BleakStorm::ArcWithin(0.0, 0.0, 50.0, 0.0, 0.0, 60.0, start), 2.0 * kPi, 1e-12), "a circle around the view: all of it");
+        Check(BleakStorm::ArcWithin(0.0, 0.0, 80.0, 0.0, 0.0, 60.0, start) == 0.0, "a circle beyond the view all round: none");
+        Check(BleakStorm::ArcWithin(0.0, 0.0, 50.0, 500.0, 0.0, 60.0, start) == 0.0, "far away: none");
+        Check(BleakStorm::ArcWithin(0.0, 0.0, 0.0, 1.0, 0.0, 60.0, start) == 0.0, "radius 0: none");
+        bool ends = true;
+
+        for (int k = 0; k < 10; k++) {
+            double r = 30.0 + 90.0 * k, a = 0.7 * k - 2.0, d = r + 25.0 - 5.0 * k;
+            double px = 10.0 + d * cos(a), py = -20.0 + d * sin(a);
+            double span = BleakStorm::ArcWithin(10.0, -20.0, r, px, py, 60.0, start);
+            ends = ends && span > 0.0 && span < 2.0 * kPi;
+
+            for (double t : { start, start + span }) {
+                double qx = 10.0 + r * cos(t), qy = -20.0 + r * sin(t);
+                ends = ends && Near(sqrt((qx - px) * (qx - px) + (qy - py) * (qy - py)), 60.0, 1e-6);
+            }
+
+            double mid = start + span * 0.5;
+            ends = ends && Near(cos(mid), cos(a), 1e-9) && Near(sin(mid), sin(a), 1e-9);
+        }
+
+        Check(ends, "the arc's ends are `reach` from the view, its middle towards it");
+
+        Check(Near(BleakStorm::DiscAngles(0.0, 0.0, 30.0, 0.0, 60.0, start), 2.0 * kPi, 1e-12), "the centre in view: every angle");
+        double span = BleakStorm::DiscAngles(0.0, 0.0, 200.0, 100.0, 60.0, start);
+        double d = sqrt(200.0 * 200.0 + 100.0 * 100.0);
+        Check(Near(span, 2.0 * asin(60.0 / d), 1e-12), "the disc's angles");
+        bool tangent = true;
+
+        for (double t : { start, start + span }) {
+            // The distance from the view's centre to the ray at angle t is the reach.
+            tangent = tangent && Near(fabs(200.0 * sin(t) - 100.0 * cos(t)), 60.0, 1e-9);
+        }
+
+        Check(tangent, "its sides touch the disc");
+
+        bool close = true, growing = true;
+        uint32_t previous = 0;
+
+        for (double r = 0.5; r < 4000.0; r *= 1.07) {
+            uint32_t n = BleakStorm::ArcSegments(r, 2.0 * kPi);
+            close = close && (n == BleakStorm::kMinimapMaxSegments || r * (1.0 - cos(kPi / n)) <= BleakStorm::kMinimapChordUnits + 1e-12);
+            growing = growing && n >= previous;
+            previous = n;
+        }
+
+        Check(close, "circles within a tenth of a unit of the true circle");
+        Check(growing, "more segments for larger circles");
+        Check(BleakStorm::ArcSegments(100.0, 0.0) == 0 && BleakStorm::ArcSegments(0.0, 1.0) == 0, "no arc: no segments");
+        Check(BleakStorm::ArcSegments(1e-3, 0.1) == 1, "a tiny circle: one");
+        Check(BleakStorm::DashCount(1.0) == BleakStorm::kMinimapMinDashes, "small circles get the fewest dashes");
+        double big = 900.0;
+        uint32_t n = BleakStorm::DashCount(big);
+        Check(Near(2.0 * kPi * big / n, BleakStorm::kMinimapDashUnits + BleakStorm::kMinimapGapUnits, 0.05), "dashes keep their length on the screen");
+    }
+
+    void TestMinimapStorm() {
+        // The island's first circles seen from a minimap 140 units wide, at every zoom and UI scale.
+        bool covered = true, clean = true, ranges = true, keyline = true, widths = true, dashes = true, nextOn = true, fits = true;
+        int sampled = 0, outside = 0;
+
+        for (uint32_t zoom = 0; zoom < 6; zoom += 1) {
+            for (double layoutScale : { 1.0, 0.64, 1.5 }) {
+                for (int place = 0; place < 7; place++) {
+                    BleakStorm::Circle cur = { -267.0, -267.0, 860.0 - 120.0 * place };
+                    BleakStorm::Circle next = { -200.0, -300.0, cur.r * 0.6 };
+                    // Inside near the edge, on it, outside near it, far outside, at the centre.
+                    const double offsets[7] = { -40.0, 0.0, 30.0, 150.0, -cur.r, -90.0, 600.0 };
+                    double a = 0.9 * place + 0.3;
+                    double px = cur.x + (cur.r + offsets[place]) * cos(a);
+                    double py = cur.y + (cur.r + offsets[place]) * sin(a);
+                    BleakStorm::MinimapSpace s = Space(px, py, zoom, layoutScale, 140.0);
+                    Layers layers;
+                    layers.Build(s, cur, true, &next);
+                    double unitYards = BleakStorm::MinimapYardsPerUnit(s);
+
+                    for (uint32_t i = 0; i < BleakStorm::Minimap_Layers; i++) {
+                        ranges = ranges && IndicesInRange(layers.meshes[i]);
+                    }
+
+                    // Sample the frame's square turned any way (its circumscribed disc): every point well outside
+                    // the circle is shaded, none well inside.
+                    double half = BleakStorm::MinimapViewYards(s) * sqrt(2.0);
+
+                    for (int gy = -12; gy <= 12; gy++) {
+                        for (int gx = -12; gx <= 12; gx++) {
+                            double wx = px + half * gx / 12.0, wy = py + half * gy / 12.0;
+
+                            if (gx * gx + gy * gy > 144) {
+                                continue;
+                            }
+
+                            double edge = BleakStorm::EdgeDistance(cur, wx, wy);
+                            double vx, vy;
+                            BleakStorm::MinimapToVertex(s, wx, wy, vx, vy);
+                            sampled++;
+
+                            if (edge > 0.25 * unitYards) {
+                                outside++;
+                                covered = covered && Covered(layers.meshes[BleakStorm::Minimap_Shade], vx, vy);
+                            } else if (edge < -0.25 * unitYards) {
+                                clean = clean && !Covered(layers.meshes[BleakStorm::Minimap_Shade], vx, vy);
+                            }
+                        }
+                    }
+
+                    // No shade vertex inside the circle; the edge and its keyline at their widths in UI units.
+                    const BleakStorm::MinimapMesh& sh = layers.meshes[BleakStorm::Minimap_Shade];
+
+                    for (uint32_t v = 0; v < sh.vertexCount && sh.vertexCount != 4; v++) {
+                        clean = clean && YardsFrom(s, sh.vertices[v], cur.x, cur.y) >= cur.r * (1.0 - 1e-6) - 1e-3;
+                    }
+
+                    const BleakStorm::MinimapMesh& edge = layers.meshes[BleakStorm::Minimap_Edge];
+                    const BleakStorm::MinimapMesh& line = layers.meshes[BleakStorm::Minimap_EdgeOutline];
+                    bool inView = BleakStorm::ArcWithin(cur.x, cur.y, cur.r, px, py, BleakStorm::MinimapViewYards(s), a) > 0.0;
+                    keyline = keyline && (!inView || (edge.indexCount && line.indexCount && edge.vertexCount == line.vertexCount));
+
+                    for (uint32_t v = 0; v < edge.vertexCount; v++) {
+                        double r = YardsFrom(s, edge.vertices[v], cur.x, cur.y);
+                        double expect = cur.r + (v & 1 ? 1.0 : -1.0) * BleakStorm::kMinimapEdgeUnits * unitYards;
+                        widths = widths && Near(r, expect, 2e-3 * unitYards + 1e-4 * cur.r);
+                        double o = YardsFrom(s, line.vertices[v], cur.x, cur.y);
+                        double outer = cur.r + (v & 1 ? 1.0 : -1.0) * (BleakStorm::kMinimapEdgeUnits + BleakStorm::kMinimapOutlineUnits) * unitYards;
+                        widths = widths && Near(o, outer, 2e-3 * unitYards + 1e-4 * cur.r);
+                    }
+
+                    // The next circle's dashes lie on it, at their width.
+                    const BleakStorm::MinimapMesh& nx = layers.meshes[BleakStorm::Minimap_Next];
+
+                    for (uint32_t v = 0; v < nx.vertexCount; v++) {
+                        double r = YardsFrom(s, nx.vertices[v], next.x, next.y);
+                        dashes = dashes && Near(r, next.r + (v & 1 ? 1.0 : -1.0) * BleakStorm::kMinimapNextUnits * unitYards, 2e-3 * unitYards + 1e-4 * next.r);
+                    }
+
+                    bool nextInView = BleakStorm::ArcWithin(next.x, next.y, next.r, px, py, BleakStorm::MinimapViewYards(s), a) > 0.0;
+                    nextOn = nextOn && (!nextInView || (nx.indexCount && layers.meshes[BleakStorm::Minimap_NextOutline].indexCount));
+
+                    for (uint32_t i = 0; i < BleakStorm::Minimap_Layers; i++) {
+                        fits = fits && layers.meshes[i].vertexCount < BleakStorm::kMinimapMaxVertices;
+                    }
+                }
+            }
+        }
+
+        Check(sampled > 10000 && outside > 2000, "the samples reach the storm");
+        Check(covered, "every point of the view outside the circle is shaded");
+        Check(clean, "no shade inside the circle");
+        Check(ranges, "indices point at vertices, whole triangles");
+        Check(keyline, "an edge in view has its keyline");
+        Check(widths, "edge and keyline at their widths in UI units");
+        Check(dashes, "the dashes lie on the next circle");
+        Check(nextOn, "a next circle in view is drawn");
+        Check(fits, "every layer fits its buffer");
+
+        // A dash is kMinimapDashUnits long on the screen, its keyline kMinimapOutlineUnits more at each end.
+        BleakStorm::MinimapSpace s = Space(0.0, 0.0, 5, 1.0, 140.0);
+        BleakStorm::Circle cur = { 0.0, 0.0, 400.0 };
+        BleakStorm::Circle next = { 10.0, 5.0, 40.0 };
+        Layers layers;
+        Check(layers.Build(s, cur, true, &next), "something to draw");
+        const BleakStorm::MinimapMesh& nx = layers.meshes[BleakStorm::Minimap_Next];
+        const BleakStorm::MinimapMesh& no = layers.meshes[BleakStorm::Minimap_NextOutline];
+        double perUnit = s.layoutScale;
+        uint32_t n = BleakStorm::DashCount(40.0 / BleakStorm::MinimapYardsPerUnit(s));
+        uint32_t columns = (nx.vertexCount / 2) / n;
+        Check(nx.vertexCount == no.vertexCount && nx.vertexCount % (2 * n) == 0 && columns >= 2, "a whole next circle in view: every dash, each with its keyline");
+        const float* a0 = nx.vertices[1].pos;
+        const float* a1 = nx.vertices[2 * (columns - 1) + 1].pos;
+        const float* b0 = no.vertices[1].pos;
+        const float* b1 = no.vertices[2 * (columns - 1) + 1].pos;
+        double dashLength = sqrt((a1[0] - a0[0]) * (a1[0] - a0[0]) + (a1[1] - a0[1]) * (a1[1] - a0[1])) / perUnit;
+        double lineLength = sqrt((b1[0] - b0[0]) * (b1[0] - b0[0]) + (b1[1] - b0[1]) * (b1[1] - b0[1])) / perUnit;
+        Check(dashLength > 4.0 && dashLength < 6.5, "a dash about kMinimapDashUnits long");
+        Check(lineLength > dashLength + 1.5, "its keyline longer at both ends");
+        Check(layers.meshes[BleakStorm::Minimap_Shade].indexCount == 0, "deep inside: no shade");
+
+        // Inside a circle far from its edge, nothing; the lobby gets no shade; a closed storm shades everything.
+        BleakStorm::Circle huge = { 0.0, 0.0, 1500.0 };
+        Check(!layers.Build(s, huge, true, nullptr), "far inside the circle: nothing to draw");
+        BleakStorm::Circle away = { 3000.0, 0.0, 300.0 };
+        Check(layers.Build(s, away, true, nullptr) && layers.meshes[BleakStorm::Minimap_Shade].vertexCount == 4 && layers.meshes[BleakStorm::Minimap_Edge].indexCount == 0, "far outside: the whole view is shaded");
+        Check(!layers.Build(s, away, false, nullptr), "the lobby, far outside: nothing");
+        BleakStorm::Circle lobby = { 0.0, 200.0, 150.0 };
+        Check(layers.Build(s, lobby, false, nullptr) && layers.meshes[BleakStorm::Minimap_Shade].indexCount == 0 && layers.meshes[BleakStorm::Minimap_Edge].indexCount, "the lobby: the edge, no shade");
+        BleakStorm::Circle closed = { 0.0, 0.0, 0.0 };
+        Check(layers.Build(s, closed, true, nullptr) && layers.meshes[BleakStorm::Minimap_Shade].vertexCount == 4 && layers.meshes[BleakStorm::Minimap_Edge].indexCount == 0, "a closed storm: all shade, no edge");
+        BleakStorm::Circle same = cur;
+        layers.Build(s, cur, true, &same);
+        Check(layers.meshes[BleakStorm::Minimap_Next].indexCount == 0, "the storm on the next circle: no dashes");
+
+        // A whole ring closes on its first column exactly.
+        BleakStorm::Circle ring = { 20.0, -10.0, 30.0 };
+        layers.Build(s, ring, true, nullptr);
+        const BleakStorm::MinimapMesh& e = layers.meshes[BleakStorm::Minimap_Edge];
+        Check(e.vertexCount >= 4 && memcmp(&e.vertices[0], &e.vertices[e.vertexCount - 2], 2 * sizeof(BleakStorm::MinimapVertex)) == 0, "a whole edge closes without a crack");
+
+        // The hatch is fixed to the ground: one world point keeps its texture coordinates, give or take whole
+        // repeats, as the minimap moves; one repeat is kMinimapHatchUnits on the screen.
+        BleakStorm::MinimapSpace s2 = Space(37.3, -81.9, 5, 1.0, 140.0);
+        float t1[2], t2[2], t3[2];
+        HatchAt(s, 12.5, -7.75, t1);
+        HatchAt(s2, 12.5, -7.75, t2);
+        double du = t2[0] - t1[0], dv = t2[1] - t1[1];
+        Check(Near(du, floor(du + 0.5), 1e-3) && Near(dv, floor(dv + 0.5), 1e-3) && fabs(du) + fabs(dv) > 0.5, "the hatch stays on the ground");
+        double unit = BleakStorm::MinimapYardsPerUnit(s);
+        HatchAt(s, 12.5, -7.75 - BleakStorm::kMinimapHatchUnits * unit, t3);
+        Check(Near(t3[0] - t1[0], 1.0, 1e-4) && Near(t3[1], t1[1], 1e-6), "the hatch repeats every kMinimapHatchUnits");
+
+        // Soft lines: with a pixel of 0.7 vertex units, the edge has four rows a column, fading from 0 to 1 across
+        // one pixel centred on each side; dashes fade at their ends too; a band thinner than a pixel peaks lower.
+        const double pixel = 0.7;
+        layers.Build(s, ring, true, &next, pixel);
+        const BleakStorm::MinimapMesh& soft = layers.meshes[BleakStorm::Minimap_Edge];
+        double perYardSoft = s.extent / (2.0 * s.scale * BleakStorm::kMinimapTileYards);
+        double halfEdge = BleakStorm::kMinimapEdgeUnits * s.layoutScale / perYardSoft;
+        double f = pixel / perYardSoft;
+        bool rows = soft.vertexCount % 4 == 0 && soft.vertexCount > 8;
+
+        for (uint32_t v = 0; v + 3 < soft.vertexCount; v += 4) {
+            const BleakStorm::MinimapVertex* q = &soft.vertices[v];
+            rows = rows && q[0].fade == 0.0f && q[1].fade == 1.0f && q[2].fade == 1.0f && q[3].fade == 0.0f;
+            rows = rows && Near(YardsFrom(s, q[0], ring.x, ring.y), ring.r - halfEdge - 0.5 * f, 1e-3);
+            rows = rows && Near(YardsFrom(s, q[1], ring.x, ring.y), ring.r - halfEdge + 0.5 * f, 1e-3);
+            rows = rows && Near(YardsFrom(s, q[2], ring.x, ring.y), ring.r + halfEdge - 0.5 * f, 1e-3);
+            rows = rows && Near(YardsFrom(s, q[3], ring.x, ring.y), ring.r + halfEdge + 0.5 * f, 1e-3);
+        }
+
+        Check(rows, "soft sides: a pixel's fade centred on each side of the edge");
+        Check(soft.indexCount == (soft.vertexCount / 4 - 1) * 18, "three strips a segment");
+        const BleakStorm::MinimapMesh& softDash = layers.meshes[BleakStorm::Minimap_Next];
+        const BleakStorm::MinimapMesh& softLine = layers.meshes[BleakStorm::Minimap_NextOutline];
+        bool capped = softDash.vertexCount > 0 && softDash.vertexCount == softLine.vertexCount;
+        uint32_t perDash = 4 * (columns + 2);
+        capped = capped && softDash.vertexCount % perDash == 0;
+
+        for (uint32_t d = 0; capped && d < softDash.vertexCount; d += perDash) {
+            for (uint32_t r = 0; r < 4; r++) {
+                capped = capped && softDash.vertices[d + r].fade == 0.0f && softDash.vertices[d + perDash - 4 + r].fade == 0.0f;
+            }
+
+            capped = capped && softDash.vertices[d + 5].fade == 1.0f;
+        }
+
+        Check(capped, "soft dashes: their ends fade too, and keylines match them");
+        BleakStorm::MinimapMesh thin = layers.m[0].mesh;
+        thin.vertexCount = thin.indexCount = 0;
+        BleakStorm::BandShape soft3 = { 3.0, false, false, false };
+        Check(BleakStorm::MinimapBand(s, 0.0, 0.0, 10.0, 11.0, 0.0, 1.0, 4, soft3, thin) && Near(thin.vertices[1].fade, 1.0 / 3.0, 1e-6) && thin.vertices[1].pos[0] == thin.vertices[2].pos[0], "a band thinner than its fade peaks lower, in its middle");
+        BleakStorm::MinimapMesh full = layers.m[0].mesh;
+        full.vertexCapacity = 7;
+        full.vertexCount = full.indexCount = 0;
+        Check(!BleakStorm::MinimapBand(s, 0.0, 0.0, 10.0, 11.0, 0.0, 1.0, 4, soft3, full) && full.vertexCount == 0, "a band that does not fit: nothing");
+        Check(!layers.Build(s, ring, true, &next, std::numeric_limits<double>::quiet_NaN()), "a NaN pixel: nothing");
+
+        // The storm's front: from the edge kMinimapGlowUnits into the storm, fading out; not in the lobby.
+        layers.Build(s, ring, true, nullptr, pixel);
+        const BleakStorm::MinimapMesh& glow = layers.meshes[BleakStorm::Minimap_Glow];
+        double glowYards = BleakStorm::kMinimapGlowUnits * BleakStorm::MinimapYardsPerUnit(s);
+        bool front = glow.vertexCount >= 4 && glow.vertexCount % 2 == 0;
+
+        for (uint32_t v = 0; v + 1 < glow.vertexCount; v += 2) {
+            front = front && glow.vertices[v].fade == 1.0f && glow.vertices[v + 1].fade == 0.0f;
+            front = front && Near(YardsFrom(s, glow.vertices[v], ring.x, ring.y), ring.r, 1e-3) && Near(YardsFrom(s, glow.vertices[v + 1], ring.x, ring.y), ring.r + glowYards, 1e-3);
+        }
+
+        Check(front, "the storm's front fades out from the edge into the storm");
+        layers.Build(s, ring, false, nullptr, pixel);
+        Check(layers.meshes[BleakStorm::Minimap_Glow].indexCount == 0 && layers.meshes[BleakStorm::Minimap_Edge].indexCount > 0, "the lobby: no front either");
+        layers.Build(s, closed, true, nullptr, pixel);
+        Check(layers.meshes[BleakStorm::Minimap_Glow].indexCount == 0, "a closed storm: no front");
+    }
+
+    void TestHatch() {
+        const uint8_t* t = BleakStorm::HatchLevels();
+        const uint32_t n = BleakStorm::kHatchSize;
+        Check(BleakStorm::HatchLevels() == t, "the hatch is made once");
+        Check(BleakStorm::HatchLevelSize(BleakStorm::kHatchLevels - 1) == 1 && BleakStorm::HatchLevelOffset(1) == n * n * 4, "the hatch's levels");
+        uint32_t sum = 0, white = 0, seam = 0, inside = 0;
+
+        for (uint32_t y = 0; y < n; y++) {
+            for (uint32_t x = 0; x < n; x++) {
+                const uint8_t* p = t + (y * n + x) * 4;
+                sum += p[3];
+                white += p[0] == 255 && p[1] == 255 && p[2] == 255;
+                // Tileable: across the edge the alpha steps no more than inside.
+                int right = t[(y * n + (x + 1) % n) * 4 + 3];
+                int down = t[(((y + 1) % n) * n + x) * 4 + 3];
+                uint32_t step = static_cast<uint32_t>(std::max(abs(p[3] - right), abs(p[3] - down)));
+                uint32_t& worst = (x == n - 1 || y == n - 1) ? seam : inside;
+                worst = std::max(worst, step);
+            }
+        }
+
+        double coverage = sum / (255.0 * n * n);
+        Check(Near(coverage, 0.25, 0.01), "a quarter of the hatch is covered");
+        Check(white == n * n, "the hatch is white; its lines are in alpha");
+        Check(seam <= inside, "the hatch tiles without a seam");
+        const uint8_t* last = t + BleakStorm::HatchLevelOffset(BleakStorm::kHatchLevels - 1);
+        Check(Near(last[3], 64.0, 2.0), "its smallest level is a quarter grey");
+        const uint8_t* l1 = t + BleakStorm::HatchLevelOffset(1);
+        int expect = (t[3] + t[7] + t[n * 4 + 3] + t[(n + 1) * 4 + 3] + 2) / 4;
+        Check(l1[3] == expect, "each level is the box filter of the one above");
+    }
+}
+
 int main(int argc, char** argv) {
     if (argc != 2) {
         fprintf(stderr, "usage: test_storm <dir with circle_cases.csv>\n");
@@ -566,6 +1202,10 @@ int main(int argc, char** argv) {
     TestFillUnknown();
     TestBuild();
     TestNoise();
+    TestMinimapSpace();
+    TestMinimapArcs();
+    TestMinimapStorm();
+    TestHatch();
     printf("%d checks, %d failed\n", s_checks, s_failed);
     printf(s_failed ? "FAIL\n" : "PASS\n");
     return s_failed ? 1 : 0;

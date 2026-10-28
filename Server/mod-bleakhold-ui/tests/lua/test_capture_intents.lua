@@ -6,12 +6,14 @@
 -- Run by the repository's Tools/UiLint/testrunner.lua (see ../run_tests.sh).
 local FX = host_loadfile(repo .. "/Tools/UiLint/tests/fixtures.lua")()
 
--- Click Bleakhold Royale's island map at pixel (px, py) from its top-left corner.
+-- Click Bleakhold Royale's island map at pixel (px, py) from its top-left corner, given in a 512-unit picture (the
+-- canvas is RoyaleMap.lua's MP.SIZE units across), so the same world point is clicked whatever the canvas size.
 local function clickMap(M, ns, px, py)
     local canvas = ns.RoyaleMap.canvas
     local sc = canvas:GetEffectiveScale()
-    M.cursorX = (canvas:GetLeft() + px) * sc
-    M.cursorY = (canvas:GetTop() - py) * sc
+    local k = ns.RoyaleMap.SIZE / 512
+    M.cursorX = (canvas:GetLeft() + px * k) * sc
+    M.cursorY = (canvas:GetTop() - py * k) * sc
     M.Fire(canvas, "OnMouseUp", "LeftButton")
 end
 
@@ -158,7 +160,7 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
     M.Advance(0.6)
     roys(2, 1)
     M.Advance(0.6)
-    M.env.BleakholdRoyaleDeploy()                                          -- the parachute binding: RDEPLOY
+    ns.Royale.Deploy()                     -- RDEPLOY: R.Deploy stays for the protocol (no button or key sends it)
     M.Advance(1.1)
     roys(3, 3, "Aldric")
     M.Advance(0.3)

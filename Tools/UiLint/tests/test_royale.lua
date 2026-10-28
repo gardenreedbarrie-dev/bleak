@@ -1,8 +1,9 @@
 -- Bleakhold Royale (docs/BleakholdProtocol.md section 17): the protocol document's frames through State and the HUD at
 -- the frame sizes the server may use, the Royale card and its gates (feature bit 4096, the patch marker), the ready
--- check, the island map's transform and the landing pin, the parachute, the spectator camera, the storm (timer,
--- circle, screen edge, safe-zone arrow), the kill feed and the announcer, the end card, the drop countdown, the
--- player's own position, garbage, and a whole scripted match in /bh demo.
+-- check, the island map's transform and the landing pin, the drop, the spectator camera, the storm (timer, circle,
+-- storm edge, safe-zone arrow), the kill feed and the announcer, the end card, the drop countdown, the player's own
+-- position, garbage, and a whole scripted match in /bh demo. The HUD's own layout, motion and wording are
+-- test_royale_hud.lua's.
 local FX = host_loadfile(repo .. "/Tools/UiLint/tests/fixtures.lua")()
 
 local ROYALE = { [6] = 4096 }
@@ -106,8 +107,8 @@ for _, size in ipairs({ 1000, 251, 64 }) do
             if ex.op == "QUEUE" and ex.payload:match("^5,") then
                 -- the ready check: the popup, the counts
                 H.ok(M.env.BleakholdRoyaleReady:IsShown(), "ready check popup")
-                H.eq(R.ready.count:GetText(), "0 / 24 accepted")
-                H.eq(R.ready.ring.label:GetText(), "15")
+                H.eq(R.ready.count:GetText(), "0 of 24 accepted")
+                H.eq(R.ready.num:GetValue(), "15", "the seconds in the ring")
             end
             M.Advance(0.1)
         end
@@ -169,16 +170,20 @@ for _, size in ipairs({ 1000, 251, 64 }) do
         M.Advance(0.3)
         local bar = M.env.BleakholdRoyaleBar
         H.ok(bar:IsShown(), "top bar")
-        H.contains(bar.main:GetText(), "Drop in 0:4", "drop countdown")
-        H.eq(bar.alive:GetText(), "24", "players in the lobby")
+        H.eq(bar.cells[2].label:GetText(), "DROP IN")
+        H.contains(bar.main:GetText(), "0:4", "drop countdown")
+        H.eq(bar.cells[1].label:GetText(), "PLAYERS")
+        H.eq(bar.cells[1].value:GetText(), "24/40", "players in the lobby, of the queue's most")
         H.ok(M.env.BleakholdRoyaleMapFrame:IsShown(), "the map opens in the lobby")
         H.ok(ns.RoyaleMap.pins.pin:IsShown(), "the snapped pin on the map")
         H.ok(M.env.BleakholdRoyaleResult:IsShown(), "end card")
-        H.eq(ns.RoyaleHud.result.place:GetText(), "#12 of 24")
+        local ec = ns.RoyaleHud.result
+        H.eq(ec.title.title, "ELIMINATED")
+        H.eq(ec.rank:GetValue(), "#12"); H.eq(ec.of:GetText(), "of 24")
         H.ok(M.env.BleakholdRoyaleFeed:IsShown(), "kill feed")
         H.contains(ns.RoyaleHud.feed.lines[1].killer:GetText(), "Aldric")
         H.contains(ns.RoyaleHud.feed.lines[1].victim:GetText(), "Brenna")
-        H.eq(ns.RoyaleHud.banner.title:GetText(), "SUPPLY DROP", "match events only: kills are BGANN's")
+        H.eq(ns.RoyaleHud.current.title, "SUPPLY DROP", "match events only: kills are BGANN's")
     end)
 end
 
@@ -291,7 +296,7 @@ test("royale: the ready check popup accepts and declines with QREPLY, and goes w
     H.ok(rc.waiting:IsShown() and not rc.accept:IsShown(), "waiting for the others")
     H.send(M, "QUEUE", { { 6, 2, "B", 901, 0, 1, 96, "", 412, 14, 80, 80, 24, 20, 40, 9, 24, 1 } })
     M.Advance(0.3)
-    H.eq(rc.count:GetText(), "9 / 24 accepted")
+    H.eq(rc.count:GetText(), "9 of 24 accepted")
     -- a new proposal: decline
     H.send(M, "QUEUE", { { 7, 1, "B", 901, 0, 1, 100, "", "", "", 80, 80, 20, 20, 40, "", "", 1 } })
     H.ok(not rc:IsShown(), "gone with the proposal")
@@ -316,15 +321,25 @@ end)
 test("royale: the map turns a click into RDROP through ROYM's frame, negative yards included", function(M, ns)
     connect(M)
     H.send(M, "ROYM", MAP)
-    roys(M)
+    roys(M, { [2] = 1 })
     M.Advance(0.3)
     local mp = ns.RoyaleMap
-    H.ok(M.env.BleakholdRoyaleMapFrame:IsShown(), "opened by itself in the lobby")
-    -- the transform: u = (maxY - y) / (maxY - minY), v = (maxX - x) / (maxX - minX)
+    H.ok(M.env.BleakholdRoyaleMapFrame:IsShown(), "opened by itself when the landing phase starts")
+    -- the transform: u = (maxY - y) / (maxY - minY), v = (maxX - x) / (maxX - minX), in canvas units (mp.SIZE)
     local px, py = mp.ToMap(-266, -266)
-    H.ok(math.abs(px - 512 * 799 / 1599) < 0.01 and math.abs(py - 512 * 799 / 1599) < 0.01, "the keep near the middle")
-    local x, y = mp.ToWorld(512, 0)
+    H.ok(math.abs(px - mp.SIZE * 799 / 1599) < 0.01 and math.abs(py - mp.SIZE * 799 / 1599) < 0.01,
+        "the keep near the middle")
+    local x, y = mp.ToWorld(mp.SIZE, 0)
     H.eq(x, 533); H.eq(y, -1066)
+    -- the clicks below are given in a 512-unit picture's pixels
+    local function clickMap(M2, ns2, px2, py2)
+        local k = mp.SIZE / 512
+        local canvas = mp.canvas
+        local s = canvas:GetEffectiveScale()
+        M2.cursorX = (canvas:GetLeft() + px2 * k) * s
+        M2.cursorY = (canvas:GetTop() - py2 * k) * s
+        M2.Fire(canvas, "OnMouseUp", "LeftButton")
+    end
     clickMap(M, ns, 100, 200)
     M.Advance(0.1)
     H.eq(table.concat(intentsOf(M, "RDROP"), " "), "-92,221", "x from the row, y from the column")
@@ -360,23 +375,28 @@ test("royale: the map turns a click into RDROP through ROYM's frame, negative ya
     H.eq(last[#last], "120,80", "the farm")
 end)
 
-test("royale: pins lock 3 s before the drop; the drop closes the map; the last 10 s count down in the centre",
+test("royale: pins lock 3 s before the drop (3.6 s on the client); the last 15 s count down in the ring; DROP!",
 function(M, ns)
     connect(M)
     H.send(M, "ROYM", MAP)
     roys(M, { [2] = 1, [3] = 15000 })
     M.Advance(0.3)
     local bar = M.env.BleakholdRoyaleBar
-    H.eq(bar.main:GetText(), "Drop in 0:15")
+    local cd = M.env.BleakholdRoyaleCountdown
+    H.ok(cd:IsShown(), "the drop countdown from 15 s")
+    H.eq(ns.RoyaleCountdown.Shown(), 15)
+    H.eq(cd.kick.text:GetText(), "DROP IN")
+    H.eq(bar.cells[2].label:GetText(), "DROP IN")
+    H.eq(bar.main:GetText(), "", "one clock on screen: the ring's")
+    H.ok(math.abs(bar.cells[2]:GetAlpha() - 0.35) < 1e-6, "the middle cell dimmed")
     M.Advance(2)
-    H.eq(bar.sub:GetText(), "Pins lock in 10")
-    H.ok(not M.env.BleakholdCountdown:IsShown(), "no centre countdown yet")
+    H.eq(bar.sub:GetText(), "Press ALT-M to choose your landing", "no pin yet: the tab names the map's key")
+    H.ok(not M.env.BleakholdCountdown:IsShown(), "the keystone countdown stays out of it")
     M.Advance(3.5)
-    H.ok(M.env.BleakholdCountdown:IsShown(), "the drop countdown")
-    H.eq(ns.Countdown.frame.kicker:GetText(), ns.RoyaleHud.KICKER)
-    H.eq(ns.Countdown.frame.title:GetText(), "The drop")
+    H.eq(ns.RoyaleCountdown.Shown(), 10)
     M.Advance(6.6)
-    H.eq(bar.sub:GetText(), "Pins are locked")
+    H.eq(bar.sub:GetText(), "You drop at random.", "locked without a pin")
+    H.ok(not M.env.BleakholdRoyaleMapFrame:IsShown(), "the map closed at the client's lock")
     local before = #intentsOf(M, "RDROP")
     clickMap(M, ns, 100, 100)
     M.Advance(0.2)
@@ -387,37 +407,10 @@ function(M, ns)
     end
     roys(M, { [2] = 2, [3] = 5000, [6] = 1 })
     M.Advance(0.3)
-    H.ok(not M.env.BleakholdCountdown:IsShown(), "countdown gone at the drop")
-    H.ok(not M.env.BleakholdRoyaleMapFrame:IsShown(), "the map closes at the drop")
-end)
-
-test("royale: RDEPLOY from the binding only while falling, once, 0.5 s into the fall", function(M, ns)
-    connect(M)
-    roys(M, { [2] = 2, [3] = 5000 })
-    M.env.BleakholdRoyaleDeploy()
-    M.Advance(0.2)
-    H.eq(#intentsOf(M, "RDEPLOY"), 0, "not falling: nothing")
-    roys(M, { [2] = 2, [3] = 5000, [6] = 1 })
-    M.Advance(0.2)
-    local dp = M.env.BleakholdRoyaleParachute
-    H.ok(dp:IsShown(), "prompt while falling")
-    H.contains(dp.key:GetText(), "Click here")
-    M.env.BleakholdRoyaleDeploy()
-    M.Advance(0.1)
-    H.eq(#intentsOf(M, "RDEPLOY"), 0, "too early in the fall")
-    M.Advance(0.4)
-    M.env.SetBinding("F", "BLEAKHOLD_ROYALE_DEPLOY")
-    M.Advance(0.2)
-    H.contains(dp.key:GetText(), "Press F")
-    M.env.BleakholdRoyaleDeploy()
-    M.Advance(0.2)
-    H.eq(table.concat(intentsOf(M, "RDEPLOY"), "|"), "", "RDEPLOY has no fields")
-    H.eq(#intentsOf(M, "RDEPLOY"), 1)
-    H.ok(not dp:IsShown(), "prompt gone")
-    M.Advance(1.2)
-    M.env.BleakholdRoyaleDeploy()
-    M.Advance(0.2)
-    H.eq(#intentsOf(M, "RDEPLOY"), 1, "once per drop")
+    H.ok(cd.drop:IsShown(), "DROP! at the drop")
+    M.Advance(1)
+    H.ok(not cd:IsShown(), "the countdown gone after DROP!")
+    H.ok(not M.env.BleakholdRoyaleMapFrame:IsShown(), "the map stays closed at the drop")
 end)
 
 ------------------------------------------------------------------------------------------------------
@@ -433,22 +426,29 @@ function(M, ns)
         [19] = 30000, [20] = 20, [22] = 300, [23] = -267 })
     M.Advance(0.3)
     local bar = M.env.BleakholdRoyaleBar
-    H.eq(bar.main:GetText(), "Storm moves in 0:10")
-    H.eq(bar.sub:GetText(), "Outside the storm circle: 2.0% of your health per second")
+    H.eq(bar.cells[2].label:GetText(), "STORM CLOSES IN")
+    H.eq(bar.main:GetText(), "0:10")
+    H.eq(bar.sub:GetText(), "IN THE STORM  |cffFF7A3D-2.0% HP/s|r", "the storm's damage in the tab")
+    H.ok(bar.tab.icon:IsShown() and bar.tab.icon.rsIcon == "storm", "with the storm icon")
     local pips = 0
     for _, p in ipairs(bar.pips) do
-        local r = p:GetVertexColor()
-        if p:IsShown() and math.abs(r - 0xB5 / 255) < 0.01 then pips = pips + 1 end
+        if p:IsShown() and p.lit and p.gem:IsShown() then pips = pips + 1 end
     end
     H.eq(pips, 2, "two stage pips lit")
-    H.ok(M.env.BleakholdRoyaleVignette:IsShown(), "purple screen edge outside")
+    H.ok(M.env.BleakholdRoyaleVignette:IsShown(), "the storm edge outside")
+    local entered = 0
+    for _, snd in ipairs(M.sounds) do
+        if snd == "igPVPUpdate" then entered = entered + 1 end
+    end
+    H.eq(entered, 1, "entering the storm sounds once")
     local ea = M.env.BleakholdRoyaleSafeArrow
     H.ok(ea:IsShown(), "arrow to the safe zone")
     H.eq(ea.dist:GetText(), "322 yd")
     local _, _, _, ax, ay = ea:GetPoint(1)
     H.ok(ay < -40 and math.abs(ax) < 10, "south on a north-up minimap: " .. ax .. "," .. ay)
     M.Advance(10)
-    H.contains(bar.main:GetText(), "Storm moving 0:2")
+    H.eq(bar.cells[2].label:GetText(), "STORM CLOSING")
+    H.contains(bar.main:GetText(), "0:2")
     M.Advance(9.7)
     local x, y, r, moving = R.Circle()
     H.ok(moving, "moving")
@@ -462,7 +462,9 @@ function(M, ns)
     H.eq(ea.dist:GetText(), "105 yd inside", "how far inside the next circle")
     local _, _, _, alpha = ea.tex:GetVertexColor()
     H.ok(alpha and alpha < 0.6, "dimmed inside")
-    H.ok(not bar.sub:GetText():find("Outside", 1, true))
+    H.eq(bar.sub:GetText(), "SAFE", "out of the storm: SAFE flashes in the tab")
+    M.Advance(0.6)
+    H.ok(not bar.tab:IsShown(), "then the tab goes")
     -- a spectator sees neither
     roys(M, { [2] = 3, [6] = 3, [14] = 10, [22] = 300, [23] = -267 })
     M.Advance(0.3)
@@ -637,7 +639,8 @@ test("royale: the island map gets ALT-M once when it is free, and the circle ban
     roys(M, { [2] = 3, [6] = 2, [11] = 1 })
     H.send(M, "ROYV", { { "R", 2, "", "", "", "" } })
     M.Advance(0.2)
-    H.eq(ns.RoyaleHud.banner.kicker:GetText(), "The storm circle 2 is shown on the map (press CTRL-SHIFT-M)")
+    H.eq(ns.RoyaleHud.current.title, "NEW STORM CIRCLE")
+    H.eq(ns.RoyaleHud.banner.line:GetText(), "The storm draws in. Circle 2 of 6 is on your map (CTRL-SHIFT-M).")
 end)
 
 test("royale: a taken ALT-M is left alone and the banner has no key", function(M, ns)
@@ -649,17 +652,17 @@ test("royale: a taken ALT-M is left alone and the banner has no key", function(M
     H.ok(M.chat[#M.chat].msg:find("ALT-M is taken", 1, true), "says so once")
     H.send(M, "ROYV", { { "R", 2, "", "", "", "" } })
     M.Advance(0.2)
-    H.eq(ns.RoyaleHud.banner.kicker:GetText(), "The storm circle 2 is shown on the map")
+    -- no key opens the map: MP.KeyText() names the slash command
+    H.eq(ns.RoyaleHud.banner.line:GetText(), "The storm draws in. Circle 2 of 6 is on your map (/bh royale map).")
 end)
 
--- The stage pips shown and lit.
+-- The stage gems shown and lit.
 local function pipsOf(bar)
     local shown, lit = 0, 0
     for _, p in ipairs(bar.pips) do
         if p:IsShown() then
             shown = shown + 1
-            local r = p:GetVertexColor()
-            if math.abs(r - 0xB5 / 255) < 0.01 then lit = lit + 1 end
+            if p.lit and p.gem:IsShown() then lit = lit + 1 end
         end
     end
     return shown, lit
@@ -675,29 +678,31 @@ function(M, ns)
     roys(M, { [2] = 2, [3] = 20000, [6] = 1, [11] = 1, [15] = -150, [16] = -310, [17] = 520, [18] = 100000,
         [19] = 270000, [20] = 10, [22] = 300, [23] = 300, [24] = 6 })
     M.Advance(0.3)
-    H.eq(bar.main:GetText(), "The drop!")
+    H.eq(bar.cells[2].label:GetText(), "DROPPING")
+    H.eq(bar.main:GetText(), "", "no clock: the drop plate carries the times")
     H.eq(pipsOf(bar), 0, "no pips while falling")
     H.ok(not ea:IsShown(), "no arrow while falling")
-    H.eq(MP.StatusText(ns.Royale.Match()), "The drop!")
+    H.eq(MP.StatusText(ns.Royale.Match()), "Dropping", "an older server: no landing time")
     -- landed while others still fall (the server keeps phase 2 until the last one is down)
     roys(M, { [2] = 2, [3] = 12000, [6] = 2, [11] = 1, [15] = -150, [16] = -310, [17] = 520, [18] = 100000,
         [19] = 270000, [20] = 10, [22] = 300, [23] = 300, [24] = 6 })
     M.Advance(0.3)
-    H.eq(bar.main:GetText(), "Storm moves in 01:40")
+    H.eq(bar.cells[2].label:GetText(), "STORM CLOSES IN")
+    H.eq(bar.main:GetText(), "1:40")
     local shown, lit = pipsOf(bar)
     H.eq(shown, 6); H.eq(lit, 1)
     H.ok(ea:IsShown(), "the arrow to circle 1")
     local left, right = MP.StatusText(ns.Royale.Match())
-    H.contains(left, "Storm moves in"); H.eq(right, "Storm stage 1 of 6")
+    H.contains(left, "Storm closes in 1:4"); H.eq(right, "Circle 1 of 6")
     -- a spectator eliminated during the drop sees the storm too, not "The drop!"
     roys(M, { [2] = 2, [6] = 3, [11] = 1, [18] = 100000, [19] = 270000, [22] = "", [23] = "", [24] = 6 })
     M.Advance(0.3)
-    H.contains(bar.main:GetText(), "Storm moves in")
+    H.eq(bar.cells[2].label:GetText(), "STORM CLOSES IN")
     -- a late drop in phase 3 is falling: the drop again
     roys(M, { [2] = 3, [6] = 1, [11] = 2, [18] = 10000, [19] = 30000, [24] = 6 })
     M.Advance(0.3)
-    H.eq(bar.main:GetText(), "The drop!")
-    H.ok(M.env.BleakholdRoyaleParachute:IsShown(), "the parachute prompt")
+    H.eq(bar.cells[2].label:GetText(), "DROPPING")
+    H.ok(M.env.BleakholdRoyaleDrop:IsShown(), "the drop plate")
 end)
 
 test("royale: the stage count comes from ROYS; overtime is shown as overtime, never as stage 7 of 6",
@@ -711,7 +716,7 @@ function(M, ns)
     local shown, lit = pipsOf(bar)
     H.eq(shown, 8); H.eq(lit, 3)
     local _, right = MP.StatusText(R.Match())
-    H.eq(right, "Storm stage 3 of 8")
+    H.eq(right, "Circle 3 of 8")
     local _, _, _, x1 = bar.pips[1]:GetPoint(1)
     local _, _, _, x8 = bar.pips[8]:GetPoint(1)
     H.ok(math.abs(x1 + x8) < 0.01, "the pips are centred")
@@ -720,10 +725,11 @@ function(M, ns)
     M.Advance(0.3)
     shown, lit = pipsOf(bar)
     H.eq(shown, 8); H.eq(lit, 8, "every pip lit")
-    H.eq(bar.main:GetText(), "Overtime: the storm has closed")
+    H.eq(bar.cells[2].label:GetText(), "FINAL STORM")
+    H.ok(bar.cells[2].dash:IsShown(), "no clock: the dash")
     local left
     left, right = MP.StatusText(R.Match())
-    H.eq(right, "Storm overtime"); H.eq(left, "The storm has closed")
+    H.eq(right, "Final storm"); H.eq(left, "The storm has closed.")
     -- the most stages the server takes
     roys(M, { [2] = 3, [6] = 2, [11] = 16, [18] = 1000, [19] = 2000, [24] = 99 })
     M.Advance(0.3)
@@ -735,10 +741,10 @@ function(M, ns)
     M.Advance(0.3)
     H.eq(R.Match().stages, nil)
     H.eq(pipsOf(bar), 6)
-    H.eq(select(2, MP.StatusText(R.Match())), "Storm stage 2 of 6")
+    H.eq(select(2, MP.StatusText(R.Match())), "Circle 2 of 6")
     roys(M, { [2] = 4, [6] = 3, [11] = 7, [14] = 0 })
     M.Advance(0.3)
-    H.eq(select(2, MP.StatusText(R.Match())), "Storm overtime")
+    H.eq(select(2, MP.StatusText(R.Match())), "Final storm")
 end)
 
 test("royale: the kill feed keeps five lines for 8 s; ROYK announce is superseded: no banner, no voice",
@@ -765,9 +771,13 @@ function(M, ns)
     -- the feed: newest first, five lines, the forfeit says so
     local feed = Hud.feed
     H.ok(feed:IsShown())
-    H.contains(feed.lines[1].victim:GetText(), "Ivo|r (left)")
+    H.contains(feed.lines[1].victim:GetText(), "Ivo|r")
+    H.contains(feed.lines[1].victim:GetText(), " (left)")
+    H.eq(feed.lines[1].icon.rsIcon, "door", "the cause's icon")
     H.eq(feed.lines[1].killer:GetText(), "")
     H.contains(feed.lines[2].victim:GetText(), "Hesper")
+    H.eq(feed.lines[2].icon.rsIcon, "storm")
+    H.eq(feed.lines[3].icon.rsIcon, "swords")
     H.ok(feed.lines[5]:IsShown() and feed.lines[5].victim:GetText():find("Dalia", 1, true), "five lines")
     H.eq(ns.S.royale.alive, 18, "alive from aliveAfter")
     H.eq(ns.Royale.KillsOf("Corwin"), 6)
@@ -782,26 +792,43 @@ function(M, ns)
     H.ok(not Hud.banner:IsShown(), "the Royale banner stays for match events")
 end)
 
-test("royale: milestones, the circle and the winner get banners", function(M, ns)
+test("royale: milestones, the circle and the winner get banners; VICTORY for the winner only", function(M, ns)
     connect(M)
+    local Hud = ns.RoyaleHud
     roys(M, { [2] = 3, [6] = 2 })
     H.send(M, "ROYV", { { "N", 10, "", "", "", "" } })
     M.Advance(0.2)
-    H.eq(ns.RoyaleHud.banner.title:GetText(), "10 PLAYERS LEFT")
+    H.eq(Hud.current.title, "PLAYERS LEFT")
+    H.ok(Hud.banner.num:IsShown(), "the count in the metal numerals")
+    H.eq(Hud.banner.num:GetValue(), "10")
     H.send(M, "ROYV", { { "W", 7, "", "", "", "Dalia" } })
-    M.Advance(2.6)
-    H.eq(ns.RoyaleHud.banner.title:GetText(), "VICTORY")
-    H.contains(ns.RoyaleHud.banner.kicker:GetText(), "Dalia - 7 eliminations")
+    M.Advance(2.9)
+    -- the others see who won (an eliminated player just saw ELIMINATED: a gold VICTORY would read as theirs)
+    H.eq(Hud.current.title, "WINNER")
+    H.contains(Hud.banner.line:GetText(), "Dalia|r · 7 kills")
     -- event banners take turns, a newer one of a kind replaces the waiting one
     M.Advance(3)
     H.send(M, "ROYV", { { "D", 0, -80, -180, 20000, "" } })
     H.send(M, "ROYV", { { "S", 2, "", "", "", "" } })
     H.send(M, "ROYV", { { "S", 3, "", "", "", "" } })
     M.Advance(0.2)
-    H.eq(ns.RoyaleHud.banner.title:GetText(), "SUPPLY DROP")
-    H.eq(#ns.RoyaleHud.queue, 1, "one storm banner waits")
-    M.Advance(2.5)
-    H.eq(ns.RoyaleHud.banner.title:GetText(), "THE STORM IS MOVING", "the waiting event after the drop")
+    H.eq(Hud.current.title, "SUPPLY DROP")
+    H.eq(Hud.banner.line:GetText(), "Supplies fall near the wilds in 0:20.")
+    H.eq(#Hud.queue, 1, "one storm banner waits")
+    M.Advance(2.9)
+    H.eq(Hud.current.title, "THE STORM MOVES", "the waiting event after the drop")
+    -- the winner's own banner
+    M.Advance(3)
+    local cheers = 0
+    roys(M, { [2] = 5, [6] = 5 })
+    H.send(M, "ROYV", { { "W", 4, "", "", "", "Tester" } })
+    M.Advance(0.2)
+    H.eq(Hud.current.title, "VICTORY")
+    H.eq(Hud.banner.line:GetText(), "Last one standing · 4 kills")
+    for _, snd in ipairs(M.sounds) do
+        if snd == "AchievementSound" then cheers = cheers + 1 end
+    end
+    H.eq(cheers, 1, "VICTORY's sound")
 end)
 
 ------------------------------------------------------------------------------------------------------
@@ -817,7 +844,8 @@ test("royale: the spectator bar sends RSPEC 0/2/1, queues again and leaves", fun
     M.Advance(0.3)
     local sb = M.env.BleakholdRoyaleSpectate
     H.ok(sb:IsShown(), "spectator bar")
-    H.eq(sb.name:GetText(), "Watching Aldric Stormwind (3 kills)")
+    H.contains(sb.name:GetText(), "Aldric Stormwind|r")
+    H.contains(sb.name:GetText(), " · 3 kills")
     sb.killer:Click()
     M.Advance(0.6)
     sb.prev:Click()
@@ -835,7 +863,7 @@ test("royale: the spectator bar sends RSPEC 0/2/1, queues again and leaves", fun
     -- keeps the choice until the camera can move
     roys(M, { [2] = 3, [6] = 3, [8] = 12, [21] = "", [22] = "", [23] = "" })
     M.Advance(0.6)
-    H.eq(sb.name:GetText(), "Nobody to watch")
+    H.eq(sb.name:GetText(), "No one left to watch.")
     H.ok(sb.killer:IsEnabled() and sb.next:IsEnabled() and sb.prev:IsEnabled(), "camera buttons live")
     sb.killer:Click()
     M.Advance(0.3)
@@ -858,26 +886,29 @@ test("royale: the spectator bar sends RSPEC 0/2/1, queues again and leaves", fun
     H.eq(#intentsOf(M, "RSPEC"), n)
 end)
 
-test("royale: the end card shows the placement, the stats and the rewards; the winner's says #1 VICTORY",
+test("royale: the end card shows the placement, the stats and the rewards; the winner's says VICTORY #1",
 function(M, ns)
     connect(M)
     roys(M, { [2] = 3, [6] = 3 })
     H.send(M, "ROYE", { { 7001, 7, 32, 2, 18400, 2100, 214, "", "", "", 1 }, { "H", 180, "", "Placement" },
         { "H", 50, "", "2 eliminations" }, { "S", 20, "", "Placement" } })
-    M.Advance(0.2)
+    M.Advance(0.8)
     local ec = M.env.BleakholdRoyaleResult
     H.ok(ec:IsShown())
-    H.eq(ec.place:GetText(), "#7 of 32")
-    H.eq(ec.rows[1].value:GetText(), "2"); H.eq(ec.rows[2].value:GetText(), "18,400");
-    H.eq(ec.rows[3].value:GetText(), "2,100")
-    H.eq(ec.rows[4].value:GetText(), "03:34")
-    H.eq(ec.rewards[1]:GetText(), "+ 180 Honor - Placement")
-    H.eq(ec.rewards[3]:GetText(), "+ 20 Shards - Placement")
+    H.eq(ec.title.title, "ELIMINATED")
+    H.eq(ec.rank:GetValue(), "#7"); H.eq(ec.of:GetText(), "of 32")
+    H.eq(ec.tiles[1].value:GetText(), "2"); H.eq(ec.tiles[2].value:GetText(), "18,400")
+    H.eq(ec.tiles[3].value:GetText(), "2,100")
+    H.eq(ec.tiles[4].value:GetText(), "3:34")
+    H.eq(ec.rewards[1].amount:GetText(), "+180 Honor"); H.eq(ec.rewards[1].reason:GetText(), "Placement")
+    H.eq(ec.rewards[3].amount:GetText(), "+20 Shards")
+    H.eq(ec.rewards[3].icon.rsIcon, "shards")
     H.eq(ec.keep.label:GetText(), "Keep watching")
     -- the server sends it again at the end with the winner
     H.send(M, "ROYE", { { 7001, 7, 32, 2, 18400, 2100, 214, "Dalia", 11, 7, 1 }, { "H", 180, "", "Placement" } })
     M.Advance(0.2)
-    H.eq(ec.winner:GetText(), "Winner: Dalia (7 eliminations)")
+    H.contains(ec.winner:GetText(), "Winner · ")
+    H.contains(ec.winner:GetText(), "Dalia|r · 7 kills")
     ec.keep:Click()
     H.ok(not ec:IsShown(), "dismissed")
     H.send(M, "ROYE", { { 7001, 7, 32, 2, 18400, 2100, 214, "Dalia", 11, 7, 1 } })
@@ -888,9 +919,10 @@ function(M, ns)
     H.send(M, "ROYE", { { 7002, 1, 20, 9, 50000, 0, 700, "Tester", 1, 9, 0 }, { "H", 400, "", "Placement" } })
     M.Advance(0.2)
     H.ok(ec:IsShown())
-    H.eq(ec.place:GetText(), "#1 VICTORY")
+    H.eq(ec.title.title, "VICTORY"); H.eq(ec.rank:GetValue(), "#1")
     H.eq(#ns.S.royaleResult.rewards, 0)
-    H.eq(ec.rewardsLabel:GetText(), "NO REWARDS")
+    H.ok(ec.none:IsShown() and not ec.rewards[1]:IsShown(), "no reward rows")
+    H.eq(ec.none:GetText(), "No rewards. You left early or saw no fight.")
     H.eq(ec.keep.label:GetText(), "Close")
     -- the Activities card remembers it
     ns.UI.Open("royale")
@@ -1084,11 +1116,14 @@ test("royale: /bh demo plays a whole match through the real receive path", funct
     H.ok(M.env.BleakholdRoyaleReady:IsShown(), "ready check")
     M.env.BleakholdRoyaleReady.accept:Click()
     M.Advance(2)
-    H.ok(M.env.BleakholdRoyaleMapFrame:IsShown(), "the island map in the lobby")
+    H.ok(not M.env.BleakholdRoyaleMapFrame:IsShown(), "no map in the warm-up brawl")
+    M.Advance(6)
+    H.ok(M.env.BleakholdRoyaleMapFrame:IsShown(), "the island map when the landing phase starts")
     clickMap(M, ns, 250, 260)
     M.Advance(1)
     H.ok(ns.S.royale.pinX ~= nil, "the demo echoed the pin")
-    for _ = 1, 90 do
+    -- the drop takes 20 s as the realm runs it (8 s of freefall, 12 s under the parachute): the match ends 99 s in
+    for _ = 1, 100 do
         M.Advance(1)
     end
     local dropped = 0

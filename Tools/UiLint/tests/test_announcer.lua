@@ -361,7 +361,10 @@ end)
 
 test("announcer: /bh demo previews the announcer in the Royale match", function(M, ns)
     local played = {}
-    M.env.PlaySoundFile = function(path) played[#played + 1] = path end
+    -- the announcer's lines only (the Royale HUD plays its own ticks, wind and landing from Sounds\Royale)
+    M.env.PlaySoundFile = function(path)
+        if path:find(DIR, 1, true) == 1 then played[#played + 1] = path end
+    end
     M.env.SlashCmdList.BLEAKHOLD("demo")
     M.Advance(1)
     ns.Royale.Join()
@@ -369,7 +372,7 @@ test("announcer: /bh demo previews the announcer in the Royale match", function(
     if M.env.BleakholdRoyaleReady:IsShown() then
         M.env.BleakholdRoyaleReady.accept:Click()
     end
-    M.Advance(45)
+    M.Advance(55)   -- first blood at the landing, 47 s in (the drop takes 20 s), the double kill 4 s later
     H.ok(#played >= 2, "first blood and the double kill: " .. #played)
     H.eq(played[1], DIR .. "male\\firstblood.wav")
     M.env.SlashCmdList.BLEAKHOLD("demo off")

@@ -437,3 +437,221 @@ test("a server that needs a newer protocol blocks all sends", function(M, ns)
     H.send(M, "WEEK", { { 1, 4 } })
     H.eq(ns.S.week, nil, "pushes ignored")
 end)
+
+------------------------------------------------------------------------------------------------------
+-- Bleakhold Royale (section 17): ROYS fields 25-27, the drop's times
+------------------------------------------------------------------------------------------------------
+-- A ROYS of a player falling from the drop (phase 2, me 1): fields 1-24, then `drop` as fields 25 on; `over` replaces
+-- fields by index (nil-free: "" is an empty field).
+local function dropRoys(M, ns, drop, over)
+    local r = { 7001, 2, 20000, 24, 24, 1, 0, "", 104, 96, 1, -267, -267, 1080, -150, -310, 520, 119800, 289800, 0, "",
+        104, 96, 6 }
+    for i, v in ipairs(drop or {}) do r[24 + i] = v end
+    for k, v in pairs(over or {}) do r[k] = v end
+    H.send(M, "ROYS", { r })
+    return ns.S.royale
+end
+
+test("ROYS fields 25-27: the drop's times, counted from the moment the ROYS arrives", function(M, ns)
+    H.hello(M, { [6] = 4096 })
+    M.Advance(0.3)
+    -- the start gun: 8 s of free fall, then 12 s under the parachute
+    local m = dropRoys(M, ns, { 8000, 20000, 8000 })
+    H.eq(m.me, 1); H.eq(m.stages, 6, "field 24 before them")
+    H.eq(m.fallMsLeft, 8000); H.eq(m.landMsLeft, 20000); H.eq(m.fallMs, 8000)
+    H.eq(m.recvAt, M.env.GetTime())
+    M.Advance(3)
+    H.ok(math.abs(ns.RoyaleLeft(m.fallMsLeft, m.recvAt) - 5) < 1e-6, "5 s of free fall left after 3 s")
+    H.ok(math.abs(ns.RoyaleLeft(m.landMsLeft, m.recvAt) - 17) < 1e-6, "17 s to the touchdown")
+    -- the parachute opened by itself: fallMsLeft 0, not empty
+    m = dropRoys(M, ns, { 0, 12000, 8000 }, { [3] = 12000, [18] = 111800, [19] = 281800 })
+    H.eq(m.fallMsLeft, 0); H.eq(m.landMsLeft, 12000); H.eq(m.fallMs, 8000)
+    -- the document lists them as fields 25-27, with these two ROYS as its example
+    local doc = assert(host_readfile(repo .. "/docs/BleakholdProtocol.md"))
+    local list = doc:match("\n### ROYS[^\n]*\n\n`(matchId, [^`]+)`")
+    H.ok(list, "the ROYS field list")
+    local names = {}
+    for name in list:gmatch("[^, ]+") do names[#names + 1] = name end
+    H.eq(#names, 27); H.eq(names[24], "stages")
+    H.eq(names[25], "fallMsLeft"); H.eq(names[26], "landMsLeft"); H.eq(names[27], "fallMs")
+    H.contains(doc, "`...,6,8000,20000,8000`"); H.contains(doc, "`...,6,0,12000,8000`")
+end)
+
+test("ROYS of an older server (23 or 24 fields) parses as before, with no drop times", function(M, ns)
+    H.hello(M, { [6] = 4096 })
+    M.Advance(0.3)
+    local m = dropRoys(M, ns)
+    H.eq(m.me, 1); H.eq(m.stages, 6); H.eq(m.pinX, 104); H.eq(m.shrinkEndMs, 289800)
+    H.eq(m.fallMsLeft, nil); H.eq(m.landMsLeft, nil); H.eq(m.fallMs, nil)
+    local r = { 7001, 2, 20000, 24, 24, 1, 0, "", 104, 96, 1, -267, -267, 1080, -150, -310, 520, 119800, 289800, 0, "",
+        104, 96 }
+    H.send(M, "ROYS", { r })
+    m = ns.S.royale
+    H.eq(m.stages, nil); H.eq(m.myY, 96); H.eq(m.fallMsLeft, nil); H.eq(m.fallMs, nil)
+    -- field 24 empty, the drop's times after it
+    m = dropRoys(M, ns, { 7000, 19000, 8000 }, { [24] = "" })
+    H.eq(m.stages, nil); H.eq(m.fallMsLeft, 7000); H.eq(m.landMsLeft, 19000); H.eq(m.fallMs, 8000)
+end)
+
+test("ROYS drop times: only while falling, all three or none, never garbage", function(M, ns)
+    H.hello(M, { [6] = 4096 })
+    M.Advance(0.3)
+    -- landed (me 2) or in the lobby (me 0): whatever comes in fields 25-27 is not a drop
+    local m = dropRoys(M, ns, { 8000, 20000, 8000 }, { [3] = 0, [6] = 2 })
+    H.eq(m.me, 2); H.eq(m.fallMsLeft, nil); H.eq(m.landMsLeft, nil); H.eq(m.fallMs, nil)
+    m = dropRoys(M, ns, { 8000, 20000, 8000 }, { [2] = 1, [6] = 0 })
+    H.eq(m.me, 0); H.eq(m.fallMsLeft, nil)
+    -- one of the three missing: none of them
+    for _, drop in ipairs({ { "", 20000, 8000 }, { 8000, "", 8000 }, { 8000, 20000, "" }, { 8000, 20000 } }) do
+        m = dropRoys(M, ns, drop)
+        H.eq(m.fallMsLeft, nil); H.eq(m.landMsLeft, nil); H.eq(m.fallMs, nil)
+        H.eq(m.me, 1, "the rest of the ROYS still counts")
+    end
+    -- garbage numbers are empty fields
+    for _, bad in ipairs({ "abc", "1e4", "8000.5", "0x10", " 8000", "9999999999999999" }) do
+        m = dropRoys(M, ns, { bad, 20000, 8000 })
+        H.eq(m.fallMsLeft, nil, "fallMsLeft " .. bad); H.eq(m.landMsLeft, nil)
+    end
+    -- 0 to a day, like every Royale time
+    m = dropRoys(M, ns, { -5, 99999999999, 8000 })
+    H.eq(m.fallMsLeft, 0); H.eq(m.landMsLeft, 86400000)
+    -- the touchdown never comes before the parachute opens
+    m = dropRoys(M, ns, { 8000, 5000, 8000 })
+    H.eq(m.fallMsLeft, 8000); H.eq(m.landMsLeft, 8000)
+    -- a later server's field 28 is ignored
+    m = dropRoys(M, ns, { 6000, 18000, 8000, 42 })
+    H.eq(m.fallMsLeft, 6000); H.eq(m.landMsLeft, 18000); H.eq(m.fallMs, 8000)
+end)
+
+------------------------------------------------------------------------------------------------------
+-- Bleakhold Royale (section 17): the storm beast's kinds, ROYV B A K F, ROYO X H and ROYK cause B
+------------------------------------------------------------------------------------------------------
+-- One "### " block of section 17 (to the next heading), and the one-letter codes it lists: the rows of its table, or
+-- the codes of one of its list items.
+local function royaleDoc(heading)
+    local doc = assert(host_readfile(repo .. "/docs/BleakholdProtocol.md"))
+    return assert(doc:match("\n### " .. heading .. "[^\n]*\n(.-)\n#"), heading)
+end
+
+local function letters(text, pattern)
+    local out = {}
+    for c in text:gmatch(pattern) do out[#out + 1] = c end
+    return table.concat(out)
+end
+
+test("ROYV B A K F: the storm beast stirs at a place, wakes, is slain or flees", function(M, ns)
+    H.hello(M, { [6] = 4096 })
+    M.Advance(0.3)
+    local seen = {}
+    ns.On("ROYALE_EVENT", function(e) seen[#seen + 1] = e.kind end)
+    H.send(M, "ROYV", { { "B", 0, 60, -420, 30000, "Crow's Rise" } })
+    local e = ns.S.royaleEvent
+    H.eq(e.kind, "B"); H.eq(e.value, 0); H.eq(e.x, 60); H.eq(e.y, -420); H.eq(e.msLeft, 30000)
+    H.eq(e.name, "Crow's Rise"); H.eq(e.recvAt, M.env.GetTime())
+    M.Advance(12)
+    H.ok(math.abs(ns.RoyaleLeft(e.msLeft, e.recvAt) - 18) < 1e-6, "it wakes in 18 s, 12 s later")
+    -- B names a place: at most 40 bytes, as in ROYM; K names a character: 48
+    H.send(M, "ROYV", { { "B", 0, 60, -420, 30000, string.rep("p", 60) } })
+    H.eq(#ns.S.royaleEvent.name, 40)
+    H.send(M, "ROYV", { { "A", 0, 60, -420 } })
+    e = ns.S.royaleEvent
+    H.eq(e.kind, "A"); H.eq(e.x, 60); H.eq(e.msLeft, nil); H.eq(e.name, nil)
+    H.send(M, "ROYV", { { "K", 0, 60, -420, "", "Aldric Stormwind" } })
+    H.eq(ns.S.royaleEvent.kind, "K"); H.eq(ns.S.royaleEvent.name, "Aldric Stormwind")
+    H.send(M, "ROYV", { { "K", 0, 60, -420, "", string.rep("n", 60) } })
+    H.eq(#ns.S.royaleEvent.name, 48)
+    H.send(M, "ROYV", { { "F", 0, 60, -420 } })
+    H.eq(ns.S.royaleEvent.kind, "F"); H.eq(ns.S.royaleEvent.y, -420)
+    -- a kind this client does not know (a later server's), two letters, lower case: ignored, nothing changes
+    for _, bad in ipairs({ "Z", "BX", "KA", "b", "" }) do
+        H.send(M, "ROYV", { { bad, 0, 1, 2, 3000, "x" } })
+    end
+    H.eq(ns.S.royaleEvent.kind, "F"); H.eq(ns.S.royaleEvent.x, 60)
+    H.eq(table.concat(seen, ""), "BBAKKF")
+end)
+
+test("ROYO X and H: the storm beast with its health in percent, clamped to 0-100, and its hoard", function(M, ns)
+    H.hello(M, { [6] = 4096 })
+    M.Advance(0.3)
+    H.send(M, "ROYO", { { 7001, 1 }, { 30, "X", 100, 60, -420, 3, 30000 }, { 31, "H", 0, 62, -418, 1 },
+        { 3, "B", 2, 120, 80, 1 } })
+    local o = ns.S.royaleObjects
+    H.eq(#o.list, 3)
+    local x, h = o.byId[30], o.byId[31]
+    H.eq(x.kind, "X"); H.eq(x.subtype, 100); H.eq(x.state, 3); H.eq(x.msLeft, 30000); H.eq(x.x, 60); H.eq(x.y, -420)
+    H.eq(h.kind, "H"); H.eq(h.subtype, 0); H.eq(h.state, 1); H.eq(h.msLeft, nil)
+    H.eq(o.byId[3].subtype, 2, "a buff orb keeps its buff")
+    -- awake, then hurt: changes for the beast alone; its health is clamped to 0-100, garbage is 0
+    for _, c in ipairs({ { 57, 57 }, { 0, 0 }, { 101, 100 }, { 4000000000, 100 }, { -5, 0 }, { "abc", 0 },
+        { "57.5", 0 }, { "", 0 }, { 100, 100 } }) do
+        H.send(M, "ROYO", { { 7001, 0 }, { 30, "X", c[1], 60, -420, 1 } })
+        H.eq(ns.S.royaleObjects.byId[30].subtype, c[2], "health " .. tostring(c[1]))
+    end
+    x = ns.S.royaleObjects.byId[30]
+    H.eq(x, o.byId[30], "updated in place"); H.eq(x.state, 1); H.eq(x.msLeft, nil, "awake: no time left")
+    -- slain: the beast gone (0), its hoard opened (4); the hoard never has a subtype, whatever is sent
+    H.send(M, "ROYO", { { 7001, 0 }, { 30, "X", 0, 60, -420, 0 }, { 31, "H", 9, 62, -418, 4 } })
+    H.eq(x.state, 0); H.eq(x.subtype, 0); H.eq(h.state, 4); H.eq(h.subtype, 0)
+    -- the other kinds keep their rules: a supply drop has no subtype, a buff orb at most 3
+    H.send(M, "ROYO", { { 7001, 0 }, { 20, "D", 77, -950, -250, 3, 20000 }, { 3, "B", 99, 120, 80, 2 } })
+    H.eq(ns.S.royaleObjects.byId[20].subtype, 0); H.eq(ns.S.royaleObjects.byId[3].subtype, 3)
+    -- kinds this client does not know are skipped; the others of the same ROYO still count
+    H.send(M, "ROYO", { { 7001, 0 }, { 40, "Q", 1, 0, 0, 1 }, { 41, "XH", 50, 0, 0, 1 }, { 42, "x", 5, 0, 0, 1 },
+        { 31, "H", 0, 62, -418, 0 } })
+    o = ns.S.royaleObjects
+    H.eq(#o.list, 4); H.eq(o.byId[40], nil); H.eq(o.byId[41], nil); H.eq(o.byId[42], nil); H.eq(h.state, 0)
+end)
+
+test("ROYK cause B: killed by the storm beast itself (class 0, no tally) or with a player's credit", function(M, ns)
+    H.hello(M, { [6] = 4096 })
+    M.Advance(0.3)
+    local function last() return ns.S.royaleFeed[#ns.S.royaleFeed] end
+    H.send(M, "ROYK", { { "Thundermaw", 0, "Ysolde", 5, "B", 21 } })
+    local k = last()
+    H.eq(k.killer, "Thundermaw"); H.eq(k.killerClassId, 0); H.eq(k.victim, "Ysolde"); H.eq(k.cause, "B")
+    H.eq(k.aliveAfter, 21); H.eq(k.byBoss, true); H.eq(k.killerKills, nil); H.eq(ns.S.royaleKills.Thundermaw, nil)
+    -- a tally sent along is not the beast's either
+    H.send(M, "ROYK", { { "Thundermaw", 0, "Corin", 11, "B", 20, 3 } })
+    H.eq(last().byBoss, true); H.eq(last().killerKills, nil); H.eq(ns.S.royaleKills.Thundermaw, nil)
+    -- a player credited for it (one may even be called Thundermaw): their elimination and tally count
+    H.send(M, "ROYK", { { "Aldric", 1, "Brenna", 8, "B", 19, 4 } })
+    H.eq(last().cause, "B"); H.eq(last().byBoss, nil); H.eq(ns.S.royaleKills.Aldric, 4)
+    H.send(M, "ROYK", { { "Thundermaw", 4, "Dalia", 11, "B", 18, 1 } })
+    H.eq(last().byBoss, nil); H.eq(ns.S.royaleKills.Thundermaw, 1)
+    -- class 0 with another cause is not the beast
+    H.send(M, "ROYK", { { "Garrick", 0, "Erin", 2, "P", 17, 2 } })
+    H.eq(last().byBoss, nil); H.eq(last().killerKills, 2)
+    -- causes this client does not know show as a player's kill
+    for _, bad in ipairs({ "Z", "BX", "b", "" }) do
+        H.send(M, "ROYK", { { "Aldric", 1, "Brenna", 8, bad, 16, 5 } })
+        H.eq(last().cause, "P", "cause " .. bad); H.eq(last().byBoss, nil)
+    end
+end)
+
+test("the client takes exactly the ROYV, ROYO and ROYK codes that section 17 lists, the storm beast's included",
+    function(M, ns)
+    H.hello(M, { [6] = 4096 })
+    M.Advance(0.3)
+    local events = letters(royaleDoc("ROYV"), "\n| `(%u)` |")
+    local objects = letters(assert(royaleDoc("ROYO"):match("\n%- `kind`: (.-)`subtype`")), "`(%u)` ")
+    local causes = letters(assert(royaleDoc("ROYK"):match("\n%- `cause`: (.-)\n%- ")), "`(%u)` ")
+    H.eq(events, "RSDLONWBAKF"); H.eq(objects, "SBDXH"); H.eq(causes, "PSFLAB")
+    local got = {}
+    ns.On("ROYALE_EVENT", function(e) got[#got + 1] = e.kind end)
+    local recs = { { 7001, 1 } }
+    for i = 1, 26 do
+        local c = string.char(64 + i)
+        H.send(M, "ROYV", { { c, 0, 1, 2 } })
+        recs[#recs + 1] = { i, c, 0, 0, 0, 1 }
+        H.send(M, "ROYK", { { "Aldric", 1, "Brenna", 8, c, 20 } })
+        local cause = ns.S.royaleFeed[#ns.S.royaleFeed].cause
+        H.eq(cause, causes:find(c, 1, true) and c or "P", "ROYK cause " .. c)
+    end
+    -- in alphabetical order, as they were sent
+    local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    H.eq(table.concat(got, ""), letters(alphabet, "[" .. events .. "]"), "ROYV kinds taken")
+    H.send(M, "ROYO", recs)
+    local kinds = {}
+    for _, o in ipairs(ns.S.royaleObjects.list) do kinds[#kinds + 1] = o.kind end
+    H.eq(table.concat(kinds, ""), letters(alphabet, "[" .. objects .. "]"), "ROYO kinds taken")
+end)
