@@ -356,7 +356,8 @@ BleakholdUi.Case.CooldownMs = 1000
 #        Default:     "15"
 #
 #    BleakholdUi.Glide.Cooldown
-#        Description: Seconds between two glides of one player (a relog does not reset it).
+#        Description: Seconds between two glides of one player (a relog does not reset it), by GLIDE or by
+#                     the spellbook racial (BleakholdUi.Glide.CastSpell), whose button shows it.
 #        Default:     90
 #
 #    BleakholdUi.Glide.Duration
@@ -371,7 +372,7 @@ BleakholdUi.Case.CooldownMs = 1000
 #                     aura (SPELL_AURA_FEATHER_FALL) on the caster only. 100800 is Walk on Air, the module's
 #                     own spell: its server row is data/sql/db-world/02_bleakhold_walk_on_air.sql, and the
 #                     client needs the same row in its Spell.dbc (patch MPQ) for the buff's name, icon and
-#                     wings. A spell the server lacks or that has no feather fall falls back to 130 (Slow
+#                     look (its visual). A spell the server lacks or that has no feather fall falls back to 130 (Slow
 #                     Fall). The aura ends with the glide (landing, water, its duration), except a Slow Fall
 #                     the player cast again (a mage's own).
 #        Default:     100800 - Walk on Air
@@ -408,8 +409,30 @@ BleakholdUi.Case.CooldownMs = 1000
 #
 #    BleakholdUi.Glide.StartVisualKit
 #        Description: SpellVisualKit.dbc id shown on the player (with its sound) when a fall becomes a glide.
-#                     13709 is Wind Shear's gust of wind and whoosh. 0: none.
+#                     13709 is Wind Shear's gust of wind and whoosh. 0: none. The rest of the glide's look is
+#                     the spell visual of BleakholdUi.Glide.Spell's Spell.dbc row: Walk on Air (100800) has 63,
+#                     Slow Fall's (a light at the hands and a soft flash at the head when the glide starts,
+#                     nothing that stays on the character). Other stock visuals that fit: 0 (none), 12114
+#                     (Guardian Spirit's golden wings for the whole glide), 12724 (Cyclone Fall's whirl and a
+#                     floating pose), 6768 (Levitate's swirl at the feet), 7370 (Magic Wings, wings at the
+#                     head: the old look). Change it in Tools/RaceForge/races.json (the client's row) and in
+#                     data/sql/db-world/02_bleakhold_walk_on_air.sql together, then raceforge.py update.
 #        Default:     13709
+#
+#    BleakholdUi.Glide.CastSpell
+#        Description: Walk on Air in the spellbook: the racial the module teaches at login to the races of
+#                     BleakholdUi.Glide.Races (and takes from every other character), put once on the first
+#                     empty slot of the main action bar (or of the bottom and right bars). Casting it starts
+#                     the glide with the rules of GLIDE, in the air only (falling or jumping: on the ground the
+#                     cast fails with the client's "Cannot be used on the ground" and costs nothing), and shares
+#                     the cooldown with GLIDE (/glide, the key binding, the Glide button), which its button
+#                     shows (the spell row's own is 90 s; another BleakholdUi.Glide.Cooldown is sent to the
+#                     client). 100801 is the module's row (data/sql/db-world/02_bleakhold_walk_on_air.sql, with
+#                     its spell_bleakhold_walk_on_air script); the client needs the same row in its Spell.dbc
+#                     (Tools/RaceForge/races.json, raceforge.py update) to show it. A spell the server lacks, or
+#                     without that script, leaves the spellbook without it (logged). 0: none.
+#        Default:     100801 - Walk on Air
+#                     0      - no spellbook spell (GLIDE only)
 
 BleakholdUi.Camp.Enable = 1
 BleakholdUi.Camp.MinLevel = 5
@@ -454,6 +477,7 @@ BleakholdUi.Glide.Steer = 1
 BleakholdUi.Glide.RequireFalling = 0
 BleakholdUi.Glide.Instances = 0
 BleakholdUi.Glide.StartVisualKit = 13709
+BleakholdUi.Glide.CastSpell = 100801
 
 ###################################################################################################
 # KEYSTONE RUNS

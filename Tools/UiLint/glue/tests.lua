@@ -34,6 +34,14 @@ end
 
 dofile(HARNESS .. "/stock.lua")
 
+-- A realm patch's own two-names screen (names_realm.lua): its boxes exist before the Bleakhold glue loads.
+if SCENARIO:find("^names%-realm") then
+    dofile(HARNESS .. "/names_realm.lua")
+    MOCK.nameGlue = assert(MOCK.nameGlues[SCENARIO], "no two-names screen for " .. SCENARIO)
+    MOCK.nameGlue.setup()
+end
+MOCK.stockCreateCharacter = CreateCharacter
+
 -- Anchors as GetPoint lists them, to compare later.
 local function anchorList(region)
     local out = {}
@@ -43,6 +51,16 @@ end
 local screenAnchors = {}
 if MOCK.raceGlue then
     for i = 1, MOCK.raceGlue.count do screenAnchors[i] = anchorList(_G["CharacterCreateRaceButton" .. i]) end
+end
+-- The name box, the Randomize button and the realm's own second box as the screen made them.
+local nameBefore = {
+    first = anchorList(CharacterCreateNameEdit), firstWidth = CharacterCreateNameEdit:GetWidth(),
+    firstLetters = CharacterCreateNameEdit:GetMaxLetters(), random = anchorList(CharacterCreateRandomName),
+    label = select(1, CharacterCreateNameEdit:GetRegions()):GetText(), backdropList = #FRAMES_TO_BACKDROP_COLOR,
+}
+if MOCK.nameGlue and MOCK.nameGlue.last() then
+    nameBefore.last = anchorList(MOCK.nameGlue.last())
+    nameBefore.lastLetters = MOCK.nameGlue.last():GetMaxLetters()
 end
 
 if SCENARIO == "login-stockignoresscan" then
@@ -583,20 +601,54 @@ end
 
 -- ------------------------------------------------------------------------------------------------ names
 
+-- The edit boxes among CharacterCreate's frames, at any depth.
+local function screenEditBoxes()
+    local out = {}
+    local function walk(f)
+        if f:GetObjectType() == "EditBox" then out[#out + 1] = f end
+        for _, c in ipairs({ f:GetChildren() }) do walk(c) end
+    end
+    walk(CharacterCreate)
+    return out
+end
+
+local function lastLog()
+    return BLEAKHOLD_GLUE_LOG[#BLEAKHOLD_GLUE_LOG] or ""
+end
+
 local function namesScenario()
-    local first, last = CharacterCreateNameEdit, BleakholdLastNameEdit
+    local first = CharacterCreateNameEdit
     MOCK.setRaces({ STOCK[1], { name = "High Elf", file = "HighElf", faction = "Alliance" }, STOCK[6] })
 
     if SCENARIO == "names-off" then
-        check(last == nil, "off: no last name box")
+        check(BleakholdLastNameEdit == nil, "off: no last name box")
+        check(BleakholdGlue.namesPath == "off" and lastLog():find("names: off", 1, true), "off: the path is logged: " .. lastLog())
         SetGlueScreen("charcreate")
+        check(BleakholdLastNameEdit == nil, "off: still no last name box once shown")
         first:SetText("Arthas")
         CharacterCreate_Okay()
         check(MOCK.created[1] == "Arthas", "off: stock name passed on")
         return
     end
 
+    -- Nothing is added before the screen first shows: that show decides.
+    check(BleakholdGlue.namesPath == "waiting", "waits for the screen's first show: " .. tostring(BleakholdGlue.namesPath))
+    check(BleakholdLastNameEdit == nil and CreateCharacter == MOCK.stockCreateCharacter, "nothing added before it shows")
+    check(CharacterRenameEditBox:GetMaxLetters() == 25, "rename box takes a full name")
+
+    if SCENARIO == "names-paid" then
+        PAID_SERVICE_TYPE = 1; PAID_SERVICE_CHARACTER_ID = 3
+        MOCK.paidName = "Christopher Ravencrest"
+    end
+    SetGlueScreen("charcreate")
+    local last = BleakholdLastNameEdit
+    check(BleakholdGlue.namesPath == "bleakhold", "stock screen: Bleakhold's boxes: " .. tostring(BleakholdGlue.namesPath))
+    check(lastLog():find("names: bleakhold", 1, true) ~= nil, "the path is logged: " .. lastLog())
+    check(BleakholdGlue.ScreenSecondNameBox() == nil, "Bleakhold's own box and label never count as the screen's: "
+          .. tostring(BleakholdGlue.ScreenSecondNameBox()))
+
     check(last ~= nil and last:GetObjectType() == "EditBox", "last name box created")
+    check(#screenEditBoxes() == 2, "two name boxes on the screen: " .. #screenEditBoxes())
     check(last:GetParent() == first:GetParent(), "same parent as the stock box")
     check(first:GetMaxLetters() == 25 and last:GetMaxLetters() == 12, "first box takes a whole name, last box 12 letters")
     check(last._autoFocus == false, "last name box does not take the focus on show")
@@ -619,12 +671,8 @@ local function namesScenario()
     local listed = false
     for _, v in pairs(FRAMES_TO_BACKDROP_COLOR) do if v == "BleakholdLastNameEdit" then listed = true end end
     check(listed, "faction backdrop colour list includes the last name box")
-    check(CharacterRenameEditBox:GetMaxLetters() == 25, "rename box takes a full name")
 
     if SCENARIO == "names-paid" then
-        PAID_SERVICE_TYPE = 1; PAID_SERVICE_CHARACTER_ID = 3
-        MOCK.paidName = "Christopher Ravencrest"
-        SetGlueScreen("charcreate")
         check(first:GetText() == "Christopher" and last:GetText() == "Ravencrest", "paid change splits the character's name")
         CharacterCreate_Okay()
         GlueDialog_OnClick(1)
@@ -635,7 +683,6 @@ local function namesScenario()
         return
     end
 
-    SetGlueScreen("charcreate")
     check(last:IsVisible(), "last name box visible with the screen")
     check(first:GetText() == "" and last:GetText() == "", "boxes start empty")
     local horde = 0
@@ -716,9 +763,71 @@ local function namesScenario()
     check(#BLEAKHOLD_GLUE_ERRORS == 0, "no caught errors: " .. table.concat(BLEAKHOLD_GLUE_ERRORS, " | "))
 end
 
+-- A realm patch's own two-names screen (names_realm.lua): Bleakhold adds no box, moves and restyles none of the
+-- screen's, and the name the screen's own code builds reaches CreateCharacter unchanged.
+local function realmNamesScenario()
+    local glue = MOCK.nameGlue
+    local first = CharacterCreateNameEdit
+    MOCK.setRaces({ STOCK[1], { name = "High Elf", file = "HighElf", faction = "Alliance" }, STOCK[6] })
+    check(BleakholdGlue.namesPath == "waiting", "waits for the screen's first show: " .. tostring(BleakholdGlue.namesPath))
+
+    local function untouched(when)
+        local label = when .. ": "
+        check(BleakholdGlue.namesPath == "realm", label .. "the realm's path: " .. tostring(BleakholdGlue.namesPath))
+        check(tostring(BleakholdGlue.namesWhy):find(glue.why) ~= nil, label .. "found by " .. glue.why .. ": "
+              .. tostring(BleakholdGlue.namesWhy))
+        check(BleakholdLastNameEdit == nil and BleakholdNameAnchor == nil and BleakholdLastNameEditLabel == nil,
+              label .. "no Bleakhold box, anchor or label")
+        local boxes = screenEditBoxes()
+        local inScreen = glue.last():GetParent() ~= GlueParent
+        check(#boxes == (inScreen and 2 or 1), label .. "one set of name boxes: " .. #boxes .. " edit boxes on the screen")
+        check(sameAnchorList(anchorList(first), nameBefore.first), label .. "first name box not moved: "
+              .. describeAnchors(anchorList(first)))
+        check(first:GetWidth() == nameBefore.firstWidth and first:GetMaxLetters() == nameBefore.firstLetters,
+              label .. "first name box keeps its size and letters")
+        check(select(1, first:GetRegions()):GetText() == nameBefore.label, label .. "its label stays the screen's: "
+              .. tostring(select(1, first:GetRegions()):GetText()))
+        check(sameAnchorList(anchorList(glue.last()), nameBefore.last), label .. "the screen's last name box not moved")
+        check(glue.last():GetMaxLetters() == nameBefore.lastLetters, label .. "the screen's last name box keeps its letters")
+        check(sameAnchorList(anchorList(CharacterCreateRandomName), nameBefore.random), label .. "Randomize not moved")
+        check(#FRAMES_TO_BACKDROP_COLOR == nameBefore.backdropList, label .. "the backdrop colour list is the screen's")
+        check(CreateCharacter == MOCK.stockCreateCharacter, label .. "CreateCharacter is not wrapped")
+    end
+
+    SetGlueScreen("charcreate")
+    -- (a box the screen's OnShow makes exists only now: its anchors are the ones it was made with)
+    check(glue.last() ~= nil, "the screen's own last name box exists")
+    nameBefore.last = nameBefore.last or anchorList(glue.last())
+    nameBefore.lastLetters = nameBefore.lastLetters or glue.last():GetMaxLetters()
+    untouched("shown")
+    check(lastLog():find("names: realm", 1, true) ~= nil, "the path is logged: " .. lastLog())
+
+    -- The screen's own code builds the name.
+    first:SetText("Arthas"); glue.last():SetText("Menethil")
+    CharacterCreate_Okay()
+    check(MOCK.created[#MOCK.created] == "Arthas Menethil", "the screen's code sends First Last: "
+          .. tostring(MOCK.created[#MOCK.created]))
+    first:SetText("Jaina"); glue.last():SetText("")
+    CharacterCreate_Okay()
+    check(MOCK.created[#MOCK.created] == "Jaina", "a single name passes as it is: " .. tostring(MOCK.created[#MOCK.created]))
+    MOCK.type(first, " Proudmoore")
+    check(first:GetText():sub(1, 6) == "Jaina " and glue.last():GetText() == "",
+          "typing is not split into the screen's boxes: " .. first:GetText() .. "|" .. glue.last():GetText())
+    glue.last():SetText("Kept")
+    CharacterCreateRandomName:Click()
+    check(first:GetText() == "Arannis" and glue.last():GetText() == "Kept", "Randomize does only what the screen does")
+
+    SetGlueScreen("login"); SetGlueScreen("charcreate")
+    untouched("shown again")
+    SetCharacterGender(SEX_FEMALE)
+    check(#BLEAKHOLD_GLUE_ERRORS == 0, "no caught errors: " .. table.concat(BLEAKHOLD_GLUE_ERRORS, " | "))
+    check(#MOCK.collisions == 0, "no global name collisions: " .. table.concat(MOCK.collisions, ", "))
+end
+
 local ok, err = pcall(function()
     if SCENARIO == "login-classic" then classicScenario()
     elseif SCENARIO:find("^login") then loginScenario()
+    elseif MOCK.nameGlue then realmNamesScenario()
     elseif SCENARIO:find("^names") then namesScenario()
     elseif SCENARIO == "races12" then racesScenario(12)
     elseif SCENARIO == "races12-female" then racesScenario(12, true)

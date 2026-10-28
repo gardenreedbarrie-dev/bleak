@@ -20,6 +20,9 @@
 	<Binding name="BLEAKHOLD_GRAPHICS">
 		BleakholdToggle("graphics")
 	</Binding>
+	<Binding name="BLEAKHOLD_MAKECAMP">
+		BleakholdMakeCamp()
+	</Binding>
 	<Binding name="BLEAKHOLD_GLIDE">
 		BleakholdGlide()
 	</Binding>

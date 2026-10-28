@@ -274,20 +274,22 @@ them field for field (234 columns).
 | `icon`, `icon_name` | SpellIcon.dbc id; with `icon_name` the build checks the icon's texture name too |
 | `visual` | SpellVisual.dbc id (0 for none) |
 | `fields` | Every other column by its client name (`attributes`, `durationIndex`, `effect[0]`, `effectAura[0]`, `effectBasePoints[0]`, ...). Columns not given are 0, except procChance 101, equippedItemClass -1 and effectChainAmplitude 1.0, as in Blizzard's rows |
-| `cast_by` | `race` (default): a racial, which a race must list. `server`: a spell no race learns, which a server module casts (Walk on Air, the High Elf glide); it gets its Spell.dbc row only |
+| `cast_by` | `race` (default): a racial, which a race must list. `server`: a spell no race learns, which a server module casts (Walk on Air's aura, 100800); it gets its Spell.dbc row only. `module`: a spell a server module teaches and the player casts from the spellbook (Walk on Air, 100801, which mod-bleakhold-ui teaches to the races of `BleakholdUi.Glide.Races`); like `server`, no race lists it and it gets no `playercreateinfo` row |
 | `server_row` | An SQL file of this repository (relative to its root) that holds the spell's `spell_dbc` row: RaceForge then writes none and checks that row against the Spell.dbc row field for field (columns the INSERT leaves out count as the table's defaults) |
 | `text_locales` | The locale slots that get the texts: all nine by default (like the race names), `["enUS"]` to match a row that fills only that one |
 
 The build checks that the icon, the visual, the duration, the range and the cast time exist (when those DBCs are in
 the input folder) and that no SkillLineAbility row teaches a spell of `spells`: racial spells show in the spellbook's
-General tab, and the server teaches them (mod-bleakhold in bleakserv). The Bleakhold racials:
+General tab, and the server teaches them (mod-bleakhold in bleakserv; Walk on Air in the spellbook mod-bleakhold-ui). The
+Bleakhold racials:
 
 | Spell | Race | Effect (Spell.dbc) | Icon, visual |
 |---|---|---|---|
 | 90500 Wind Blessed, passive | High Elf | aura 193 (SPELL_AURA_MELEE_SLOW, Berserking's) +3: melee, ranged and cast speed 3% faster | 2837 Ability_Druid_GaleWinds |
 | 90501 Elemental Insight, passive | Eredar | aura 168 (SPELL_AURA_MOD_DAMAGE_DONE_VERSUS, Beast Slaying's) +5%, creature type mask 8 (Elemental) | 2016 Spell_Nature_ElementalAbsorption |
 | 90502 Read Ley Line | Eredar | instant, 2 min cooldown, off the global cooldown, castable while sitting; auras 88 and 110 (mana) +100% for 30 s; mod-bleakhold makes it 2 min when cast while resting | 2158 Spell_Arcane_StudentOfMagic; visual 4279 (Mana Tide's: a blue splash and glowing hands, then a mana swirl at the feet) |
-| 100800 Walk on Air (server-cast) | High Elf glide (mod-bleakhold-ui) | aura 105 feather fall, 10 s; its `spell_dbc` row is `Server/mod-bleakhold-ui/data/sql/db-world/02_bleakhold_walk_on_air.sql` | 1931 Spell_Nature_EyeOfTheStorm; visual 7370 (Magic Wings' wings) |
+| 100800 Walk on Air (server-cast) | the High Elf glide's aura (mod-bleakhold-ui casts it when a glide starts) | aura 105 feather fall, 10 s; its `spell_dbc` row is `Server/mod-bleakhold-ui/data/sql/db-world/02_bleakhold_walk_on_air.sql` | 1931 Spell_Nature_EyeOfTheStorm; visual 63 (Slow Fall's: a light at the hands and a soft flash at the head as the glide starts; was 7370, Magic Wings' wings). Others that fit: 0 none, 12114 Guardian Spirit's golden wings, 12724 Cyclone Fall's whirl and floating pose, 6768 Levitate's swirl at the feet |
+| 100801 Walk on Air (module-taught) | High Elf, in the spellbook: mod-bleakhold-ui teaches it at login (`BleakholdUi.Glide.CastSpell`) and puts it on a free action bar slot once | instant, 90 s cooldown (`recoveryTime`; the module sends `BleakholdUi.Glide.Cooldown` when it differs, and shares it with `/glide`), off the global cooldown, self; a dummy effect its script (`spell_bleakhold_walk_on_air`) turns into the glide, in the air only (on the ground the cast fails with "Cannot be used on the ground", free); its `spell_dbc` row is the same SQL file's | 505 Spell_Magic_FeatherFall; no visual of its own (the aura's is the glide's look) |
 
 ## Updating a live realm (`raceforge.py update`)
 

@@ -52,6 +52,9 @@ REALM_PANDAREN_BIT = 1 << 19
 NO_RACE = -2147483648
 RACIALS = (90500, 90501, 90502)
 WALK_ON_AIR = 100800
+# Walk on Air in the spellbook: mod-bleakhold-ui teaches it and its script starts the glide (aura WALK_ON_AIR)
+WALK_ON_AIR_CAST = 100801
+GLIDE_SPELLS = [WALK_ON_AIR, WALK_ON_AIR_CAST]
 
 
 def run_tool(*args):
@@ -187,13 +190,24 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual((high_elf.drop_skill_lines, high_elf.racial_spells), ([756], [90500]))
         self.assertEqual((eredar.drop_skill_lines, eredar.racial_spells), ([760], [90501, 90502]))
         self.assertEqual(config.racial_spell_ids(), list(RACIALS))
-        self.assertEqual(config.spell_ids(), list(RACIALS) + [WALK_ON_AIR])
-        self.assertEqual(config.server_sql_spell_ids(), list(RACIALS))  # Walk on Air's row is mod-bleakhold-ui's
+        self.assertEqual(config.spell_ids(), list(RACIALS) + GLIDE_SPELLS)
+        self.assertEqual(config.server_sql_spell_ids(), list(RACIALS))  # Walk on Air's rows are mod-bleakhold-ui's
         self.assertEqual(config.action_bar_spell(eredar), 90502)
         self.assertEqual(config.action_bar_spell(high_elf), 0)
         self.assertTrue(config.spells[90500].passive and config.spells[90501].passive and not config.spells[90502].passive)
         self.assertEqual(config.spells[WALK_ON_AIR].cast_by, "server")
         self.assertEqual(config.spells[WALK_ON_AIR].text_locales, ["enUS"])
+        cast = config.spells[WALK_ON_AIR_CAST]
+        self.assertEqual((cast.cast_by, cast.text_locales, cast.server_row), ("module", ["enUS"], config.spells[WALK_ON_AIR].server_row))
+        self.assertFalse(cast.passive)
+        # the spellbook racial: instant, 90 s (BleakholdUi.Glide.Cooldown's default), off the global cooldown, a dummy on the caster
+        self.assertEqual((cast.fields["recoveryTime"], cast.fields["castingTimeIndex"], cast.fields["effect[0]"], cast.fields["implicitTargetA[0]"]),
+                         (90000, 1, 3, 1))
+        self.assertNotIn("startRecoveryTime", cast.fields)
+        self.assertEqual((cast.icon, cast.icon_name, cast.visual), (505, "Spell_Magic_FeatherFall", 0))
+        self.assertIn("$100800d", cast.description)  # the aura's 10 s
+        self.assertEqual(config.spells[WALK_ON_AIR].visual, 63)  # Slow Fall's look, not Magic Wings' (7370)
+        self.assertNotIn(WALK_ON_AIR_CAST, [s for r in config.races for s in r.racial_spells])
         self.assertEqual(len(config.spells[90500].text_locales), 9)
         self.assertEqual(config.archives.own, "patch-R.MPQ")
         self.assertIn("hd", config.archives.optional_packs)
@@ -214,6 +228,8 @@ class ConfigTests(unittest.TestCase):
             (lambda d: d["races"][0]["racials"].update(spells=[90500, 90500]), "twice"),
             (lambda d: d["races"][0]["racials"].update(drop_template_skill_lines=[0]), "positive ids"),
             (lambda d: d["races"][0]["racials"].update(spells=[90500, WALK_ON_AIR]), "cast_by server"),
+            (lambda d: d["races"][0]["racials"].update(spells=[90500, WALK_ON_AIR_CAST]), "cast_by module, which no race learns"),
+            (lambda d: spell(d, WALK_ON_AIR_CAST).update(cast_by="race"), "no race lists"),
             (lambda d: d["races"][1]["racials"].update(spells=[90501]), "no race lists"),
             (lambda d: d["spells"].append(dict(spell(d, 90500))), "two spells have the id 90500"),
             (lambda d: spell(d, 90500).update(id=0), "id must be between"),
@@ -271,6 +287,17 @@ class SpellRowTests(unittest.TestCase):
         walk = spellmod.build_row(self.table, self.config.spells[WALK_ON_AIR])
         self.assertEqual(t.get_loc(walk, "name")[:2], ["Walk on Air", ""])  # enUS only, as its server row
         self.assertEqual(t.float_value(walk, "effectBonusCoefficient[0]"), 1.0)
+        self.assertEqual((t.get(walk, "spellVisualID[0]"), t.get(walk, "spellIconID")), (63, 1931))
+
+        cast = spellmod.build_row(self.table, self.config.spells[WALK_ON_AIR_CAST])
+        self.assertEqual(t.get_loc(cast, "name")[:2], ["Walk on Air", ""])
+        self.assertEqual((t.get(cast, "effect[0]"), t.get(cast, "implicitTargetA[0]"), t.get(cast, "recoveryTime")), (3, 1, 90000))
+        self.assertEqual((t.get(cast, "startRecoveryCategory"), t.get(cast, "startRecoveryTime"), t.get(cast, "durationIndex")), (0, 0, 0))
+        self.assertEqual((t.get(cast, "spellVisualID[0]"), t.get(cast, "spellIconID")), (0, 505))
+        self.assertEqual(t.get(cast, "auraDescription_flags"), spellmod.LOC_FLAGS_EMPTY)
+        # both rows are the ones of mod-bleakhold-ui's SQL, field for field
+        for spell_id, row in ((WALK_ON_AIR, walk), (WALK_ON_AIR_CAST, cast)):
+            self.assertEqual(spellmod.server_row_check(self.table, row, self.config.spells[spell_id]), ("PASS", ""), spell_id)
 
     def test_field_problems(self):
         spell = configmod.SpellDef(id=1, name="x", fields={"nonsense": 1, "id": 5, "name[0]": 1, "attributes": 1.5, "recoveryTime": 1 << 40,
@@ -338,6 +365,11 @@ class BuildTests(unittest.TestCase):
     def build(self, *extra):
         return run_tool("build", "--dbc", self.stock, "--out", os.path.join(self.tmp.name, "out"), "--force", *extra)
 
+    @staticmethod
+    def report(out: str) -> str:
+        with open(os.path.join(out, "report.txt"), encoding="utf-8") as f:
+            return f.read()
+
     def test_template_racials_kept_without_racials(self):
         config = write_json(os.path.join(self.tmp.name, "old.json"), without_racials(races_json()))
         result = self.build("--config", config)
@@ -355,9 +387,14 @@ class BuildTests(unittest.TestCase):
         spells = table_of(os.path.join(out, "client", "DBFilesClient", "Spell.dbc"), "Spell")
         stock = table_of(os.path.join(self.stock, "Spell.dbc"), "Spell")
         self.assertEqual(spells.rows[:len(stock.rows)], stock.rows)  # stock rows untouched, new ones appended
-        self.assertEqual(sorted(spells.ids() - stock.ids()), list(RACIALS) + [WALK_ON_AIR])
+        self.assertEqual(sorted(spells.ids() - stock.ids()), list(RACIALS) + GLIDE_SPELLS)
         self.assertIn("spell_dbc row matches Spell.dbc field for field", result.stdout)
-        self.assertIn("02_bleakhold_walk_on_air.sql matches Spell.dbc field for field", result.stdout)
+        self.assertIn("server-cast spell 100800 Walk on Air: the spell_dbc row of Server/mod-bleakhold-ui/data/sql/db-world/"
+                      "02_bleakhold_walk_on_air.sql matches Spell.dbc field for field", result.stdout)
+        self.assertIn("module-taught spell 100801 Walk on Air: the spell_dbc row of Server/mod-bleakhold-ui/data/sql/db-world/"
+                      "02_bleakhold_walk_on_air.sql matches Spell.dbc field for field", result.stdout)
+        self.assertIn("module-taught spell 100801 Walk on Air: no race learns it (a server module teaches it)", result.stdout)
+        self.assertIn("spell 100801 Walk on Air (active, icon 505, visual 0) for the server (cast_by module)", result.stdout + self.report(out))
 
         with open(os.path.join(out, "server", "sql", "bleakhold_races.sql"), encoding="utf-8") as f:
             sql = f.read()
@@ -474,6 +511,17 @@ class UpdateTests(unittest.TestCase):
         self.assertEqual(again.stdout.count("already up to date"), 3)
         self.assertIn("Client archives: none", again.stdout)
         self.assertFalse(os.path.exists(os.path.join(self.work, "again", "client", "patch-R.MPQ")))
+
+    def test_glide_spell_rows_in_the_report(self):
+        # The lines bleakserv's deploy/README.md ("Glide spell", step 2) tells the owner to look for, word for word.
+        result = self.update()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        sql = "Server/mod-bleakhold-ui/data/sql/db-world/02_bleakhold_walk_on_air.sql"
+        self.assertIn(f"[PASS] module-taught spell {WALK_ON_AIR_CAST} Walk on Air: the spell_dbc row of {sql} matches Spell.dbc "
+                      "field for field", result.stdout)
+        self.assertIn(f"[PASS] server-cast spell {WALK_ON_AIR} Walk on Air: the spell_dbc row of {sql} matches Spell.dbc "
+                      "field for field", result.stdout)
+        self.assertRegex(result.stdout, r"\b\d+ checks, 0 failed")
 
     def test_spell_dbc_in_a_later_realm_patch(self):
         # Patch-Z holds the realm's own Spell.dbc (a custom spell) and a texture: the rows go into Patch-Z's copy.
@@ -1130,6 +1178,7 @@ class BleakservTests(unittest.TestCase):
                 self.assertEqual(spellmod.compare_row(table, row, rows[spell_id]), [], f"{name}: {spell_id}")
 
             self.assertNotIn(WALK_ON_AIR, rows, name)  # mod-bleakhold-ui's own SQL holds it
+            self.assertNotIn(WALK_ON_AIR_CAST, rows, name)
             ok, output = lint_sql(text)
             self.assertTrue(ok, f"{name}: {output}")
 

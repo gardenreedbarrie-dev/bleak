@@ -4,7 +4,8 @@
  *
  * Hooks: the self-whisper that carries client messages (section 2), the prefix guard on every other
  * addon channel, login/logout, configuration and the world tick; for camping (section 16) the XP bonus,
- * the end of camp rest when combat starts, the campfires that enter the world and the glide's movement.
+ * the end of camp rest when combat starts, the campfires that enter the world, the glide's movement and Walk on Air in
+ * the spellbook (spell_bleakhold_walk_on_air).
  */
 
 #include "BleakholdCamp.h"
@@ -16,6 +17,9 @@
 #include "Player.h"
 #include "ScriptMgr.h"
 #include "SharedDefines.h"
+#include "SpellInfo.h"
+#include "SpellScript.h"
+#include "SpellScriptLoader.h"
 
 namespace
 {
@@ -164,6 +168,35 @@ namespace
         }
     };
 
+    // Walk on Air in the spellbook (BleakholdUi.Glide.CastSpell, 100801; spell_script_names in
+    // data/sql/db-world/02_bleakhold_walk_on_air.sql): the cast runs GLIDE's checks, in the air only, and fails with
+    // the client's own cast result (no cooldown spent); the hit starts the module's glide, whose cooldown it shares.
+    class spell_bleakhold_walk_on_air : public SpellScript
+    {
+        PrepareSpellScript(spell_bleakhold_walk_on_air);
+
+        SpellCastResult CheckCast()
+        {
+            Player* player = GetCaster() ? GetCaster()->ToPlayer() : nullptr;
+            if (!player)
+                return SPELL_FAILED_DONT_REPORT;
+            return static_cast<SpellCastResult>(Camp::Instance().CheckGlideCast(player));
+        }
+
+        void HandleDummy(SpellEffIndex /*effIndex*/)
+        {
+            Player* player = GetCaster() ? GetCaster()->ToPlayer() : nullptr;
+            if (player && GetHitUnit() == player)
+                Camp::Instance().OnGlideCast(player, GetSpellInfo()->Id, GetSpellInfo()->RecoveryTime);
+        }
+
+        void Register() override
+        {
+            OnCheckCast += SpellCheckCastFn(spell_bleakhold_walk_on_air::CheckCast);
+            OnEffectHitTarget += SpellEffectFn(spell_bleakhold_walk_on_air::HandleDummy, EFFECT_0, SPELL_EFFECT_DUMMY);
+        }
+    };
+
     // Camping (section 16): notes the Basic Campfires players light and the fires of BleakholdUi.Camp.ExtraFireEntries as
     // they enter the world (map threads; the check is a few integer compares for any other object).
     class BleakholdCampFireScript : public AllGameObjectScript
@@ -185,4 +218,5 @@ void AddBleakholdScripts()
     new BleakholdWorldScript();
     new BleakholdCampFireScript();
     new BleakholdGlideScript();
+    RegisterSpellScript(spell_bleakhold_walk_on_air);
 }

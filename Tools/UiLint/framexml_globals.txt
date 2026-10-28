@@ -37,6 +37,10 @@ ChatEdit_UpdateHeader
 StaticPopupDialogs
 SendMailNameEditBox
 TogglePVPFrame
+# the stock Dungeon Finder (LFDFrame.xml/.lua; UIParent.lua's ShowUIPanel): Activities > Dungeons opens it
+LFDParentFrame
+ToggleLFDParentFrame
+ShowUIPanel
 # Optional addons (always checked for nil before use)
 DragonUI
 DragonUI_QuestTrackerFrame

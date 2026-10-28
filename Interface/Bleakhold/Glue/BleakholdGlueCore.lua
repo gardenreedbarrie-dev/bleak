@@ -49,6 +49,14 @@ function BH.Try(fn, ...)
     return ok, err
 end
 
+-- What the glue decided where a screen can be the stock one or a realm patch's own (one line each, oldest first):
+-- nothing reads it but the tests and whoever looks into the glue's state.
+BLEAKHOLD_GLUE_LOG = {}
+
+function BH.Log(text)
+    BLEAKHOLD_GLUE_LOG[#BLEAKHOLD_GLUE_LOG + 1] = tostring(text)
+end
+
 -- Called at the end of each Bleakhold file.
 function BH.FlushLoadErrors(file)
     if #pendingErrors > 0 then

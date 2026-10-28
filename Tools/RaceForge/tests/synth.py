@@ -361,12 +361,12 @@ def build_tables() -> dict[str, bytes]:
 
     icons = Packer("SpellIcon")
     for icon_id, name in ((1, "Synthetic"), (1931, "Spell_Nature_EyeOfTheStorm"), (2016, "Spell_Nature_ElementalAbsorption"), (2158, "Spell_Arcane_StudentOfMagic"),
-                          (2837, "Ability_Druid_GaleWinds")):
+                          (2837, "Ability_Druid_GaleWinds"), (505, "Spell_Magic_FeatherFall")):
         icons.add(id=icon_id, textureFilename=f"Interface\\Icons\\{name}")
     tables["SpellIcon"] = icons.pack()
 
     visuals = Packer("SpellVisual")
-    for visual_id in (1, 4279, 7370):
+    for visual_id in (1, 63, 4279, 7370):
         visuals.add(id=visual_id, castKit=visual_id + 1, stateKit=visual_id + 2)
     tables["SpellVisual"] = visuals.pack()
 

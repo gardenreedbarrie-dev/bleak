@@ -24,6 +24,12 @@ I.WINDOWS = {
       text = "Mythic keys, the Eclipse Rift, raid echoes and server firsts.", window = "BleakholdLeaderboardsFrame" },
     { key = "graphics", title = "Graphics", emote = "sparkle", binding = "BLEAKHOLD_GRAPHICS",
       text = "Bleakhold's graphics presets and settings.", window = "BleakholdGraphics" },
+    -- not a window: what the minimap's Make camp orb does (the orbs are off while this launcher lists the windows),
+    -- listed while the realm has camping on, its tooltip line with the cooldown
+    { key = "camp", title = "Make camp", glyph = "flame", binding = "BLEAKHOLD_MAKECAMP",
+      text = function() return ns.Camp.MakeCampText() end,
+      action = function() ns.Camp.MakeCamp() end,
+      shown = function() return ns.Camp.CampAvailable() end },
 }
 
 I.TITLE = "Bleakhold"
@@ -42,6 +48,9 @@ local function art(w)
 end
 
 function I.IsOpen(w)
+    if not w.window then
+        return false
+    end
     local win = UI.windows[w.window]
     if not (win and win:IsShown()) then
         return false
@@ -53,18 +62,20 @@ function I.IsOpen(w)
     return true
 end
 
--- What AddicatUI.RegisterMicroMenuLauncher takes.
+-- What AddicatUI.RegisterMicroMenuLauncher takes. description is a string or a function (read on hover), shown a
+-- function (the flyout lists the entry while it returns true; read each time the flyout opens).
 function I.LauncherSpec()
     local entries = {}
     for _, w in ipairs(I.WINDOWS) do
         entries[#entries + 1] = {
             key = w.key, title = w.title, description = w.text, binding = w.binding, icon = art(w),
-            open = function()
+            open = w.action or function()
                 UI.Open(w.key, true)
             end,
             isOpen = function()
                 return I.IsOpen(w)
             end,
+            shown = w.shown,
         }
     end
     return {

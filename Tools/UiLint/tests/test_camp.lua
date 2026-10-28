@@ -23,6 +23,12 @@ local function campst(M, over)
     H.send(M, "CAMPST", { r })
 end
 
+-- GlobalStrings.lua's SPELL_FAILED_NOT_ON_GROUND, before the addon loads (a stand-in for the client's text).
+local GROUND_STOCK = "Cannot use on the ground"
+local function stockGroundError(M)
+    M.env.SPELL_FAILED_NOT_ON_GROUND = GROUND_STOCK
+end
+
 -- A refusal the client tells by itself: in the error frame, like the server's ERR sentences.
 local function printed(M, text)
     local n = 0
@@ -442,7 +448,7 @@ test("camp: the Glide button shows for gliders only, counts its cooldown and gli
     campst(M, { [10] = 90 })
     M.Advance(0.3)
     H.ok(gb:IsShown(), "a glider gets the button")
-    H.eq(gb.icon:GetTexture(), "Interface\\Icons\\Spell_Nature_EyeOfTheStorm", "Walk on Air's icon")
+    H.eq(gb.icon:GetTexture(), "Interface\\Icons\\Spell_Magic_FeatherFall", "the spellbook racial's icon (races.json 100801)")
     H.ok(gb.cd:IsShown(), "cooldown on the button")
     H.eq(gb.cd:GetText(), "01:30")
     M.Advance(40)
@@ -572,6 +578,133 @@ test("camp: the Glide key works in mid-air, and the new GLIDE refusals read as s
         H.send(M, "ERR", { { "GLIDE", "c", code, "" } })
         H.ok(errorsShown(M, text) >= 1, code)
     end
+end)
+
+test("camp: Walk on Air in the spellbook: the Glide button makes way, the glide bar stays, the ground error is worded",
+    function(M, ns)
+    FX.connect(M, H, ALL_BITS)
+    local gb, bar = M.env.BleakholdGlideButton, ns.Camp.glideBar
+    campst(M, { [10] = 0 })
+    M.Advance(0.3)
+    H.ok(gb:IsShown(), "no spell yet: the Glide button")
+    -- the server teaches the spell at login (mod-bleakhold-ui, BleakholdUi.Glide.CastSpell)
+    local known = {}
+    M.env.IsSpellKnown = function(id) return known[id] and 1 or nil end
+    known[ns.Camp.GLIDE_SPELL] = true
+    H.eq(ns.Camp.GLIDE_SPELL, 100801, "races.json's spellbook racial")
+    M.FireEvent("LEARNED_SPELL_IN_TAB", 1)
+    H.ok(not gb:IsShown(), "the action bar's Walk on Air replaces the Glide button")
+    -- the cast on the ground fails with SPELL_FAILED_NOT_ON_GROUND: worded for the glide while the spell is known
+    H.contains(M.env.SPELL_FAILED_NOT_ON_GROUND, "To glide: jump", "worded for the glide")
+    H.contains(M.env.SPELL_FAILED_NOT_ON_GROUND, "You must be in the air for that.", "and still true for an item")
+    -- a glide (cast from the action bar): the bar still shows where the button was, and counts down
+    M.falling = true
+    campst(M, { [10] = 90, [13] = 10 })
+    M.Advance(0.3)
+    H.ok(bar:IsShown() and not gb:IsShown(), "the glide bar without the button")
+    H.eq(bar:GetParent(), M.env.UIParent, "the bar is not the button's child")
+    local _, rel = bar:GetPoint(1)
+    H.eq(rel, gb, "placed over the button's spot")
+    M.Advance(2)
+    H.contains(bar.text:GetText(), "7.", "counts down")
+    M.falling = false
+    M.Advance(0.3)
+    H.ok(not bar:IsShown(), "landed")
+    campst(M, { [10] = 85 })
+    M.Advance(0.3)
+    H.ok(not bar:IsShown() and not gb:IsShown())
+    -- /glide and the key still glide (the server shares the cooldown with the spell)
+    M.Advance(90)
+    M.env.BleakholdGlide()
+    M.Advance(0.3)
+    H.ok(H.lastIntent(M, "GLIDE"), "the key binding still sends GLIDE")
+    -- the editor still shows the button to place
+    ns.Camp.glidePreview = true
+    ns.Camp.RefreshGlide()
+    H.ok(gb:IsShown(), "editor preview")
+    ns.Camp.glidePreview = nil
+    ns.Camp.RefreshGlide()
+    H.ok(not gb:IsShown())
+    -- the spell taken again (another race, the glide off): the button comes back
+    known[ns.Camp.GLIDE_SPELL] = nil
+    M.FireEvent("SPELLS_CHANGED")
+    H.ok(gb:IsShown(), "the Glide button is back")
+    H.eq(M.env.SPELL_FAILED_NOT_ON_GROUND, GROUND_STOCK, "no spell: the client's own ground error again")
+end, { before = stockGroundError })
+
+-- Who does not know Walk on Air keeps the client's own text: the server's item_only_for_flight gives the same cast
+-- result for Arcane Charges (34475) used off the Isle of Quel'Danas flight, any race.
+test("camp: without Walk on Air the ground error stays the client's own", function(M, ns)
+    FX.connect(M, H, ALL_BITS)
+    M.env.IsSpellKnown = function() return nil end
+    M.FireEvent("SPELLS_CHANGED")
+    M.FireEvent("PLAYER_ENTERING_WORLD")
+    M.Advance(0.3)
+    H.eq(M.env.SPELL_FAILED_NOT_ON_GROUND, GROUND_STOCK, "not reworded for an Arcane Charges player")
+    campst(M, { [10] = 0 })   -- a glider without the spell yet (the Glide button): still the stock text
+    M.Advance(0.3)
+    H.ok(M.env.BleakholdGlideButton:IsShown())
+    H.eq(M.env.SPELL_FAILED_NOT_ON_GROUND, GROUND_STOCK)
+end, { before = stockGroundError })
+
+test("camp: a High Elf who logs in knowing Walk on Air gets the glide wording at once", function(M, ns)
+    H.contains(M.env.SPELL_FAILED_NOT_ON_GROUND, "To glide: jump", "worded from the first world entry")
+end, { before = function(M)
+    stockGroundError(M)
+    M.env.IsSpellKnown = function(id) return id == 100801 and 1 or nil end
+end })
+
+-- The spellbook's Walk on Air known: the Glide button is hidden, and with it its 0.25 s OnUpdate.
+local function knowGlideSpell(M, ns)
+    M.env.IsSpellKnown = function(id) return id == ns.Camp.GLIDE_SPELL and 1 or nil end
+    M.FireEvent("SPELLS_CHANGED")
+end
+
+test("camp: Walk on Air in the spellbook: thrown off again after a guessed landing, the glide bar comes back",
+    function(M, ns)
+    FX.connect(M, H, ALL_BITS)
+    knowGlideSpell(M, ns)
+    local gb, bar = M.env.BleakholdGlideButton, ns.Camp.glideBar
+    M.falling = true
+    campst(M, { [10] = 90, [13] = 10 })    -- cast from the action bar while falling
+    M.Advance(1.5)
+    H.ok(bar:IsShown() and not gb:IsShown(), "gliding: the bar, no button")
+    M.falling = false                       -- a roof, for a moment: the client guesses a landing
+    M.Advance(0.3)
+    H.ok(not bar:IsShown(), "guessed landed")
+    M.falling = true                        -- the server held the glide (a push on its way) and throws them off again
+    M.Advance(0.3)
+    H.ok(bar:IsShown(), "the bar is back, with the Glide button hidden")
+    H.ok(not gb:IsShown(), "the button stays out of the way")
+    H.contains(bar.text:GetText(), "Walk on Air")
+    M.Advance(1.5)
+    M.falling = false
+    M.Advance(0.3)
+    H.ok(not bar:IsShown(), "landed")
+    campst(M, { [10] = 85 })                -- the server ended it
+    M.falling = true
+    M.Advance(1)
+    H.ok(not bar:IsShown(), "no glide: a fall shows nothing")
+end)
+
+test("camp: Walk on Air in the spellbook: a waiting glide after a long slide still shows its bar off the ledge",
+    function(M, ns)
+    FX.connect(M, H, ALL_BITS)
+    knowGlideSpell(M, ns)
+    local gb, bar = M.env.BleakholdGlideButton, ns.Camp.glideBar
+    campst(M, { [10] = 90, [13] = 10 })    -- cast on the ground: the glide waits for a ledge
+    M.Advance(0.3)
+    H.ok(bar:IsShown() and not gb:IsShown(), "waiting glide shown, no button")
+    M.falling = true                        -- a slide down a slope: over a second in the air, under 2.5 yd
+    M.Advance(1.2)
+    M.falling = false
+    M.Advance(0.3)
+    H.ok(not bar:IsShown(), "the client guesses a landing")
+    M.Advance(1)
+    H.ok(not bar:IsShown(), "on the ground: stays down")
+    M.falling = true                        -- over a real ledge: the server's glide starts, no new CAMPST
+    M.Advance(0.5)
+    H.ok(bar:IsShown(), "the real glide has its bar")
 end)
 
 test("camp: no Glide button while the realm has glide off", function(M, ns)

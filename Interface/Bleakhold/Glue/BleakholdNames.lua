@@ -1,10 +1,17 @@
 -- Bleakhold glue: first and last names.
 --
 -- The server's mod-two-names accepts "First Last" character names. The client side needs no Wow.exe patch here:
--- ClientServices::CharacterValidateName leaves the check to the server (BLEAKHOLD(names)). This file splits the
--- stock name box into a First Name box and a Last Name box and joins the two for every stock call to
--- CreateCharacter (CharacterCreate_Okay and the paid-service confirmation both pass the first box's text). The
--- last name is optional, so single names keep working. With BLEAKHOLD_TWO_NAMES = false the stock box is kept.
+-- ClientServices::CharacterValidateName leaves the check to the server (BLEAKHOLD(names)). On the stock character
+-- creation screen this file splits the stock name box into a First Name box and a Last Name box and joins the two
+-- for every stock call to CreateCharacter (CharacterCreate_Okay and the paid-service confirmation both pass the
+-- first box's text). The last name is optional, so single names keep working. With BLEAKHOLD_TWO_NAMES = false the
+-- stock box is kept.
+--
+-- A realm patch can bring a character creation screen of its own that already has a first and a last name box (a
+-- two-names screen): Bleakhold then adds no box, moves and restyles none of the screen's, and leaves the name its
+-- code builds alone. The choice is made when the screen first shows (after the screen's own OnShow, so a box it
+-- makes there counts too); BleakholdGlue.namesPath says which way it went ("bleakhold", "realm", "kept", "off"),
+-- BleakholdGlue.namesWhy why, and BLEAKHOLD_GLUE_LOG keeps the line.
 
 local BH = BleakholdGlue
 
@@ -372,15 +379,115 @@ local function createLastNameBox()
     return true
 end
 
--- --------------------------------------------------------------------------------------------- install
+-- ------------------------------------------------------------------------------------- the screen's own boxes
 
-local function installTwoNames()
-    if not BLEAKHOLD_TWO_NAMES or not CharacterCreateNameEdit or _G[LAST_NAME_EDIT] then
-        return
+-- Words that name a second name box or its label, compared without case, spaces or punctuation ("Last Name",
+-- "CharacterCreateLastNameEdit", "CC_Surname_Box", "First and last name, 2-12 letters each").
+BH.SECOND_NAME_WORDS = { "lastname", "surname", "secondname", "familyname", "nachname" }
+
+local function squash(text)
+    return (string.gsub(string.lower(tostring(text or "")), "[^%w]", ""))
+end
+
+local function saysSecondName(text)
+    local squashed = squash(text)
+
+    for _, word in ipairs(BH.SECOND_NAME_WORDS) do
+        if string.find(squashed, word, 1, true) then
+            return true
+        end
     end
 
+    return false
+end
+
+-- The widget type of a frame or region, nil for anything else (any table of _G: nothing it does may stop the check).
+local function objectType(object)
+    if type(object) ~= "table" then
+        return nil
+    end
+
+    local ok, kind = pcall(function()
+        return type(object.GetObjectType) == "function" and object:GetObjectType() or nil
+    end)
+    return ok and kind or nil
+end
+
+local function isOurs(object)
+    return object ~= nil and (object == _G[LAST_NAME_EDIT] or object == _G[LAST_NAME_EDIT .. "Label"])
+end
+
+-- Why the character creation screen already has a second name box of its own (a realm patch's two-names screen), as
+-- a short text, or nil for the stock screen. A realm's frame names are not known here, so any of these tells:
+--   1. an edit box among CharacterCreate's frames (at any depth) other than the stock name box and Bleakhold's;
+--   2. an edit box anywhere whose global name says last name, surname, second or family name;
+--   3. a text among CharacterCreate's frames that says so ("Last Name", "First and last name, ...").
+function BH.ScreenSecondNameBox()
+    local stockBox = CharacterCreateNameEdit
+    local seen, label = {}, nil
+
+    local function walk(frame, depth)
+        if seen[frame] or depth > 16 then
+            return nil
+        end
+
+        seen[frame] = true
+
+        if frame ~= stockBox and not isOurs(frame) and objectType(frame) == "EditBox" then
+            return "edit box " .. tostring(frame:GetName() or "(no name)")
+        end
+
+        if not label and type(frame.GetRegions) == "function" then
+            for _, region in ipairs({ frame:GetRegions() }) do
+                if not isOurs(region) and objectType(region) == "FontString" and saysSecondName(region:GetText()) then
+                    label = "text \"" .. tostring(region:GetText()) .. "\""
+                    break
+                end
+            end
+        end
+
+        if type(frame.GetChildren) == "function" then
+            for _, child in ipairs({ frame:GetChildren() }) do
+                local found = walk(child, depth + 1)
+
+                if found then
+                    return found
+                end
+            end
+        end
+
+        return nil
+    end
+
+    local screen = CharacterCreate or (stockBox and stockBox:GetParent())
+    local found = screen and walk(screen, 0)
+
+    if found then
+        return found
+    end
+
+    for name, value in pairs(_G) do
+        if type(name) == "string" and value ~= stockBox and not isOurs(value) and saysSecondName(name)
+            and objectType(value) == "EditBox" then
+            return "edit box " .. name
+        end
+    end
+
+    return label
+end
+
+-- --------------------------------------------------------------------------------------------- install
+
+local function setPath(path, why)
+    BH.namesPath = path
+    BH.namesWhy = why
+    BH.Log("names: " .. path .. (why and (" (" .. why .. ")") or ""))
+end
+
+-- Bleakhold's boxes, once: the last name box, CreateCharacter passing "First Last", the Randomize surname.
+local function installOurs()
     if not createLastNameBox() then
-        return
+        return false
     end
 
     -- Every stock caller passes the first box's text; FullName adds the last name. A failure in FullName must
@@ -394,26 +501,75 @@ local function installTwoNames()
         end
     end
 
-    -- A paid change starts from the character's own name; a new character from empty boxes.
-    BH.WrapGlobal("CharacterCreate_OnShow", nil, function()
-        if PAID_SERVICE_TYPE and type(PaidChange_GetName) == "function" then
-            BH.SetFullName(PaidChange_GetName())
-        else
-            _G[LAST_NAME_EDIT]:SetText("")
-        end
-    end)
-
     BH.HookScript(CharacterCreateRandomName, "OnClick", function()
         _G[LAST_NAME_EDIT]:SetText(BH.RandomSurname(selectedRaceFile()))
     end)
 
-    -- Renaming takes the whole name in one box.
-    if CharacterRenameEditBox and CharacterRenameEditBox.SetMaxLetters then
-        CharacterRenameEditBox:SetMaxLetters(BH.FULL_NAME_LETTERS)
-    end
-
     if CharacterCreateNameEdit:IsShown() then
         _G[LAST_NAME_EDIT]:Show()
+    end
+
+    return true
+end
+
+-- A paid change starts from the character's own name; a new character from empty boxes.
+local function resetOurs()
+    if PAID_SERVICE_TYPE and type(PaidChange_GetName) == "function" then
+        BH.SetFullName(PaidChange_GetName())
+    else
+        _G[LAST_NAME_EDIT]:SetText("")
+    end
+end
+
+-- Every show of the screen, after its own OnShow: the first one decides (the screen's boxes exist by then, also one
+-- its OnShow makes), the later ones only reset Bleakhold's boxes.
+local function onScreenShown()
+    if BH.namesPath == "waiting" then
+        setPath("deciding")
+        local why = BH.ScreenSecondNameBox()
+
+        if why then
+            setPath("realm", "the screen has its own second name box: " .. why .. "; Bleakhold adds none")
+        elseif installOurs() then
+            setPath("bleakhold", "stock screen: Bleakhold's First Name and Last Name boxes")
+        else
+            setPath("kept", "the name box has no anchor to take: the single stock box stays")
+        end
+    end
+
+    if BH.namesPath == "bleakhold" then
+        resetOurs()
+    end
+end
+
+local function installTwoNames()
+    if not BLEAKHOLD_TWO_NAMES then
+        setPath("off", "BLEAKHOLD_TWO_NAMES is off: the stock name box")
+        return
+    end
+
+    if not CharacterCreateNameEdit then
+        setPath("kept", "no CharacterCreateNameEdit on this screen")
+        return
+    end
+
+    -- Renaming takes the whole name in one box (on any screen: the server takes "First Last").
+    if CharacterRenameEditBox and CharacterRenameEditBox.SetMaxLetters and CharacterRenameEditBox.GetMaxLetters then
+        local letters = CharacterRenameEditBox:GetMaxLetters() or 0
+
+        if letters > 0 and letters < BH.FULL_NAME_LETTERS then
+            CharacterRenameEditBox:SetMaxLetters(BH.FULL_NAME_LETTERS)
+        end
+    end
+
+    setPath("waiting")
+    BH.HookScript(CharacterCreate or CharacterCreateNameEdit:GetParent(), "OnShow", onScreenShown)
+
+    -- Shown already (never at login, but a reload of the glue on that screen): decide now.
+    local screen = CharacterCreate or CharacterCreateNameEdit:GetParent()
+
+    if screen and screen.IsVisible and screen:IsVisible() then
+        onScreenShown()
     end
 end
 

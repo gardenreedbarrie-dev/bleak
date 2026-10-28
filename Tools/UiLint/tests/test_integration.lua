@@ -105,12 +105,78 @@ test("launcher: every window with its key binding, a tooltip line and Bleakhold'
         keys[#keys + 1] = e.key
         H.ok(bindings:find('name="' .. e.binding .. '"', 1, true), e.key .. ": binding in Bindings.xml")
         H.ok(type(M.env["BINDING_NAME_" .. e.binding]) == "string", e.key .. ": binding label")
-        H.ok(e.title ~= "" and e.description ~= "", e.key .. ": title and tooltip line")
-        H.ok(ns.UI.openers[e.key], e.key .. ": an opener")
+        local text = type(e.description) == "function" and e.description() or e.description
+        H.ok(e.title ~= "" and type(text) == "string" and text ~= "", e.key .. ": title and tooltip line")
+        H.ok(type(e.open) == "function", e.key .. ": opens")
+        if e.key ~= "camp" then
+            H.ok(ns.UI.openers[e.key], e.key .. ": an opener")
+        end
+        H.ok(e.shown == nil or type(e.shown) == "function", e.key .. ": shown is a predicate")
         checkIcon(e.icon, e.key)
     end
-    H.eq(table.concat(keys, ","), "activities,collections,animations,season,leaderboards,graphics")
+    H.eq(table.concat(keys, ","), "activities,collections,animations,season,leaderboards,graphics,camp")
 end, withAddicatUI())
+
+------------------------------------------------------------------------------------------------------
+-- Make camp: the minimap orbs are off with AddicatUI, so its launcher and a key binding make camp
+------------------------------------------------------------------------------------------------------
+local CAMPING = { [6] = 512 }
+
+local function campEntry(M)
+    for _, e in ipairs(M.env.AddicatUI.launchers[1].entries) do
+        if e.key == "camp" then return e end
+    end
+end
+
+local function campIntents(M)
+    local n = 0
+    for _, it in ipairs(H.intents(M)) do
+        if it.op == "CAMP" and it.fields[1] == "M" then n = n + 1 end
+    end
+    return n
+end
+
+test("launcher: Make camp, listed while the realm has camping on, makes camp with the orbs off", function(M, ns)
+    local e = campEntry(M)
+    H.ok(not M.env.BleakholdOrbHolder:IsShown(), "the orbs are off with AddicatUI")
+    H.ok(e, "a Make camp entry")
+    H.eq(e.title, "Make camp")
+    H.eq(e.binding, "BLEAKHOLD_MAKECAMP")
+    H.ok(not e.shown(), "not listed before the server says camping is on")
+    FX.connect(M, H)
+    H.ok(not e.shown(), "not listed on a realm with camping off")
+    FX.connect(M, H, CAMPING)
+    H.ok(e.shown(), "listed with camping on")
+    H.ok(not e.isOpen(), "an action, never open")
+    e.open()
+    M.Advance(0.3)
+    H.eq(campIntents(M), 1, "the entry sends CAMP M, as the orb does")
+end, withAddicatUI())
+
+test("launcher: Make camp's tooltip line tells the cooldown the orb showed", function(M, ns)
+    FX.connect(M, H, CAMPING)
+    local e = campEntry(M)
+    H.ok(not e.description():find("again in", 1, true), "no cooldown: no countdown")
+    H.send(M, "CAMPST", { { "N", 0, 0, 0, 1800, 0, 0, {}, {}, "", 0, 0 } })   -- made camp: 30 min cooldown
+    H.contains(e.description(), "You can make camp again in", "the cooldown")
+    local sent = campIntents(M)
+    e.open()
+    M.Advance(0.3)
+    H.eq(campIntents(M), sent, "on cooldown: refused locally, as the orb is")
+    M.Advance(1801)
+    H.ok(not e.description():find("again in", 1, true), "the cooldown ran out")
+end, withAddicatUI())
+
+test("Make camp key binding: Bindings.xml runs BleakholdMakeCamp, labelled for Key Bindings", function(M, ns)
+    local bindings = assert(host_readfile(addonDir .. "/Bindings.xml"))
+    H.ok(bindings:find('name="BLEAKHOLD_MAKECAMP"', 1, true), "the binding")
+    H.ok(bindings:find("BleakholdMakeCamp()", 1, true), "runs BleakholdMakeCamp")
+    H.eq(M.env.BINDING_NAME_BLEAKHOLD_MAKECAMP, "Make camp")
+    FX.connect(M, H, CAMPING)
+    M.env.BleakholdMakeCamp()
+    M.Advance(0.3)
+    H.eq(campIntents(M), 1, "the key makes camp")
+end)
 
 test("launcher: an entry toggles its window and reports it open", function(M, ns)
     FX.connect(M, H)
@@ -230,10 +296,68 @@ test("tracker: AddicatUI's quest tracker on the left half puts the key tracker o
 end, { before = function(M) questTracker(M, 150) end })
 
 ------------------------------------------------------------------------------------------------------
+-- Minimap orbs: off by default with AddicatUI (its launcher lists the windows), the player's choice wins
+------------------------------------------------------------------------------------------------------
+test("orbs: on by default without AddicatUI, the only launcher there is", function(M, ns)
+    H.ok(M.env.BleakholdOrbHolder:IsShown(), "shown")
+    H.eq(M.env.BleakholdCharDB.orbsHidden, nil, "no choice saved")
+    M.env.SlashCmdList.BLEAKHOLD("orbs off")
+    H.ok(not M.env.BleakholdOrbHolder:IsShown(), "off")
+    H.eq(M.env.BleakholdCharDB.orbsHidden, true, "the choice is saved")
+    M.env.SlashCmdList.BLEAKHOLD("orbs on")
+    H.ok(M.env.BleakholdOrbHolder:IsShown())
+    H.eq(M.env.BleakholdCharDB.orbsHidden, false)
+end)
+
+test("orbs: off by default with AddicatUI; /bh orbs on and reset bring them back", function(M, ns)
+    H.ok(not M.env.BleakholdOrbHolder:IsShown(), "AddicatUI's micro menu lists the windows: no orbs")
+    H.eq(M.env.BleakholdCharDB.orbsHidden, nil, "a default, not a saved choice")
+    H.eq(#M.env.AddicatUI.launchers, 1, "the launcher is there instead")
+    M.FireEvent("PLAYER_ENTERING_WORLD")
+    H.ok(not M.env.BleakholdOrbHolder:IsShown(), "still off after entering the world")
+    M.env.SlashCmdList.BLEAKHOLD("orbs on")
+    H.ok(M.env.BleakholdOrbHolder:IsShown(), "on when asked")
+    M.env.SlashCmdList.BLEAKHOLD("orbs off")
+    H.ok(not M.env.BleakholdOrbHolder:IsShown())
+    M.env.SlashCmdList.BLEAKHOLD("orbs reset")
+    H.ok(M.env.BleakholdOrbHolder:IsShown(), "reset shows them at their first places")
+    H.eq(M.env.BleakholdCharDB.orbsHidden, false)
+end, withAddicatUI())
+
+test("orbs: a player who turned them on keeps them with AddicatUI", function(M, ns)
+    H.ok(M.env.BleakholdOrbHolder:IsShown(), "the saved choice wins over the default")
+    M.FireEvent("ADDON_LOADED", "AddicatUI")
+    H.ok(M.env.BleakholdOrbHolder:IsShown(), "and keeps winning")
+end, withAddicatUI(function(M) M.env.BleakholdCharDB = { orbsHidden = false } end))
+
+test("orbs: a player who turned them off keeps them off without AddicatUI", function(M, ns)
+    H.ok(not M.env.BleakholdOrbHolder:IsShown())
+end, { before = function(M) M.env.BleakholdCharDB = { orbsHidden = true } end })
+
+test("orbs: AddicatUI without the launcher in its strip leaves them on", function(M, ns)
+    H.ok(M.env.BleakholdOrbHolder:IsShown(), "micro menu module off: the orbs are the launcher")
+    M.env.AddicatUI.MicroMenuLauncherAvailable = function() error("broken") end
+    M.allowErrors = true
+    M.FireEvent("ADDON_LOADED", "AddicatUI")
+    H.ok(not M.env.BleakholdOrbHolder:IsShown(), "a failing query counts as AddicatUI being there")
+end, withAddicatUI(function(M) M.env.AddicatUI.MicroMenuLauncherAvailable = function() return false end end))
+
+test("orbs: AddicatUI loaded after Bleakhold turns the default off", function(M, ns)
+    H.ok(M.env.BleakholdOrbHolder:IsShown(), "on while AddicatUI is not there")
+    fakeAddicatUI(M)
+    M.FireEvent("ADDON_LOADED", "AddicatUI")
+    H.ok(not M.env.BleakholdOrbHolder:IsShown(), "off once its launcher lists the windows")
+end)
+
+------------------------------------------------------------------------------------------------------
 -- Editor mode: minimap orbs
 ------------------------------------------------------------------------------------------------------
 test("editor: an orb follows its outline around the minimap ring and saves the angle", function(M, ns)
     local aui = M.env.AddicatUI
+    -- with AddicatUI the orbs start off (its launcher lists the windows), and so does their outline
+    H.ok(not M.env.BleakholdOrbHolder:IsShown(), "orbs off by default with AddicatUI")
+    H.ok(not aui.movers.bleakhold_orb_season.visible(), "hidden orbs are not in the editor")
+    M.env.SlashCmdList.BLEAKHOLD("orbs on")
     M.Advance(1.1)
     for _, o in ipairs(ns.Orbs.list) do
         local mover = aui.movers["bleakhold_orb_" .. o.key]

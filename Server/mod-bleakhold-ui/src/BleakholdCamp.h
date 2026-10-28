@@ -12,7 +12,9 @@
  * new fires. Game objects and players are kept as guids and found again on every use, so a fire that despawns, a grid
  * that unloads or a player who logs out leaves nothing dangling.
  *
- * Glide (Walk on Air): GLIDE puts the feather fall aura (BleakholdUi.Glide.Spell) on the player. A fall at least
+ * Glide (Walk on Air): GLIDE, or a cast of the racial in the spellbook (BleakholdUi.Glide.CastSpell, which the module
+ * teaches at login to the races that can glide; its spell script checks the cast and starts the glide), puts the
+ * feather fall aura (BleakholdUi.Glide.Spell) on the player; the two share the cooldown. A fall at least
  * CampRules::GlideMinHeight above the ground becomes a glide: the server pushes the player forward along their facing
  * (Unit::KnockbackFrom from a point behind them, BleakholdUi.Glide.ForwardSpeed, no vertical speed: never up), and
  * again whenever they turn (OnPlayerMove: the client reports its facing while falling, and keeps the direction a fall
@@ -83,6 +85,7 @@ namespace Bleakhold
         bool glideRequireFalling = false;    // GLIDE only in the air
         bool glideInstances = false;         // GLIDE in dungeons and raids
         uint32_t glideStartKit = 13709;      // SpellVisualKit played when a glide starts (0: none)
+        uint32_t glideCastSpell = CampRules::WalkOnAirCastSpell;   // the racial in the spellbook (0: none)
     };
 
     class Camp
@@ -98,6 +101,11 @@ namespace Bleakhold
         // ---- intents and the CAMPST topic (world thread) ----
         void HandleCamp(Player* player, Intent const& intent);
         void HandleGlide(Player* player, Intent const& intent);
+        // The spellbook racial (spell_bleakhold_walk_on_air, map threads): the cast result of its checks (GLIDE's,
+        // in the air only; CampRules::CastResult::Ok to go on), and the glide when it hits. `recoveryMs` is the
+        // spell's own cooldown, which the core has just started.
+        uint32_t CheckGlideCast(Player* player);
+        void OnGlideCast(Player* player, uint32_t castSpell, uint32_t recoveryMs);
         void HandleRepair(Player* player, Intent const& intent);
         // CAMPST now, or as soon as a second has passed since the last one (GET CAMPST, after HELLO).
         void RequestState(Player* player);
@@ -107,7 +115,8 @@ namespace Bleakhold
         void Update(uint64_t nowMs);
 
         // ---- hooks ----
-        void OnLogin(Player* player);                 // world thread: clears a RESTING flag left by a camp logout
+        void OnLogin(Player* player);                 // world thread: clears a RESTING flag left by a camp logout,
+                                                      // teaches or takes the spellbook racial
         void OnLogout(Player* player);                // world thread: forgets the player's camp state and glide
         // map thread (every movement packet of every player; a single atomic load while nobody glides)
         void OnPlayerMove(Player* player, MovementInfo const& movementInfo, uint32_t opcode);
@@ -171,6 +180,14 @@ namespace Bleakhold
         CampRules::Profession const* ProfessionOf(uint32_t skill) const;
         uint8_t PlaceableTier(Player* player, CampRules::Profession const& prof) const;
         bool CanGlide(Player* player) const;
+        // GLIDE's facts for the player (`requireAir`: the spellbook racial, which needs the air whatever the config)
+        CampRules::GlideFacts GlideFactsOf(Player* player, bool requireAir);
+        // the glide once its checks passed: the aura, the cooldown, the run; false when the aura did not land
+        bool StartGlide(Player* player, bool inAir);
+        // the spellbook racial shows the glide's cooldown (`seconds` from now; 0 clears it), when the player knows it
+        void ShowGlideCooldown(Player* player, uint32_t seconds);
+        // login: the spellbook racial for who can glide (learned once onto a free action bar slot), not for others
+        void SyncGlideSpell(Player* player);
         // the glide's push (map thread or world thread, for the player given): along `facing`, `fallSpeed` yd/s down
         static void GlidePush(Player* player, float facing, float forwardSpeed, float fallSpeed);
         static bool CanPush(Player* player);

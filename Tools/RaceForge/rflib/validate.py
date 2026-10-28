@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from . import masks as maskrules
 from . import schema_access
 from . import spells as spellmod
-from .config import ALLIANCE_COLUMN, LOCALES, MONK_CLASS_ID, PANDAREN_RACE_IDS, TEAM_LANGUAGE, Config
+from .config import ALLIANCE_COLUMN, CAST_BY_TEXT, LOCALES, MONK_CLASS_ID, PANDAREN_RACE_IDS, TEAM_LANGUAGE, Config
 from .dbc import DbcError, DbcTable, to_signed
 from .forge import (CHAR_SECTIONS_KEY, RACE_COLUMN, RACE_ROW_TABLES, READ_ONLY_TABLES, SKILL_LINE_COLUMN, SMART_MASKS, SPELL_TABLES,
                     find_dbc, is_dropped_row, spell_reference_problems)
@@ -416,7 +416,7 @@ def check_racial_spells(v: Validation, result: dict[str, DbcTable], config: Conf
 
     for spell_id in spell_ids:
         spell = config.spells[spell_id]
-        label = f"{'racial' if spell.cast_by == 'race' else 'server-cast'} spell {spell_id} {spell.name}"
+        label = f"{CAST_BY_TEXT.get(spell.cast_by, spell.cast_by)} spell {spell_id} {spell.name}"
         row = by_id.get(spell_id)
 
         if row is None:
@@ -451,6 +451,8 @@ def check_racial_spells(v: Validation, result: dict[str, DbcTable], config: Conf
 
         if spell.cast_by == "race":
             v.expect(bool(owners), f"{label}: belongs to a race")
+        elif spell.cast_by == "module":
+            v.expect(not owners, f"{label}: no race learns it (a server module teaches it)")
         else:
             v.expect(not owners, f"{label}: no race learns it (the server casts it)")
 

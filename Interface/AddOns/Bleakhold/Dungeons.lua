@@ -1,6 +1,7 @@
 -- Bleakhold: Activities - Dungeons. The Dungeon Journey board (chapters, dungeon cards, tier, group
--- size, best score, server record, daily bounty, double Shards marker, Shards) and the queue panel
--- (dungeon or Eclipse Rift, join/leave, status, the server's level band, group proposal).
+-- size, best score, server record, daily bounty, double Shards marker, Shards), the queue panel
+-- (dungeon or Eclipse Rift, join/leave, status, the server's level band, group proposal) and, under it, the
+-- game's own Dungeon Finder.
 -- Every button sends an intent; what is unlocked, matched or paid is decided by the server.
 local ADDON, ns = ...
 local U, UI, Comm, Data = ns.U, ns.UI, ns.Comm, ns.Data
@@ -264,6 +265,19 @@ q.accept = UI.Button(q, (QW - 30) / 2, 30, "Accept", "teal", 13)
 q.accept:SetPoint("BOTTOMLEFT", q, "BOTTOMLEFT", 12, 12)
 q.decline = UI.Button(q, (QW - 30) / 2, 30, "Decline", "dark", 13)
 q.decline:SetPoint("BOTTOMRIGHT", q, "BOTTOMRIGHT", -12, 12)
+
+-- Under the queue panel: the game's own Dungeon Finder (random dungeons and heroics), which the I key opened before
+-- it opened Activities.
+P.finder = UI.Button(P, QW, 30, "Dungeon Finder", "ghost", 12)
+P.finder:SetPoint("TOPRIGHT", q, "BOTTOMRIGHT", 0, -12)
+P.finder:SetScript("OnClick", function()
+    A.OpenDungeonFinder()
+end)
+P.finder.tooltip = function()
+    local key = GetBindingKey and GetBindingKey("TOGGLELFGPARENT")
+    return { "Dungeon Finder", { "The game's own finder: random dungeons and random heroics.", C.mid, true },
+             { key and ("Key: " .. key) or "Give it a key in Key Bindings: Toggle Dungeon Finder.", C.mute, true } }
+end
 
 local ROLE_SHORT = { [1] = "T", [2] = "H", [4] = "D" }
 

@@ -48,7 +48,7 @@ EREDAR_DISABLED = EREDAR_DISABLED or "Your account cannot create an Eredar."
 -- Their racials (the server's mod-bleakhold and Tools/RaceForge's races.json): CharacterCreate.lua lists every
 -- ABILITY_INFO_<FILE><n> from 1 up to the first missing one above the race's description.
 ABILITY_INFO_HIGHELF1 = ABILITY_INFO_HIGHELF1 or "- Wind Blessed: melee, ranged and spell haste increased by 3%."
-ABILITY_INFO_HIGHELF2 = ABILITY_INFO_HIGHELF2 or "- Walk on Air: a fall becomes a glide you steer by turning."
+ABILITY_INFO_HIGHELF2 = ABILITY_INFO_HIGHELF2 or "- Walk on Air: in the air, glide for 10 sec and steer it by turning."
 ABILITY_INFO_EREDAR1 = ABILITY_INFO_EREDAR1 or "- Elemental Insight: damage dealt versus Elementals increased by 5%."
 ABILITY_INFO_EREDAR2 = ABILITY_INFO_EREDAR2
     or "- Read Ley Line: health and mana regeneration increased by 100% for 30 sec, or 2 min while resting."

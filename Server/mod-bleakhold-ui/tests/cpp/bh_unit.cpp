@@ -1170,6 +1170,73 @@ TEST("camping: GLIDE refusals come in their order")
         CHECK_MSG(doc.find("`" + std::string(code) + "`") != std::string::npos, std::string(code) + " is documented");
 }
 
+TEST("camping: Walk on Air in the spellbook: cast results, who knows it, its action bar slot, its rows")
+{
+    using namespace Bleakhold::CampRules;
+    CHECK(WalkOnAirCastSpell == 100801 && WalkOnAirCastSpell != WalkOnAirSpell);
+    // a refused cast shows the client's own cast result (3.3.5a SpellCastResult); the air is the spell's own need
+    CHECK(GlideCastResult(GlideRefusal::None) == CastResult::Ok && CastResult::Ok == 255);
+    CHECK(GlideCastResult(GlideRefusal::Ground) == 171);     // SPELL_FAILED_NOT_ON_GROUND
+    CHECK(GlideCastResult(GlideRefusal::Cooldown) == 67);    // SPELL_FAILED_NOT_READY
+    CHECK(GlideCastResult(GlideRefusal::Race) == 107);       // SPELL_FAILED_SPELL_UNAVAILABLE
+    CHECK(GlideCastResult(GlideRefusal::Here) == 60);        // SPELL_FAILED_NOT_HERE
+    CHECK(GlideCastResult(GlideRefusal::Dead) == 23);        // SPELL_FAILED_CASTER_DEAD
+    CHECK(GlideCastResult(GlideRefusal::Mounted) == 64);     // SPELL_FAILED_NOT_MOUNTED
+    CHECK(GlideCastResult(GlideRefusal::Flying) == 59);      // SPELL_FAILED_NOT_FLYING
+    CHECK(GlideCastResult(GlideRefusal::Water) == 88);       // SPELL_FAILED_ONLY_ABOVEWATER
+    CHECK(GlideCastResult(GlideRefusal::Held) == 103);       // SPELL_FAILED_ROOTED
+    std::set<uint32_t> seen;
+    for (GlideRefusal r : { GlideRefusal::Race, GlideRefusal::Here, GlideRefusal::Dead, GlideRefusal::Mounted,
+             GlideRefusal::Flying, GlideRefusal::Water, GlideRefusal::Held, GlideRefusal::Ground,
+             GlideRefusal::Cooldown })
+    {
+        uint32_t const result = GlideCastResult(r);
+        CHECK_MSG(result != CastResult::Ok && result < 255 && seen.insert(result).second, "one result per refusal");
+    }
+    // the spell needs the air: standing is refused, a jump or a fall goes on
+    GlideFacts f;
+    f.raceOk = true; f.alive = true; f.requireFalling = true;
+    CHECK(GlideCastResult(CheckGlide(f)) == CastResult::NotOnGround);
+    f.inAir = true;
+    CHECK(GlideCastResult(CheckGlide(f)) == CastResult::Ok);
+    f.cooldownLeft = 30;
+    CHECK(GlideCastResult(CheckGlide(f)) == CastResult::NotReady);
+    // who knows it
+    CHECK(GlideSpellbookChange(true, false) == SpellbookChange::Learn);
+    CHECK(GlideSpellbookChange(true, true) == SpellbookChange::None);
+    CHECK(GlideSpellbookChange(false, true) == SpellbookChange::Unlearn);
+    CHECK(GlideSpellbookChange(false, false) == SpellbookChange::None);
+    // where it goes when it is learned: the main bar first, then the bars the player sees, never page 2 or a stance bar
+    CHECK(FirstFreeBarSlot({}) == 0);
+    CHECK(FirstFreeBarSlot({ 0, 1, 2 }) == 3);
+    std::vector<uint8_t> full;
+    for (uint8_t s = 0; s < 12; ++s)
+        full.push_back(s);
+    CHECK(FirstFreeBarSlot(full) == 60);                       // bottom left bar
+    for (uint8_t s = 60; s < 72; ++s)
+        full.push_back(s);
+    CHECK(FirstFreeBarSlot(full) == 48);                       // bottom right bar
+    for (uint8_t s = 48; s < 60; ++s)
+        full.push_back(s);
+    CHECK(FirstFreeBarSlot(full) == 24);                       // right bar
+    for (uint8_t s = 24; s < 48; ++s)
+        full.push_back(s);
+    CHECK(FirstFreeBarSlot(full) == -1);                       // 12-23 and 72+ stay untouched
+    // its rows: the module's SQL (02_bleakhold_walk_on_air.sql) has both spells, the script name the module
+    // registers, the 90 s cooldown BleakholdUi.Glide.Cooldown starts at, the dummy on the caster and Slow Fall's look
+    std::string const sql =
+        bhtest::ReadFile(g_repo + "/Server/mod-bleakhold-ui/data/sql/db-world/02_bleakhold_walk_on_air.sql");
+    CHECK(sql.find("DELETE FROM `spell_dbc` WHERE `ID` IN (100800, 100801);") != std::string::npos);
+    CHECK(sql.find("(100801, 262160, 1, 90000, 101, 1, -1, 3, 1, 1, 505, 'Walk on Air'") != std::string::npos);
+    CHECK(sql.find("(100800, 262160, 1, 101, 1, 1, -1, 6, 1, 1, 105, 63, 1931, 'Walk on Air'") != std::string::npos);
+    CHECK(sql.find("VALUES (100801, 'spell_bleakhold_walk_on_air');") != std::string::npos);
+    std::string const scripts = bhtest::ReadFile(g_repo + "/Server/mod-bleakhold-ui/src/BleakholdScripts.cpp");
+    CHECK(scripts.find("RegisterSpellScript(spell_bleakhold_walk_on_air);") != std::string::npos);
+    std::string const conf = bhtest::ReadFile(g_repo + "/Server/mod-bleakhold-ui/conf/mod_bleakhold_ui.conf.dist");
+    CHECK(conf.find("\nBleakholdUi.Glide.CastSpell = 100801\n") != std::string::npos);
+    CHECK(conf.find("\nBleakholdUi.Glide.Cooldown = 90\n") != std::string::npos);
+}
+
 TEST("camping: a glide waits for a ledge, starts over a drop, steers by turning and ends on landing")
 {
     using namespace Bleakhold::CampRules;

@@ -192,6 +192,12 @@ The in-game Bleakhold interface is a built-in addon in `Interface/AddOns/Bleakho
 - Collections, Season and Leaderboards windows; Collections > Transmog is the transmog window (below).
 - Minimap buttons, the Mythic+ tracker and keystone countdown (with a DBM pull bar), task toasts, item tooltip
   lines and coloured server announcements.
+- The windows open from AddicatUI's micro menu (the Bleakhold button lists them, and Make camp while the realm has
+  camping on) and from their keys. I opens Activities: set once for each set of key bindings (the account's, or a
+  character's own with Character Specific Key Bindings) when I still opens the stock Dungeon Finder or nothing (a key
+  you gave anything else stays yours); the Dungeon Finder button under the Dungeons page's queue opens the game's own
+  finder. The minimap buttons are off while AddicatUI is loaded (its micro menu lists the same windows) and on
+  without it; `/bh orbs on`, `off` or `reset` is your own choice and wins either way.
 
 Copy the folder to `Interface\AddOns\Bleakhold` next to the executable. `/bh` (or `/bleakhold`) opens it,
 `/bh help` lists the commands, and `/bh demo` shows every window with sample data without a server.
@@ -328,19 +334,23 @@ in, get Campfire Warmth (bonus experience) and the buffs of the camp objects aro
 decides everything (`docs/BleakholdProtocol.md`, section 16); the addon shows its `CAMPST` state and counts the
 timers down between messages.
 
-- Make camp: the flame orb on the minimap ring (the cooldown under it), `/makecamp`, `/campfire` or `/bh camp`
-  (`/makecamp pack` puts your fire out). `/camp` is left alone: it is the game's own logout command.
+- Make camp: `/makecamp`, `/campfire` or `/bh camp` (`/makecamp pack` puts your fire out), a key (Key Bindings,
+  Bleakhold, Make camp), Make camp in AddicatUI's micro menu (the Bleakhold button; its tooltip has the cooldown), or
+  the flame orb on the minimap ring (the cooldown under it) with the minimap buttons on (`/bh orbs on`). `/camp` is
+  left alone: it is the game's own logout command.
 - The Camp frame, shown while you are at a campfire (drag it anywhere): Resting with the settle countdown, or
   Camping; the fire's time left; Warmth and your XP bonus; the camp objects at the fire (hover for the
   profession, tier and buff); a Place button for each object your professions can set down (one per player per
   fire, three per fire); Repair while repairing is allowed there; Pack up at your own fire.
 - Away from a fire, a small indicator shows Warmth time left, Well Fed and the XP bonus while they last.
-- High Elves glide with Walk on Air: the Glide button (with its cooldown, and a glide bar over it while a glide
-  runs), a key that works in mid-air (Key Bindings, Bleakhold, Walk on Air) or `/glide`. Use it while you fall or
-  just before you step off a ledge: Walk on Air lasts 10 seconds from the moment you use it, and a fall in that time
-  becomes a glide that carries you forward and follows your facing (turn to steer). It never gains altitude; landing
-  ends it without fall damage. 90 second cooldown. Not in battlegrounds, arenas, dungeons or raids (a realm may allow
-  dungeons and raids).
+- High Elves glide with Walk on Air, a racial in the spellbook (General) that the realm teaches at login and puts on
+  a free action bar slot once: jump or step off a ledge, then cast it (on the ground it says you must be in the air
+  and costs nothing). The glide lasts 10 seconds, carries you forward and follows your facing (turn to steer); it
+  never gains altitude, and landing ends it without fall damage. 90 second cooldown, shown on the action bar and
+  shared with the key (Key Bindings, Bleakhold, Walk on Air, which also works just before a ledge) and `/glide`.
+  Without the spell (a realm that has not taught it yet) the Glide button does the same, with its cooldown; a glide
+  bar shows the glide's time either way. Not in battlegrounds, arenas, dungeons or raids (a realm may allow dungeons
+  and raids).
 - Field repair: `/repair` (`/bh repair`) or the Repair button, for blacksmiths anywhere or anyone at a fire with a
   blacksmith's anvil.
 - Refusals show as short sentences in the error frame (not outdoors, in combat, cooldown, skill too low, ...).
@@ -513,8 +523,10 @@ The client loads `Interface\Bleakhold\Glue\BleakholdGlue.toc` right after the st
 `Interface\GlueXML\GlueXML.toc` on every glue load (BLEAKHOLD(loginui), `CGlueMgr::Resume`). Those files
 restyle and extend the stock screens from Lua: the login screen, a restyled dialog with a connecting
 progress bar, and character creation with the High Elf and Eredar races and a First Name and a Last Name box
-(the server's mod-two-names accepts "First Last"; the last name is optional). No Blizzard file is replaced, so
-this works with signature checks on or off.
+(the server's mod-two-names accepts "First Last"; the last name is optional). A realm patch's own character creation
+screen that already has a second name box (a two-names screen) gets none of Bleakhold's: its boxes stay as they are
+and its own code builds the name (`BleakholdGlue.namesPath` says which way the glue went). No Blizzard file is
+replaced, so this works with signature checks on or off.
 
 - Install: copy `Interface/Bleakhold/Glue` from this repository to `<client>\Data\Interface\Bleakhold\Glue\`
   (or `<client>\Interface\Bleakhold\Glue\`), or pack it into a `Data\patch-?.MPQ` under the same path, before

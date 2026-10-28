@@ -1300,8 +1300,10 @@ end
 -- ============================================================================
 -- ADDON LAUNCHER (launcherButton and its flyout)
 -- ============================================================================
--- spec = { id, title, description, icon, entries = { { title, description, binding, icon, open, isOpen } } }
+-- spec = { id, title, description, icon, entries = { { title, description, binding, icon, open, isOpen, shown } } }
 -- icon = { file, coords = { left, right, top, bottom }, color = { r, g, b } }; the owner's callbacks run in pcall.
+-- An entry's description may be a function (read on hover), and shown a function: the flyout lists the entry only
+-- while it returns true (read each time the flyout opens; a failing one counts as shown).
 
 local launcher
 local launcherFlyout
@@ -1344,6 +1346,21 @@ local function ShowLauncherTooltip(owner, title, binding, description)
     GameTooltip_AddNewbieTip(owner, text, 1.0, 1.0, 1.0, description)
 end
 
+local function EntryShown(entry)
+    if type(entry.shown) ~= "function" then return true end
+    local ok, result = pcall(entry.shown)
+    if not ok then
+        geterrorhandler()(result)
+        return true
+    end
+    return result and true or false
+end
+
+local function EntryText(entry)
+    if type(entry.description) == "function" then return CallLauncher(entry.description) end
+    return entry.description
+end
+
 local function BindingLabel(binding)
     local key = binding and GetBindingKey(binding)
     if not key then return nil end
@@ -1356,26 +1373,30 @@ local function LayoutFlyout(flyout)
     flyout.title:SetText(launcher and launcher.title or "")
     local width = flyout.title:GetStringWidth() + 8
     local y = FLYOUT_PAD_Y + FLYOUT_ROW
-    for index, entry in ipairs(entries) do
-        local row = flyout.rows[index] or flyout.NewRow(index)
-        row.entry = entry
-        PaintLauncherIcon(row.icon, entry.icon, false)
-        row.text:SetText(entry.title or "")
-        local key = BindingLabel(entry.binding)
-        row.detail:SetText(key or "")
-        row.text:SetPoint("RIGHT", key and row.detail or row, key and "LEFT" or "RIGHT", key and -12 or 0, 0)
-        row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", flyout, "TOPLEFT", FLYOUT_PAD_X, -y)
-        row:SetPoint("RIGHT", flyout, "RIGHT", -FLYOUT_PAD_X, 0)
-        row:UnlockHighlight()
-        if CallLauncher(entry.isOpen) then row:LockHighlight() end
-        row:Show()
-        local w = FLYOUT_ICON + 6 + row.text:GetStringWidth() + 8
-        if key then w = w + 12 + row.detail:GetStringWidth() end
-        width = math.max(width, w)
-        y = y + FLYOUT_ROW
+    local index = 0
+    for _, entry in ipairs(entries) do
+        if EntryShown(entry) then
+            index = index + 1
+            local row = flyout.rows[index] or flyout.NewRow(index)
+            row.entry = entry
+            PaintLauncherIcon(row.icon, entry.icon, false)
+            row.text:SetText(entry.title or "")
+            local key = BindingLabel(entry.binding)
+            row.detail:SetText(key or "")
+            row.text:SetPoint("RIGHT", key and row.detail or row, key and "LEFT" or "RIGHT", key and -12 or 0, 0)
+            row:ClearAllPoints()
+            row:SetPoint("TOPLEFT", flyout, "TOPLEFT", FLYOUT_PAD_X, -y)
+            row:SetPoint("RIGHT", flyout, "RIGHT", -FLYOUT_PAD_X, 0)
+            row:UnlockHighlight()
+            if CallLauncher(entry.isOpen) then row:LockHighlight() end
+            row:Show()
+            local w = FLYOUT_ICON + 6 + row.text:GetStringWidth() + 8
+            if key then w = w + 12 + row.detail:GetStringWidth() end
+            width = math.max(width, w)
+            y = y + FLYOUT_ROW
+        end
     end
-    for index = #entries + 1, #flyout.rows do flyout.rows[index]:Hide() end
+    for unused = index + 1, #flyout.rows do flyout.rows[unused]:Hide() end
     flyout:SetSize(math.max(FLYOUT_MIN_WIDTH, width) + FLYOUT_PAD_X * 2, y + FLYOUT_PAD_Y)
 end
 
@@ -1445,7 +1466,7 @@ local function EnsureFlyout()
         end)
         row:SetScript("OnEnter", function(self)
             local entry = self.entry
-            if entry then ShowLauncherTooltip(self, entry.title, entry.binding, entry.description) end
+            if entry then ShowLauncherTooltip(self, entry.title, entry.binding, EntryText(entry)) end
         end)
         row:SetScript("OnLeave", function() GameTooltip:Hide() end)
         flyout.rows[index] = row
@@ -2747,6 +2768,13 @@ function addon.RefreshMicroMenuLauncher(live)
     elseif live and IsLoggedIn() then
         addon.RefreshMicromenuButtons()
     end
+end
+
+-- Whether a launcher has its place in the strip: the micro menu module on and its option (show_launcher) not off.
+-- Bleakhold reads it to keep its minimap buttons off while the launcher lists its windows.
+function addon.MicroMenuLauncherAvailable()
+    local mm = addon.db and addon.db.profile and addon.db.profile.micromenu
+    return (IsModuleEnabled() and not (mm and mm.show_launcher == false)) and true or false
 end
 
 -- Another addon's launcher (Bleakhold's); one at a time, a second id replaces the first. Returns true when taken.

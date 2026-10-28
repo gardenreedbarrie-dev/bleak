@@ -4,8 +4,9 @@
 -- The pieces: a Make camp orb on the minimap ring (with the cooldown under it), the movable Camp frame
 -- shown while the player is at a campfire (state, settle and fire timers, warmth and XP bonus, the camp
 -- objects with tooltips, Place/Repair/Pack up buttons), a small Warmth/Food indicator away from the fire,
--- the Glide button for Walk on Air (cooldown on it, a glide bar over it while a glide runs) and its key binding
--- (BleakholdGlide, Bindings.xml), /makecamp (/campfire), /glide, /repair.
+-- the Glide button for Walk on Air (cooldown on it, a glide bar over it while a glide runs; it makes way for the
+-- spellbook's Walk on Air once the server taught it) and its key binding (BleakholdGlide, Bindings.xml), Make camp's
+-- key binding (BleakholdMakeCamp) and launcher entry (Integration.lua), /makecamp (/campfire), /glide, /repair.
 -- Features: 512 camping, 1024 glide, 2048 field repair; everything of a feature the realm has off hides.
 local ADDON, ns = ...
 local U, UI, Comm, Data = ns.U, ns.UI, ns.Comm, ns.Data
@@ -25,8 +26,17 @@ CP.MAX_OBJECTS = 8       -- icons drawn (the server sends at most 8; a fire hold
 CP.MAX_PLACE = 6         -- place buttons drawn
 CP.ICONS = "Interface\\Icons\\"
 CP.UNKNOWN_ICON = "INV_Misc_QuestionMark"
-CP.GLIDE_ICON = "Spell_Nature_EyeOfTheStorm"   -- Walk on Air's own icon (SpellIcon 1931)
+CP.GLIDE_ICON = "Spell_Magic_FeatherFall"      -- the spellbook racial's icon (SpellIcon 505, races.json 100801)
 CP.GLIDE_NAME = "Walk on Air"
+-- Walk on Air in the spellbook (mod-bleakhold-ui's BleakholdUi.Glide.CastSpell, taught at login to who can glide): its
+-- action bar button does what the Glide button does, sharing the cooldown, so the Glide button makes way for it.
+CP.GLIDE_SPELL = 100801
+-- The cast fails on the ground with SPELL_FAILED_NOT_ON_GROUND (the server's spell script); the client shows that
+-- string. Other things give that result too (the server's item_only_for_flight: Arcane Charges, 34475, used off the
+-- Isle of Quel'Danas flight), so it is reworded only while the player knows Walk on Air (CP.WordGroundError), and
+-- worded so it stays true for those: the stock text comes back once the spell is gone.
+CP.NOT_ON_GROUND_TEXT = "You must be in the air for that. To glide: jump, or step off a ledge, first."
+CP.STOCK_NOT_ON_GROUND = SPELL_FAILED_NOT_ON_GROUND
 -- (no seconds here: BleakholdUi.Glide.Duration may differ; the glide bar and the tooltip's Gliding line show them)
 CP.GLIDE_TEXT = "Glide through the air, steering your descent. Does not gain altitude."
 CP.GLIDE_HOW = "Use it while you fall, or just before you step off a ledge: its time runs from the moment you use it. "
@@ -208,9 +218,29 @@ function CP.Repair()
     return send("REPAIR")
 end
 
--- Key binding entry point (Bindings.xml).
+-- Key binding entry points (Bindings.xml).
 function BleakholdGlide()
     CP.Glide()
+end
+
+function BleakholdMakeCamp()
+    CP.MakeCamp()
+end
+
+-- Make camp in AddicatUI's micro menu launcher (Integration.lua), for while the minimap orbs are off: listed while
+-- the realm has camping on, its tooltip line with the cooldown the orb shows.
+CP.MAKE_CAMP_TEXT = "Light a campfire here: Warmth, and bonus experience once the camp settles."
+
+function CP.CampAvailable()
+    return featureCamp() and true or false
+end
+
+function CP.MakeCampText()
+    local cd = leftOf("cd")
+    if cd and cd >= 1 then
+        return CP.MAKE_CAMP_TEXT .. "\nYou can make camp again in " .. U.Duration(ceil(cd)) .. "."
+    end
+    return CP.MAKE_CAMP_TEXT
 end
 
 ------------------------------------------------------------------------------------------------------
@@ -644,6 +674,20 @@ end)
 -- not empty), with the cooldown on it and, while a glide runs (CAMPST gliding), a glide bar over it. The key
 -- binding (Bindings.xml) does the same as a click, also in mid-air.
 ------------------------------------------------------------------------------------------------------
+-- The spellbook has Walk on Air: its own button (an action bar's) replaces this one.
+function CP.GlideSpellKnown()
+    return (IsSpellKnown and IsSpellKnown(CP.GLIDE_SPELL)) and true or false
+end
+
+-- The ground error, worded for the glide while Walk on Air is known, else the client's own (see NOT_ON_GROUND_TEXT).
+function CP.WordGroundError()
+    if CP.GlideSpellKnown() then
+        SPELL_FAILED_NOT_ON_GROUND = CP.NOT_ON_GROUND_TEXT
+    else
+        SPELL_FAILED_NOT_ON_GROUND = CP.STOCK_NOT_ON_GROUND
+    end
+end
+
 local gb = CreateFrame("Button", "BleakholdGlideButton", UIParent)
 gb:SetSize(36, 36)
 gb:SetFrameStrata("MEDIUM")
@@ -675,6 +719,7 @@ gb:SetScript("OnEnter", function(self)
     lines[#lines + 1] = { (left and left >= 1) and ("Ready in " .. U.Clock(ceil(left))) or "Ready", C.goldLight }
     local key = GetBindingKey and GetBindingKey("BLEAKHOLD_GLIDE")
     lines[#lines + 1] = { key and ("Key: " .. key) or "Bind a key: Key Bindings, Bleakhold, Walk on Air", C.mute }
+    lines[#lines + 1] = { "Walk on Air is in your spellbook (General) once the realm has taught it.", C.mute, true }
     UI.ShowTooltip(self, lines)
 end)
 gb:SetScript("OnLeave", function()
@@ -692,10 +737,13 @@ end
 -- waits there for a ledge). The server says when it ends (a landing) within a second; the bar goes at once when the
 -- client sees the landing itself: a second in the air (IsFalling; a hop is shorter and does not use the glide up),
 -- then on the ground again. That is a guess (the server starts a glide only 2.5 yd above the ground, and holds one
--- whose last push is still on its way): a new fall while the server still says gliding brings the bar back.
+-- whose last push is still on its way): a new fall while the server still says gliding brings the bar back
+-- (CP.GlideBarWatch, below).
 CP.GLIDE_BAR_W = 150
 CP.GLIDE_AIR_SEC = 1.0
-local bar = UI.Bar(gb, CP.GLIDE_BAR_W, 14, C.teal)
+-- (a child of UIParent, placed over the button: it stays when the button makes way for the spellbook's Walk on Air)
+local bar = UI.Bar(UIParent, CP.GLIDE_BAR_W, 14, C.teal)
+bar:SetFrameStrata("MEDIUM")
 bar:SetPoint("BOTTOM", gb, "TOP", 0, 6)
 UI.Backdrop(bar, C.chip, C.chipBorder)
 bar.text = UI.Text(bar, 11, C.text, "body", "CENTER", "OVERLAY")
@@ -790,10 +838,15 @@ end
 function CP.RefreshGlide()
     if not (glideLive() or CP.glidePreview) then
         gb:Hide()
+        bar:Hide()
+        return
+    end
+    CP.UpdateGlideBar()
+    if CP.GlideSpellKnown() and not CP.glidePreview then
+        gb:Hide()   -- the spellbook's Walk on Air is on the action bar; the glide bar still shows over this place
         return
     end
     CP.UpdateGlide()
-    CP.UpdateGlideBar()
     if not gb:IsShown() then
         gpos.Anchor()
         gb:Show()
@@ -805,11 +858,10 @@ gb:SetScript("OnUpdate", function(self, elapsed)
     gacc = gacc + (elapsed or 0)
     if gacc >= 0.25 then
         gacc = 0
-        if not CP.glidePreview and not glideLive() then
+        if not CP.glidePreview and (not glideLive() or CP.GlideSpellKnown()) then
             gb:Hide()
         else
             CP.UpdateGlide()
-            CP.UpdateGlideBar()   -- the bar's own OnUpdate stops while it is hidden
         end
     end
 end)
@@ -822,6 +874,17 @@ bar:SetScript("OnUpdate", function(self, elapsed)
         CP.UpdateGlideBar()
     end
 end)
+
+-- The bar's own OnUpdate stops while it is hidden, and the Glide button is often hidden too (it makes way for the
+-- spellbook's Walk on Air), so neither can bring the bar back. While the server still says a glide runs and the bar
+-- is down (the client guessed a landing: a push still on its way threw the player off again, or a waiting glide
+-- found its ledge after a long slide), this looks again four times a second; a new fall shows the bar.
+function CP.GlideBarWatch()
+    if not bar:IsShown() and glideLive() and (leftOf("gliding") or 0) > 0 then
+        CP.UpdateGlideBar()
+    end
+end
+ns.Every(0.25, CP.GlideBarWatch)
 
 ------------------------------------------------------------------------------------------------------
 -- Wiring: a CAMPST or a HELLO (feature bits) redraws everything; the shown frames keep their own timers
@@ -842,6 +905,16 @@ ns.On("STATE", function(topic)
 end)
 
 ns.On("HELLO", CP.RefreshAll)
+
+-- The server teaches the spellbook's Walk on Air at login (or takes it): the Glide button makes way, or comes back,
+-- and the ground error is worded for the glide, or the client's own again.
+local function spellsChanged()
+    CP.WordGroundError()
+    CP.RefreshGlide()
+end
+ns.RegisterEvent("LEARNED_SPELL_IN_TAB", spellsChanged)
+ns.RegisterEvent("SPELLS_CHANGED", spellsChanged)
+ns.RegisterEvent("PLAYER_ENTERING_WORLD", CP.WordGroundError)
 
 ns.On("CAMP_SETTLED", function(c)
     ns.Toast.Push({

@@ -876,9 +876,10 @@ Bleakhold realm; 22 after RaceForge's build) turn a fall into a glide they steer
   falls normally from there.
 - With Slow Fall (130, the fallback below) a mage's own Slow Fall stays: `GLIDE` does not shorten one with more time
   left than a glide, and the end of a glide takes off only the Slow Fall `GLIDE` put on (not one the mage cast again).
-- A gust of wind with a whoosh (`BleakholdUi.Glide.StartVisualKit`, SpellVisualKit 13709) plays when the glide starts;
-  Walk on Air's own wings (spell visual 7370, the one of Magic Wings: wings at the head, no sound, no forced
-  animation) show while it lasts, so the player keeps their own run, jump and fall animations.
+- A gust of wind with a whoosh (`BleakholdUi.Glide.StartVisualKit`, SpellVisualKit 13709) plays when the glide starts,
+  with Walk on Air's own spell visual: 63, Slow Fall's (a light at the hands and a soft flash at the head as the aura
+  lands, nothing that stays on the character; the old 7370 was Magic Wings' wings at the head). The visual is the
+  Spell.dbc row's (races.json and the module's SQL; the conf file lists the other stock ones that fit).
 
 There is no glide in a battleground or an arena, the Bleakhold Royale map included (section 17), nor in a dungeon or a
 raid unless `BleakholdUi.Glide.Instances` is on (0 by default): there the steerable push would skip jump shortcuts
@@ -890,8 +891,22 @@ cooldown and `gliding` the glide that runs now.
 Walk on Air is the module's own spell. The server has it from `data/sql/db-world/02_bleakhold_walk_on_air.sql`
 (`spell_dbc`); the client needs the same row in its `Spell.dbc` (a patch MPQ) for the buff's name, icon
 (Spell_Nature_EyeOfTheStorm), tooltip ("Glide through the air for 10 sec, steering your descent. Does not gain
-altitude.": its `$d` is the row's duration) and wings. Without the client row the glide works the same, with no buff
+altitude.": its `$d` is the row's duration) and look. Without the client row the glide works the same, with no buff
 shown; without the server row the server glides with Slow Fall (130) and logs it.
+
+**Walk on Air in the spellbook.** The same file has spell 100801 (`BleakholdUi.Glide.CastSpell`), the racial High
+Elves cast from the spellbook or an action bar, with its script (`spell_script_names`: spell_bleakhold_walk_on_air).
+The server teaches it at login to the races of `BleakholdUi.Glide.Races` (and takes it from every other character),
+and puts it once on the first empty slot of the main action bar (else the bottom and right bars). A cast runs
+`GLIDE`'s checks, in the air only (falling or jumping, whatever `BleakholdUi.Glide.RequireFalling` says), and a refused
+cast fails with the client's own cast result (on the ground `SPELL_FAILED_NOT_ON_GROUND`, which the addon words as "You
+must be in the air for that. To glide: jump, or step off a ledge, first." while the spell is known, the stock text
+otherwise, since an item can give that result too; on cooldown `SPELL_FAILED_NOT_READY`; mounted, flying, swimming,
+rooted or on a map without the glide the matching one) and costs nothing. A cast that goes through starts the glide `GLIDE` starts. The
+two share the cooldown: the spell's own is 90 s (`RecoveryTime`), the server sends `BleakholdUi.Glide.Cooldown` when
+that differs and whenever `GLIDE` (`/glide`, the key binding, the Glide button) starts one, so the action bar always
+shows the glide's cooldown. The addon hides its Glide button while the spell is known (`IsSpellKnown(100801)`); the
+glide bar stays where the button was.
 
 **mod-anticheat.** A glide is movement mod-anticheat (AnticheatMgr) accepts: the push only happens while the player
 falls, its speed check skips a packet that follows a falling one and its teleport check a falling player (a glide

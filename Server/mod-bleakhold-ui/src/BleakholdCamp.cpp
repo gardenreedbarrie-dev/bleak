@@ -32,6 +32,7 @@
 #include "SpellInfo.h"
 #include "SpellMgr.h"
 #include "World.h"
+#include "WorldPacket.h"
 
 #include <algorithm>
 #include <cmath>
@@ -304,6 +305,8 @@ namespace Bleakhold
         c.glideRequireFalling = sConfigMgr->GetOption<bool>("BleakholdUi.Glide.RequireFalling", false);
         c.glideInstances = sConfigMgr->GetOption<bool>("BleakholdUi.Glide.Instances", false);
         c.glideStartKit = sConfigMgr->GetOption<uint32_t>("BleakholdUi.Glide.StartVisualKit", 13709);
+        c.glideCastSpell =
+            sConfigMgr->GetOption<uint32_t>("BleakholdUi.Glide.CastSpell", CampRules::WalkOnAirCastSpell);
 
         std::lock_guard<std::recursive_mutex> guard(_lock);
         _cfg = c;
@@ -383,6 +386,26 @@ namespace Bleakhold
             {
                 LOG_ERROR("module", "[Bleakhold] BleakholdUi.Glide.Spell {} {}; gliding is off", _cfg.glideSpell, why);
                 _cfg.glideSpell = 0;
+            }
+        }
+        if (_cfg.glideCastSpell)
+        {
+            // the spellbook racial: an active spell with a dummy effect that its script (spell_script_names) turns into
+            // the glide; without one it would be a button that does nothing
+            SpellInfo const* info = sSpellMgr->GetSpellInfo(_cfg.glideCastSpell);
+            SpellScriptsBounds const scripts = sObjectMgr->GetSpellScriptsBounds(_cfg.glideCastSpell);
+            char const* problem = nullptr;
+            if (!info)
+                problem = "does not exist (spell_dbc: data/sql/db-world/02_bleakhold_walk_on_air.sql)";
+            else if (info->IsPassive() || !info->HasEffect(SPELL_EFFECT_DUMMY))
+                problem = "is not an active spell with a dummy effect";
+            else if (scripts.first == scripts.second)
+                problem = "has no spell_bleakhold_walk_on_air script (spell_script_names)";
+            if (problem)
+            {
+                LOG_ERROR("module", "[Bleakhold] BleakholdUi.Glide.CastSpell {} {}; Walk on Air is not in the "
+                    "spellbook (/glide and the key binding still glide)", _cfg.glideCastSpell, problem);
+                _cfg.glideCastSpell = 0;
             }
         }
         if (_cfg.warmthSpell && !SafeSpell(_cfg.warmthSpell, why))
@@ -478,6 +501,94 @@ namespace Bleakhold
             if (spell && spell != CampRules::SlowFallSpell)
                 player->RemoveAurasDueToSpell(spell, player->GetGUID());
         _campers.erase(Raw(player));
+        SyncGlideSpell(player);
+    }
+
+    // =============================================================================================
+    // Walk on Air in the spellbook
+    // =============================================================================================
+    void Camp::SyncGlideSpell(Player* player)
+    {
+        std::lock_guard<std::recursive_mutex> guard(_lock);
+        // with the spellbook racial off (BleakholdUi.Glide.CastSpell 0, or a spell this server lacks) a character that
+        // learned the default one loses it
+        uint32_t const spell = _cfg.glideCastSpell ? _cfg.glideCastSpell : CampRules::WalkOnAirCastSpell;
+        bool const canGlide = _cfg.glideCastSpell && CanGlide(player);
+        switch (CampRules::GlideSpellbookChange(canGlide, player->HasSpell(spell)))
+        {
+            case CampRules::SpellbookChange::None:
+                break;
+            case CampRules::SpellbookChange::Unlearn:
+                player->removeSpell(spell, SPEC_MASK_ALL, false);
+                DebugLog(player->GetName() + " no longer knows Walk on Air (" + std::to_string(spell) + ")");
+                return;
+            case CampRules::SpellbookChange::Learn:
+            {
+                player->learnSpell(spell);
+                if (!player->HasSpell(spell))
+                {
+                    LOG_ERROR("module", "[Bleakhold] {} could not learn Walk on Air ({}, BleakholdUi.Glide.CastSpell)",
+                        player->GetName(), spell);
+                    return;
+                }
+                // once, as it is learned: onto the first empty slot of the bars the player sees
+                std::vector<uint8_t> occupied;
+                for (uint8_t slot = 0; slot < MAX_ACTION_BUTTONS; ++slot)
+                    if (player->GetActionButton(slot))
+                        occupied.push_back(slot);
+                int const slot = CampRules::FirstFreeBarSlot(occupied);
+                if (slot >= 0 && player->addActionButton(static_cast<uint8_t>(slot), spell, ACTION_BUTTON_SPELL))
+                    player->SendActionButtons(1);
+                LOG_INFO("module", "[Bleakhold] {} learned Walk on Air ({}), action bar slot {}", player->GetName(),
+                    spell, slot);
+                break;
+            }
+        }
+        // the glide's cooldown survives a relog (the timers do): the spell shows what is left
+        if (canGlide)
+            ShowGlideCooldown(player, CampRules::SecondsLeft(TimersOf(Low(player)).glideReadyAt, NowSec()));
+    }
+
+    void Camp::ShowGlideCooldown(Player* player, uint32_t seconds)
+    {
+        uint32_t const spell = _cfg.glideCastSpell;
+        if (!spell || !player->HasSpell(spell))
+            return;
+        if (!seconds)
+        {
+            if (player->HasSpellCooldown(spell))
+                player->RemoveSpellCooldown(spell, true);   // SMSG_CLEAR_COOLDOWN
+            return;
+        }
+        uint32_t const ms = std::min<uint32_t>(seconds, 86400) * 1000;
+        player->AddSpellCooldown(spell, 0, ms);
+        WorldPacket data;
+        player->BuildCooldownPacket(data, SPELL_COOLDOWN_FLAG_NONE, spell, ms);
+        player->SendDirectMessage(&data);
+    }
+
+    uint32_t Camp::CheckGlideCast(Player* player)
+    {
+        std::lock_guard<std::recursive_mutex> guard(_lock);
+        if (!_cfg.glideOn || !_cfg.glideSpell || !_cfg.glideCastSpell)
+            return CampRules::CastResult::SpellUnavailable;
+        if (!player->IsInWorld() || player->IsBeingTeleported())
+            return CampRules::CastResult::NotHere;
+        return CampRules::GlideCastResult(CampRules::CheckGlide(GlideFactsOf(player, true)));
+    }
+
+    void Camp::OnGlideCast(Player* player, uint32_t castSpell, uint32_t recoveryMs)
+    {
+        std::lock_guard<std::recursive_mutex> guard(_lock);
+        // the checks ran on this cast a moment ago (CheckGlideCast); the config may have been reloaded since
+        if (!_cfg.glideOn || !_cfg.glideSpell || !StartGlide(player, InAir(player)))
+        {
+            player->RemoveSpellCooldown(castSpell, true);   // nothing happened: no cooldown either
+            return;
+        }
+        // the core started the spell's own cooldown; BleakholdUi.Glide.Cooldown is the glide's
+        if (_cfg.glideCooldownSec * 1000 != recoveryMs)
+            ShowGlideCooldown(player, _cfg.glideCooldownSec);
     }
 
     void Camp::OnLogout(Player* player)
@@ -857,13 +968,8 @@ namespace Bleakhold
         DebugLog(player->GetName() + " packed up " + ObjectGuid(target).ToString());
     }
 
-    void Camp::HandleGlide(Player* player, Intent const& intent)
+    CampRules::GlideFacts Camp::GlideFactsOf(Player* player, bool requireAir)
     {
-        std::lock_guard<std::recursive_mutex> guard(_lock);
-        if (!_cfg.glideOn || !_cfg.glideSpell)
-            return Ui::Refuse(player, intent, GlideErr::Off);
-        if (!player->IsInWorld() || player->IsBeingTeleported())
-            return;
         uint64_t const now = NowSec();
         Timers const t = TimersOf(Low(player));
         CampRules::GlideFacts f;
@@ -877,8 +983,19 @@ namespace Bleakhold
         f.held = player->HasUnitState(UNIT_STATE_ROOT | UNIT_STATE_CONTROLLED) || player->IsRooted() ||
             !player->IsClientControlled(player) || static_cast<Unit*>(player->m_mover) != player;
         f.inAir = InAir(player);
-        f.requireFalling = _cfg.glideRequireFalling;
+        f.requireFalling = requireAir || _cfg.glideRequireFalling;
         f.cooldownLeft = CampRules::SecondsLeft(t.glideReadyAt, now);
+        return f;
+    }
+
+    void Camp::HandleGlide(Player* player, Intent const& intent)
+    {
+        std::lock_guard<std::recursive_mutex> guard(_lock);
+        if (!_cfg.glideOn || !_cfg.glideSpell)
+            return Ui::Refuse(player, intent, GlideErr::Off);
+        if (!player->IsInWorld() || player->IsBeingTeleported())
+            return;
+        CampRules::GlideFacts const f = GlideFactsOf(player, false);
         switch (CampRules::CheckGlide(f))
         {
             case CampRules::GlideRefusal::None: break;
@@ -894,6 +1011,15 @@ namespace Bleakhold
                 return Ui::Refuse(player, intent, "glide_cooldown",
                     "You can glide again in " + std::to_string(f.cooldownLeft) + " s.");
         }
+        if (!StartGlide(player, f.inAir))
+            return Ui::Refuse(player, intent, "failed", TextFailed);
+        // the spellbook racial shows the cooldown this glide started
+        ShowGlideCooldown(player, _cfg.glideCooldownSec);
+    }
+
+    bool Camp::StartGlide(Player* player, bool inAir)
+    {
+        uint64_t const now = NowSec();
         // a glide still running (a game master's reset, a cooldown shorter than the glide) starts over; a mage's own
         // Slow Fall (the fallback spell) with more time left stays as it is, and the glide rides on it
         uint32_t const spell = _cfg.glideSpell;
@@ -909,7 +1035,7 @@ namespace Bleakhold
         {
             LOG_ERROR("module", "[Bleakhold] {} could not glide: spell {} did not land (BleakholdUi.Glide.Spell)",
                 player->GetName(), spell);
-            return Ui::Refuse(player, intent, "failed", TextFailed);
+            return false;
         }
         // the glide lasts as long as the aura (ApplyAura sets the duration, but a permanent aura keeps its own)
         if (!ride && (aura->GetMaxDuration() <= 0 || aura->GetDuration() <= 0))
@@ -936,7 +1062,7 @@ namespace Bleakhold
         run.glide.hasLast = true;
         // already falling high enough: the fall becomes a glide at once; else the aura waits for a ledge (OnPlayerMove)
         bool start = false;
-        if (f.inAir && !player->GetTransport() &&
+        if (inAir && !player->GetTransport() &&
             HeightAboveGround(player, player->GetPositionX(), player->GetPositionY(), player->GetPositionZ()) >=
                 CampRules::GlideMinHeight)
         {
@@ -962,6 +1088,7 @@ namespace Bleakhold
             GlidePush(player, player->GetOrientation(), run.forwardSpeed, 0.0f);   // the fall stops and starts over
         _campers[Raw(player)].want = true;
         DebugLog(player->GetName() + " glides" + (start ? " (in the air)" : " (waiting for a ledge)"));
+        return true;
     }
 
     // =============================================================================================
@@ -1527,6 +1654,7 @@ namespace Bleakhold
                 it->second.glideReadyAt = 0;
             }
         }
+        ShowGlideCooldown(player, 0);
         _campers[Raw(player)].want = true;
     }
 

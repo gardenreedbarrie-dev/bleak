@@ -124,6 +124,10 @@ SPELL_TEXT_FIELDS = {"name": "name", "subtext": "nameSubtext", "description": "d
 # Longest text AzerothCore's spell_dbc columns take (Name_Lang_* and NameSubtext_Lang_* varchar(100),
 # AuraDescription_Lang_* varchar(550), Description_Lang_* text).
 SPELL_TEXT_LIMITS = {"name": 100, "subtext": 100, "description": 4000, "aura_description": 550}
+# Who gives a spell of races.json to the player: race (a racial a race lists, taught at creation and by
+# mod-bleakhold), server (a module casts it on the player), module (a module teaches it; the player casts it).
+CAST_BY = ("race", "server", "module")
+CAST_BY_TEXT = {"race": "racial", "server": "server-cast", "module": "module-taught"}
 
 
 @dataclass
@@ -131,7 +135,9 @@ class SpellDef:
     """A new Spell.dbc row: the texts, the icon and visual, and every other column by its client name.
 
     cast_by "race": a racial, listed by a race's racials.spells. cast_by "server": a spell no race learns (a server
-    module casts it); it gets its Spell.dbc row only. server_row: the SQL file (relative to the repository root) that
+    module casts it); it gets its Spell.dbc row only. cast_by "module": a spell a server module teaches and the player
+    casts from the spellbook (Walk on Air's racial, mod-bleakhold-ui): like server, no race lists it and it gets no
+    playercreateinfo row. server_row: the SQL file (relative to the repository root) that
     holds the spell_dbc row when another part of the project owns it; RaceForge then writes no spell_dbc row of its own
     and checks that file's row against the Spell.dbc row field for field. text_locales: the locale slots that get the
     texts (all nine by default, like the race names)."""
@@ -354,8 +360,8 @@ def parse_spell(data: dict, index: int) -> SpellDef:
                      cast_by=str(data.get("cast_by") or "race"), server_row=str(data.get("server_row") or ""))
     where = f"{where} ({spell.name or spell.id})"
 
-    if spell.cast_by not in ("race", "server"):
-        raise ConfigError(f"{where}: cast_by must be race or server")
+    if spell.cast_by not in CAST_BY:
+        raise ConfigError(f"{where}: cast_by must be race, server or module")
 
     if spell.server_row and (os.path.isabs(spell.server_row) or ".." in spell.server_row.replace("\\", "/").split("/")):
         raise ConfigError(f"{where}: server_row must be a path inside the repository, relative to its root")
@@ -450,17 +456,18 @@ def parse(data: dict, path: str = "") -> Config:
         if missing:
             raise ConfigError(f"{path}: {race.name} ({race.id}): racials.spells {missing} are not defined in spells")
 
-        server_cast = [s for s in race.racial_spells if spells[s].cast_by == "server"]
+        server_cast = [s for s in race.racial_spells if spells[s].cast_by != "race"]
 
         if server_cast:
-            raise ConfigError(f"{path}: {race.name} ({race.id}): racials.spells {server_cast} are cast_by server, which no race learns")
+            kinds = " or ".join(sorted({spells[s].cast_by for s in server_cast}))
+            raise ConfigError(f"{path}: {race.name} ({race.id}): racials.spells {server_cast} are cast_by {kinds}, which no race learns")
 
     listed = {s for race in races for s in race.racial_spells}
 
     for spell in spells.values():
         if spell.cast_by == "race" and spell.id not in listed:
             raise ConfigError(f"{path}: spell {spell.id} ({spell.name}) is a racial no race lists; list it in a race's racials.spells, "
-                              "or give it \"cast_by\": \"server\"")
+                              "or give it \"cast_by\": \"server\" (a module casts it) or \"module\" (a module teaches it)")
 
     archives_data = data.get("archives") or {}
 

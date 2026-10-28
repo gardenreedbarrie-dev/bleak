@@ -702,7 +702,8 @@ def cmd_update(args) -> int:
 
             if spell.server_row and server_spells is not None:
                 status, detail = spellmod.server_row_check(server_spells, server_spells.by_id()[spell_id], spell)
-                result.add(status, f"spell {spell_id} {spell.name}: the spell_dbc row of {spell.server_row} matches Spell.dbc field for field", detail)
+                label = f"{configmod.CAST_BY_TEXT.get(spell.cast_by, spell.cast_by)} spell {spell_id} {spell.name}"
+                result.add(status, f"{label}: the spell_dbc row of {spell.server_row} matches Spell.dbc field for field", detail)
 
         if args.server_sql:
             with open(args.server_sql, encoding="utf-8") as f:

@@ -545,8 +545,15 @@ return function(opts)
         M.bindings[key] = action
         return 1
     end
-    env.GetCurrentBindingSet = function() return 1 end
-    env.SaveBindings = function(which) M.savedBindings = M.savedBindings + 1 end
+    -- the set in use: 1 the account's (ACCOUNT_BINDINGS), 2 the character's own (CHARACTER_BINDINGS); a test sets
+    -- M.bindingSet = 2 for "Character Specific Key Bindings"
+    M.savedBindingSets = {}
+    env.GetCurrentBindingSet = function() return M.bindingSet or 1 end
+    env.SaveBindings = function(which)
+        assert(which == 1 or which == 2, "Usage: SaveBindings(1 or 2)")
+        M.savedBindings = M.savedBindings + 1
+        M.savedBindingSets[#M.savedBindingSets + 1] = which
+    end
     env.GetScreenWidth = function() return 1024 end
     env.GetScreenHeight = function() return 768 end
     env.PlaySound = function(s) M.sounds[#M.sounds + 1] = s end
@@ -657,6 +664,13 @@ return function(opts)
     new("EditBox", "SendMailNameEditBox", env.UIParent):SetMaxLetters(12)
     env.DressUpItemLink = function(link) M.dressedUp = link end
     env.TogglePVPFrame = function() M.pvpFrameToggled = (M.pvpFrameToggled or 0) + 1 end
+    -- the stock Dungeon Finder: a UI panel, hidden until ShowUIPanel or ToggleLFDParentFrame opens it
+    env.LFDParentFrame = new("Frame", "LFDParentFrame", env.UIParent)
+    env.LFDParentFrame.__shown = false
+    env.ShowUIPanel = function(frame) if frame then frame:Show() end end
+    env.ToggleLFDParentFrame = function()
+        if env.LFDParentFrame:IsShown() then env.LFDParentFrame:Hide() else env.ShowUIPanel(env.LFDParentFrame) end
+    end
     -- GetMinimapShape, DragonUI*, DBM: absent unless a test sets them
 
     ------------------------------------------------------------------------------------------------

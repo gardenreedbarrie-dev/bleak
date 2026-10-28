@@ -375,7 +375,8 @@ class Forge:
 
         for spell_id, row in zip(spell_ids, rows):
             spell = self.config.spells[spell_id]
-            owners = ", ".join(f"{r.name} ({r.id})" for r in self.config.races if spell_id in r.racial_spells) or "the server (cast_by server)"
+            owners = ", ".join(f"{r.name} ({r.id})" for r in self.config.races if spell_id in r.racial_spells) or \
+                f"the server (cast_by {spell.cast_by})"
             change.notes.append(f"spell {spell_id} {spell.name} ({'passive' if spell.passive else 'active'}, icon {spell.icon}, visual {spell.visual}) for {owners}")
             problems, skipped = spell_reference_problems(spell, row, self.tables)
 

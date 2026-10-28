@@ -655,3 +655,70 @@ for _, key in ipairs({ "tasks", "dungeons", "keys", "rift" }) do
     ns.AddCommand(key, "open Activities - " .. key, function() open(key) end)
 end
 ns.AddCommand("activities", "open the Activities window", function() open(nil, true) end)
+
+------------------------------------------------------------------------------------------------------
+-- The game's own Dungeon Finder (random dungeons and heroics), one click away: the I key opens Activities instead
+------------------------------------------------------------------------------------------------------
+function A.OpenDungeonFinder()
+    win:Hide()
+    if LFDParentFrame and ShowUIPanel then
+        ShowUIPanel(LFDParentFrame)
+    elseif type(ToggleLFDParentFrame) == "function" then
+        ToggleLFDParentFrame()
+    end
+end
+
+-- The I key: once per set of key bindings, I opens Activities, as it did before. Taken only from the stock Dungeon
+-- Finder (TOGGLELFGPARENT, ToggleLFDParentFrame in the 3.3.5a FrameXML Bindings.xml: I in the stock key bindings)
+-- or when nothing has it; a key the player gave anything else stays theirs, and so does a key they gave Activities
+-- already. Not in combat (SetBinding is protected there): tried again when combat ends or at the next login.
+-- SaveBindings writes the set in use only: the account's (ACCOUNT_BINDINGS, 1), or with "Character Specific Key
+-- Bindings" ticked the character's own (CHARACTER_BINDINGS, 2). So "offered" is kept where that set lives: the
+-- account's in BleakholdDB, a character's own in BleakholdCharDB; every set gets the offer once.
+A.KEY = "I"
+A.BINDING = "BLEAKHOLD_ACTIVITIES"
+A.STOCK_FINDER = { TOGGLELFGPARENT = true }
+A.CHARACTER_SET = 2
+
+-- The saved table that holds "offered" for the set of key bindings in use now.
+function A.KeyOfferStore()
+    local set = GetCurrentBindingSet and GetCurrentBindingSet()
+    if set == A.CHARACTER_SET then
+        return ns.cdb
+    end
+    return ns.db.options
+end
+
+function A.KeyOffered()
+    return A.KeyOfferStore().activitiesKeyOffered and true or false
+end
+
+function A.OfferDefaultKey()
+    if A.KeyOffered() or not SetBinding or not GetBindingAction then
+        return
+    end
+    if InCombatLockdown and InCombatLockdown() then
+        return
+    end
+    A.KeyOfferStore().activitiesKeyOffered = true
+    if GetBindingKey and GetBindingKey(A.BINDING) then
+        return
+    end
+    local current = GetBindingAction(A.KEY) or ""
+    if current == "" or A.STOCK_FINDER[current] then
+        if SetBinding(A.KEY, A.BINDING) and SaveBindings and GetCurrentBindingSet then
+            SaveBindings(GetCurrentBindingSet())
+            ns.Print("I opens Activities (dungeons, keys, Eclipse Rift, group finder). The Dungeon Finder is in "
+                .. "Activities > Dungeons, and Key Bindings can give it a key of its own.")
+        end
+    end
+end
+
+ns.RegisterEvent("PLAYER_ENTERING_WORLD", function()
+    ns.After(1, A.OfferDefaultKey)
+end)
+ns.RegisterEvent("PLAYER_REGEN_ENABLED", function()
+    if not A.KeyOffered() then
+        ns.After(0.5, A.OfferDefaultKey)
+    end
+end)

@@ -1,5 +1,8 @@
 -- Bleakhold: round buttons around the minimap (Activities, Collections, Season, Leaderboards, and the orbs other
 -- files add with Orbs.Add, such as Camp).
+-- Off by default while AddicatUI is loaded: its micro menu launcher (Integration.lua) lists the same windows and Make
+-- camp, and the I key opens Activities. Without AddicatUI they are on, the only launcher there is. /bh orbs on|off is
+-- the player's own choice (per character), which wins over the default either way.
 -- They live on BleakholdOrbHolder, a child of UIParent anchored to the Minimap's centre, never on the
 -- Minimap itself: AddicatUI (DragonUI) collects every button parented to Minimap/MinimapBackdrop into its drawer,
 -- and it moves and rescales the Minimap, which the holder follows. In AddicatUI's editor mode each orb has
@@ -269,21 +272,58 @@ ns.On("STATE", function(topic)
     end
 end)
 
-function Orbs.SetShown(show)
-    ns.cdb.orbsHidden = not show
-    if show then
+-- AddicatUI lists the Bleakhold windows in its micro menu (the launcher Integration.lua registers): loaded, with
+-- the entry point, and (when it says) the launcher has its place in the strip.
+function Orbs.LauncherElsewhere()
+    local aui = _G.AddicatUI
+    if type(aui) ~= "table" or type(aui.RegisterMicroMenuLauncher) ~= "function" then
+        return false
+    end
+    if type(aui.MicroMenuLauncherAvailable) == "function" then
+        local ok, available = pcall(aui.MicroMenuLauncherAvailable)
+        if ok and available ~= nil then
+            return available and true or false
+        end
+    end
+    return true
+end
+
+-- The player's choice (ns.cdb.orbsHidden: true off, false on, nil none) or else the default.
+function Orbs.WantShown()
+    local hidden = ns.cdb.orbsHidden
+    if hidden == true then
+        return false
+    elseif hidden == false then
+        return true
+    end
+    return not Orbs.LauncherElsewhere()
+end
+
+function Orbs.Apply()
+    if Orbs.WantShown() then
         holder:Show()
+        Orbs.Layout(true)
     else
         holder:Hide()
     end
 end
 
-ns.On("DB_READY", function()
-    if ns.cdb.orbsHidden then
-        holder:Hide()
+function Orbs.SetShown(show)
+    ns.cdb.orbsHidden = not show
+    Orbs.Apply()
+end
+
+Orbs.Apply()
+
+ns.On("DB_READY", Orbs.Apply)
+
+-- AddicatUI loaded after Bleakhold, or its micro menu settled by login: the default may change.
+ns.RegisterEvent("ADDON_LOADED", function(event, name)
+    if name == "AddicatUI" then
+        Orbs.Apply()
     end
-    Orbs.Layout(true)
 end)
+ns.RegisterEvent("PLAYER_LOGIN", Orbs.Apply)
 
 if Minimap and Minimap.HookScript then
     Minimap:HookScript("OnSizeChanged", function()
@@ -295,12 +335,15 @@ ns.AddCommand("orbs", "minimap buttons: /bh orbs on|off|reset", function(args)
     args = (args or ""):lower()
     if args == "off" then
         Orbs.SetShown(false)
+        ns.Print("Minimap buttons off (/bh orbs on brings them back).")
     elseif args == "reset" then
         wipe(ns.cdb.orbs)
         Orbs.SetShown(true)
         Orbs.Layout(true)
+        ns.Print("Minimap buttons on, at their first places.")
     else
         Orbs.SetShown(true)
+        ns.Print("Minimap buttons on (/bh orbs off hides them).")
     end
 end)
 

@@ -1,5 +1,5 @@
 {
-    "_readme": "Bleakhold races for RaceForge. Every race clones its template race (models, sounds, class list) and joins the faction of faction_race (language, reputations, faction template, start zone). racials drops the template's racial skill lines and names the race's own racial spells; spells defines them (and the server-cast spells) as Spell.dbc rows. id is the race id build gives (after the stock rows 1-21); realm_id is the race's id on the Bleakhold realm, whose own race patch (Patch-R.MPQ) put High Elf and Eredar in the stock slots 15 and 19: raceforge.py update works there. See README.md for every field.",
+    "_readme": "Bleakhold races for RaceForge. Every race clones its template race (models, sounds, class list) and joins the faction of faction_race (language, reputations, faction template, start zone). racials drops the template's racial skill lines and names the race's own racial spells; spells defines them (and the spells a server module casts or teaches) as Spell.dbc rows. id is the race id build gives (after the stock rows 1-21); realm_id is the race's id on the Bleakhold realm, whose own race patch (Patch-R.MPQ) put High Elf and Eredar in the stock slots 15 and 19: raceforge.py update works there. See README.md for every field.",
     "races": [
         {
             "id": 22,
@@ -24,7 +24,7 @@
             "racials": {
                 "drop_template_skill_lines": [756],
                 "spells": [90500],
-                "comment": "No Blood Elf racials (756: Arcane Torrent, Magic Resistance, Arcane Affinity). Wind Blessed instead; the glide is mod-bleakhold-ui's (GLIDE)."
+                "comment": "No Blood Elf racials (756: Arcane Torrent, Magic Resistance, Arcane Affinity). Wind Blessed instead; the glide, Walk on Air (100801 in the spellbook, aura 100800), is mod-bleakhold-ui's, which teaches it."
             }
         },
         {
@@ -113,7 +113,7 @@
             "aura_description": "Gliding on the air. Turn to steer; you do not gain altitude.",
             "icon": 1931,
             "icon_name": "Spell_Nature_EyeOfTheStorm",
-            "visual": 7370,
+            "visual": 63,
             "cast_by": "server",
             "server_row": "Server/mod-bleakhold-ui/data/sql/db-world/02_bleakhold_walk_on_air.sql",
             "text_locales": ["enUS"],
@@ -122,7 +122,25 @@
                 "effect[0]": 6, "effectDieSides[0]": 1, "implicitTargetA[0]": 1, "effectAura[0]": 105,
                 "effectBonusCoefficient[0]": 1.0
             },
-            "comment": "The High Elf glide of mod-bleakhold-ui (GLIDE): the module casts it, no race learns it. Its spell_dbc row is the module's own SQL (server_row; RaceForge checks it field for field and writes none); only enUS texts, as that row. Feather fall (aura 105) on the caster for 10 s (duration 1), instant, self; attributes 0x40010 (ability, no sheathe). Visual 7370 is Magic Wings' (24742): wings at the head, no sound and no forced animation, as in the module's row; change visual here together with that row. Ids 100800-100809 are the camping spells."
+            "comment": "The glide's aura (mod-bleakhold-ui, BleakholdUi.Glide.Spell): the module casts it when a glide starts (the spellbook racial 100801, /glide, the key binding or the Glide button), no race learns it. Its spell_dbc row is the module's own SQL (server_row; RaceForge checks it field for field and writes none); only enUS texts, as that row. Feather fall (aura 105) on the caster for 10 s (duration 1), instant, self; attributes 0x40010 (ability, no sheathe). visual is the glide's look, set here and in that row together: 63 is Slow Fall's (130): a light at the hands and a soft flash at the head when the glide starts, nothing that stays on the character. Others: 0 none (the Wind Shear gust of BleakholdUi.Glide.StartVisualKit alone), 12114 Guardian Spirit's golden wings for the whole glide, 12724 Cyclone Fall's whirl with a floating pose, 6768 Levitate's swirl at the feet, 7370 Magic Wings (the old: wings at the head). Ids 100800-100809 are the camping spells."
+        },
+        {
+            "id": 100801,
+            "name": "Walk on Air",
+            "subtext": "Racial",
+            "description": "Glide through the air for $100800d, steering your descent by turning. Use it while falling or jumping. Does not gain altitude.",
+            "aura_description": "",
+            "icon": 505,
+            "icon_name": "Spell_Magic_FeatherFall",
+            "visual": 0,
+            "cast_by": "module",
+            "server_row": "Server/mod-bleakhold-ui/data/sql/db-world/02_bleakhold_walk_on_air.sql",
+            "text_locales": ["enUS"],
+            "fields": {
+                "attributes": 262160, "castingTimeIndex": 1, "recoveryTime": 90000, "rangeIndex": 1, "schoolMask": 1,
+                "effect[0]": 3, "effectDieSides[0]": 1, "implicitTargetA[0]": 1
+            },
+            "comment": "The High Elf glide in the spellbook (mod-bleakhold-ui, BleakholdUi.Glide.CastSpell): the module teaches it at login to the races of BleakholdUi.Glide.Races (15, the High Elf on the realm) and puts it on a free action bar slot once; casting it starts the module's glide (its rules, its aura 100800), sharing the cooldown with /glide, the key binding and the Glide button. Usable only in the air (falling or jumping; on the ground the cast fails with \"Cannot be used on the ground\", which the addon words for the glide, and costs nothing). Instant, off the global cooldown (no startRecovery), 90 s cooldown (recoveryTime 90000: the action bar shows it; the module sends BleakholdUi.Glide.Cooldown when that differs), self (range 1), physical school (no spell school lockout). A dummy effect on the caster (effect 3, target 1) that the module's spell script handles; no visual of its own (the aura's is the glide's look). Icon 505 Spell_Magic_FeatherFall (Slow Fall's feather)."
         }
     ],
     "archives": {

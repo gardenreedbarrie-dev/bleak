@@ -18,6 +18,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace Bleakhold::CampRules
@@ -356,6 +357,76 @@ namespace Bleakhold::CampRules
         if (f.cooldownLeft > 0)
             return GlideRefusal::Cooldown;
         return GlideRefusal::None;
+    }
+
+    // ---- Walk on Air in the spellbook (BleakholdUi.Glide.CastSpell) ----
+    //
+    // The racial a High Elf casts from the spellbook or an action bar: the module teaches it to the races that can
+    // glide (at login), and its spell script runs GLIDE's checks on the cast, in the air only, and starts the same
+    // glide on the hit. A refused cast fails with one of the client's own cast results (it words them itself and
+    // starts no cooldown); the glide's cooldown is the module's either way, shared with GLIDE, and shown on the
+    // spell.
+    inline constexpr uint32_t WalkOnAirCastSpell = 100801;
+
+    // SpellCastResult values of 3.3.5a (AzerothCore's SharedDefines.h, the client's Magic/Types.h): the ones a refused
+    // glide cast shows.
+    namespace CastResult
+    {
+        inline constexpr uint32_t CasterDead = 23;          // "You are dead"
+        inline constexpr uint32_t NotFlying = 59;           // "You are flying"
+        inline constexpr uint32_t NotHere = 60;             // "You can't use that here"
+        inline constexpr uint32_t NotMounted = 64;          // "You are mounted"
+        inline constexpr uint32_t NotReady = 67;            // "Not yet recovered"
+        inline constexpr uint32_t OnlyAboveWater = 88;      // "Cannot use while swimming"
+        inline constexpr uint32_t Rooted = 103;             // "You are unable to move"
+        inline constexpr uint32_t SpellUnavailable = 107;   // "The spell is not available to you"
+        inline constexpr uint32_t NotOnGround = 171;        // "Cannot be used on the ground" (the addon: glide text)
+        inline constexpr uint32_t Ok = 255;                 // SPELL_CAST_OK
+    }
+
+    // The cast result of a GLIDE refusal (GlideFacts filled with requireFalling: the spell needs the air).
+    inline uint32_t GlideCastResult(GlideRefusal refusal)
+    {
+        switch (refusal)
+        {
+            case GlideRefusal::None: return CastResult::Ok;
+            case GlideRefusal::Race: return CastResult::SpellUnavailable;
+            case GlideRefusal::Here: return CastResult::NotHere;
+            case GlideRefusal::Dead: return CastResult::CasterDead;
+            case GlideRefusal::Mounted: return CastResult::NotMounted;
+            case GlideRefusal::Flying: return CastResult::NotFlying;
+            case GlideRefusal::Water: return CastResult::OnlyAboveWater;
+            case GlideRefusal::Held: return CastResult::Rooted;
+            case GlideRefusal::Ground: return CastResult::NotOnGround;
+            case GlideRefusal::Cooldown: return CastResult::NotReady;
+        }
+        return CastResult::SpellUnavailable;
+    }
+
+    // At login: who can glide knows the spell, who cannot (another race, the glide or the spell off) does not.
+    enum class SpellbookChange : uint8_t { None, Learn, Unlearn };
+    inline SpellbookChange GlideSpellbookChange(bool canGlide, bool knowsSpell)
+    {
+        if (canGlide && !knowsSpell)
+            return SpellbookChange::Learn;
+        if (!canGlide && knowsSpell)
+            return SpellbookChange::Unlearn;
+        return SpellbookChange::None;
+    }
+
+    // Where a newly learned spell goes on the action bars (once, when it is learned): the first empty slot of the
+    // main bar (0-11), then of the bottom left (60-71), bottom right (48-59), right (24-35) and second right (36-47)
+    // bars; -1 when all of them are full. Page 2 of the main bar (12-23) shows only when paged to, and 72 and up are
+    // the stance and form bars.
+    inline int FirstFreeBarSlot(std::vector<uint8_t> const& occupied)
+    {
+        constexpr std::array<std::pair<uint8_t, uint8_t>, 5> Bars{ { { 0, 12 }, { 60, 72 }, { 48, 60 }, { 24, 36 },
+            { 36, 48 } } };
+        for (auto const& [first, end] : Bars)
+            for (uint8_t slot = first; slot < end; ++slot)
+                if (std::find(occupied.begin(), occupied.end(), slot) == occupied.end())
+                    return slot;
+        return -1;
     }
 
     // One glide, from GLIDE until it ends. `airborne`: the fall has become a glide (falling at least GlideMinHeight

@@ -239,14 +239,17 @@ test("emote wheel: Ctrl+G is offered once when free", function(M, ns)
     M.bindings["ALT-E"] = "BLEAKHOLD_EMOTEWHEEL"
     A.Refresh()
     H.contains(tab.right.hint:GetText(), "Hold ALT-E")
-end)
+end, { before = function(M) M.env.BleakholdDB = { options = { activitiesKeyOffered = true } } end })
 
 test("emote wheel: a taken Ctrl+G is left alone", function(M, ns)
     M.bindings["CTRL-G"] = "TOGGLEGUILDTAB"
     M.Advance(1.5)
     H.eq(M.bindings["CTRL-G"], "TOGGLEGUILDTAB")
     H.eq(M.savedBindings, 0)
-end, { before = function(M) M.bindings["CTRL-G"] = "TOGGLEGUILDTAB" end })
+end, { before = function(M)
+    M.bindings["CTRL-G"] = "TOGGLEGUILDTAB"
+    M.env.BleakholdDB = { options = { activitiesKeyOffered = true } }   -- (the I key's offer saves bindings too)
+end })
 
 test("emote wheel: not bound in combat, offered after", function(M, ns)
     M.combat = true
