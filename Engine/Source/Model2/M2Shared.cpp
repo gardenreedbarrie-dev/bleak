@@ -1650,6 +1650,16 @@ int32_t CM2Shared::LoadSkinProfile(uint32_t profile) {
 
 // INLINED
 uint32_t CM2Shared::GetSkinProfileIndex(uint32_t maxBones) {
+    // BLEAKHOLD(x64): s_skinProfileBoneCounts holds the bone budgets of the last four profiles, and 3.3.5a models
+    // have at most four. Models converted from later expansions list up to eight (their LOD skins counted too):
+    // for them the original reads in front of the table, which the 32-bit client survived, while here the
+    // negative index wraps as a uint32 and the read crashes (Dalaran, Blackrock Spire). Such a model takes its
+    // full skin, profile 0: M2ModernFinalizeSkin clamps its bone budget and splits any section over the device's
+    // bones per draw.
+    if (this->m_data->m_numSkinProfiles > 4) {
+        return 0;
+    }
+
     for (uint32_t i = 0; i < this->m_data->m_numSkinProfiles; i++) {
         if (s_skinProfileBoneCounts[4 - this->m_data->m_numSkinProfiles + i] <= maxBones) {
             return i;
