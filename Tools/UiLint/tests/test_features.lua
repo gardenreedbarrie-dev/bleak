@@ -133,7 +133,7 @@ test("toast: a task becoming claimable shows the toast; click opens Tasks", func
     H.ok(t:IsShown())
     H.eq(t.kicker:GetText(), "Daily Task Complete")
     H.eq(t.title:GetText(), "Key sweeper")
-    H.eq(t.sub:GetText(), "Claim 1 Emblem of Heroism in Activities")
+    H.eq(t.sub:GetText(), "Claim 1 Emblem of Heroism", "too long with 'in Activities' at 10 px (Toast.FitSub)")
     t:Click()
     H.ok(M.env.BleakholdActivitiesFrame:IsShown() and ns.Activities.current == "tasks")
 end)
@@ -160,7 +160,7 @@ test("toast: the server's 'Keys window' line names the Mythic+ Dungeons page", f
     FX.connect(M, H)
     -- bh_ui_bridge.cpp, the keystone used at its dungeon
     H.send(M, "TOAST", { { "K", "Keystone ready", "Press Start keystone in the Keys window", "keys" } })
-    H.eq(M.env.BleakholdToastFrame.sub:GetText(), "Press Start keystone on the Mythic+ Dungeons page")
+    H.eq(M.env.BleakholdToastFrame.sub:GetText(), "Start keystone on Mythic+ Dungeons")
     H.eq(ns.Toast.FixSub("Press Start keystone in the Keys window", "tasks"), "Press Start keystone in the Keys window",
         "only for its own target")
 end)
@@ -187,16 +187,26 @@ test("tooltip: legacy lines once per item, collected state", function(M, ns)
     H.eq(tt:NumLines(), 1, "other items untouched")
 end)
 
-test("tooltip: keystone lines on the player's keystone", function(M, ns)
+test("tooltip: keystone lines on the player's keystone in the bags, not on a link", function(M, ns)
     FX.connect(M, H)
     FX.all(M, H)
-    local tt = M.env.ItemRefTooltip
+    M.env.GetContainerItemLink = function(bag, slot)
+        return (bag == 0 and slot == 1) and "|cffa335ee|Hitem:900001:0:0:0:0:0:0:0:80|h[Mythic Keystone]|h|r" or nil
+    end
+    local tt = M.env.GameTooltip
     tt:SetOwner(M.env.UIParent, "ANCHOR_NONE")
-    tt:SetHyperlink("item:900001")
+    tt:SetBagItem(0, 1)
     local text = table.concat(tt.__lines, "\n")
     H.contains(text, "Halls of Lightning +8")
-    H.contains(text, "Affixes: Fortified, Bolstering, Volcanic")
+    H.contains(text, "Affixes: Fortified, Bolstering, Raging", "the server's affix ids (4 is Raging)")
     H.contains(text, "Dungeon mode: Mythic")
+    -- a chat link: every keystone is this item, so it is not the viewer's key
+    local ref = M.env.ItemRefTooltip
+    ref:SetOwner(M.env.UIParent, "ANCHOR_NONE")
+    ref:SetHyperlink("item:900001")
+    text = table.concat(ref.__lines, "\n")
+    H.ok(not text:find("Halls of Lightning", 1, true), "no dungeon on a link")
+    H.contains(text, "A keystone link does not show its dungeon and level.")
 end)
 
 ------------------------------------------------------------------------------------------------------

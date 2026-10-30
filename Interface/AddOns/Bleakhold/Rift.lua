@@ -1,12 +1,16 @@
 -- Bleakhold: Activities > Eclipse Rift, the old window's page (old BleakholdActivities.lua :352-404) in its anatomy
 -- (Activities.lua A.Page): what the rift is, the best floor solo, duo, trio and as a group and the checkpoint in the
 -- stat column, the rewards (with their tooltips), how it works, the floor to start at (floor 1 or right after a
--- checkpoint) and Enter / Leave. Our extras: the run in progress (floor, boss, time, deaths, score), the last run's
--- summary with its rewards, the Rift rank and a link to the Rift leaderboard.
+-- checkpoint) and Enter / Leave. Our extras: the run in progress (floor, boss, the run's time and deaths, score), the
+-- last run's summary with its rewards, the Rift rank and a link to the Rift leaderboard.
 --
 -- Data: the old page's BHMP U (Legacy.lua: bests by group size, checkpoint, level, open, the floor now, the floor
 -- count; X and a Rift floor's S keep the floor now true, since the server sends no U on leaving); our RIFT / RIFTE for
--- the run and the last run (RIFTE asks for U again).
+-- the run and the last run (RIFTE asks for U again). The bests come from U alone: RIFT's bestFloor is the best of any
+-- party size while no run is on (the bridge's RiftBestAny), so it never stands in for Best Solo. RIFT's deaths are the
+-- whole run's, like its elapsedMs (the bridge sends Run::riftRunDeaths, which goes on from floor to floor; the Rift
+-- tracker shows the same count), and RIFTE's floorReached is the deepest floor stood on, unset (or 0 from an older
+-- server) when the run ended before its first floor.
 -- Actions: the old commands, as the old page sent them (.rift enter <floor> | leave: Legacy.RiftEnter, RiftLeave), so
 -- the player picks the start floor; a party member who is not the leader follows the party (.rift enter, the server's
 -- follow path: Legacy.RiftFollow); Leaderboard opens ours.
@@ -15,7 +19,8 @@
 -- floor is one boss, its portal leads deeper; every 5th floor is a checkpoint, and a run starts at floor 1 or right
 -- after one reached; a floor pays Mythic Coins (more the deeper, double on a new best for the group size, within the
 -- weekly cap), every 5th floor a Mythical Cache, and a small chance at a Mythic-only look; the whole party down
--- collapses the rift.
+-- collapses the rift. Whoever opens it must be alive, out of combat and not on a flight; a member who follows must be
+-- the same (EnterBlock, checked again every second while the page is open).
 local ADDON, ns = ...
 local U, UI, Comm = ns.U, ns.UI, ns.Comm
 local C = UI.C
@@ -155,6 +160,24 @@ function P.IsFollower()
     return raid == 0 and party > 0 and not (IsPartyLeader and IsPartyLeader())
 end
 P.FOLLOW_NOTE = "Your party leader opens the rift; if it is already open, this takes you to your party."
+-- A member who is dead, in combat or on a flight. The client cannot tell whether the party is in the rift: the server
+-- says "Your party is in the rift: ..." on its follow path only, and "Only your party leader can open the rift."
+-- otherwise, so this line holds either way.
+P.FOLLOW_BUSY = "You can follow your party into the rift once you are alive, out of combat and not on a flight."
+
+-- The player's own state as RiftEnter checks it for whoever opens the rift (in its order), or nil.
+local function selfBusy()
+    if UnitAffectingCombat and UnitAffectingCombat("player") then
+        return "You are in combat."
+    end
+    if UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") then
+        return "You are dead."
+    end
+    if UnitOnTaxi and UnitOnTaxi("player") then
+        return "You are busy (battleground or flight)."
+    end
+    return nil
+end
 
 -- What keeps the player from opening the rift (or following the party into it), as the server checks it (RiftEnter),
 -- or nil. Also the Bleakhold Royale and 1v1 arena queues, which .rift enter does not check (a player on a Rift floor
@@ -166,7 +189,7 @@ function P.EnterBlock()
     end
     local level = UnitLevel and UnitLevel("player") or 0
     if r.known and level > 0 and level < (r.minLevel or 0) then
-        return "Opens at level " .. r.minLevel .. "."
+        return "You need to be level " .. r.minLevel .. "."
     end
     local queued = A.OtherQueueBlock()
     if queued then
@@ -176,33 +199,30 @@ function P.EnterBlock()
     if inInstance and (kind == "party" or kind == "raid" or kind == "pvp" or kind == "arena") then
         return "Leave the dungeon or battleground first."
     end
-    -- the player's own state (RiftEnter checks every member who goes in, the leader as "You")
-    if UnitAffectingCombat and UnitAffectingCombat("player") then
-        return "You are in combat."
-    end
-    if UnitIsDeadOrGhost and UnitIsDeadOrGhost("player") then
-        return "You are dead."
-    end
-    if UnitOnTaxi and UnitOnTaxi("player") then
-        return "You are busy (battleground or flight)."
-    end
     if (GetNumRaidMembers and GetNumRaidMembers() or 0) > 0 then
         return "The rift takes at most 5 players - leave the raid group first."
     end
-    -- the leader's opening (a follower only goes after the party): never a Dungeon Finder group, and every member,
-    -- near or far, at the rift's level
-    if not P.IsFollower() then
-        if A.InDungeonFinderGroup() then
-            return "Leave the Dungeon Finder group first."
-        end
-        if r.known and (r.minLevel or 0) > 0 then
-            for i = 1, GetNumPartyMembers and GetNumPartyMembers() or 0 do
-                local unit = "party" .. i
-                local lvl = UnitLevel and UnitLevel(unit) or 0
-                if lvl > 0 and lvl < r.minLevel then
-                    local name = UnitName and UnitName(unit)
-                    return U.Safe(name or "A party member") .. " needs to be level " .. r.minLevel .. "."
-                end
+    -- a follower goes after the party once alive, out of combat and free (the follow path, before the leader's rules)
+    if P.IsFollower() then
+        return selfBusy() and P.FOLLOW_BUSY or nil
+    end
+    -- the leader's opening: never a Dungeon Finder group, the leader alive, out of combat and free, and every
+    -- member, near or far, at the rift's level (the members' combat is left to the server: only those within 100
+    -- yards go in)
+    if A.InDungeonFinderGroup() then
+        return "Leave the Dungeon Finder group first."
+    end
+    local busy = selfBusy()
+    if busy then
+        return busy
+    end
+    if r.known and (r.minLevel or 0) > 0 then
+        for i = 1, GetNumPartyMembers and GetNumPartyMembers() or 0 do
+            local unit = "party" .. i
+            local lvl = UnitLevel and UnitLevel(unit) or 0
+            if lvl > 0 and lvl < r.minLevel then
+                local name = UnitName and UnitName(unit)
+                return U.Safe(name or "A party member") .. " needs to be level " .. r.minLevel .. "."
             end
         end
     end
@@ -267,7 +287,10 @@ function P:RefreshRun()
         local parts = {}
         local e = P.Elapsed()
         if e then parts[#parts + 1] = "Time " .. U.Clock(e) end
-        if rf and rf.deaths then parts[#parts + 1] = rf.deaths .. (rf.deaths == 1 and " death" or " deaths") end
+        -- the run's deaths, from its first floor (as the time and the Rift tracker)
+        if rf and rf.deaths then
+            parts[#parts + 1] = rf.deaths .. (rf.deaths == 1 and " death" or " deaths")
+        end
         if rf and rf.groupSize then parts[#parts + 1] = rf.groupSize == 1 and "solo" or ("group of " .. rf.groupSize) end
         lines[2] = table.concat(parts, "  -  ")
         if rf and rf.score then lines[3] = "Score " .. U.Commas(rf.score) end
@@ -275,7 +298,7 @@ function P:RefreshRun()
         P.runTitle:SetText("Your Last Run")
         local sm = rf and rf.summary
         if sm then
-            lines[1] = (sm.floor and ("Reached floor " .. sm.floor) or "Run over") .. (sm.newBest and "  -  new best!" or "")
+            lines[1] = P.SummaryTitle(sm)
             local parts = {}
             if sm.timeMs then parts[#parts + 1] = "Time " .. U.Clock(sm.timeMs / 1000) end
             if sm.score then parts[#parts + 1] = "Score " .. U.Commas(sm.score) end
@@ -295,6 +318,21 @@ function P:RefreshRun()
     end
 end
 
+-- The last run's first line: the deepest floor stood on (none: the run ended before it began), and "new best!" unless
+-- a reward line says which party size the best is for (the server's "New best for a duo run").
+function P.SummaryTitle(sm)
+    local text = (sm.floor or 0) > 0 and ("Reached floor " .. sm.floor) or "Run over"
+    if sm.newBest then
+        for _, rw in ipairs(sm.rewards or {}) do
+            if type(rw) == "string" and rw:find("^New best") then
+                return text
+            end
+        end
+        text = text .. "  -  new best!"
+    end
+    return text
+end
+
 -- The run's time, counted on from the last RIFT (anchored to GetTime()).
 function P.Elapsed()
     local rf = S.rift
@@ -306,15 +344,12 @@ end
 
 function P:RefreshStats()
     local r = L.rift
+    -- U's bests by party size and checkpoint, "-" until U comes (RIFT's bestFloor mixes the sizes: it is no solo best)
     for i, v in ipairs(P.bests) do
-        local b = r.best[i] or 0
+        local b = r.known and r.best[i] or 0
         v:SetText(b > 0 and tostring(b) or "-")
     end
-    if not r.known and S.rift and S.rift.bestFloor and S.rift.bestFloor > 0 then
-        -- before the old U: our RIFT's best floor (the best of the group size played, else overall)
-        P.bests[1]:SetText(tostring(S.rift.bestFloor))
-    end
-    P.checkpoint:SetText((r.checkpoint or 0) > 0 and ("floor " .. r.checkpoint) or "-")
+    P.checkpoint:SetText(r.known and (r.checkpoint or 0) > 0 and ("floor " .. r.checkpoint) or "-")
     local rank = S.rift and S.rift.rank
     if rank then
         P.rank:SetText(tostring(rank))
@@ -326,10 +361,8 @@ function P:RefreshStats()
     end
 end
 
-function P:Refresh()
-    P:RefreshStats()
-    P:RefreshFloors()
-    P:RefreshRun()
+-- Enter / Leave, the start floor and the note under them.
+function P:RefreshEnter()
     local r = L.rift
     local runFloor = P.RunFloor()
     local party = (GetNumPartyMembers and GetNumPartyMembers() or 0) > 0
@@ -358,9 +391,19 @@ function P:Refresh()
     end
 end
 
+function P:Refresh()
+    P:RefreshStats()
+    P:RefreshFloors()
+    P:RefreshRun()
+    P:RefreshEnter()
+end
+
+-- every second while open: the run's clock, or (no run) the button again, as combat, death and flights come and go
 function P:Tick()
     if P.RunFloor() then
         P:RefreshRun()
+    else
+        P:RefreshEnter()
     end
 end
 

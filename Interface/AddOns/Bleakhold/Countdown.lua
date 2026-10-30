@@ -12,11 +12,21 @@
 --               glow flares and settles to a halo; the one before fades out
 --   zero        the frame goes (the run starts: MPLUS_GO), as before
 -- With royaleMotion off (RoyaleStyle.lua) every pop and fade jumps to its end and the bar does not flash.
--- DBM: the group leader's client sends DBM's pull-timer message (prefix "DBMv4-PT", body = seconds) to the group, or
--- to itself when solo and DBM is loaded, so DBM shows its own "Pull in" bar (and may count in the middle of the screen
--- itself: hideNumeralsWithDBM hides ours then). That message is for DBM only; it is never a Bleakhold intent. When the
--- server already sends the DBM message itself (HELLO feature bit DBM_BY_SERVER), the client does not. While DBM shows
--- its bar (CD.DbmBar asks DBM's bar module) ours hides, so one bar shows.
+-- The kicker names the run: "Mythic+ Keystone" for a key, "Mythic 0 - untimed" for a Mythic 0 (MPS level 0: the
+-- Font of Power's, which counts down 10 s; it has no affixes) over the bare dungeon name.
+-- DBM: the group leader's client sends DBM's pull-timer messages to the group, or to itself when solo and DBM is
+-- loaded, so DBM shows its own "Pull in" bar (and may count in the middle of the screen itself: hideNumeralsWithDBM
+-- hides ours then). Two of them, one per DBM generation:
+--   "DBMv4-PT"     body = seconds (0 cancels): the newer DBM builds (the Warmane backport)
+--   "DBMv4-Pizza"  body = seconds .. "\tPull in", never for 0: the stock DBM-Core 4.x for 3.3.5a, which knows only its
+--                  Pizza timer (from a leader or an assistant); the newer builds map a "Pull in" Pizza onto their PT
+--                  sync with AntiSpam, so they still show one bar
+-- A 4.x DBM ignores Pizza from its own player and drops a whisper from outside the group, so the sender (the leader,
+-- or a solo player) makes its own bar there (DBM:CreatePizzaTimer, not broadcast), and on a cancel every client with a
+-- 4.x DBM takes the "Pull in" bar away itself (DBM.Bars:CancelBar). These messages are for DBM only; never a Bleakhold
+-- intent. When the server already sends the DBM message itself (HELLO feature bit DBM_BY_SERVER), the client does not;
+-- the server sends PT only, so a client with a 4.x DBM makes its own bar then (CD.LocalServerPull).
+-- While DBM shows its bar (CD.DbmBar asks DBM's bar module) ours hides, so one bar shows.
 local ADDON, ns = ...
 local U, UI, Comm = ns.U, ns.UI, ns.Comm
 local C = UI.C
@@ -29,7 +39,11 @@ local CD = {}
 ns.Countdown = CD
 
 CD.DBM_PREFIX = "DBMv4-PT"
+CD.DBM_PIZZA_PREFIX = "DBMv4-Pizza"
+-- DBM 4.x numbers its releases (4442 for 4.52); the newer builds use a date (yyyymmdd...)
+CD.DBM_OLD_BELOW = 1e6
 CD.KEY_KICKER = "Mythic+ Keystone"
+CD.M0_KICKER = "Mythic 0 - untimed"
 CD.W, CD.H = 420, 270
 CD.MAX_AFFIXES = 6
 -- DBM-Core's DBT defaults: DBTBarTemplate 195 x 20, GameFontHighlightSmall, StartColor, EndColor, Flash below 7.75 s;
@@ -347,6 +361,17 @@ function CD.PullChannel()
     return dbmLoaded() and "WHISPER" or nil
 end
 
+-- Whether the DBM loaded is a 4.x build (the stock 3.3.5a DBM-Core: Pizza timers only, a release number), not a newer
+-- one (a date) or none.
+function CD.OldDbm()
+    local d = DBM
+    if type(d) ~= "table" or type(d.CreatePizzaTimer) ~= "function" then
+        return false
+    end
+    local rev = tonumber(d.ReleaseRevision)
+    return rev ~= nil and rev < CD.DBM_OLD_BELOW
+end
+
 function CD.SendPull(seconds)
     local channel = CD.PullChannel()
     if not channel then
@@ -357,13 +382,42 @@ function CD.SendPull(seconds)
         return false
     end
     local body = tostring(seconds)
-    if channel == "WHISPER" then
-        SendAddonMessage(CD.DBM_PREFIX, body, "WHISPER", ns.PlayerName())
-    else
+    local old = CD.OldDbm()
+    if channel ~= "WHISPER" then
         SendAddonMessage(CD.DBM_PREFIX, body, channel)
+        if seconds >= 3 then
+            SendAddonMessage(CD.DBM_PIZZA_PREFIX, body .. "\t" .. CD.BAR_TEXT, channel)
+        end
+    elseif not old then
+        SendAddonMessage(CD.DBM_PREFIX, body, "WHISPER", ns.PlayerName())
+    end
+    -- a 4.x DBM shows nothing for its own player's message: the sender's bar is made here
+    if old and seconds > 0 then
+        pcall(DBM.CreatePizzaTimer, DBM, seconds, CD.BAR_TEXT, false)
     end
     CD.sentPull = seconds > 0
     return true
+end
+
+-- A realm whose server sends the pull timer itself (DBM_BY_SERVER: BleakholdMgr's RunPullTimerLocked) sends
+-- "DBMv4-PT" only, which a 4.x DBM does not know: there every client with a 4.x DBM, leader or member, makes its own
+-- "Pull in" bar (not broadcast), unless the player turned the DBM pull bar off (/bh dbm off). A newer DBM takes the
+-- server's PT. Answers whether it made one.
+function CD.LocalServerPull(seconds)
+    if Comm.demo or seconds < 3 or not Comm.HasFeature(Comm.FEATURE.DBM_BY_SERVER) or not ns.Option("dbmPull", true)
+        or not CD.OldDbm() then
+        return false
+    end
+    return (pcall(DBM.CreatePizzaTimer, DBM, seconds, CD.BAR_TEXT, false))
+end
+
+-- DBM's "Pull in" bar goes (a 4.x DBM has no message that cancels a Pizza timer).
+function CD.CancelDbmBar()
+    local d = DBM
+    local bars = type(d) == "table" and type(d.Bars) == "table" and d.Bars or nil
+    if bars and type(bars.CancelBar) == "function" then
+        pcall(bars.CancelBar, bars, CD.BAR_TEXT)
+    end
 end
 
 -- Whether DBM shows its "Pull in" bar now: DBM-Core's bar module (DBM.Bars, DBT) finds a bar by its name, as
@@ -417,14 +471,30 @@ function CD.Remaining()
     return (m.countdownMs or 0) / 1000 - (GetTime() - (m.startedAt or GetTime()))
 end
 
--- The affix icons and the era, centred under the title.
-local function layoutHead(names, ids, era)
+-- An affix's name and tooltip text by the server's id (MPS), as the Keys page names it (ns.Keys.AffixInfo: Data.lua's
+-- built-in DEF A numbers some of them differently, 4 Volcanic there for the server's Raging).
+function CD.AffixInfo(id)
+    local K = ns.Keys
+    if K and K.AffixInfo then
+        return K.AffixInfo(id)
+    end
+    local d = ns.Def("A", id)
+    return ns.AffixNames({ id })[1], d and d.text
+end
+
+-- The affix icons (the server's affix ids) and the era, centred under the title.
+local function layoutHead(ids, era)
     local shown = {}
     for i, a in ipairs(f.affixes) do
-        local name = names[i]
-        if name then
-            local d = ids and ids[i] and ns.Def("A", ids[i])
-            a:SetAffix(name, nil, d and d.text)
+        local id = ids and ids[i]
+        if id then
+            local name, text = CD.AffixInfo(id)
+            a:SetAffix(name, nil, text)
+            -- the Mythic Champions and Mythical Boons have no affix icon of their own: the Keys page's
+            local special = ns.Keys and ns.Keys.SPECIAL_ICONS and ns.Keys.SPECIAL_ICONS[id]
+            if special then
+                a:SetIcon(special)
+            end
             a:Show()
             shown[#shown + 1] = a
         else
@@ -464,16 +534,16 @@ function CD.Start(m)
         return
     end
     CD.generic = nil
-    f.kicker:SetText(CD.KEY_KICKER)
+    f.kicker:SetText((m.level or 0) == 0 and CD.M0_KICKER or CD.KEY_KICKER)
     UI.SetText(f.title, ns.DungeonName(m.dungeonId) .. ((m.level or 0) > 0 and (" +" .. m.level) or ""))
     local era = m.eraId and (ns.DefName("E", m.eraId, "Era") .. " era") or nil
-    layoutHead(ns.AffixNames(m.affixes), m.affixes, era)
+    layoutHead(m.affixes, era)
     f.bar.name:SetText(CD.BAR_TEXT)
     f.bar.timeText = nil
     CD.total = secs
     clearNumbers()
-    if secs >= 3 then
-        CD.SendPull(secs)
+    if secs >= 3 and not CD.SendPull(secs) then
+        CD.LocalServerPull(secs)
     end
     claimBar()
     f:Show()
@@ -491,7 +561,7 @@ function CD.StartGeneric(kicker, title, ms)
     CD.generic = { endsAt = GetTime() + secs, kicker = kicker, title = title }
     UI.SetText(f.kicker, kicker or "")
     UI.SetText(f.title, title or "")
-    layoutHead({}, nil, nil)
+    layoutHead(nil, nil)
     UI.SetText(f.bar.name, kicker or "")
     f.bar.timeText = nil
     CD.total = secs
@@ -518,8 +588,15 @@ function CD.Stop(cancelled)
     end
     f:Hide()
     clearNumbers()
-    if cancelled and CD.sentPull then
-        CD.SendPull(0)
+    if cancelled then
+        local sent = CD.sentPull
+        if sent then
+            CD.SendPull(0)
+        end
+        -- the bar this client made, or a 4.x DBM's from the leader's Pizza: nothing else takes it away
+        if sent or CD.OldDbm() then
+            CD.CancelDbmBar()
+        end
     end
     CD.sentPull = false
 end

@@ -12,9 +12,12 @@
 -- Rules as the server has them (mod-bleakhold bh_mplus.cpp): the four weekly affixes join at +2, +4, +7 and +10, the
 -- Champions and Boons at Champions.MinLevel (W's third field); Mythic 0 and keys need Mythic.MinLevel (80; below it
 -- the dungeon stays Normal); Mythic 0 ends with the final boss and gives the first keystone (+1); a key is used inside
--- its own dungeon by the group leader (right-click it, or the Font of Power, then Start keystone within 5 minutes) and
--- its countdown cannot be stopped; in time it goes up 1 to 3 levels and moves to another dungeon, over time it drops a
--- level; only the group leader sets the difficulty, outside dungeons (SetDifficulty, the bridge's KMODE).
+-- its own dungeon by the group leader (right-click it, or the Font of Power, then Start keystone within 5 minutes), on
+-- Normal difficulty (Normal or Mythic mode, not Heroic), also in a Mythic 0 no boss died in yet, and its countdown
+-- cannot be stopped; in time it goes up 1 to 3 levels (at most KEY maxLevel) and moves to another dungeon, over time it
+-- drops a level (never under +1); only the group leader sets the difficulty, outside dungeons (SetDifficulty, the
+-- bridge's KMODE). The Mythical Caches are an allowance, not caches to open: each finished run spends 1 to 3 of them
+-- and puts the gear straight into the bags (Complete, RollGear).
 local ADDON, ns = ...
 local U, UI, Comm = ns.U, ns.UI, ns.Comm
 local C = UI.C
@@ -70,6 +73,47 @@ P.coinsTip:SetScript("OnLeave", function()
     end
 end)
 
+-- The Mythical Caches are a reward allowance the runs spend on their own, not caches to open (bh_mplus.cpp Complete:
+-- 1 to 3 for a key in time, 1 over time or for a Mythic 0, capped by what is left; bh_rift.cpp: 1 every Rift.CacheEvery
+-- floors; RollGear puts the gear in the bags). KEY's cachesReady is the whole allowance, cachesBanked the part over
+-- the weekly amount (the bridge's Caches: banked = bank - weeklyCap), so the weekly amount is ready - banked while
+-- something is banked and less than all of it is; KEY sends neither the weekly amount nor the cap of the bank. With
+-- all of it banked (a realm with WeeklyCacheCap 0; a KEY with more banked than left, as the demo's) there is no weekly
+-- amount to show.
+function P.CachesTooltip()
+    local k = S.key or {}
+    local ready, banked = max(0, k.cachesReady or 0), max(0, k.cachesBanked or 0)
+    local lines = { "Mythical Caches", { "Cache rewards you have left. Each finished key uses 1 to 3 (by the time "
+        .. "left; 1 over time or in a Mythic 0) and every 5th Eclipse Rift floor uses 1; the gear goes straight into "
+        .. "your bags.", C.text, true } }
+    if banked > 0 and banked < ready then
+        lines[#lines + 1] = { (ready - banked) .. " more every week; unused ones carry over.", C.text, true }
+        lines[#lines + 1] = { banked .. " of them carried over from earlier weeks.", C.dim, true }
+    else
+        lines[#lines + 1] = { "More come every week; unused ones carry over.", C.text, true }
+        if banked > 0 and ready > 0 then
+            lines[#lines + 1] = { "All of them carried over from earlier weeks.", C.dim, true }
+        end
+    end
+    if ready == 0 then
+        lines[#lines + 1] = { "None left: runs give no cache gear until more come at the weekly reset.", C.orange,
+            true }
+    end
+    return lines
+end
+P.cachesTip = CreateFrame("Frame", nil, P)
+P.cachesTip:SetPoint("TOPRIGHT", P.caches.label, "TOPRIGHT", 0, 0)
+P.cachesTip:SetSize(170, 40)
+P.cachesTip:EnableMouse(true)
+P.cachesTip:SetScript("OnEnter", function(self)
+    UI.ShowTooltip(self, P.CachesTooltip())
+end)
+P.cachesTip:SetScript("OnLeave", function()
+    if GameTooltip then
+        GameTooltip:Hide()
+    end
+end)
+
 ------------------------------------------------------------------------------------------------------
 -- The keystone (old :288-290)
 ------------------------------------------------------------------------------------------------------
@@ -79,9 +123,11 @@ P.keyIcon:EnableMouse(true)
 P.keyText = UI.Text(P, 15, C.text)
 P.keyText:SetPoint("TOPLEFT", P.keyIcon, "TOPRIGHT", 10, -4)
 UI.OneLine(P.keyText, 360)
-P.keySub = UI.Text(P, 11, C.dim)
+-- wider than the title and two lines high: the run notes ("Run under way: in time +9 to +11 in a new dungeon, over
+-- time +7 here.") are long; below the stat column there is room up to the art
+P.keySub = UI.Para(P, 11, C.dim, 460)
 P.keySub:SetPoint("TOPLEFT", P.keyText, "BOTTOMLEFT", 0, -4)
-UI.OneLine(P.keySub, 360)
+P.keySub:SetHeight(28)
 
 -- the keystone's levels, as the server words them (DEF M; the built-in ladder before it sends one)
 function P.LadderTooltip()
@@ -198,6 +244,7 @@ P.start.tooltip = function()
     return { "Start keystone", { "Inside your keystone's dungeon: right-click the keystone (or use the Font of "
         .. "Power), then press this to start the countdown for your group.", C.text, true },
         { "A keystone needs " .. P.KEY_MIN_PLAYERS .. " players inside the dungeon.", C.text, true },
+        { "Normal or Mythic dungeon mode, not Heroic.", C.text, true },
         { "The countdown cannot be stopped once it starts.", C.dim, true } }
 end
 -- why Start keystone is greyed (P.StartBlock), under the season grid
@@ -284,8 +331,18 @@ function P.AffixInfo(id)
     return name, text
 end
 
--- The keystone run going on now (counting down or running, no result yet), or nil. StartRun has already lowered the
--- stored key ("depleted until the run is finished"), so while it runs the page shows the run's own level.
+-- The names of a list of the server's affix ids (MPS, KEY, ERA), as P.AffixInfo names them: the key tracker and the
+-- countdown use it too, so all of them call id 4 Raging.
+function P.AffixNames(ids)
+    local out = {}
+    for _, id in ipairs(ids or {}) do
+        out[#out + 1] = (P.AffixInfo(id))
+    end
+    return out
+end
+
+-- A keystone run going on now (counting down or running, no result yet; a Mythic 0 is level 0, not one), or nil. It
+-- can be someone else's: every member of the leader's run gets its MPS and MP.
 function P.RunningKey()
     local m = S.mplus
     if m and not m.result and (m.state or 0) <= 1 and (m.level or 0) > 0 then
@@ -294,15 +351,123 @@ function P.RunningKey()
     return nil
 end
 
-function P:RefreshKey()
-    local run = P.RunningKey()
-    if run then
-        local runName = ns.DefName("D", run.dungeonId, nil) or ns.DungeonName(run.dungeonId)
-        P.keyIcon.icon:SetTexture(UI.IconPath("INV_Misc_Key_15"))
-        P.keyText:SetText("|cffa335ee+" .. run.level .. "|r  " .. U.Safe(runName) .. "  -  run under way")
-        P.keySub:SetText("Beat the timer: +1 to +3 and a new dungeon. Over time: +" .. max(1, run.level - 1) .. ".")
+-- Whether the player leads their group, or has none: only then can a keystone they hold start (StartRun: "Only the
+-- group leader can start a run"; KSTART too).
+function P.LeadsGroup()
+    local raid = GetNumRaidMembers and GetNumRaidMembers() or 0
+    if raid > 0 then
+        return (IsRaidLeader and IsRaidLeader()) and true or false
+    end
+    local party = GetNumPartyMembers and GetNumPartyMembers() or 0
+    return party == 0 or ((IsPartyLeader and IsPartyLeader()) and true or false)
+end
+
+-- Whose the keystone run going on now is, from what the server sends, not from who leads now: the lead can pass in
+-- the middle of a run (or AzerothCore hands it away from an offline leader), and Complete() still sets the new key for
+-- run->owner, whoever leads by then. Every member gets the run's MPS and MP, only while inside its instance (the
+-- bridge's SyncRun: MpAbandoned once out).
+-- The KEY against the run (MPS):
+--   the run's dungeon and level: inside, the bridge sends the owner the run's own key (BuildKey, for run->owner only)
+--     and every member their own stored key, so this is the owner's: "own". A member whose own key happens to be the
+--     same is told apart by the old K when it came (Legacy.lua): StartRun stored the owner's key a level lower (SetKey,
+--     then SendKey), so the owner's K is under the run's level and a member's K is their key as it is: "other" (not at
+--     +1, where max(1, level - 1) stays 1).
+--   its dungeon one level lower: what an older server (before BuildKey sent the run's key) sends the owner, and what a
+--     member may hold. Told apart by what the KEYs did at the run's start (P.NoteRunStart): fallen from the run's level
+--     then, "own"; held from well before, "other". When the start was not seen (a /reload, a login in the middle of
+--     the run) the group leader's counts as the run, as before (StartRun takes only the leader's keystone), and
+--     anyone else's is "unsure": a member's own key, or an older server's owner who passed the lead.
+--   any other dungeon or level: never the owner's, "other".
+-- nil without a running key run or a keystone.
+function P.RunOwnership()
+    local m, k = P.RunningKey(), S.key
+    if not (m and k and k.hasKey) then
+        return nil
+    end
+    if m.dungeonId ~= k.dungeonId then
+        return "other"
+    end
+    if k.level == m.level then
+        -- (not the demo's K: a fixed sample that its sample run never lowers)
+        local old = not Comm.demo and L.mplus.key
+        if m.level > 1 and old and old.level == m.level and L.KeyDungeonId(old.name) == k.dungeonId then
+            return "other"
+        end
+        return "own"
+    end
+    if k.level + 1 == m.level then
+        local v = P.verdict
+        if v and v.runId == m.runId then
+            return v.who
+        end
+        return P.LeadsGroup() and "own" or "unsure"
+    end
+    return "other"
+end
+
+-- What the KEYs did at a run's start (its first MPS, with the countdown: a later MPS, after a /reload or on entering
+-- again, has none), for a key of its dungeon one level under it: an older bridge sent the owner the key StartRun stored
+-- a level lower as soon as the run started (before or just after the MPS), while a member's KEY does not change when
+-- someone else's run starts. P.verdict = { runId, who = "own" | "other" } for that run.
+P.START_WINDOW = 10
+P.held = nil   -- the KEY now: dungeonId, level, since (GetTime), fellAt (when it fell one level in its dungeon)
+
+function P.NoteKey()
+    local k = S.key
+    local d, l = (k and k.hasKey) and k.dungeonId or 0, (k and k.hasKey) and k.level or 0
+    local h = P.held
+    if h and h.dungeonId == d and h.level == l then
         return
     end
+    local now = GetTime()
+    P.held = { dungeonId = d, level = l, since = now,
+        fellAt = (h and d > 0 and h.dungeonId == d and h.level == l + 1) and now or nil }
+end
+
+function P.NoteRunStart()
+    local m, h = P.RunningKey(), P.held
+    if not (m and h and (m.countdownMs or 0) > 0) or (P.verdict and P.verdict.runId == m.runId) then
+        return
+    end
+    if h.dungeonId ~= m.dungeonId or h.level + 1 ~= m.level then
+        return
+    end
+    local at = m.startedAt or GetTime()
+    if h.fellAt and math.abs(h.fellAt - at) <= P.START_WINDOW then
+        P.verdict = { runId = m.runId, who = "own" }
+    elseif h.since < at - P.START_WINDOW then
+        P.verdict = { runId = m.runId, who = "other" }
+    end
+end
+
+ns.On("STATE", function(topic)
+    if topic == "KEY" then
+        P.NoteKey()
+        P.NoteRunStart()
+    end
+end)
+
+-- The player's own keystone run going on now (P.RunOwnership), or nil.
+function P.OwnRun()
+    if P.RunOwnership() == "own" then
+        return P.RunningKey()
+    end
+    return nil
+end
+
+-- What the run can make of the key, as Complete() does: in time +1 to +3 (at most KEY maxLevel) in another dungeon,
+-- over time one level lower here (never under +1).
+function P.RunOutcome(level)
+    local top = (S.key and S.key.maxLevel) or 15
+    local lo, hi = min(top, level + 1), min(top, level + 3)
+    return "Run under way: in time +" .. lo .. (hi > lo and (" to +" .. hi) or "") .. " in a new dungeon, over time +"
+        .. max(1, level - 1) .. " here."
+end
+-- for a run that is surely not the player's (P.RunOwnership "other"); P.RUN_UNSURE when it may be theirs
+P.OTHER_RUN = "In a keystone run that is not yours: your keystone does not change."
+P.RUN_UNSURE = "A keystone run is under way."
+
+function P:RefreshKey()
     local level, name, timer, known, depleted = P.Keystone()
     -- the keystone item's own icon when the client knows the item, else the old page's key
     local icon = GetItemIcon and GetItemIcon((S.key and S.key.itemId) or P.KEY_ITEM)
@@ -310,11 +475,23 @@ function P:RefreshKey()
         icon = nil
     end
     if level then
+        local run, who = P.RunningKey(), P.RunOwnership()
+        local own = who == "own" and run or nil
+        -- during the player's own run the run's level (an older server's stored key is one lower until it ends)
+        level = own and own.level or level
         P.keyIcon.icon:SetTexture(icon or UI.IconPath("INV_Misc_Key_15"))
         P.keyText:SetText("|cffa335ee+" .. level .. "|r  " .. U.Safe(name)
-            .. (depleted and "  |cff808080(depleted)|r" or ""))
-        P.keySub:SetText((timer > 0 and ("Timer " .. U.Clock(timer) .. "  -  ") or "")
-            .. "right-click the key inside the dungeon")
+            .. ((depleted and not own) and "  |cff808080(depleted)|r" or ""))
+        if own then
+            P.keySub:SetText(P.RunOutcome(own.level))
+        elseif who == "other" then
+            P.keySub:SetText(P.OTHER_RUN)
+        elseif run then
+            P.keySub:SetText(P.RUN_UNSURE)
+        else
+            P.keySub:SetText((timer > 0 and ("Timer " .. U.Clock(timer) .. "  -  ") or "")
+                .. "right-click the key inside the dungeon")
+        end
     else
         P.keyIcon.icon:SetTexture(UI.IconPath("INV_Misc_Key_15"))
         P.keyText:SetText("No keystone")
@@ -391,11 +568,130 @@ function P.InKeyDungeon(keyName)
     return type(here) == "string" and here ~= "" and keyName:find(here, 1, true) ~= nil
 end
 
--- What keeps Start keystone from working, as the server checks KSTART, or nil: a keystone, the group leader (or no
--- group; mod-bleakhold-ui BleakholdMgr.cpp), no key countdown or run going (a Mythic 0 with no boss down may still
--- become the key run), Normal difficulty, 5 players inside at the key level (StartRun), and a start the keystone or
--- the Font of Power opened here (the server's O: TakePendingSocket wants it, in the key's own dungeon, within 5
--- minutes; Legacy.lua). The demo has no dungeon to be in: there the button starts its sample run from anywhere.
+-- StartRun's and KeyStartBlock's refusal on a Heroic instance (bh_mplus.cpp, bh_mplus_scripts.cpp): Mythic mode is
+-- Normal difficulty, Heroic is not.
+P.NORMAL_ONLY = "Mythic 0 and keystones run on Normal difficulty. Set your dungeon difficulty to Normal, leave and "
+    .. "enter again."
+
+-- The same rule before the group enters (the dungeon difficulty is Heroic, the player outside the key's dungeon).
+function P.HeroicOutsideText(name)
+    return "Set the dungeon difficulty to Normal or Mythic before you enter " .. U.Safe(name or "the dungeon")
+        .. ": keystones do not run on Heroic."
+end
+
+-- The instance's difficulty (GetInstanceInfo's third value; for a 5-player dungeon 1 Normal, 2 Heroic).
+function P.InstanceDifficulty()
+    if not GetInstanceInfo then
+        return 1
+    end
+    local _, _, difficulty = GetInstanceInfo()
+    return tonumber(difficulty) or 1
+end
+
+-- MythicRunText's words for a finished run (bh_mplus_scripts.cpp): the right-click and StartRun refuse every start in
+-- an instance that had one until it is reset.
+function P.FinishedText(level, name)
+    local what = (level or 0) > 0 and (U.Safe(name) .. " +" .. level) or ("Mythic 0: " .. U.Safe(name))
+    return what .. " - finished. Reset the dungeon for another run."
+end
+
+-- The run S.mplus shows ended here (its MPE, P.endedRun) and no loading screen came since: the player is still in the
+-- instance it ran in, which has to be left to be reset. After MPE the bridge sends nothing when the player leaves (a
+-- finished run is not opened again), so the MPE's run id is kept until PLAYER_ENTERING_WORLD.
+P.endedRun = nil
+ns.On("MPLUS_END", function(res)
+    P.endedRun = type(res) == "table" and res.runId or nil
+end)
+ns.RegisterEvent("PLAYER_ENTERING_WORLD", function()
+    P.endedRun = nil
+end)
+
+-- A Mythic 0 or key run that finished in this instance, as the server's refusal says it, or nil: the old S and T
+-- (Legacy.lua) of the instance entered again after the run (SendFullState: state 3 ST_DONE), else the run S.mplus
+-- shows, ended since the last loading screen and run in the dungeon the player stands in (a stale S.mplus never blocks
+-- a later run).
+function P.FinishedBlock()
+    local run = L.Run()
+    if run and run.state == L.STATE.DONE and (run.mode == L.MODE.KEY or run.mode == L.MODE.MYTHIC0)
+        and type(run.name) == "string" and run.name ~= "" and A.InDungeon() then
+        return P.FinishedText(run.mode == L.MODE.KEY and run.level or 0, run.name)
+    end
+    local m = S.mplus
+    if not (m and P.endedRun and m.runId == P.endedRun) then
+        return nil
+    end
+    if not (m.result or m.state == 2 or m.state == 3) or (m.dungeonId or 0) == 0 then
+        return nil
+    end
+    local name = ns.DefName("D", m.dungeonId, nil) or ns.DungeonName(m.dungeonId)
+    if P.InKeyDungeon(name) then
+        return P.FinishedText(m.level, name)
+    end
+    return nil
+end
+
+-- What a run going on here leaves of Start keystone, or nil (StartRun; MythicRunText for the right-click): a Mythic 0
+-- (MPS level 0) still takes the keystone while it runs and no boss has died (StartRun's fromMythic0: the server's own
+-- Mythic mode starts one on entry, StartAutoMythic); a Mythic 0 counting down (the Font of Power) or a key run does
+-- not; a run finished here (P.FinishedBlock) does not either.
+function P.RunBlock()
+    local done = P.FinishedBlock()
+    if done then
+        return done
+    end
+    local m = S.mplus
+    if not m or m.result or (m.state or 0) > 1 then
+        return nil
+    end
+    if (m.level or 0) == 0 and (m.dungeonId or 0) > 0 then
+        if (m.state or 0) == 0 then
+            return "Mythic 0: " .. U.Safe(ns.DefName("D", m.dungeonId, nil) or ns.DungeonName(m.dungeonId))
+                .. " - in progress."
+        elseif (m.bossBits or 0) ~= 0 then
+            return "A boss is already dead in this Mythic 0. Reset the dungeon to insert a keystone."
+        end
+        return nil
+    end
+    if (m.state or 0) == 0 then
+        return P.OwnRun() and "Your keystone's countdown is running." or "A keystone countdown is running."
+    end
+    return "A keystone run is under way."
+end
+
+-- Who StartRun names before it counts the players (its ForPlayers check over the instance: below Mythic.MinLevel, in
+-- combat), or nil: the player and the party members the keystone saw inside when it opened the start (G).
+function P.MemberBlock()
+    local g = L.mplus.group
+    if not g then
+        return nil
+    end
+    local inside = {}
+    for _, m in ipairs(g) do
+        if m.inside then
+            inside[m.name] = true
+        end
+    end
+    local need = P.KeyMinLevel()
+    for _, unit in ipairs({ "player", "party1", "party2", "party3", "party4" }) do
+        local name = UnitName(unit)
+        if name and (unit == "player" or inside[name]) then
+            local level = UnitLevel(unit) or 0
+            if level > 0 and level < need then
+                return U.Safe(name) .. " is below level " .. need .. "."
+            elseif UnitAffectingCombat(unit) then
+                return U.Safe(name) .. " is in combat."
+            end
+        end
+    end
+    return nil
+end
+
+-- What keeps Start keystone from working, as the server checks KSTART, or nil: a keystone, no countdown or run going
+-- (a fresh Mythic 0 aside), the group leader (or no group; mod-bleakhold-ui BleakholdMgr.cpp), the key's own dungeon on
+-- Normal difficulty, nobody under the level or in combat, 5 players inside, and a start the keystone or the Font of
+-- Power opened here (the server's O: PeekPendingSocket wants it, in the key's own dungeon, within 5 minutes;
+-- Legacy.lua).
+-- The demo has no dungeon to be in: there the button starts its sample run from anywhere.
 function P.StartBlock()
     if not (Comm.ready or Comm.demo) then
         return "Waiting for the server..."
@@ -404,34 +700,35 @@ function P.StartBlock()
     if not (k and k.hasKey) then
         return "You have no keystone."
     end
-    -- a keystone run counting down or running; a Mythic 0 (level 0, which the server starts on its own in a key
-    -- dungeon) becomes the key run until its first boss dies (StartRun's fromMythic0)
-    local m = S.mplus
-    if m and not m.result and (m.state or 0) <= 1 then
-        if (m.level or 0) > 0 then
-            return (m.state or 0) == 0 and "Your keystone's countdown is running." or "A keystone run is under way."
-        elseif (m.bossBits or 0) ~= 0 then
-            return "A boss is already dead in this Mythic 0. Reset the dungeon to insert a keystone."
-        end
+    local busy = P.RunBlock()
+    if busy then
+        return busy
     end
     if Comm.demo then
         return nil
     end
     local raid, party = GetNumRaidMembers and GetNumRaidMembers() or 0, GetNumPartyMembers and GetNumPartyMembers() or 0
-    if (raid > 0 and not (IsRaidLeader and IsRaidLeader())) or (raid == 0 and party > 0
-        and not (IsPartyLeader and IsPartyLeader())) then
+    if not P.LeadsGroup() then
         return "Only the group leader can start the keystone."
     end
-    local _, name = P.Keystone()
-    -- keys run on Normal only: in a Heroic instance the keystone opens nothing (KeyStartBlock, StartRun)
-    if P.InKeyDungeon(name) and GetInstanceInfo and select(3, GetInstanceInfo()) == 2 then
-        return "Keystones run on Normal difficulty: set Normal (Heroic Dungeons page) outside, then enter again."
-    end
     local armed = L.SocketArmed()
-    if not armed then
-        if not P.InKeyDungeon(name) then
-            return "Use your keystone inside " .. U.Safe(name or "its dungeon") .. "."
+    local _, name = P.Keystone()
+    local inside = P.InKeyDungeon(name)
+    if not armed and not inside then
+        -- Heroic set (KEY mode 1) before the group goes in: said now, not once they stand in a Heroic instance
+        -- (P.NORMAL_ONLY) and have to leave, change it and reset; only the leader (or a solo player) gets here
+        if L.Difficulty() == 2 then
+            return P.HeroicOutsideText(name)
         end
+        return "Use your keystone inside " .. U.Safe(name or "its dungeon") .. "."
+    end
+    -- a Heroic instance: the right-click refuses it too, so the start never opens there
+    if inside and P.InstanceDifficulty() == 2 then
+        return P.NORMAL_ONLY
+    end
+    local member = armed and P.MemberBlock()
+    if member then
+        return member
     end
     -- 5 players inside (StartRun): the group the keystone saw inside when it opened the start (G), else its size
     local seen = armed and L.GroupInside()
@@ -442,15 +739,6 @@ function P.StartBlock()
         end
         return text .. "."
     end
-    -- every player inside at the key level (StartRun; a full party is all inside)
-    local minLevel = P.KeyMinLevel()
-    for i = 1, party do
-        local unit = "party" .. i
-        local lvl = UnitLevel and UnitLevel(unit) or 0
-        if lvl > 0 and lvl < minLevel then
-            return U.Safe(UnitName and UnitName(unit) or "A party member") .. " is below level " .. minLevel .. "."
-        end
-    end
     if not armed then
         return "Right-click your keystone (or use the Font of Power), then press Start keystone."
     end
@@ -458,12 +746,13 @@ function P.StartBlock()
 end
 
 -- What keeps the group leader's difficulty change from working (the bridge's KMODE, SetDifficulty): any instance (the
--- bridge refuses it on a dungeon, raid, battleground or arena map), a member who is not the leader.
+-- bridge refuses it on a dungeon, raid, battleground or arena map), a member who is not the leader (of a party or a
+-- raid: Group::IsLeader).
 function P.DifficultyBlock()
     if IsInInstance() then
         return "Leave the dungeon or battleground first."
     end
-    if (GetNumPartyMembers and GetNumPartyMembers() or 0) > 0 and not (IsPartyLeader and IsPartyLeader()) then
+    if not P.LeadsGroup() then
         return "Only the group leader can change the dungeon difficulty."
     end
     return nil
@@ -485,11 +774,14 @@ function P:RefreshStats()
     local k = S.key
     if k then
         if (k.weeklyBest or 0) > 0 then
-            P.best:SetText("+" .. k.weeklyBest .. (k.weeklyBestDungeon and ("  " .. U.Safe(ns.DungeonName(k.weeklyBestDungeon))) or ""))
+            P.best:SetText("+" .. k.weeklyBest
+                .. (k.weeklyBestDungeon and ("  " .. U.Safe(ns.DungeonName(k.weeklyBestDungeon))) or ""))
         else
             P.best:SetText("-")
         end
-        P.caches:SetText(k.cachesReady .. " left" .. ((k.cachesBanked or 0) > 0 and (", " .. k.cachesBanked .. " carried over") or ""))
+        -- an allowance the runs spend (P.CachesTooltip), not caches to open
+        P.caches:SetText(k.cachesReady .. " left"
+            .. ((k.cachesBanked or 0) > 0 and (", " .. k.cachesBanked .. " carried over") or ""))
     end
     for _, v in ipairs({ P.best, P.caches }) do
         if k then
@@ -499,6 +791,11 @@ function P:RefreshStats()
             v:Hide()
             v.label:Hide()
         end
+    end
+    if k then
+        P.cachesTip:Show()
+    else
+        P.cachesTip:Hide()
     end
     local w = S.week
     if w and w.coins then
@@ -544,6 +841,7 @@ function P:OnOpen()
 end
 
 ns.On("MPLUS_START", function()
+    P.NoteRunStart()
     if P:IsVisible() then
         P:Refresh()
     end

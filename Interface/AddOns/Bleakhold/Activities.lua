@@ -146,25 +146,75 @@ local weeklyPill = UI.Pill(win.header, "", C.dim, 11)
 weeklyPill:SetPoint("LEFT", dailyPill, "RIGHT", 14, 0)
 A.resetTexts = { dailyPill, weeklyPill }
 
+-- HELLO says when the next daily and weekly reset come (the Journey's reset hour, Thursday 00:00, server local time)
+-- and is sent once, so the client rolls them on: a day, a week (a day with a clock change is an hour off).
+A.DAY, A.WEEK = 86400, 604800
+A.RESET_GRACE = 5                               -- seconds after a reset before asking for the new day
+
+-- The first reset at or after at that is still to come at now, for a reset every period seconds.
+function A.NextReset(at, period, now)
+    if not at or at > now then
+        return at
+    end
+    return at + (floor((now - at) / period) + 1) * period
+end
+
+-- The resets the window has seen pass: HELLO's at first, rolled on once the new day (week) is asked for; a new HELLO
+-- (a new table in Comm.server) starts them again.
+local seen = {}
+local function seenResets()
+    local s = Comm.server or {}
+    if seen.hello ~= s then
+        seen.hello, seen.daily, seen.weekly = s, s.dailyReset, s.weeklyReset
+    end
+    return seen
+end
+A.SeenResets = seenResets
+
 function A.ResetTexts()
     local s = Comm.server or {}
+    local r = seenResets()
     local now = Comm.ServerTime()
     local daily, weekly
-    if s.dailyReset then
-        daily = "Daily reset  " .. U.Duration(s.dailyReset - now)
+    local nextDaily, nextWeekly = A.NextReset(r.daily, A.DAY, now), A.NextReset(r.weekly, A.WEEK, now)
+    if nextDaily then
+        daily = "Daily reset  " .. U.Duration(nextDaily - now)
     else
         daily = "Daily reset  -"
     end
-    if s.weeklyReset then
+    if nextWeekly then
         local offset = (s.utcOffsetMin or 0) * 60
-        weekly = "Weekly reset  " .. (U.Date("!%a %H:%M", s.weeklyReset + offset) or "-")
+        weekly = "Weekly reset  " .. (U.Date("!%a %H:%M", nextWeekly + offset) or "-")
     else
         weekly = "Weekly reset  -"
     end
     return daily, weekly
 end
 
-local resetAsked = 0
+-- After a reset passes: the new day's tasks, the week and the era, once (the week and the era alone after a weekly
+-- reset that is no daily one); then the reset rolls on to the next.
+function A.CheckResets()
+    local r = seenResets()
+    if not Comm.ready then
+        return
+    end
+    local now = Comm.ServerTime()
+    local day = r.daily and now >= r.daily + A.RESET_GRACE
+    local week = r.weekly and now >= r.weekly + A.RESET_GRACE
+    if not (day or week) then
+        return
+    end
+    if day then
+        r.daily = A.NextReset(r.daily, A.DAY, now)
+        Comm.Refresh("TASKS")
+    end
+    if week then
+        r.weekly = A.NextReset(r.weekly, A.WEEK, now)
+    end
+    Comm.Refresh("WEEK")
+    Comm.Refresh("ERA")
+end
+
 local function updateHeader()
     local onTasks = A.current == "tasks"
     for _, p in ipairs(A.resetTexts) do
@@ -179,14 +229,7 @@ local function updateHeader()
         dailyPill:SetValue(daily)
         weeklyPill:SetValue(weekly)
     end
-    -- after a reset passes, fetch the new day once
-    local s = Comm.server or {}
-    if s.dailyReset and Comm.ServerTime() >= s.dailyReset and GetTime() - resetAsked > 60 and Comm.ready then
-        resetAsked = GetTime()
-        Comm.Refresh("TASKS")
-        Comm.Refresh("WEEK")
-        Comm.Refresh("ERA")
-    end
+    A.CheckResets()
 end
 
 -- Leave dungeon (old :118-130): inside a party or raid instance; greyed while dead or in combat, as the server refuses
@@ -617,8 +660,10 @@ reroll:SetPoint("TOPRIGHT", P, "TOPLEFT", A.PAD + LEFT, DAILY_Y + 2)
 P.reroll = reroll
 P.dailyTitle = dailyTitle
 
--- a daily task: title, the achievement progress bar with "14 / 20" in it, the text, and its reward as quest rewards
--- show one (icon and name); a finished task shows the check and "Complete" in green instead of the bar
+-- a daily task: title, the achievement progress bar with "14 / 20" in it, the text (up to three lines, down to the
+-- reward row), and its reward as quest rewards show one (icon and name); a finished task shows the check and
+-- "Complete" in green instead of the bar. The card's tooltip has the whole title and text, the progress and the reward,
+-- for a title or text too long for the card (a bounty's goal from an older server is its one-line title).
 local CARD_W = floor((LEFT - 20) / 3)
 local CARD_H = 136
 local CARD_BAR_W = min(170, CARD_W - 24)
@@ -642,7 +687,18 @@ for i = 1, 3 do
     c.text:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -60)
     c.text:SetWidth(CARD_W - 22)
     c.text:SetJustifyV("TOP")
-    c.text:SetHeight(30)
+    c.text:SetHeight(44)                            -- three lines, down to the reward and Claim row (-104)
+    c:EnableMouse(true)
+    c:SetScript("OnEnter", function(self)
+        if self.tip then
+            UI.ShowTooltip(self, self.tip)
+        end
+    end)
+    c:SetScript("OnLeave", function()
+        if GameTooltip then
+            GameTooltip:Hide()
+        end
+    end)
     c.claim = UI.Button(c, min(150, CARD_W - 24), 22, "Claim", "red", 12)
     c.claim:SetPoint("BOTTOM", c, "BOTTOM", 0, 10)
     c.reward = UI.Reward(c, 16, 11)
@@ -762,10 +818,48 @@ bonus.text = UI.Text(bonus, 11, C.dim)
 bonus.text:SetPoint("TOPLEFT", bonus.title, "BOTTOMLEFT", 0, -4)
 bonus.text:SetWidth(ASIDE - 24)
 bonus.text:SetJustifyV("TOP")
-bonus.text:SetHeight(42)
 bonus.state = UI.Text(bonus, 12, C.teal)
 bonus.state:SetPoint("BOTTOMLEFT", bonus, "BOTTOMLEFT", 12, 10)
+-- the text takes the lines it needs (up to BONUS_LINES) and the box grows to fit it with the state line under it, into
+-- the free column above Find a group; the tooltip has the whole text
+P.BONUS_LINES = 6
+local BONUS_LINE, BONUS_SPACING = 11, 2
+local BONUS_FRAME = 124 - (3 * BONUS_LINE + 2 * BONUS_SPACING)   -- the box around its text: 124 high for three lines
+bonus:EnableMouse(true)
+bonus:SetScript("OnEnter", function(self)
+    if self.tip then
+        UI.ShowTooltip(self, self.tip)
+    end
+end)
+bonus:SetScript("OnLeave", function()
+    if GameTooltip then
+        GameTooltip:Hide()
+    end
+end)
 P.bonus = bonus
+
+-- The lines fs's text wraps to at width w, at most maxLines: the client's own height for it, else (a client that
+-- answers one line for a text wider than w) its width over the line's, less a little for the words that move down.
+function A.WrappedLines(fs, w, maxLines)
+    local _, size = fs:GetFont()
+    size = size or 12
+    local spacing = fs:GetSpacing() or 0
+    local n = floor(((fs:GetStringHeight() or size) + spacing) / (size + spacing) + 0.5)
+    local wide = fs:GetStringWidth() or 0
+    if n <= 1 and wide > w then
+        n = math.ceil(wide / (w * 0.9))
+    end
+    return max(1, min(maxLines, n))
+end
+
+function P.FitBonus()
+    bonus.text:SetHeight(P.BONUS_LINES * (BONUS_LINE + BONUS_SPACING))
+    local n = A.WrappedLines(bonus.text, ASIDE - 24, P.BONUS_LINES)
+    local h = n * BONUS_LINE + (n - 1) * BONUS_SPACING
+    bonus.text:SetHeight(h + 4)                     -- a little room, so the client never cuts the last line
+    bonus:SetHeight(BONUS_FRAME + h)
+    return n
+end
 
 local find = UI.Button(P, 160, 26, "Find a group", "red", 12)
 find:SetPoint("BOTTOMRIGHT", P, "BOTTOMRIGHT", -18, 18)
@@ -820,6 +914,7 @@ local function setCard(c, t)
     c.pick:Hide()
     UI.Colors(c, C.card, C.border)
     if not t then
+        c.tip = nil
         c.bar:SetProgress(0, "")
         c.bar:Show()
         UI.SetText(c.title, Comm.ready and "No task" or "Waiting for the server")
@@ -839,6 +934,13 @@ local function setCard(c, t)
     end
     UI.SetText(c.title, ns.TaskTitle(t))
     UI.SetText(c.text, ns.TaskText(t))
+    local text = ns.TaskText(t)
+    c.tip = { U.Safe(ns.TaskTitle(t)) }
+    if text ~= "" then
+        c.tip[#c.tip + 1] = { U.Safe(text), C.text, true }
+    end
+    c.tip[#c.tip + 1] = { t.state == 2 and "Claimed" or (done and "Complete") or (have .. " / " .. need), C.dim }
+    c.tip[#c.tip + 1] = { "Reward: " .. U.Safe(ns.TaskReward(t)), C.gold }
     if rerollMode and t.state == 0 then
         UI.Colors(c, C.active, C.border)
         c.pick:Show()
@@ -946,10 +1048,16 @@ function P:RefreshWeek(e)
     if b then
         UI.SetText(bonus.title, b.title or "")
         UI.SetText(bonus.text, b.text or "")
+        P.FitBonus()
+        bonus.tip = { U.Safe(b.title or "Weekly Bonus") }
+        if (b.text or "") ~= "" then
+            bonus.tip[2] = { U.Safe(b.text), C.text, true }
+        end
         bonus.state:SetText(e.bonusDone and "Done" or "Still open")
         UI.SetColor(bonus.state, e.bonusDone and C.mute or C.teal)
         bonus:Show()
     else
+        bonus.tip = nil
         bonus:Hide()
     end
 end

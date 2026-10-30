@@ -585,21 +585,28 @@ function P.CustomDungeons()
     return out
 end
 
--- A dungeon's row tooltip: chapter, level band, the player's best and the server record.
+-- A Journey score as the server words it: a percentage, at most 100 (bh_dungeon.cpp caps it: "87% in 12:30").
+function P.Percent(score)
+    return math.min(100, math.max(0, math.floor(tonumber(score) or 0))) .. "%"
+end
+
+-- A dungeon's row tooltip: chapter, level band, the player's best and the server record. Both are percentages; the
+-- record is the one of the best's tier, Normal without a best (bh_ui_bridge_map.cpp BoardRecord: never another tier's),
+-- so it is labelled with that tier and compares with the best beside it.
 function P.CustomTip(d)
     local cdef = ns.Def("C", d.chapter)
     local lines = { U.Safe(ns.DungeonName(d.id)) }
     lines[#lines + 1] = { (cdef and cdef.name and U.Safe(cdef.name) or ("Chapter " .. (d.chapter or 0)))
         .. ((d.lvlMin and d.lvlMax) and ("  -  level " .. d.lvlMin .. "-" .. d.lvlMax) or ""), C.dim }
+    local tier = ns.Data.tiers[(d.bestScore and d.bestTier or 0) + 1]
+    local tierText = tier and (" (" .. tier .. ")") or ""
     if d.bestScore then
-        local tier = d.bestTier and ns.Data.tiers[d.bestTier + 1]
-        -- the Journey score, 0-100 as on the board ("best 82%")
-        lines[#lines + 1] = { "Your best: " .. d.bestScore .. "%" .. (tier and (" (" .. tier .. ")") or ""), C.text }
+        lines[#lines + 1] = { "Your best: " .. P.Percent(d.bestScore) .. tierText, C.text }
     else
         lines[#lines + 1] = { "No run here yet", C.dim }
     end
     if d.recordScore then
-        lines[#lines + 1] = { "Server record: " .. d.recordScore .. "%"
+        lines[#lines + 1] = { "Server record: " .. P.Percent(d.recordScore) .. tierText
             .. (d.recordName and (" - " .. U.Safe(d.recordName)) or ""), C.gold }
     end
     return lines

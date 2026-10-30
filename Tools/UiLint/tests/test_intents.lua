@@ -111,7 +111,9 @@ test("SendAddonMessage is only called by Comm (BHc), Countdown (DBM pull timer) 
             H.contains(text, 'SendAddonMessage(prefix, msg, "WHISPER", me)')
         elseif file == "Countdown.lua" then
             for line in text:gmatch("[^\n]*SendAddonMessage%([^\n]*") do
-                H.contains(line, "CD.DBM_PREFIX", "Countdown only sends the DBM prefix")
+                H.ok(line:find("SendAddonMessage(CD.DBM_PREFIX,", 1, true)
+                    or line:find("SendAddonMessage(CD.DBM_PIZZA_PREFIX,", 1, true),
+                    "Countdown only sends DBM's prefixes (PT and Pizza): " .. line)
             end
         else
             H.eq(n, 0, file .. " must not call SendAddonMessage")
@@ -168,7 +170,7 @@ test("clicking every button of every window sends only valid intents (live mode)
             H.eq(s.target, M.playerName)
             H.eq(s.msg, "B?", "mod-bleakhold: only the coin balance is asked for")
         else
-            H.eq(s.prefix, "DBMv4-PT", "unexpected addon prefix " .. s.prefix)
+            H.ok(s.prefix == "DBMv4-PT" or s.prefix == "DBMv4-Pizza", "unexpected addon prefix " .. s.prefix)
         end
     end
     H.ok(n >= 10, "a good number of intents were exercised: " .. n)

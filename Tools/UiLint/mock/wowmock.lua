@@ -805,6 +805,10 @@ return function(opts)
             fire(self, "OnTooltipSetItem")
         end
     end
+    -- the bag and bank hovers (ContainerFrameItemButton_OnEnter, BankFrameItemButton_OnEnter): the slot's item as
+    -- env.GetContainerItemLink / GetInventoryItemLink give it, set like SetHyperlink (cleared, OnTooltipSetItem)
+    function IMPL.SetBagItem(self, bag, slot) IMPL.SetHyperlink(self, env.GetContainerItemLink(bag, slot) or "") end
+    function IMPL.SetInventoryItem(self, unit, slot) IMPL.SetHyperlink(self, env.GetInventoryItemLink(unit, slot) or "") end
     function IMPL.GetItem(self) if self.__item then return self.__item[1], self.__item[2] end end
     function IMPL.AddMessage(self, msg) table.insert(M.chat, { frame = self, msg = msg }) end
     function IMPL.SetMaxLetters(self, n) self.__maxLetters = n end

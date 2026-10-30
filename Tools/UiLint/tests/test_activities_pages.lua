@@ -204,11 +204,12 @@ test("journey: no start inside an instance or in the Dungeon Finder's queue, as 
     H.ok(P.enter:IsEnabled(), "free again")
 end)
 
--- The board's dungeons from our BOARD: a locked one, one with Normal and Veteran, one with Normal only.
+-- The board's dungeons from our BOARD: a locked one, one with Normal and Veteran, one with Normal only. Scores are
+-- the Journey's percentages (bh_dungeon.cpp caps a score at 100), the record of the best's tier.
 local CUSTOM_BOARD = {
     { 1, 1260, 0, 0, 0, "", 1 },
-    { 36, 1, 15, 21, 1, 1500, 0, 3100, "Brenna", 0 },
-    { 33, 1, 18, 25, 3, 82, 1, 95, "Dalia", 0 },
+    { 36, 1, 15, 21, 1, 72, 0, 95, "Brenna", 0 },
+    { 33, 1, 18, 25, 3, 64, 1, 88, "Dalia", 0 },
     { 209, 3, 42, 48, 1, "", "", "", "", 1 },
 }
 
@@ -229,8 +230,8 @@ test("journey: a custom run of any unlocked dungeon at a chosen tier is QJOIN D,
     -- the rows' tooltips: chapter, level, best, server record
     local tip = tipText(cr.dungeon.items[2].tip)
     H.contains(tip, "level 18-25")
-    H.contains(tip, "Your best: 82% (Veteran)", "the 0-100 Journey score, as on the board")
-    H.contains(tip, "Server record: 95% - Dalia")
+    H.contains(tip, "Your best: 64% (Veteran)")
+    H.contains(tip, "Server record: 88% (Veteran) - Dalia")
     local tiers = {}
     for _, it in ipairs(cr.tier.items) do tiers[#tiers + 1] = it.text end
     H.eq(table.concat(tiers, ","), "Normal,Veteran", "the tiers unlocked there")
@@ -611,7 +612,7 @@ test("rift: closed, under level, not the leader, a raid, inside a dungeon", func
     feed(ns, { "U;0;0;0;0;0;80;1;0;50" })
     M.playerLevel = 72
     P:Refresh()
-    H.eq(P.note:GetText(), "Opens at level 80.")
+    H.eq(P.note:GetText(), "You need to be level 80.", "RiftEnter's own words")
     H.ok(not P.enter:IsEnabled())
     H.eq(P.checkpoint:GetText(), "-")
     H.eq(P.bests[1]:GetText(), "-")
@@ -809,10 +810,9 @@ test("mythic+: a key run under way shows its own level, not the lowered key; Low
     H.send(M, "MPS", FX.examples(M).MPS)
     M.Advance(0.3)
     P:Refresh()
-    H.contains(P.keyText:GetText(), "+8|r  Halls of Lightning")
-    H.contains(P.keyText:GetText(), "run under way")
+    H.eq(P.keyText:GetText(), "|cffa335ee+8|r  Halls of Lightning", "the run's level; the note is under it")
     H.ok(not P.keySub:GetText():find("right-click", 1, true), "no 'right-click the key' while it runs")
-    H.contains(P.keySub:GetText(), "Over time: +7.")
+    H.eq(P.keySub:GetText(), "Run under way: in time +9 to +11 in a new dungeon, over time +7 here.")
     -- the map is named "Blackrock Spire"; the key's dungeon "Lower Blackrock Spire"
     H.ok(P.InKeyDungeon("Lower Blackrock Spire") == false, "outside")
     M.inInstance, M.instanceType, M.zone = true, "party", "Blackrock Spire"
@@ -1210,8 +1210,7 @@ test("mythic+: a fresh Mythic 0 takes a keystone; a boss down, a member below le
     M.env.GetInstanceInfo = function() return "Halls of Lightning", "party", 2, "Heroic", 5, 0, nil end
     P:Refresh()
     H.ok(not P.start:IsEnabled(), "Heroic")
-    H.eq(P.startHint:GetText(), "Keystones run on Normal difficulty: set Normal (Heroic Dungeons page) outside, then "
-        .. "enter again.")
+    H.eq(P.startHint:GetText(), P.NORMAL_ONLY)
     M.env.GetInstanceInfo = getInstanceInfo
     P:Refresh()
     H.contains(P.startHint:GetText(), "Right-click your keystone", "Normal: the keystone opens the start")
