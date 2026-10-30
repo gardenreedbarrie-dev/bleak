@@ -684,6 +684,45 @@ local function ApplyContainerSpacing()
     end
 end
 
+-- Bleakhold UI (UI by Addicated): bag windows open above the micro menu dock (micromenu.lua, addon.MicroDock). WoW
+-- stacks them up from CONTAINER_OFFSET_Y, sized for its own flat bag bar, and UIParent puts its own value back each
+-- time it lays the screen out; so after a layout that starts lower than the dock's top, the start is lifted to it and
+-- the bags are laid out once more. The spacing above shares this one hook and runs once, on the final layout. The
+-- hook is installed by the skin or by the dock, whichever comes first; each part checks its own switch.
+local containerHookInstalled, liftingContainers
+
+local function ContainerLift()
+    local dock = addon.MicroDock
+    local start = not liftingContainers and dock and dock.BagStart and dock.BagStart()
+    if start and (tonumber(CONTAINER_OFFSET_Y) or 0) < start then return start end
+end
+
+local function OnContainerFrameAnchors()
+    local start = ContainerLift()
+    if start then
+        CONTAINER_OFFSET_Y = start
+        liftingContainers = true
+        local ok, err = pcall(updateContainerFrameAnchors)
+        liftingContainers = false
+        if not ok then geterrorhandler()(err) end
+        return
+    end
+    ApplyContainerSpacing()
+end
+
+function addon.InstallContainerAnchorHook()
+    if containerHookInstalled or type(updateContainerFrameAnchors) ~= "function" then return end
+    containerHookInstalled = true
+    hooksecurefunc("updateContainerFrameAnchors", OnContainerFrameAnchors)
+end
+
+-- The dock was laid out again: open bags that start under its top are lifted at once.
+function addon.LiftContainerFrames()
+    if containerHookInstalled and ContainerLift() then
+        updateContainerFrameAnchors()
+    end
+end
+
 local function InstallHooks()
     if BagSkinModule.hooksInstalled then
         return
@@ -709,7 +748,8 @@ local function InstallHooks()
         NewItems:UpdateContainer(frame)
     end)
 
-    hooksecurefunc("updateContainerFrameAnchors", ApplyContainerSpacing)
+    -- the container spacing, with the dock's lift (OnContainerFrameAnchors)
+    addon.InstallContainerAnchorHook()
 end
 
 function BagSkinModule:Apply()

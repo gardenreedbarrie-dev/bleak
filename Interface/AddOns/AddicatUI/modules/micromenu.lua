@@ -1034,6 +1034,257 @@ local charPushHooksRegistered = false
 local MICRO_LAYOUT_BASE_Y = 55
 local hideFramesScheduler, bagsBar
 
+-- ============================================================================
+-- THE BOTTOM-RIGHT DOCK (micromenu.layout = "dock", the default; "strip" is AddicatUI's own layout)
+-- ============================================================================
+-- Bleakhold UI, UI by Addicated: the dock of the Bleakhold UI addon (BleakholdUI.lua), laid out by this file's own
+-- layout passes (LayoutMicroButtons, bagbuttons_reposition, RefreshBagsPosition). One row of micro buttons runs
+-- under the action bar's right gryphon at many screen sizes (Character, Spellbook and Talents could not be clicked),
+-- so the dock puts them in as many columns as fit right of the gryphon (Columns caps it), then in even rows: no
+-- near-empty last row, the shorter row at the bottom, right aligned. They sit in a tooltip-border box at the bottom
+-- right with the bag bar on top behind a divider; the backpack is 10 % and the small bags 12 % over the bag scale.
+-- The box moves in edit mode as one piece ("microdock", widgets.microdock); the strip's and the bag bar's own movers
+-- stand aside while it is on (their saved places stay for the strip), and bag windows open above it (BagStart, read
+-- by bags_skin.lua's container hook). Sizes are UIParent units unless a name says otherwise.
+local Dock = {
+    GAP = 2,                -- between two buttons (button units)
+    PAD = 7,                -- from the box's edge to the buttons and the bag bar
+    BAG_TOP = 4,            -- the bag bar's top under the box's top edge
+    BAG_BAR_H = 54,         -- the bag bar's height (the backpack is centred on it, as on the bag bar's own mover)
+    BAG_ROW = 7,            -- what the bag row adds to the backpack's height: the divider and its air
+    LINE_Y = 3,             -- the divider over the grid
+    KEYRING_ROOM = 40,      -- the key ring and the fold arrow, left of the small bags
+    BAG_GAP = 4,            -- between two small bags
+    MIN_COLUMNS = 3,
+    BAR_GAP = 6,            -- kept free between the action bar and the box
+    BACKPACK_SCALE = 1.10,
+    BAG_SCALE = 1.12,
+    BAG_LIFT = 4,           -- bag windows start this far above the box
+    BACKDROP = {
+        bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+        edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+        tile = true, tileSize = 16, edgeSize = 14,
+        insets = { left = 3, right = 3, top = 3, bottom = 3 },
+    },
+    BG = { 0.02, 0.02, 0.03, 0.82 },
+    BORDER = { 0.55, 0.46, 0.26, 0.95 },
+    LINE = { 0.55, 0.46, 0.26, 0.55 },
+}
+addon.MicroDock = Dock
+
+-- The dock is the layout (micromenu.layout) and the micro menu module runs. A hand-installed copy of the old
+-- Bleakhold UI addon lays out its own dock over the same buttons; while it is loaded this one stands aside.
+function Dock.Active()
+    local mm = addon.db and addon.db.profile and addon.db.profile.micromenu
+    if not (mm and mm.layout == "dock" and IsModuleEnabled()) then return false end
+    return not (IsAddOnLoaded and IsAddOnLoaded("BleakholdUI"))
+end
+
+local function DockBagScale()
+    local bags = addon.db and addon.db.profile and addon.db.profile.bags
+    return tonumber(bags and bags.scale) or 1
+end
+
+-- The backpack's scale (it hangs on UIParent) and a small bag's (on the bag bar, which has the bag scale itself).
+function Dock.BackpackScale(bagScale)
+    bagScale = tonumber(bagScale) or 1
+    return Dock.Active() and bagScale * Dock.BACKPACK_SCALE or bagScale
+end
+
+function Dock.SlotScale()
+    return Dock.Active() and Dock.BAG_SCALE or 1.0
+end
+
+-- A region's coordinate in UIParent units; a texture has no scale of its own, it draws at its frame's.
+local function DockToUI(region, v)
+    local owner = region.GetEffectiveScale and region or (region.GetParent and region:GetParent())
+    local scale = owner and owner.GetEffectiveScale and owner:GetEffectiveScale() or UIParent:GetEffectiveScale()
+    return v * scale / UIParent:GetEffectiveScale()
+end
+
+-- Where the action bar ends: its right gryphon, or its last button when the gryphons are off.
+function Dock.BarRight()
+    local cap = _G.MainMenuBarRightEndCap
+    local right = cap and cap:IsVisible() and cap:GetRight()
+    if right then return DockToUI(cap, right) end
+    local button = _G.ActionButton12
+    right = button and button:IsVisible() and button:GetRight()
+    if right then return DockToUI(button, right) + 8 end
+    return UIParent:GetWidth() * 0.62
+end
+
+-- Columns and rows for n buttons stepX apart (gapX of it between two) in `free` width: as many columns as fit, at
+-- least MIN_COLUMNS and at most maxColumns, then even rows.
+function Dock.Grid(n, stepX, gapX, free, maxColumns)
+    if n < 1 then return 0, 0 end
+    local fit = math.max(Dock.MIN_COLUMNS, math.floor((free - 2 * Dock.PAD + gapX) / stepX))
+    maxColumns = math.floor(tonumber(maxColumns) or n)
+    if maxColumns >= 1 then fit = math.min(fit, maxColumns) end
+    local rows = math.ceil(n / math.min(fit, n))
+    return math.ceil(n / rows), rows
+end
+
+-- The bag row's width and height at the dock's bag scales (0, 0 without a backpack); read before they apply, so
+-- the order of the layout passes does not matter.
+function Dock.BagRow()
+    local backpack = MainMenuBarBackpackButton
+    if not (backpack and backpack:IsShown()) then return 0, 0 end
+    local scale = DockBagScale()
+    local backpackScale = scale * Dock.BACKPACK_SCALE
+    local slot = bagslots[1]
+    local slotWidth = 0
+    if slot and slot:IsShown() and not GetBagCollapseState() then
+        slotWidth = (slot:GetWidth() or 0) * scale * Dock.BAG_SCALE
+    end
+    return (backpack:GetWidth() or 0) * backpackScale + 4 * (slotWidth + Dock.BAG_GAP) + Dock.KEYRING_ROOM,
+        (backpack:GetHeight() or 0) * backpackScale
+end
+
+-- The SetPoint lock the strip uses (buttons keep their place when Blizzard moves them for a vehicle).
+local function DockPoint(frame, ...)
+    if frame.SetPoint == addon._noop then frame.SetPoint = UIParent.SetPoint end
+    frame:ClearAllPoints()
+    frame:SetPoint(...)
+    frame.SetPoint = addon._noop
+end
+
+function Dock.PlaceMover()
+    local mover = Dock.mover
+    if not mover then return end
+    local widgets = addon.db and addon.db.profile and addon.db.profile.widgets
+    local cfg = widgets and widgets.microdock or {}
+    local anchor = cfg.anchor or "BOTTOMRIGHT"
+    mover:ClearAllPoints()
+    mover:SetPoint(anchor, UIParent, anchor, cfg.posX or -4, cfg.posY or 4)
+end
+
+-- The mover (the edit-mode frame that places the dock) and the box (the backdrop, on the micro menu bar so it fades
+-- and hides with it, at the inverse of the bar's scale so its border is the old one's at any menu scale).
+function Dock.Ensure()
+    if Dock.mover then return Dock.mover, Dock.box end
+    local menu = _G.AddicatUI_MicroButtonBar
+    if not menu then return nil end
+    local mover = addon.CreateUIFrame(200, 100, "MicroDock")
+    Dock.mover = mover
+    Dock.PlaceMover()
+    addon:RegisterEditableFrame({
+        name = "microdock",
+        frame = mover,
+        configPath = { "widgets", "microdock" },
+        editorVisible = Dock.Active,
+        showTest = function() mover:Show() end,
+        applyPosition = function()
+            Dock.PlaceMover()
+            Dock.Relayout()
+        end,
+        -- a new place can leave more or less room beside the gryphon
+        onHide = function() Dock.Relayout() end,
+        module = MicromenuModule,
+    })
+    local box = CreateFrame("Frame", "AddicatUI_MicroDockFrame", menu)
+    box:SetFrameStrata("BACKGROUND")
+    box:SetBackdrop(Dock.BACKDROP)
+    box:SetBackdropColor(unpack(Dock.BG))
+    box:SetBackdropBorderColor(unpack(Dock.BORDER))
+    box.line = box:CreateTexture(nil, "ARTWORK")
+    box.line:SetTexture(unpack(Dock.LINE))
+    box.line:SetHeight(1)
+    Dock.box = box
+    return mover, box
+end
+
+-- Lays the present buttons out in the dock (LayoutMicroButtons); false when there is nothing to lay out.
+function Dock.Layout(buttons, maxColumns)
+    local mover, box = Dock.Ensure()
+    if not mover then return false end
+    local list = {}
+    for i = 1, #buttons do
+        local button = buttons[i]
+        if button:IsShown() and (button:GetWidth() or 0) > 4 then list[#list + 1] = button end
+    end
+    if #list == 0 then return false end
+    local menu = box:GetParent()
+    box:SetScale(1 / ((menu and menu:GetScale()) or 1))
+    box:Show()
+
+    local first = list[1]
+    local s = first:GetEffectiveScale() / UIParent:GetEffectiveScale()
+    local gap, pad = Dock.GAP, Dock.PAD
+    local stepX, stepY = (first:GetWidth() + gap) * s, (first:GetHeight() + gap) * s
+    -- beside the gryphon the room ends at it; a dock moved away from the bar has the Columns cap only
+    local right = mover:GetRight() or (UIParent:GetWidth() - 4)
+    local barRight = Dock.BarRight()
+    local free = right > barRight and (right - barRight - Dock.BAR_GAP) or math.huge
+    local cols, rows = Dock.Grid(#list, stepX, gap * s, free, maxColumns)
+    local gridW, gridH = cols * stepX - gap * s, rows * stepY - gap * s
+    local bagW, bagH = Dock.BagRow()
+    local width = math.max(gridW, bagW) + 2 * pad
+    local height = gridH + 2 * pad + (bagH > 0 and (bagH + Dock.BAG_ROW) or 0)
+    mover:SetSize(width, height)
+    box:ClearAllPoints()
+    box:SetAllPoints(mover)
+
+    -- rows from the top, each right aligned (a shorter last row ends under the others' right edge)
+    for i, button in ipairs(list) do
+        local r, c = math.floor((i - 1) / cols), (i - 1) % cols
+        local inRow = math.min(cols, #list - r * cols)
+        local x = width - pad - (inRow - c) * stepX + gap * s
+        local y = pad + (rows - 1 - r) * stepY
+        DockPoint(button, "BOTTOMLEFT", box, "BOTTOMLEFT", x / s, y / s)
+    end
+
+    local line = box.line
+    if bagH > 0 then
+        line:ClearAllPoints()
+        line:SetPoint("BOTTOMLEFT", box, "BOTTOMLEFT", pad, pad + gridH + Dock.LINE_Y)
+        line:SetPoint("BOTTOMRIGHT", box, "BOTTOMRIGHT", -pad, pad + gridH + Dock.LINE_Y)
+        line:Show()
+    else
+        line:Hide()
+    end
+    Dock.columns, Dock.rows = cols, rows
+    Dock.AnchorBackpack()
+    if addon.InstallContainerAnchorHook then addon.InstallContainerAnchorHook() end
+    if addon.LiftContainerFrames then addon.LiftContainerFrames() end
+    return true
+end
+
+function Dock.Hide()
+    if Dock.box then Dock.box:Hide() end
+end
+
+-- The backpack (and the small bags chained to it) in the box's bag row: its right edge PAD in, centred on the bag
+-- bar's height under the top. The bag bar's own mover keeps its saved place for the strip.
+function Dock.AnchorBackpack()
+    local backpack, box = MainMenuBarBackpackButton, Dock.box
+    if not (backpack and box and box:IsShown() and Dock.Active()) then return false end
+    backpack:SetScale(Dock.BackpackScale(DockBagScale()))
+    local s = backpack:GetEffectiveScale() / UIParent:GetEffectiveScale()
+    local locked = backpack.SetPoint == addon._noop
+    if locked then backpack.SetPoint = UIParent.SetPoint end
+    backpack:ClearAllPoints()
+    backpack:SetPoint("RIGHT", box, "TOPRIGHT", -Dock.PAD / s, -(Dock.BAG_TOP + Dock.BAG_BAR_H / 2) / s)
+    if locked then backpack.SetPoint = addon._noop end
+    return true
+end
+
+-- Where bag windows start (CONTAINER_OFFSET_Y): over the box while it sits in the screen's bottom right quarter,
+-- where WoW stacks them; nil otherwise (off, hidden, or moved elsewhere).
+function Dock.BagStart()
+    local mover, box = Dock.mover, Dock.box
+    if not (mover and box and box:IsShown() and Dock.Active()) then return nil end
+    local top, right, bottom = mover:GetTop(), mover:GetRight(), mover:GetBottom()
+    if not (top and right and bottom) then return nil end
+    if right < UIParent:GetWidth() / 2 or bottom > UIParent:GetHeight() / 2 then return nil end
+    return top + Dock.BAG_LIFT
+end
+
+-- Lays the dock out again (a new place, screen size or UI scale changes the room beside the gryphon); set to
+-- LayoutMicroButtons once it is defined below.
+function Dock.Relayout()
+    if Dock.relayout and MicromenuModule.applied and _G.AddicatUI_MicroButtonBar then Dock.relayout() end
+end
+
 local function HideUnwantedBagFrames()
     -- Process all secondary bag slots
     for i, bags in pairs(bagslots) do
@@ -2001,6 +2252,9 @@ function MainMenuMicroButtonMixin:SetupBagButtons()
             frame = bagsFrame,
             blizzardFrame = MainMenuBarBackpackButton,
             configPath = {"widgets", "bagsbar"},
+            -- in the bottom-right dock the bags move with the dock's mover
+            editorVisible = function() return not Dock.Active() end,
+            showTest = function() bagsFrame:Show() end,
             module = addon.BagsModule or {}
         })
 
@@ -2017,7 +2271,8 @@ end
 
 function MainMenuMicroButtonMixin:bagbuttons_reposition()
     local bagScale = addon.db and addon.db.profile and addon.db.profile.bags and addon.db.profile.bags.scale or 1.0
-    MainMenuBarBackpackButton:SetScale(bagScale)
+    -- the dock's backpack is 10 % and its small bags 12 % over the bag scale
+    MainMenuBarBackpackButton:SetScale(Dock.BackpackScale(bagScale))
     local bagsWidget = addon:GetEditableFrameInfo("bagsbar")
     if bagsWidget then addon.SetEditorBoxScale(bagsWidget.frame, bagScale, "RIGHT") end
 
@@ -2030,7 +2285,7 @@ function MainMenuMicroButtonMixin:bagbuttons_reposition()
             bags:Show()
             bags:SetAlpha(1)
             bags:SetFrameLevel(MainMenuBarBackpackButton:GetFrameLevel())
-            bags:SetScale(1.0)
+            bags:SetScale(Dock.SlotScale())
             bags:SetSize(28, 28)
 
             if i == 1 then
@@ -2094,6 +2349,8 @@ function MainMenuMicroButtonMixin:bagbuttons_reposition()
         end
     end
 
+    -- folding the bags changes the bag row's width, and so the dock's
+    if Dock.Active() then Dock.Relayout() end
 end
 
 function MainMenuMicroButtonMixin:bagbuttons_refresh()
@@ -2192,6 +2449,12 @@ local function LayoutMicroButtons()
         buttons = reversed
     end
 
+    -- the bottom-right dock (micromenu.layout); the strip below otherwise
+    if Dock.Active() and Dock.Layout(buttons, config.columns) then
+        return
+    end
+    Dock.Hide()
+
     local _, _, hStep, vStep, columns, _, totalWidth, totalHeight =
         GetMicroLayoutMetrics(config, useGrayscale, numButtons)
 
@@ -2224,6 +2487,7 @@ local function LayoutMicroButtons()
         menu:SetPoint("BOTTOMRIGHT", menu.editorFrame, "CENTER", menuOffX, menuOffY)
     end
 end
+Dock.relayout = LayoutMicroButtons
 
 -- A client shipping its own micro button can be short a state texture (#473: Whitemane's
 -- CollectionsMicroButton has no disabled one), and the getter then returns nil.
@@ -2301,6 +2565,9 @@ local function layoutMicroButtons(xOffset)
             blizzardFrame = menu,
             configPath = {"widgets", "micromenu"},
             module = addon.MicroMenuModule or {},
+            -- in the bottom-right dock the buttons move with the dock's mover
+            editorVisible = function() return not Dock.Active() end,
+            showTest = function() microMenuFrame:Show() end,
             onHide = function()
                 -- Re-anchor menu when leaving editor mode (overlay may have been dragged)
                 menu:ClearAllPoints()
@@ -2647,7 +2914,7 @@ function addon.RefreshBagsPosition()
     local scale = addon.db and addon.db.profile and addon.db.profile.bags and addon.db.profile.bags.scale
     if scale then
         _G.AddicatUI_BagButtonBar:SetScale(scale)
-        MainMenuBarBackpackButton:SetScale(scale)
+        MainMenuBarBackpackButton:SetScale(Dock.BackpackScale(scale))
     end
 
     local frameInfo = addon:GetEditableFrameInfo("bagsbar")
@@ -2665,12 +2932,20 @@ function addon.RefreshBagsPosition()
         end
 
         -- Ensure bags follow the container — backpack flush to the
-        -- RIGHT edge, all other bags chain leftward from it.
-        MainMenuBarBackpackButton:ClearAllPoints()
-        MainMenuBarBackpackButton:SetPoint("RIGHT", frameInfo.frame, "RIGHT", 0, 0)
+        -- RIGHT edge, all other bags chain leftward from it. In the dock they sit in its bag row instead.
+        if not Dock.AnchorBackpack() then
+            MainMenuBarBackpackButton:ClearAllPoints()
+            MainMenuBarBackpackButton:SetPoint("RIGHT", frameInfo.frame, "RIGHT", 0, 0)
+        else
+            Dock.Relayout()                  -- a new bag scale changes the bag row, and so the dock
+        end
     else
         -- Fallback to previous method if no container
         if not addon.db or not addon.db.profile or not addon.db.profile.bags then
+            return
+        end
+        if Dock.AnchorBackpack() then                  -- in the dock's bag row
+            Dock.Relayout()
             return
         end
 
@@ -2834,6 +3109,93 @@ local function ReanchorLFDStatus()
     LFDSearchStatus:SetPoint(point, MiniMapLFGFrame, relativePoint, xOff, yOff)
 end
 
+-- The Dungeon Finder button opens Bleakhold's Activities window while the Bleakhold addon is there, as the Bleakhold
+-- UI addon made it (UI by Addicated); WoW's own finder stays one click away on its Group Finder page, and is what the
+-- button opens without Bleakhold (its own OnClick, ToggleLFDParentFrame). Read at each click: Bleakhold loads after
+-- AddicatUI.
+local groupFinderClick
+local function SetupGroupFinderButton()
+    local button = _G.LFDMicroButton
+    if not button then return end
+    local stock = button:GetScript("OnClick")
+    if groupFinderClick and stock == groupFinderClick then return end
+    groupFinderClick = function(self, ...)
+        local toggle = _G.BleakholdToggle
+        if type(toggle) == "function" then
+            toggle("activities")
+        elseif stock then
+            stock(self, ...)
+        elseif type(_G.ToggleLFDParentFrame) == "function" then
+            _G.ToggleLFDParentFrame()
+        end
+    end
+    button:SetScript("OnClick", groupFinderClick)
+end
+MicromenuModule.SetupGroupFinderButton = SetupGroupFinderButton
+
+-- micromenu.layout changed (the option, the editor, /bhui dock): the buttons, the bag row and the edit-mode movers
+-- follow at once, no reload
+function addon.RefreshMicroDock()
+    if not MicromenuModule.applied or not IsModuleEnabled() or not _G.AddicatUI_MicroButtonBar then return end
+    if addon.RefreshMicromenu then addon.RefreshMicromenu() end
+    if addon.RefreshBagsPosition then addon.RefreshBagsPosition() end
+    MainMenuMicroButtonMixin:bagbuttons_reposition()
+    local editor = addon.EditorSettings
+    if editor and editor.SyncFrames then editor.SyncFrames() end
+end
+
+-- The room beside the gryphon changes with the screen (DISPLAY_SIZE_CHANGED; 3.3.5a has no UI_SCALE_CHANGED event),
+-- with the action bar's late placement at login, and when the player leaves a vehicle (the vehicle bar gave the
+-- buttons back). UNIT_EXITED_VEHICLE fires for every group member, and 3.3.5a has no RegisterUnitEvent to filter it,
+-- so the handler drops the others' (a raid in Wintergrasp leaves dozens of vehicles); the 0.3 s relayouts asked for
+-- while one waits collapse into it.
+local function InstallDockEvents()
+    if Dock.events then return end
+    local events = CreateFrame("Frame")
+    Dock.events = events
+    for _, event in ipairs({ "PLAYER_ENTERING_WORLD", "DISPLAY_SIZE_CHANGED", "UNIT_EXITED_VEHICLE" }) do
+        events:RegisterEvent(event)
+    end
+    local pending = false
+    local function relayoutSoon()
+        pending = false
+        Dock.Relayout()
+    end
+    events:SetScript("OnEvent", function(_, event, unit)
+        if event == "UNIT_EXITED_VEHICLE" and unit ~= "player" then return end
+        if not Dock.Active() then return end
+        if event == "PLAYER_ENTERING_WORLD" then
+            addon:After(0.5, Dock.Relayout)
+            addon:After(2.5, Dock.Relayout)
+        elseif not pending then
+            pending = true
+            addon:After(0.3, relayoutSoon)
+        end
+    end)
+end
+MicromenuModule.InstallDockEvents = InstallDockEvents
+
+-- /bhui dock [on | off]: core/commands.lua lists it; the layout is this file's
+if addon.BleakholdCommands and addon.BleakholdCommands.Register then
+    local B = addon.BleakholdCommands
+    B.Register("dock", function(arg)
+        local mm = addon.db and addon.db.profile and addon.db.profile.micromenu
+        if not mm then return end
+        local on
+        if arg == "on" then
+            on = true
+        elseif arg == "off" then
+            on = false
+        else
+            on = mm.layout ~= "dock"
+        end
+        mm.layout = on and "dock" or "strip"
+        addon.RefreshMicroDock()
+        B.Say(on and L["bottom-right dock on."]
+            or L["bottom-right dock off: the micro menu and the bag bar each at their own place."])
+    end)
+end
+
 local function ApplyMicromenuSystem()
     if MicromenuModule.applied or not IsModuleEnabled() then
         return
@@ -2841,6 +3203,10 @@ local function ApplyMicromenuSystem()
 
     -- Store original states first
     StoreOriginalMicroButtonStates()
+
+    -- the Dungeon Finder button opens Activities (after the stock OnClick is stored for a restore)
+    SetupGroupFinderButton()
+    InstallDockEvents()
 
     -- Debounced: a burst of cleanup requests collapses into one pass at the earliest requested time.
     hideFramesScheduler = CreateFrame("Frame")

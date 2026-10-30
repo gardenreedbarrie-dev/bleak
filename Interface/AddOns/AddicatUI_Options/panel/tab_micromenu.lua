@@ -29,6 +29,17 @@ local function BuildMicromenuTab(scroll)
     -- ====================================================================
     local menu = C:AddSection(scroll, LO["Micro Menu"])
 
+    -- Bleakhold UI: the bottom-right dock (micromenu.layout), switched at once
+    C:AddToggle(menu, {
+        label = addon.L["Bottom-Right Dock"],
+        desc = addon.L["The micro menu in even rows beside the action bar's gryphon, the bag bar on top, in one box at the bottom right (Bleakhold UI)."],
+        getFunc = function() return C:GetDBValue("micromenu.layout") == "dock" end,
+        setFunc = function(val)
+            C:SetDBValue("micromenu.layout", val and "dock" or "strip")
+            if addon.RefreshMicroDock then addon.RefreshMicroDock() end
+        end,
+    })
+
     C:AddToggle(menu, {
         label = LO["Grayscale Icons"],
         desc = LO["Use grayscale icons instead of colored icons."],
@@ -78,7 +89,8 @@ local function BuildMicromenuTab(scroll)
             C:SetDBValue("micromenu." .. modeKey() .. ".columns", val)
             if addon.RefreshMicromenu then addon.RefreshMicromenu() end
         end,
-        min = 1, max = 12, step = 1,
+        -- every button in one row: 12 and Bleakhold's
+        min = 1, max = 13, step = 1,
         width = 200,
     })
 

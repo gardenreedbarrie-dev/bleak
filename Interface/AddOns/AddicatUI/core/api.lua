@@ -13,7 +13,7 @@ These are general-purpose functions that can be used by any module.
 local addon = select(2, ...)
 local L = addon.L
 
-addon.DB_SCHEMA_VERSION = 3
+addon.DB_SCHEMA_VERSION = 4
 addon.RELEASE_VERSION = GetAddOnMetadata("AddicatUI", "Version") or "2.5"
 
 -- ============================================================================
@@ -1539,6 +1539,112 @@ function addon:SafeSetTexture(texture, path, fallback)
     return false
 end
 
+-- Whether the player placed the micro menu strip or the bag bar themselves (edit mode saves widgets.<name> anchor,
+-- posX, posY) or changed the strip's columns: anything that differs from the defaults (a whole pixel or more).
+local function MicroStripCustomised(profile, defaults)
+    if type(defaults) ~= "table" then
+        return false
+    end
+    local function differs(value, default)
+        if value == nil or default == nil then
+            return false
+        end
+        if type(value) == "number" and type(default) == "number" then
+            return math.abs(value - default) >= 1
+        end
+        return value ~= default
+    end
+    local widgets, defaultWidgets = rawget(profile, "widgets"), defaults.widgets
+    if type(widgets) == "table" and type(defaultWidgets) == "table" then
+        for _, name in ipairs({ "micromenu", "bagsbar" }) do
+            local placed, default = rawget(widgets, name), defaultWidgets[name]
+            if type(placed) == "table" and type(default) == "table" then
+                for _, key in ipairs({ "anchor", "posX", "posY" }) do
+                    if differs(rawget(placed, key), default[key]) then
+                        return true
+                    end
+                end
+            end
+        end
+    end
+    local micromenu, defaultMicromenu = rawget(profile, "micromenu"), defaults.micromenu
+    if type(micromenu) == "table" and type(defaultMicromenu) == "table" then
+        for _, mode in ipairs({ "normal", "grayscale" }) do
+            local config, default = rawget(micromenu, mode), defaultMicromenu[mode]
+            if type(config) == "table" and type(default) == "table"
+                and differs(rawget(config, "columns"), default.columns) then
+                return true
+            end
+        end
+    end
+    return false
+end
+
+-- The strip's sizes before schema 4, whose dock defaults made the micro buttons (micromenu.normal.scale_menu 0.9 to
+-- 1.0) and the bag bar (bags.scale 1 to 1.02) larger.
+local STRIP_SCALE_MENU, STRIP_BAG_SCALE = 0.9, 1
+
+-- Which of those sizes each saved profile held before AceDB copied the defaults into it (core.lua notes it ahead of
+-- AceDB:New). AceDB drops a value equal to its default at logout, so a size not stored is the old default and a
+-- stored one the player's own, even where it equals a new default.
+local storedSizes = {}
+function addon.NoteStoredProfiles(sv)
+    local profiles = type(sv) == "table" and rawget(sv, "profiles")
+    if type(profiles) ~= "table" then
+        return
+    end
+    for name, profile in pairs(profiles) do
+        if type(profile) == "table" then
+            local micromenu, bags = rawget(profile, "micromenu"), rawget(profile, "bags")
+            local normal = type(micromenu) == "table" and rawget(micromenu, "normal")
+            storedSizes[name] = {
+                scale_menu = type(normal) == "table" and rawget(normal, "scale_menu") ~= nil,
+                bags = type(bags) == "table" and rawget(bags, "scale") ~= nil,
+            }
+        end
+    end
+end
+
+-- Options > Profiles > Copy From: AceDB copies the source profile's saved values (its version among them) over the
+-- current one before the migrations run (core.lua RefreshConfig on OnProfileCopied), so the current profile now holds
+-- what the source's note describes, not what its own did. A source with no note (made this session) leaves none.
+function addon.NoteCopiedProfile(dest, source)
+    if dest == nil then
+        return
+    end
+    local note = source ~= nil and storedSizes[source] or nil
+    storedSizes[dest] = note and { scale_menu = note.scale_menu, bags = note.bags } or nil
+end
+
+-- A player the schema 4 update keeps on the strip keeps its old sizes too: the larger defaults are the dock's, and
+-- AceDB has just filled them in, so where the player stored no size of their own the strip's old one goes back (it
+-- differs from the new default, so AceDB keeps it at logout). With no note for the profile (one made this session,
+-- a test) a size equal to the new default is taken for the default.
+local function KeepStripSizes(db, profile, defaults)
+    local name = type(db.GetCurrentProfile) == "function" and db:GetCurrentProfile() or nil
+    local stored = name and storedSizes[name]
+    local function pin(tbl, key, storedOwn, newDefault, old)
+        if type(tbl) ~= "table" then
+            return
+        end
+        local own
+        if stored then
+            own = storedOwn
+        else
+            own = rawget(tbl, key) ~= newDefault
+        end
+        if not own then
+            tbl[key] = old
+        end
+    end
+    local micromenu, defaultMicromenu = rawget(profile, "micromenu"), defaults.micromenu
+    local defaultNormal = type(defaultMicromenu) == "table" and defaultMicromenu.normal
+    pin(type(micromenu) == "table" and rawget(micromenu, "normal"), "scale_menu", stored and stored.scale_menu,
+        type(defaultNormal) == "table" and defaultNormal.scale_menu, STRIP_SCALE_MENU)
+    pin(rawget(profile, "bags"), "scale", stored and stored.bags,
+        type(defaults.bags) == "table" and defaults.bags.scale, STRIP_BAG_SCALE)
+end
+
 function addon:ApplyDatabaseMigrations()
     if not self.db or not self.db.profile then
         return
@@ -1587,6 +1693,37 @@ function addon:ApplyDatabaseMigrations()
             auraborders.border_style = "square"
         end
         auraborders.custom_border = nil
+    end
+
+    -- Theme: "classic" (the World of Warcraft look) replaced the flat "bleakhold" theme as the default. AceDB drops a
+    -- value equal to its default at logout, so a stored "bleakhold" is the old default written out, never a choice;
+    -- cleared once, it follows the new default. Choosing the flat theme again after this keeps it (it is no default).
+    local theme = modules and rawget(modules, "theme")
+    if currentVersion < 4 and type(theme) == "table" and rawget(theme, "style") == "bleakhold" then
+        theme.style = nil
+    end
+
+    -- Talents: WoW's own window (with the Bleakhold spec panel, modules/talents_classic.lua) replaced AddicatUI's
+    -- all-trees window as the default, as the Bleakhold UI addon chose it. Same reasoning as the theme above: a stored
+    -- true is the old default written out, so it is cleared once and the new default applies; a window chosen after
+    -- this stays (true is no default any more). Load-once either way: it takes effect at the next login.
+    local talentsModule = modules and rawget(modules, "talents")
+    if currentVersion < 4 and type(talentsModule) == "table" and rawget(talentsModule, "enabled") == true then
+        talentsModule.enabled = nil
+    end
+
+    -- Micro menu: the Bleakhold UI dock (micromenu.layout = "dock") became the default. It moves every micro button
+    -- and the bags into one box at the bottom right and stands the strip's and the bag bar's movers aside, so a player
+    -- who placed the strip or the bag bar in edit mode, or gave the strip other columns, keeps the strip instead.
+    -- AceDB writes the defaults into the profile, so a value is the player's only where it differs from the default.
+    -- "strip" is no default, so it is kept at logout; a dock chosen after this stays as well. The strip keeps its old
+    -- sizes with it (KeepStripSizes), so it does not grow from its saved place into what the player lined it up with.
+    local micromenu = rawget(profile, "micromenu")
+    local profileDefaults = self.defaults and self.defaults.profile
+    if currentVersion < 4 and type(micromenu) == "table" and micromenu.layout ~= "strip"
+        and MicroStripCustomised(profile, profileDefaults) then
+        micromenu.layout = "strip"
+        KeepStripSizes(self.db, profile, profileDefaults)
     end
 
     -- profile.chat had no readers left; clear stored values now that the default is gone.

@@ -360,6 +360,15 @@ local function BuildMinimapTab(scroll)
         callback = RefreshMinimap,
     })
 
+    C:AddToggle(display, {
+        label = L["Bleakhold Mark"],
+        desc = L["Show the BLEAKHOLD mark under the minimap (UI by Addicated)."],
+        dbPath = "minimap.bleakhold_mark",
+        callback = function()
+            if addon.BleakMark then addon.BleakMark.Refresh() end
+        end,
+    })
+
     C:AddSlider(display, {
         label = LO["Zone Text Font Size"],
         desc = LO["Font size of the zone text above the minimap."],

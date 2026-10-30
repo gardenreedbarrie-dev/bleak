@@ -137,6 +137,12 @@ local defaults = {
                 posX = -5,
                 posY = 40
             },
+            -- Bleakhold UI: the bottom-right dock of micro menu and bags (micromenu.layout = "dock"); its box's corner
+            microdock = {
+                anchor = "BOTTOMRIGHT",
+                posX = -4,
+                posY = 4
+            },
             xpbar = {
                 anchor = "BOTTOM",
                 posX = 1,
@@ -439,6 +445,9 @@ local defaults = {
             grayscale_icons = false,
             show_latency_indicator = true,
             show_launcher = true, -- the Bleakhold button (shown only while Bleakhold registers its launcher)
+            -- "dock" (Bleakhold UI: the buttons in even rows beside the gryphon, the bag bar on top, one box at the
+            -- bottom right) or "strip" (the buttons in their own row, the bag bar on its own)
+            layout = "dock",
 
             -- Grayscale icons configuration
             grayscale = {
@@ -452,7 +461,9 @@ local defaults = {
 
             -- Normal colored icons configuration  
             normal = {
-                scale_menu = 0.9,
+                -- Bleakhold UI: full-size buttons, as the old Bleakhold UI dock laid them out (0.9 before; a strip the
+                -- schema 4 update keeps for a player keeps 0.9, core/api.lua KeepStripSizes)
+                scale_menu = 1.0,
                 x_position = -113,
                 y_position = -53,
                 icon_spacing = 26, -- Migrated from old stride to padding on first load
@@ -462,7 +473,7 @@ local defaults = {
         },
 
         bags = {
-            scale = 1,
+            scale = 1.02, -- Bleakhold UI: the bag bar 2 % larger (1 before; a kept strip keeps 1, as above)
             x_position = 1,
             y_position = 41,
             tint_unusable = true, -- Red icon tint for gear/Use items the player cannot use
@@ -617,6 +628,7 @@ local defaults = {
             player_arrow_size = 40,
             zonetext_font_size = 12,
             settings_button_angle = 203,
+            bleakhold_mark = true, -- The BLEAKHOLD mark under the map (modules/bleakmark.lua); /bhui mark toggles it
             farm_mode_enabled = false, -- Bigger map, chrome hidden; toggled by /aui farm or the panel
             farm_mode_scale = 1.5, -- Extra scale on top of minimap.scale (clamped to 1-2)
             collector_enabled = true,
@@ -909,7 +921,8 @@ local defaults = {
         talents = {
             scale = 1, -- Talent window scale on top of the UI scale, like the other panels
             glyph_names = false, -- Show each inscribed glyph's name beside its socket
-            glyph_effects = true -- Show the active-effects card next to the glyph sockets
+            glyph_effects = true, -- Show the active-effects card next to the glyph sockets
+            glyph_list = false -- WoW's talent window (talents module off): a list of the sockets over its glyph page
         },
 
         -- MODULES SETTINGS
@@ -971,7 +984,9 @@ local defaults = {
                 enabled = true -- Apply AddicatUI stance/shapeshift bar positioning and styling
             },
             talents = {
-                enabled = true -- Replace Blizzard's talent and glyph window with the retail-style one
+                -- AddicatUI's all-trees talent and glyph window. Off: WoW's own window, one tree at a time, with the
+                -- Bleakhold spec panel and glyph names (modules/talents_classic.lua), as Bleakhold chose it
+                enabled = false
             },
             petbar = {
                 enabled = true -- Apply AddicatUI pet bar positioning and styling
@@ -996,6 +1011,13 @@ local defaults = {
             },
             questdialog = {
                 enabled = true -- Retail-style quest and gossip window chrome
+            },
+            questlog = {
+                -- Bleakhold UI: the quest log (L) in the retail look (quest list, search, parchment page)
+                enabled = true
+            },
+            pvpframe = {
+                enabled = true -- Bleakhold UI: the PvP / Battlegrounds and battlemaster windows in the retail look
             },
             minimap = {
                 enabled = true, -- Apply AddicatUI minimap enhancements including custom styling, positioning, tracking icons, and calendar
@@ -1042,7 +1064,8 @@ local defaults = {
                 custom_color = { r = 0.15, g = 0.15, b = 0.15 } -- Custom tint RGB
             },
             theme = {
-                style = "bleakhold", -- "bleakhold" (dark slate and gold, client fonts) or "classic" (the DragonUI look)
+                -- "classic" (the DragonUI look) or "bleakhold" (flat dark slate and gold, client fonts)
+                style = "classic",
             },
             nameplates = {
                 enabled = true,
