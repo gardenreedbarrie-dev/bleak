@@ -30,8 +30,8 @@ the addon or typed `/run SendAddonMessage(...)`:
 - Enforce rate limits yourself (section 8). The client throttles too, but anyone can bypass that.
 - Never accept the `BHs` (server) prefix from a client, and never forward client addon messages on the
   `BHs` prefix to anyone.
-- `HELLO`'s `addonVer`, `dataVer` and `locale` are only hints for compatibility and language. Never base
-  a permission or a reward on them.
+- `HELLO`'s `addonVer`, `dataVer`, `locale` and `caps` are only hints for compatibility, language and what to
+  show. Never base a permission or a reward on them.
 
 Everything the UI shows comes from the server. The client can fake server messages to its own UI (it can
 always draw what it likes on its own screen); that has no effect on the server or other players.
@@ -161,7 +161,8 @@ These topics are revisioned. The first field of the first record of every messag
   answer with a snapshot.
 - Unrevisioned ops (`MPS`, `MP`, `MPE`, `RIFT`, `RIFTE`, `SET`, `LB`, `LBME`, `FIRSTS`, `DEF`, `TOAST`,
   `ERR`, `HELLO`, `PONG`, `CASES`, `CASE`, `UNBOX`, `CAMPST`, `ROYS`, `ROYM`, `ROYO`, `ROYK`, `ROYV`, `ROYE`, `BGANN`,
-  `WMST`, `WPZ`, `WPCAP`, `WPMAP`, `WANTED`, `WPEV`, `ARENA`) are full states or events; each one stands alone.
+  `WMST`, `WPZ`, `WPCAP`, `WPMAP`, `WANTED`, `WPEV`, `ARENA`, `CAFE`, `CAFST`, `CAFQ`, `CAFT`, `CAFEV`, `CAFRES`,
+  `CAFM`, `CAFO`, `CAFP`, `CAFBF`, `CAFSUM`, `CAFUI`, `CAFAT`) are full states or events; each one stands alone.
 
 Push a new snapshot or delta whenever something changes (task progress, queue state, keystone, run
 events). The client also asks with `GET` when a window opens; answer every `GET` with the current
@@ -174,7 +175,7 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 
 | Op | Fields | Meaning |
 |---|---|---|
-| `HELLO` | `proto, addonVer, dataVer, locale` | handshake: protocol major (1), addon version token, the `dataVer` of the definitions the client has cached (0 = none), client locale (`enUS`, ...) |
+| `HELLO` | `proto, addonVer, dataVer, locale[, caps]` | handshake: protocol major (1), addon version token, the `dataVer` of the definitions the client has cached (0 = none), client locale (`enUS`, ...); `caps`, optional, the optional parts of the addon it has loaded: 1 the café's UI (section 21). A client without them leaves the field off (0) |
 | `GET` | records of `topic[,arg...]`, 1 to 8 records | send the current state of these topics |
 | `TCLAIM` | `uid` | claim the reward of task `uid` |
 | `TREROLL` | `uid` | replace task `uid` (a daily task that is still open); the server decides if it is free or what it costs |
@@ -187,7 +188,7 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `BCLAIM` | `bountyId` | claim today's bounty |
 | `WEHANDIN` | | hand in spare war effort tokens (the server counts them) |
 | `OUTFIT` | `setId` | save the unlocked outfit of a legacy set |
-| `LBQ` | `board, seasonId, dungeonId, classId, page` | leaderboard page. `board`: `K` Mythic keys, `R` Eclipse Rift, `E` Raid Echoes, `F` server firsts, `A` arena (section 20: `seasonId` an arena season, `dungeonId` the bracket 1, 2, 3 or 5, never 0). 0 = all for `dungeonId`/`classId`. `page` from 1 |
+| `LBQ` | `board, seasonId, dungeonId, classId, page` | leaderboard page. `board`: `K` Mythic keys, `R` Eclipse Rift, `E` Raid Echoes, `F` server firsts, `A` arena (section 20: `seasonId` an arena season, `dungeonId` the bracket 1, 2, 3 or 5, never 0), `C` the café's Best Barista (section 21: `seasonId` a week id, 0 this week, `dungeonId` the café, 1 or 2, never 0). 0 = all for `dungeonId`/`classId`. `page` from 1 |
 | `PING` | `nonce` | answer with `PONG` |
 | `EMOJI` | `emojiId` | show emoji `emojiId` above the player's head to everyone nearby (section 13). `emojiId`: 0..255, an index into the emoji catalogue, `Tools/EmojiForge/emojis.json` |
 | `DANCE` | `danceId` | dance Bleakhold dance `danceId` until the player moves (section 14). `danceId`: 0..1023, an index into the dance catalogue, `Tools/DanceForge/dances.json` |
@@ -199,6 +200,13 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `RDEPLOY` | | Bleakhold Royale: accepted and ignored, the parachute opens by itself (section 17) |
 | `RSPEC` | `dir` | Bleakhold Royale spectators: watch another player (section 17). `dir`: 0 the killer (or the first player alive), 1 the next, 2 the previous |
 | `WARMODE` | `on` | turn War Mode on (1) or off (0) (section 19) |
+| `CSHIFT` | `cafeId, on` | start (1) or end (0) a barista shift at a café (section 21). `cafeId`: 1..255 |
+| `CTAKE` | `orderId` | take that order from the café's queue (section 21). `orderId`: 0..2147483647, 0 = the best one I can make |
+| `CSTEP` | `ticketId, stepIndex, actionId` | do a barista action as the next step of my ticket (section 21). `ticketId`: 1..2147483647, `stepIndex`: 1..12, `actionId`: 1..63 |
+| `CREL` | `ticketId, stepIndex, clientMs` | release the running timed step (section 21). `clientMs`: 0..60000, the time from the step's `CAFEV` `S` to the press |
+| `CORDER` | `cafeId, recipeId, tipPct` | order a drink at a café (section 21). `recipeId`: 1..65535, `tipPct`: 0, 10, 25 or 50 |
+| `CCANCEL` | `orderId` | cancel my café order (section 21). `orderId`: 1..2147483647 |
+| `CSTAFF` | `recipeId` | claim today's Staff Drink (section 21). `recipeId`: 1..65535 |
 
 `GET` topics and what to send back:
 
@@ -219,11 +227,16 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `WPMAP` | | `WPMAP`; nothing while World PvP is off (section 19) |
 | `WANTED` | | `WANTED` for the player's zone, to a War Mode player; nothing otherwise (section 19) |
 | `ARENA` | | `ARENA` while feature bit 65536 is on; nothing otherwise (section 20) |
+| `CAFE` `CAFST` `CAFO` `CAFP` `CAFBF` | | the op of the same name while feature bit 131072 is on for the player; nothing otherwise (section 21) |
+| `CAFQ` | | `CAFQ` of the café the player works at or is near; nothing otherwise (section 21) |
+| `CAFT` | | `CAFT` while the player is on a barista shift; nothing otherwise (section 21) |
+| `CAFM` | `cafeId` | `CAFM` of that café (1..255), the player's own team's only; nothing otherwise (section 21) |
 
 Examples:
 
 ```
 C> 1 HELLO 1 1/1 1,1.0.0,0,enUS
+C> 1 HELLO 1 1/1 1,1.0.0,0,enUS,1
 C> 1 GET 2 1/1 WEEK;ERA;TASKS;KEY;QUEUE;MPLUS;LIDX
 C> 1 GET 3 1/1 SET,1,2
 C> 1 TCLAIM 4 1/1 103
@@ -257,6 +270,8 @@ C> 1 RDEPLOY v 1/1
 C> 1 RSPEC w 1/1 2
 C> 1 GET x 1/1 WMST;WPZ;WPMAP;WANTED
 C> 1 WARMODE y 1/1 1
+C> 1 GET z 1/1 CAFE;CAFST;CAFQ;CAFT;CAFM,1;CAFO;CAFP;CAFBF
+C> 1 CSHIFT 10 1/1 1,1
 ```
 
 ## 7. Server to client
@@ -281,10 +296,11 @@ may define more with `DEF X`), item ids are item template entries.
   the food XP bonus, repair at a camp anvil; section 16), 1024 the High Elf glide live, 2048 blacksmiths repair
   anywhere (section 16), 4096 Bleakhold Royale live (section 17), 8192 the battleground kill announcer live
   (section 18), 16384 War Mode live, 32768 World PvP objectives live (section 19; 32768 is only ever on together
-  with 16384), 65536 arena seasons and the 1v1 ladder live (section 20).
+  with 16384), 65536 arena seasons and the 1v1 ladder live (section 20), 131072 the café live for this player (section
+  21; with `BleakholdUi.Cafe.GmOnly` game masters only).
 - The server may send `HELLO` again at any time, without a client `HELLO`, when its feature bits change (Bleakhold
-  Royale, War Mode and World PvP turn their bits on or off at runtime, the arena system 65536). The client reads it
-  like an answer to its own.
+  Royale, War Mode and World PvP turn their bits on or off at runtime, the arena system 65536, the café 131072). The
+  client reads it like an answer to its own.
 - `dailyResetEpoch`/`weeklyResetEpoch`: the next resets (Unix time).
 - `siteUrl`: shown for copying under the leaderboards (there is no web browser in game).
 
@@ -305,7 +321,7 @@ S> 1 PONG 2 1/1 12345,1792648730
 `op, seq, code, text` - the refused op, the client `SEQ` of that message, a machine code, a sentence for
 the player (shown in the window and in the error frame). `busy` (over an op's rate limit, section 8) can answer
 any action intent except `RDEPLOY`, which is never answered; the other codes are listed with each feature (sections
-13 to 19).
+13 to 21).
 
 ```
 S> 1 ERR 3 1/1 TCLAIM,4,not_claimable,That task cannot be claimed yet.
@@ -333,12 +349,16 @@ The client has built-in fallback names, but the server is the source of truth. F
 | `R` Rift boss | `id, name` |
 | `V` arena tier | `id, name, colorHex, text` (section 20) |
 | `Q` arena reward | `id, seasonId, bracket, tierId, kind, entry, count, text` (section 20) |
+| `H` café | `id, name, cityKey, team, zoneId, mapId, ownerName, tagline, colorHex` (section 21) |
+| `G` barista action | `id, station, key, kind, durMs, goldLoPermille, goldHiPermille, name, hordeName, spellId` (section 21) |
+| `F` café recipe | `id, cafeId, archetype, family, tier, unlockLevel, price80Copper, buffMin, steps (list of action ids), name, text` (section 21) |
+| `U` barista level | `level, totalXp, text` (section 21) |
 | `Z` end | header only: `Z, dataVer` |
 
 Send `DEF Z,<dataVer>` after the last kind: the client keeps the definitions for that `dataVer` only once
 the set is complete. The client also stores the set of kinds it parsed (its DEF schema): a cache saved by an addon
-that did not know some kinds (V and Q before section 20) is fetched again after an addon update even when `dataVer`
-matches, and its `HELLO` then says `dataVer` 0.
+that did not know some kinds (V and Q before section 20, H G F U before section 21) is fetched again after an addon
+update even when `dataVer` matches, and its `HELLO` then says `dataVer` 0.
 
 ```
 S> 1 DEF 4 1/1 A,7;1,Fortified,Non-boss enemies have more health and hit harder.;3,Bolstering,When a non-boss enemy dies%2C its allies nearby grow stronger.
@@ -385,8 +405,8 @@ S> 1 TASK a 1/1 2,102,20,1
 
 `kind, title, subtitle, openTarget` - `kind`: `T` task, `Q` queue, `K` keystone, `R` record, `S` season,
 `I` info. `openTarget` (window opened on click): `tasks`, `dungeons`, `keys`, `rift`, `collections`,
-`season`, `leaderboards`, `royale` (the Bleakhold Royale card, section 17), `arena` (the Arena page, section 20), or
-empty.
+`season`, `leaderboards`, `royale` (the Bleakhold Royale card, section 17), `arena` (the Arena page, section 20), `cafe`
+(the café window, section 21), or empty.
 
 ```
 S> 1 TOAST b 1/1 R,New record,Halls of Lightning +8 in 24%3A13,leaderboards
@@ -531,7 +551,8 @@ per row: `rank, dungeonId, value, timeSec, dateEpoch, members (list of name~clas
 | `E` Raid Echoes | | kill time | boss name |
 
 Page 1 should include ranks 1-3 (the podium). Up to 10 rows per page fit comfortably in a few frames. Board `A` (arena)
-has rows and an `LBME` of its own, with more fields after `label` (section 20).
+has rows and an `LBME` of its own, with more fields after `label` (section 20). Board `C` (the café's weekly Best
+Barista) uses `value` for the week's points and `timeSec` for the Perfect rate in permille (section 21).
 
 `LBME`: the player's own best: `board, rank, topPercent, value, dungeonId, timeSec, barPermille, label`.
 
@@ -547,7 +568,8 @@ S> 1 FIRSTS r 1/1 echo,Echo of Ragnaros defeated,Ironvow,1792562325;key,First ti
 ## 8. Rate limits the server must enforce
 
 The client throttles itself (bursts of 6, then 4 messages per second; identical intents within 0.5 s
-are sent once; a topic is requested at most every 3 s), but the server must not rely on that. The core
+are sent once, except `CTAKE`, `CSTEP` and `CREL`; `CREL` goes out at once, ahead of the queue, section 21; a topic is
+requested at most every 3 s), but the server must not rely on that. The core
 does not throttle addon messages for you (AzerothCore's addon flood check is not reached for
 `LANG_ADDON`). Suggested limits per player:
 
@@ -569,9 +591,15 @@ does not throttle addon messages for you (AzerothCore's addon flood check is not
 | `RDROP`, `RSPEC` | 1 each per `BleakholdUi.RateLimit.RoyaleIntervalMs` (0.5 s, so 2 per second); the addon waits 0.5 s itself |
 | `RDEPLOY` | 1 per `BleakholdUi.RateLimit.RoyaleDeployIntervalMs` (1 s); over it, dropped silently (no `busy`) |
 | `WARMODE` | 1 per `BleakholdUi.RateLimit.WarModeIntervalMs` (2 s); War Mode itself can only change once per 15 minutes (`ERR wm_cooldown`) |
+| `CSHIFT`, `CSTAFF` | 1 per `BleakholdUi.RateLimit.CafeShiftIntervalMs` (2 s) together; the addon waits 2.25 s itself |
+| `CTAKE` | 1 per `BleakholdUi.RateLimit.CafeTakeIntervalMs` (0.5 s); never a duplicate; the addon waits 0.6 s itself |
+| `CSTEP` | 1 per `BleakholdUi.RateLimit.CafeStepIntervalMs` (0.2 s); never a duplicate; the addon waits 0.25 s itself |
+| `CREL` | 1 per `BleakholdUi.RateLimit.CafeReleaseIntervalMs` (0.1 s); never a duplicate; the addon sends it at once |
+| `CORDER`, `CCANCEL` | 1 per `BleakholdUi.RateLimit.CafeOrderIntervalMs` (2 s) together; the addon waits 2.25 s itself |
 
 The server drops an action intent that repeats the player's last accepted one of the same op (same fields) within
-`BleakholdUi.RateLimit.DuplicateWindowMs` (1 s), except `RSPEC`: "next" twice is two steps.
+`BleakholdUi.RateLimit.DuplicateWindowMs` (1 s), except `RSPEC`: "next" twice is two steps, and the café's `CTAKE`,
+`CSTEP` and `CREL` (section 21): "next" twice is two takes, and a press again after an `ERR` is the same payload.
 
 Also bound the work a single message can cause (for example a `GET LIDX` answer is cached per player
 rather than rebuilt on every request).
@@ -605,6 +633,7 @@ lets each chat window hide a tag (`/bh chat`):
 | `[Case] ` | a rare reward from a case (section 15) |
 | `[Royale] ` | Bleakhold Royale: the queue filling up, a winner (section 17) |
 | `[War] ` | World PvP: a Front starts soon, starts, ends; to the players of a zone, its captures, Wanted players and bounties (section 19) |
+| `[Café] ` | the café: the Morning Rush, the weekly Best Barista (section 21) |
 
 Without the addon the lines are still readable as plain text.
 
@@ -637,6 +666,10 @@ and rewards. The whole flow is in section 19 ("A Front").
 `QJOIN A` -> `QUEUE` kind `A` state 1 -> the game's invite dialog -> `QUEUE` state 3 -> the match ends: `ARENA` (with
 the match in `M`) and `QUEUE` state 0.
 The arena leaderboard: `LBQ A` -> `LB` and `LBME`. Season changes: `ARENA` to everyone (section 20).
+
+**Café.** `HELLO` (feature bit 131072) -> `CAFE`, `CAFBF` (and the client's `GET`) -> `CSHIFT 1` -> `CAFST`, `CAFQ` ->
+`CTAKE` -> `CAFT` -> `CSTEP` / `CREL` -> `CAFEV` for each step -> `CAFRES` -> `CSHIFT 0` -> `CAFSUM`. A customer:
+`GET CAFM` -> `CORDER` -> `CAFO` until `D`. Bystanders near the bar get `CAFAT`. The whole flow is in section 21.
 
 ## 12. Versioning
 
@@ -930,8 +963,8 @@ wired in.
 - `mine`: `1` if that fire is the player's own (they may pack it up), else `0`.
 - `cd`: seconds until the player may make camp again (0 = now).
 - `warmth`: seconds of Campfire Warmth left (0 = none).
-- `xp`: the player's XP bonus now in percent (warmth and Well Fed together, at most `BleakholdUi.Camp.MaxXpPct`;
-  0 at the level cap).
+- `xp`: the player's XP bonus now in percent (warmth and Well Fed or café coffee together, at most
+  `BleakholdUi.Camp.MaxXpPct`; 0 at the level cap).
 - `objs` (list): the camp objects at this fire, `skill~tier~mine` (`mine` 1 for the player's own object).
 - `place` (list): what the player may place here now, `skill~tier`: each of their professions that reaches tier 1,
   at the highest tier they reach. Empty when they are not at a fire, the fire holds three objects or they already
@@ -939,7 +972,8 @@ wired in.
 - `glide`: seconds until the player may glide again (0 = now); empty when they cannot glide (race, or gliding off).
 - `repair`: `1` when the player qualifies for `REPAIR` (a blacksmith anywhere, or at a fire with a camp anvil), else
   `0`. `REPAIR` still refuses a dead player or one in combat.
-- `fed`: `1` while the player has a Well Fed buff (the food XP bonus), else `0`.
+- `fed`: `1` while the player has a Well Fed buff (the food XP bonus) or a café coffee whose XP bonus counts here
+  (section 21: it counts as a meal), else `0`.
 - `gliding`: seconds left of the glide that runs now (Walk on Air, from `GLIDE` until it lands or runs out; also
   while it waits for a ledge); empty (left out) when there is none. Older clients read the fields before it.
 
@@ -1985,3 +2019,423 @@ The first `ARENA` is a live season: Aldric is 12th of 48 in 1v1 at 1734, on Riva
 pairing (half the gain). The leaderboard shows 3v3 (the Ashen Pact has not played for a week), and the player's own team
 4th, top 19 % (182 in permille). The `ERR` came when rated arena had closed; the last `ARENA` shows the final standings
 with Aldric's 1v1 rewards held for review.
+
+## 21. The café
+
+Each capital has a small café: The Lion's Roast in Stormwind (café 1, Alliance) and The Grinding Tusk in Orgrimmar (café
+2, Horde). Players work a barista shift there (a timing and sequence game at the café's stations), order a drink
+(coffee, tea or a milkshake, each an out-of-combat buff) or sit at the tables, while NPC customers queue, order, drink
+and leave. The server decides everything: which station a barista stands at, every timer and grade, the queue, the
+prices, the money and every reward. The client shows what the café messages below tell it and sends only the player's
+wishes: `CSHIFT`, `CTAKE`, `CSTEP`, `CREL`, `CORDER`, `CCANCEL`, `CSTAFF`, `GET` of the café topics and `LBQ C`.
+
+`HELLO` feature bit 131072 is on while the server's café runs (`BleakholdUi.Cafe.Enable = 1` and its startup checks
+passed). The server decides the bit per player: with `BleakholdUi.Cafe.GmOnly = 1` only game masters get it. It turns on
+and off at runtime; clients already connected get a new `HELLO` (section 7). While the bit is off for a player the
+server answers every café intent with `ERR` `cafe_off`, answers no `GET` of a café topic, and the client shows no café
+window, bar or panel.
+
+**Stations and steps.** A café has seven stations, one letter each: `G` the grinder, `E` the espresso machine, `K` the
+kettle, `C` the cold box, `B` the blender, `S` the syrup and topping shelf, `V` the serving counter. Every barista
+action (`DEF G`) belongs to one station and one key of the barista bar there (1 to 8). The server decides from the
+barista's position and facing which station they are at (`CAFST` `station`); stations are shared, never clicked and
+never locked. An action is a **tap** (`T`: it runs `durMs` and completes) or **timed** (`H`: a bar of `durMs`; the
+player presses again to release it). A timed step's release inside its gold zone is Perfect (`P`), within 10 % of the
+duration around it Good (`G`), anything else Off (`O`), and so is a bar that runs out (`durMs` + 300 ms). The server
+moves every timed step's gold zone by up to 5 % of the duration, so `CAFEV` `S` carries the zone of that very step.
+
+**Tickets.** A barista takes an order at the counter (`CTAKE`) and holds a ticket for it (1 to 3 at once, `CAFST`
+`maxTickets`). A drink is made by its recipe's steps (`DEF F` `steps`) in order: `CSTEP` names the ticket, the step's
+index (the ticket's next step, from 1) and the action. A wrong action ruins the drink (`CAFEV` `X`: back to step 1; on
+the tutorial drink only "not that one", `W`, and nothing is lost); Bin (action 26) throws it away on purpose (`B`).
+Serve (action 25) is every recipe's last step: the drink is done and graded (`CAFRES`). Once a step of a ticket is done
+the cup is in the barista's hands: the other tickets wait until it is served or binned (`cafe_hands`).
+
+### Intents
+
+| Op | Fields | Meaning |
+|---|---|---|
+| `CSHIFT` | `cafeId, on` | start (`on` 1) or end (0) a barista shift at café `cafeId` (1..255) |
+| `CTAKE` | `orderId` | take that order from the queue (0..2147483647; 0 = the best one I can make: the oldest player order, then the queue's front) |
+| `CSTEP` | `ticketId, stepIndex, actionId` | do action `actionId` (1..63) as step `stepIndex` (1..12, the ticket's next step) of my ticket `ticketId` (1..2147483647); Bin (26) carries the ticket's next index |
+| `CREL` | `ticketId, stepIndex, clientMs` | release the running timed step; `clientMs` (0..60000) is the time the client measured from receiving its `CAFEV` `S` to the key press |
+| `CORDER` | `cafeId, recipeId, tipPct` | order recipe `recipeId` (1..65535) at café `cafeId` (1..255) as a customer, with a tip of `tipPct` % of the price: 0, 10, 25 or 50 |
+| `CCANCEL` | `orderId` | cancel my order (1..2147483647) while it waits in the queue, or while the house finishes it after a barista's failure (`CAFO` `F`); a full refund |
+| `CSTAFF` | `recipeId` | claim today's Staff Drink after a shift (barista level 7): the buff of that recipe, free |
+
+Anything else is malformed and dropped (section 1): another tip, a step index of 0 or above 12, an action id above 63.
+The server checks the rest itself (the café and recipe exist, the ticket and step are the player's own and current).
+
+`CREL` grades the release at `clamp(clientMs, serverElapsed - lag, serverElapsed)`, where `serverElapsed` is the time
+the server measured since the step started and `lag = clamp(latency + BleakholdUi.Cafe.ReleaseSlackMs, 100,
+BleakholdUi.Cafe.LatencyCompMaxMs)` (`latency` is the session's round trip): a client can never claim a release later
+than the server saw it, nor more than `lag` earlier.
+
+`CTAKE`, `CSTEP` and `CREL` are never duplicates (section 8): "next" twice is two takes, and a press again after `ERR`
+`cafe_station` or `cafe_busy`, or after an interrupted step, is the same payload and must arrive. The ticket id and the
+step index make a real repeat harmless (`cafe_ticket` or `cafe_busy`). The client sends them every time too (it skips
+its 0.5 s identical-intent check), and sends `CREL` at once, ahead of anything queued, in the frame of the key press.
+
+The checks of `CSTEP`, in this order: the rate (section 8); the café bit (`cafe_off`); not on shift (`cafe_shift`); dead
+(`dead`); the café paused (`cafe_paused`); mounted, shapeshifted, stealthed or invisible (`cafe_mounted`); an unknown
+ticket or a step index that is not the ticket's next one (`cafe_ticket`, and a `CAFT` follows); a step already running
+(`cafe_busy`); another ticket's drink in hand (`cafe_hands`); not at the action's station (`cafe_station`). Then the
+step runs (or the drink is binned, or ruined).
+
+`CTAKE`: `cafe_shift`, `cafe_paused`, `cafe_mounted`, not at the counter (`cafe_station`), no free ticket slot
+(`cafe_full`), the order is taken or gone (`cafe_taken`), it is the player's own account's or network's (`cafe_self`),
+its recipe is above the barista's level (`cafe_locked`).
+
+`CSHIFT 1`: already on a shift (`cafe_account`); then the café not placed, turned off or closed (`cafe_closed`) or
+paused (`cafe_paused`); then below the shift level (`cafe_level`), too far from the café (`cafe_where`), dead (`dead`),
+in combat (`cafe_combat`), mounted, on a vehicle or taxi, shapeshifted, stealthed or invisible (`cafe_mounted`), away
+(`cafe_afk`), the other team's café (`cafe_faction`), another shift on the account or too many on the network
+(`cafe_account`), an order of the player's own pending (`cafe_order`) and, last, the bar full (`cafe_bar_full`).
+`CSHIFT 0` ends the player's shift at that café; with no shift there (none at all, one at the other café, or one the
+server has already ended) it is refused with `cafe_shift`.
+
+`CORDER`: the café not open (`cafe_closed`) or paused (`cafe_paused`), the other team's café (`cafe_faction`), dead
+(`dead`), in combat (`cafe_combat`), not within 40 yd of the café (`cafe_where`), on shift (`cafe_shift`), an order
+already pending or the day's 12 used (`cafe_order`), too many player orders pending at the café (`cafe_cap`), a recipe
+of another café (`cafe_ticket`), not enough money for the price and the tip (`cafe_gold`). The money and the order are
+written to the database together, so a crash never loses or makes money; orders still pending at a restart are refunded
+by mail.
+
+### GET topics
+
+| Topic | Args | Answer |
+|---|---|---|
+| `CAFE` | | `CAFE` |
+| `CAFST` | | `CAFST` |
+| `CAFQ` | | `CAFQ` of the café the player works at or is within 40 yd of; nothing otherwise |
+| `CAFT` | | `CAFT` while the player is on shift; nothing otherwise |
+| `CAFM` | `cafeId` | `CAFM` of that café (1..255): only the player's own team's café; nothing otherwise |
+| `CAFO` | | `CAFO` |
+| `CAFP` | | `CAFP` |
+| `CAFBF` | | `CAFBF` |
+
+All of them answer nothing while the café bit is off for the player.
+
+**Pushes.** After `HELLO` with the bit the server pushes `CAFE` and `CAFBF`, `CAFST`, `CAFT` and `CAFQ` while the player
+is on shift, and `CAFO` while an order of theirs is pending. A push at login can come before the client's `HELLO` and
+`/reload` has none, so the client also asks for these after each `HELLO` with the bit. After that the server pushes each
+one when it changes, at most every `BleakholdUi.Cafe.StateGapMs` (250 ms) per player and op (`CAFQ` at most every
+500 ms; `CAFE` as its section says). Every café message is unrevisioned: the last one counts. Times in `...Ms` and `...Sec` fields count from
+the moment the message arrives.
+
+### CAFE (the cafés)
+
+One record per café: `cafeId, open, baristas, queueLen, rushState, rushSec, houseEtaSec`.
+
+- `open`: 0 off, 1 open, 2 paused (danger nearby: an enemy player close to the counter; patience and timers stand
+  still), 3 not open yet, 4 closed for safety (a pause that lasted too long; it reopens on its own).
+- `baristas`: players on shift there now; `queueLen`: orders in its queue.
+- `rushState`: 0 no Morning Rush, 1 soon, 2 live; `rushSec`: the seconds to its start (1) or end (2), empty with 0.
+- `houseEtaSec`: about how long a new order would wait for the house (the café's own staff) now.
+
+Sent to every ready player with the bit when `open`, `baristas`, the Rush or `houseEtaSec` change, at most every
+500 ms; a change of `queueLen` alone is sent at most every 5 s.
+
+### CAFST (the player as a barista)
+
+First record: `cafeId, onShift, level, xp, levelXp, nextLevelXp, shiftSec, drinks, perfects, streak, tipsCopper,
+shiftXp, station, nearStation, nearDm, maxTickets, tiredSec, flags, warnSec`.
+
+- `cafeId` and `onShift`: the café of the shift, and 1; both 0 off shift. `level` (1 to 10), `xp` (total) and the total
+  XP of this level (`levelXp`) and of the next one (`nextLevelXp`, empty at level 10) are always set.
+- `shiftSec` to `maxTickets` are the shift's, empty off shift: its length, drinks served, Perfect drinks, the streak of
+  Perfect drinks, the tips and XP earned on it.
+- `station`: the station letter the barista is at, empty when none. `nearStation`, `nearDm`: the nearest station and its
+  distance in decimetres (at most 255), empty when none. `maxTickets`: the tickets the barista may hold at once (1 to
+  3).
+- `tiredSec`: on shift, the seconds of work left before Tired (café rewards halved after 60 minutes without a 15-minute
+  break); while Tired (flag 4), the seconds of rest off shift it still needs; empty without a Tired timer.
+- `flags` (empty when 0): 1 the tutorial drink is pending (a wrong step costs nothing), 2 from-memory mode allowed (a
+  cosmetic challenge: the client hides the checklist), 4 Tired, 8 outside the café (the shift ends in `warnSec` unless
+  the barista comes back), 16 the Staff Drink can be claimed (`CSTAFF`), 32 at `nearStation`'s work spot but not facing
+  it ("Turn to face the Grinder"), 64 mounted, shapeshifted, stealthed or invisible (the shift ends in `warnSec`).
+- `warnSec`: the seconds before the flag 8 or 64 warning ends the shift; empty without one.
+
+Second record, today (always sent): `D, dayXp, dayXpFull, dayXpHalf, dayTipsCopper, dayTipsCapCopper, dayPoints,
+dayPointsCap, dayDrinks`. The first `dayXpFull` XP of a day count in full, the next `dayXpHalf` at half, then nothing.
+
+Third record, only on shift: `R, rushState, rushSec, rushServed, rushGoal, myRushServed`: the Morning Rush at the
+barista's café (`rushState` and `rushSec` as in `CAFE`), the drinks the café served in it, its goal, and the player's
+own.
+
+### CAFQ (the queue, to baristas)
+
+First record: `cafeId, count, cap, baristas, more`. `more`: the orders not sent (empty when 0). Then one record per
+order: `orderId, kind, recipeId, customer, patienceMs, patienceMaxMs, state, takenBy, needLevel, group`.
+
+- `kind`: `N` an NPC, `P` a player, `G` an NPC of a Rush group (`group`: its id, empty for the others).
+- `patienceMs` of `patienceMaxMs`: the customer's patience left (counting down from the moment the message arrives).
+- `state`: `W` waiting, `T` taken by `takenBy` (a barista's name, empty while free), `H` the house is making it.
+- `needLevel`: 0 when the receiver can make it, else the barista level it needs.
+
+The rows come in this order: waiting player orders, waiting NPC orders (each in queue order), the receiver's own taken
+orders, then everyone else's taken and house orders; at most 8, so the orders a barista can take are never the ones
+counted in `more`. Sent to the baristas on shift at the café when the queue changes, and for `GET CAFQ`.
+
+### CAFT (the barista's tickets)
+
+One record per ticket: `ticketId, orderId, recipeId, kind, customer, patienceMs, patienceMaxMs, nextStep, inHand,
+orderLine, steps, tipHintCopper`.
+
+- `kind` as in `CAFQ`; `patienceMs` of `patienceMaxMs`: the time left to serve the drink.
+- `nextStep`: the next step's index, from 1. `inHand`: 1 when this drink is in the barista's hands.
+- `orderLine`: what the customer said (empty for a player).
+- `steps` (list, every step of the recipe, at most 12): `actionId~grade`, with `grade` `N` not done yet, `P` Perfect,
+  `G` Good, `O` Off (a tap is recorded as `P`). The server always sends every step; hiding them is the client's
+  from-memory mode.
+- `tipHintCopper`: what the drink would earn the barista served well (the NPC tip, or the wage and the customer's tip).
+
+No tickets: the single record `0`. Sent on every change of a ticket, and for `GET CAFT`.
+
+### CAFEV (a step event, to the barista)
+
+`ticketId, stepIndex, actionId, event, durMs, goldLoMs, goldHiMs, grade, nextStep`
+
+- `event`: `S` started (`durMs`; a timed step also `goldLoMs`, `goldHiMs`, its gold zone from the start), `D` done (with
+  its `grade`), `I` interrupted (the barista walked away from the station, or the café paused: no penalty, the step can
+  be pressed again), `X` the wrong action: the drink is ruined and the ticket is back at step 1, `W` the wrong action on
+  the tutorial drink: nothing is lost, `B` binned by the player.
+- `nextStep`: the ticket's next step now.
+
+A `CAFT` follows when the ticket changed.
+
+### CAFRES (a drink result, to the barista)
+
+`ticketId, recipeId, quality, xp, tipCopper, points, streak, levelUp, level, customer, line, xpCapped`
+
+- `quality`: `P` Perfect (every timed step Perfect, served with at least a quarter of the patience left), `G` Good (no
+  Off step), `S` Sloppy, `R` Ruined, `L` Left (the customer's patience ran out, or the customer is gone).
+- `tipCopper`: the money the drink earned the barista: the NPC's tip, or for a player's order the wage and the tip.
+- `points`: the drink's Café Points (the weekly board). `streak`: the streak of Perfect drinks now.
+- `levelUp` 1 and the new `level` when the drink reached the next barista level.
+- `line`: the customer's thanks (their complaint for `L`); empty for a player.
+- `xpCapped`: the XP the daily cap took from this drink.
+
+### CAFM (the menu, to a customer)
+
+First record: `cafeId, open, baristas, houseEtaSec, pendingOrderId, ordersToday, ordersCap, canOrder, reason`.
+`pendingOrderId`: the player's pending order (0 none); `ordersToday` of `ordersCap`: the day's orders; `canOrder` 0 with
+`reason`, the `ERR` code an order would get now (`cafe_cap`, `cafe_paused`, ...). Then one record per recipe of the
+café: `recipeId, priceCopper, byBarista, effective`. `priceCopper`: the player's price (it depends on the character's
+level); `byBarista` 1 when a barista on shift has it unlocked (else the house makes it); `effective` 0 when its buff
+would do nothing for the player (coffee at the level cap or with XP gain off, a family whose bonus is off on the realm).
+
+### CAFO (the player's order)
+
+`orderId, cafeId, recipeId, state, position, barista, nextStep, stepCount, leftSec, priceCopper, tipCopper`
+
+- `state`: `Q` queued (`position`, from 1), `M` being made by `barista` (`nextStep` of `stepCount` done), `H` the
+  house is making it (`leftSec` about the time left), `F` the barista took too long or ruined it twice and the café's
+  owner is finishing it (`leftSec`; `CCANCEL` is allowed), `R` ready at the counter (`leftSec` to pick it up: walk
+  within 15 yd of the counter, or sit at a café table), `D` delivered (the buff is on), `X` cancelled or refunded in
+  full, `E` the pickup expired (the house's share of the price came back).
+- `nextStep`: the steps done so far, 0 to `stepCount`: 0 for `Q`, `D`, `X` and `E`, the steps finished for `M`, `H`
+  and `F` (0 while the first one runs), `stepCount` for `R`. Unlike `nextStep` of `CSTEP`, `CAFT` and `CAFEV`, it is
+  not the index of the next step: the same ticket's `CAFT` sends one more while it is made.
+- `priceCopper`, `tipCopper`: what the player paid.
+
+No order: the single record `0`. Sent on every change of the order's state, and for `GET CAFO`.
+
+### CAFP (the player's barista profile)
+
+First record: `level, xp, levelXp, nextLevelXp, drinks, perfects, memoryDrinks, bestStreak, fastestMs, weeklyWins,
+rewards`. `level` to `nextLevelXp` as in `CAFST`; `memoryDrinks`: drinks made in from-memory mode; `fastestMs`: the
+fastest drink (empty: none yet); `weeklyWins`: weeks won as Best Barista; `rewards`: 1 the Apprentice's Apron, 2 the
+Master Barista's Apron, 4 the Golden Apron, 8 the title "the Barista", 16 the title "Café Legend".
+
+Then `W, weekId, cafeId, rank, points, drinks, perfectPermille, days, eligible`: the player this week (`rank` empty
+while not eligible: 50 drinks on 3 days of the week), and `L, weekId, cafeId, winnerName, points`: last week's Best
+Barista of each café (0 to 2 records).
+
+### CAFBF (the player's café buffs)
+
+`coffeeSec, teaSec, shakeSec, shakeActive, coffeeCounts`
+
+- The seconds left of the coffee (+5 % XP from kills and quests), tea (+5 % reputation) and milkshake buffs; empty when
+  not active.
+- `shakeActive`: 1 while the milkshake's speed works (resting in a city or an inn, out of combat, not flagged for PvP,
+  not in a duel, on foot).
+- `coffeeCounts`: 0 when coffee does nothing for the player (at the level cap, with XP gain off).
+
+Sent on every change and every 60 s while a café buff is active (so the client's timers stay right).
+
+### CAFSUM (a shift ended)
+
+`cafeId, reason, shiftSec, drinks, perfects, tipsCopper, xp, xpLost, points, bestStreak, staffDrink`
+
+- `reason`: `E` ended by the player, `C` combat, `A` away, `I` idle, `W` walked away from the café, `D` died, logged out
+  or changed map, `M` mounted, shapeshifted, stealthed or invisible too long, `X` the café closed, `O` the café was
+  turned off.
+- `xpLost`: the XP the daily cap took on this shift. `staffDrink`: 1 when `CSTAFF` is possible now.
+
+Sent once, when the shift ends.
+
+### CAFUI (open a café window)
+
+`what, cafeId`: `what` is `menu`, `shift`, `board` or `help`. Sent after a choice in the café staff's gossip menu, so
+players whose `HELLO` named the café's UI (`caps` bit 1) get the window instead of the gossip pages. Every other
+player, with the addon or without it, gets the gossip pages and system messages (the menu as gossip options, the
+board in chat), and the shift option says the shift needs the café's UI.
+
+### CAFAT (who is working at the bar)
+
+First record: `cafeId, count`. Then one record per worker with a step running (baristas and the café's own staff, at
+most 6): `name, actionId, startedAgoMs, durMs, kind, stepIndex, stepCount`. `kind`: `T` a tap, `H` a timed step;
+`stepIndex` of `stepCount`: the step of the drink.
+
+Sent to every player with the bit within 30 yd of the café when a step starts, ends or is aborted (at most every 250 ms
+per player), and `cafeId, 0` when the last one ends. A player who comes within range gets the list with the next change
+(or within a second when they have none yet). There is no `GET`: after `/reload` the client waits for the next one.
+
+### LB and LBME, board C
+
+`LBQ C,weekId,cafeId,classId,page`: the weekly Best Barista board of one café. `weekId` 0 is this week; `cafeId` is 1 or
+2 (never 0: anything else is dropped); `classId` is ignored. The answer is `LB` with these rows:
+
+`rank, cafeId, points, perfectPermille, lastEpoch, members (name~classId), label`
+
+- the week's points in `value`, the Perfect rate in permille in `timeSec`, the barista's last drink in `dateEpoch`,
+  `label` like "142 drinks".
+
+`LBME`: `C, rank, topPercent, points, cafeId, perfectPermille, barPermille, label`. `barPermille`: the player's points
+in permille of #1's (at most 1000). Empty but `C` when the player has no row. Only eligible baristas (50 drinks on 3
+days) are ranked; the weekly reset pays the top ten by mail.
+
+### DEF H, G, F and U
+
+| Kind | Record |
+|---|---|
+| `H` café | `id, name, cityKey, team, zoneId, mapId, ownerName, tagline, colorHex` |
+| `G` barista action | `id, station, key, kind, durMs, goldLoPermille, goldHiPermille, name, hordeName, spellId` |
+| `F` recipe | `id, cafeId, archetype, family, tier, unlockLevel, price80Copper, buffMin, steps, name, text` |
+| `U` barista level | `level, totalXp, text` |
+
+- `H`: `cityKey` `sw` or `org`, `team` `A` or `H`, `colorHex` the café's trim colour.
+- `G`: `station` the letter, `key` the bar slot at that station (1 to 8), `kind` `T` tap or `H` timed (with its gold
+  zone in permille of `durMs`, before the per-step move), `hordeName` the name at the Horde café when it differs (empty:
+  the same), `spellId` the spell the server casts for it (its cast bar shows to other players).
+- `F`: `id` is `cafeId` × 100 + `archetype` (1 to 19: coffee 1-7, tea 8-13, milkshakes 14-19); `family` `C` coffee, `T`
+  tea, `M` milkshake; `price80Copper` the price at character level 80 (lower levels pay less, `CAFM`); `buffMin` the
+  buff's base minutes; `steps` the action ids in order (list, at most 12).
+
+### TOAST and the chat tag
+
+`TOAST` with target `cafe` opens the café window: `I,Barista level 5,Apprentice's Apron unlocked,cafe` at a barista
+level-up, `I,Best Barista of the week,...,cafe` for the weekly win. Café announcements (the Morning Rush, the weekly
+Best Barista) use the tag `[Café] ` (section 10).
+
+### Error codes
+
+| Code | Meaning |
+|---|---|
+| `cafe_off` | the café is off (no feature bit 131072 for the player) |
+| `cafe_closed` | the café is not open (not placed, turned off by a game master, or closed for safety) |
+| `cafe_faction` | the other team's café |
+| `cafe_where` | too far from the café |
+| `cafe_level` | below the level a shift needs (`BleakholdUi.Cafe.MinLevel`, 10) |
+| `cafe_combat` | in combat |
+| `cafe_mounted` | mounted, on a vehicle or taxi, shapeshifted, stealthed or invisible (`CSHIFT 1`, `CTAKE`, `CSTEP`) |
+| `cafe_paused` | the café paused: danger nearby (`CAFE` `open` 2) |
+| `cafe_cap` | too many player orders pending at the café; try again in a minute |
+| `cafe_bar_full` | the café has as many baristas on shift as it takes |
+| `cafe_afk` | away (AFK) |
+| `cafe_account` | another shift on the account, or too many on the network; `CSHIFT 1`: already on a shift |
+| `cafe_shift` | not on shift (`CTAKE`, `CSTEP`, `CREL`; `CSHIFT 0` at that café), or on shift (`CORDER`) |
+| `cafe_busy` | a step is running |
+| `cafe_station` | not at the action's station (the text names it) |
+| `cafe_ticket` | an unknown ticket or a step out of sync (a `CAFT` follows); `CORDER`: a recipe of another café |
+| `cafe_hands` | another ticket's drink is in the barista's hands |
+| `cafe_locked` | the recipe is above the barista's level (the text says the level) |
+| `cafe_full` | every ticket slot is taken |
+| `cafe_taken` | the order is taken already, or gone |
+| `cafe_self` | the order is the barista's own account's or network's |
+| `cafe_gold` | not enough money for the price and the tip |
+| `cafe_order` | an order of the player's own is pending, or the day's orders are used up |
+| `cafe_staff` | no Staff Drink to claim |
+| `dead` | dead |
+| `failed` | the server could not do it (a database error); nothing changed |
+
+`busy` (over a café op's rate, section 8) is the generic code as everywhere.
+
+A shift:
+
+```
+C> 1 GET 3a 1/1 CAFE;CAFST;CAFBF
+S> 1 CAFE 4a 1/1 1,1,1,2,1,180,45;2,1,0,0,1,180,60
+S> 1 CAFST 4b 1/1 0,0,6,1890,1600,2320;D,210,450,450,30000,180000,180,400,14
+S> 1 CAFBF 4c 1/1 1320,,1800,0,1
+C> 1 CSHIFT 3b 1/1 1,1
+S> 1 CAFST 4d 1/1 1,1,6,1890,1600,2320,0,0,0,0,0,0,V,V,3,2,3600,2;D,210,450,450,30000,180000,180,400,14;R,1,180,0,60,0
+S> 1 CAFQ 4e 1/1 1,2,6,2;1209,P,103,Brenna,25000,25000,W,,0;1207,N,101,Sergeant Corwin Ashgrove,45000,48000,W,,0
+C> 1 CTAKE 3c 1/1 1209
+C> 1 CTAKE 3d 1/1 0
+S> 1 CAFT 4f 1/1 41,1209,103,P,Brenna,57000,60000,1,0,,1~N:3~N:6~N:16~N:25~N,2100;42,1207,101,N,Sergeant Corwin Ashgrove,43200,43200,1,0,Cathedral Black. No sugar%2C no chatter%2C no delay.,1~N:3~N:4~N:25~N,400
+C> 1 CSTEP 3e 1/1 41,1,1
+S> 1 CAFEV 4g 1/1 41,1,1,S,1500,,,,1
+S> 1 CAFEV 4h 1/1 41,1,1,D,1500,,,P,2
+C> 1 CSTEP 3f 1/1 41,2,3
+S> 1 CAFEV 4i 1/1 41,2,3,S,3000,2160,2610,,2
+C> 1 CREL 3g 1/1 41,2,2380
+S> 1 CAFEV 4j 1/1 41,2,3,D,3000,2160,2610,P,3
+C> 1 CSTEP 3h 1/1 41,3,6
+S> 1 CAFEV 4k 1/1 41,3,6,S,2000,760,1160,,3
+C> 1 CREL 3i 1/1 41,3,990
+S> 1 CAFEV 4l 1/1 41,3,6,D,2000,760,1160,P,4
+C> 1 CSTEP 3j 1/1 41,4,16
+S> 1 ERR 4m 1/1 CSTEP,3j,cafe_station,Walk to the Syrup Shelf first.
+C> 1 CSTEP 3k 1/1 42,1,1
+S> 1 ERR 4n 1/1 CSTEP,3k,cafe_hands,Finish or bin the drink in your hands first.
+C> 1 CSTEP 3l 1/1 41,4,16
+S> 1 CAFEV 4o 1/1 41,4,16,S,800,,,,4
+S> 1 CAFRES 4p 1/1 41,103,P,32,2100,22,1,0,6,Brenna,,0
+C> 1 CSTEP 3m 1/1 42,2,5
+S> 1 CAFEV 4q 1/1 42,2,5,X,,,,,1
+C> 1 CSHIFT 3n 1/1 1,0
+S> 1 CAFSUM 4r 1/1 1,E,1840,14,9,10600,212,0,190,4,0
+C> 1 CSTAFF 3o 1/1 108
+S> 1 ERR 4s 1/1 CSTAFF,3o,cafe_staff,No staff drink for you today.
+```
+
+Aldric (barista level 6, two tickets) starts a shift at The Lion's Roast while a Morning Rush is three minutes away. He
+takes Brenna's order by its id and then "the best one" (`CTAKE 0`), Sergeant Corwin's. He grinds (a tap), pulls the shot
+and froths the foam (timed: both released inside the moved gold zone, so Perfect), then presses Honey away from the
+syrup shelf and gets `cafe_station`; ticket 42 must wait, since Brenna's cup is in his hands. At the shelf the same
+press is answered (`CSTEP` is never a duplicate); after Honey and Serve (not shown) the drink is Perfect, and its 2100
+copper are the wage and Brenna's tip. On Corwin's drink he presses Steam Milk where the shot belongs, which ruins it. He
+ends the shift; at level 6 there is no Staff Drink yet.
+
+An order, the board and a bystander:
+
+```
+C> 1 GET 3p 1/1 CAFM,1;CAFO;CAFP
+S> 1 CAFM 4t 1/1 1,1,1,45,0,2,12,1;101,3500,1,1;103,5300,1,1;119,15800,0,1
+S> 1 CAFO 4u 1/1 0
+S> 1 CAFP 4v 1/1 6,1890,1600,2320,412,301,0,14,5120,0,1;W,2964,1,2,1830,96,790,4,1;L,2963,1,Brenna,2480;L,2963,2,Morgra,1990
+C> 1 CORDER 3q 1/1 1,103,10
+S> 1 CAFO 4w 1/1 1210,1,103,Q,1,,0,5,,5300,530
+C> 1 CCANCEL 3r 1/1 1210
+S> 1 CAFO 4x 1/1 1210,1,103,X,,,0,5,,5300,530
+C> 1 LBQ 3s 1/1 C,0,1,0,1
+S> 1 LB 4y 1/1 C,2964,1,0,1,1;1,1,2310,812,1793900000,Brenna~2,142 drinks;2,1,1830,790,1793890000,Aldric~1,96 drinks
+S> 1 LBME 4z 1/1 C,2,40,1830,1,790,792,96 drinks
+S> 1 DEF 50 1/1 H,8;1,The Lion's Roast,sw,A,1519,0,Rosalind Thornbury,Coffee · Tea · Shakes%2C by the Cathedral steps,3F6FB5;2,The Grinding Tusk,org,H,1637,1,Grukka Steamtusk,Strong brews for strong backs.,B5402F
+S> 1 DEF 51 1/1 G,8;1,G,1,T,1500,,,Grind Beans,,100901;3,E,1,H,3000,700,850,Pull Shot,,100903;21,S,6,T,800,,,Elwynn Berry,Cactus Apple,100921
+S> 1 DEF 52 1/1 F,8;101,1,1,C,1,1,4000,30,1:3:4:25,Cathedral Black,Dark as the crypts beneath the Cathedral and twice as bracing.
+S> 1 DEF 53 1/1 U,8;1,0,Black coffee%2C latte%2C green tea and black tea. One ticket at a time%3B the first drink is forgiving.;5,1040,Iced latte and mint tea. Apprentice's Apron.
+S> 1 TOAST 54 1/1 I,Barista level 5,Apprentice's Apron unlocked,cafe
+S> 1 CAFUI 55 1/1 menu,1
+S> 1 CAFAT 56 1/1 1,2;Aldric,3,400,3000,H,2,5;Rosalind Thornbury,1,900,1500,T,1,4
+```
+
+Off shift, Aldric (a level-70 character: 7/8 of the level-80 prices, rounded up to whole silver) opens the menu: one
+barista is on shift and has every drink but the Champion's Triple Scoop unlocked, which the house would make. He orders
+the Goldshire Honey Cappuccino with a 10 % tip, is first in the queue, and cancels it for a full refund. This week's
+board of The Lion's Roast has him second behind Brenna, at 792 permille of her points. Then the definitions of the
+cafés, three actions, a recipe and two barista levels; the toast of an earlier level-up; the window the owner's gossip
+opens; and what a bystander near the bar sees: Aldric pulling a shot (step 2 of 5, 400 ms in) and the owner grinding
+beans for the house.

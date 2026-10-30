@@ -112,9 +112,9 @@ merged with Reforged's, and a build from stock files would drop all of that (Emb
 
 The client opens every `Data\patch-?.MPQ` (one character) and sorts them by path with `_strnicmp` (letters folded
 to lower case); the path sorting last wins. Every lettered patch outranks the locale archives that hold the stock
-DBCs. In use: H L R T V X Y Z (realm), A B C D E G I M N P S U (Reforged), J (WoW Forever's login patch), Q (this map);
-RaceForge writes customization art to patch-6..9 and refuses taken names
-(`Tools/RaceForge/taken_patches.json`). Free: F K O W.
+DBCs. In use: H L R T V X Y Z (realm), A B C D E G I M N P S U (Reforged), J (WoW Forever's login patch), Q (this map),
+4 (Tools/CafeForge's café archive) and 5 (this map's extractor copy); RaceForge writes customization art to
+patch-6..9 and refuses taken names (`Tools/RaceForge/taken_patches.json`). Free: F, K, O, W and 6-9.
 
 - **The map archive is `patch-Q.MPQ`**: the highest free letter, outside RaceForge's art letters and outside the
   launcher's HD pack (`Data/patch-[ABCDEGIMNPSU].MPQ` and `Data/Patch-Y.MPQ`), so every player has it. It holds

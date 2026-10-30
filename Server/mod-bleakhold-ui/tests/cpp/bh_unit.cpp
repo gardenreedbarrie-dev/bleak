@@ -246,7 +246,13 @@ TEST("every C> example of the document is accepted and re-encodes byte for byte"
     CHECK(Parse("1 GET 3 1/1 SET,1,2", &in) == DropReason::None);
     CHECK(in.topics.size() == 1 && in.topics[0].topic == Topic::Set && in.topics[0].arg1 == 1 && in.topics[0].arg2 == 2);
     CHECK(Parse("1 HELLO 1 1/1 1,1.0.0,0,enUS", &in) == DropReason::None);
-    CHECK(in.proto == 1 && in.addonVersion == "1.0.0" && in.dataVersion == 0 && in.locale == "enUS");
+    CHECK(in.proto == 1 && in.addonVersion == "1.0.0" && in.dataVersion == 0 && in.locale == "enUS" && in.caps == 0);
+    // the optional caps (section 21: bit 1 the cafe's UI); a client without optional parts leaves the field off
+    CHECK(Parse("1 HELLO 1 1/1 1,1.0.0,0,enUS,1", &in) == DropReason::None);
+    CHECK(in.locale == "enUS" && in.caps == ClientCapCafeUi);
+    CHECK(EncodeIntentPayload(in) == "1,1.0.0,0,enUS,1");
+    CHECK(Parse("1 HELLO 1 1/1 1,1.0.0,0,enUS,0", &in) == DropReason::None && in.caps == 0);
+    CHECK(EncodeIntentPayload(in) == "1,1.0.0,0,enUS");
     CHECK(Parse("1 LBQ g 1/1 K,1,0,0,2", &in) == DropReason::None);
     CHECK(in.board == Board::Keys && in.seasonId == 1 && in.page == 2 && in.seq == 16);
     CHECK(Parse("1 EMOJI i 1/1 7", &in) == DropReason::None);
@@ -493,6 +499,10 @@ TEST("malformed client messages are dropped with the right reason")
         { "BHc\t1 HELLO 1 1/1 1,12345678901234567,0,enUS", DropReason::BadField },
         { "BHc\t1 HELLO 1 1/1 0,1.0.0,0,enUS", DropReason::OutOfRange },
         { "BHc\t1 HELLO 1 1/1 1,1.0.0,0", DropReason::FieldCount },
+        { "BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUS,1,1", DropReason::FieldCount },
+        { "BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUS,x", DropReason::BadField },
+        { "BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUS,2147483648", DropReason::OutOfRange },
+        { "BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUS,", DropReason::BadField },
         { "BHc\t1 GET 1 1/1", DropReason::FieldCount },
         { "BHc\t1 GET 1 1/1 WEEK;", DropReason::FieldCount },
         { "BHc\t1 GET 1 1/1 WEEK;;ERA", DropReason::FieldCount },
@@ -595,6 +605,15 @@ TEST("endpoint: nothing but HELLO before the handshake")
     CHECK(h.verdict == Verdict::Accepted && ep.Ready());
     CHECK(Feed(ep, "1 GET 4 1/1 WEEK", 1400).verdict == Verdict::Accepted);
     CHECK_EQ(ep.Hello().locale, "enUS");
+}
+
+TEST("endpoint: the client's caps come with each HELLO (a /reload without the cafe's UI drops them)")
+{
+    Endpoint ep;
+    CHECK(Feed(ep, "1 HELLO 1 1/1 1,1.0.0,0,enUS,1", 1000).verdict == Verdict::Accepted);
+    CHECK(ep.Ready() && (ep.Hello().caps & ClientCapCafeUi));
+    CHECK(Feed(ep, "1 HELLO 2 1/1 1,1.0.0,0,enUS", 7000).verdict == Verdict::Accepted);
+    CHECK(ep.Ready() && ep.Hello().caps == 0);
 }
 
 TEST("endpoint: token bucket of 10 refilled at 5 per second")
@@ -2121,6 +2140,436 @@ TEST("arena: DEF V and Q follow the other kinds; QUEUE kind A has no member reco
     CHECK_EQ(EncodeQueue(7, qa), "7,1,A,1,1,1,8,95");
 }
 
+// ---------------------------------------------------------------------------------------------------
+// The cafe (section 21): intents, topics, limits, the duplicate guard, the encoders and the ERR codes
+// ---------------------------------------------------------------------------------------------------
+TEST("cafe: the intents and topics of section 21 parse as documented; everything else is dropped")
+{
+    Intent in;
+    CHECK(Parse("1 CSHIFT 3b 1/1 1,1", &in) == DropReason::None);
+    CHECK(in.type == IntentType::CafeShift && in.cafeId == 1 && in.cafeOn && in.seq == 3 * 36 + 11);
+    CHECK(Parse("1 CSHIFT 1 1/1 255,0", &in) == DropReason::None && in.cafeId == 255 && !in.cafeOn);
+    CHECK_EQ(EncodeIntentBody(in), "1 CSHIFT 1 1/1 255,0");
+    CHECK(Parse("1 CTAKE 3c 1/1 1209", &in) == DropReason::None && in.type == IntentType::CafeTake && in.orderId == 1209);
+    CHECK(Parse("1 CTAKE 1 1/1 0", &in) == DropReason::None && in.orderId == 0);   // 0: the best order I can make
+    CHECK(Parse("1 CTAKE 1 1/1 2147483647", &in) == DropReason::None && in.orderId == 2147483647u);
+    CHECK(Parse("1 CSTEP 3e 1/1 41,1,1", &in) == DropReason::None);
+    CHECK(in.type == IntentType::CafeStep && in.ticketId == 41 && in.stepIndex == 1 && in.actionId == 1);
+    CHECK(Parse("1 CSTEP 1 1/1 2147483647,12,63", &in) == DropReason::None);
+    CHECK(in.ticketId == 2147483647u && in.stepIndex == MaxCafeStepIndex && in.actionId == MaxCafeActionId);
+    CHECK_EQ(EncodeIntentBody(in), "1 CSTEP 1 1/1 2147483647,12,63");
+    CHECK(Parse("1 CREL 3g 1/1 41,2,2380", &in) == DropReason::None);
+    CHECK(in.type == IntentType::CafeRelease && in.ticketId == 41 && in.stepIndex == 2 && in.clientMs == 2380);
+    CHECK(Parse("1 CREL 1 1/1 1,1,0", &in) == DropReason::None && in.clientMs == 0);
+    CHECK(Parse("1 CREL 1 1/1 1,12,60000", &in) == DropReason::None && in.clientMs == MaxCafeReleaseMs);
+    CHECK_EQ(EncodeIntentBody(in), "1 CREL 1 1/1 1,12,60000");
+    CHECK(Parse("1 CORDER 3q 1/1 1,103,10", &in) == DropReason::None);
+    CHECK(in.type == IntentType::CafeOrder && in.cafeId == 1 && in.recipeId == 103 && in.tipPct == 10);
+    for (char const* ok : { "1 CORDER 1 1/1 2,219,0", "1 CORDER 1 1/1 255,65535,25", "1 CORDER 1 1/1 1,1,50" })
+        CHECK_MSG(Parse(ok) == DropReason::None, ok);
+    CHECK(Parse("1 CCANCEL 3r 1/1 1210", &in) == DropReason::None && in.type == IntentType::CafeCancel && in.orderId == 1210);
+    CHECK(Parse("1 CSTAFF 3o 1/1 108", &in) == DropReason::None && in.type == IntentType::CafeStaff && in.recipeId == 108);
+    CHECK(Parse("1 CSTAFF 1 1/1 65535", &in) == DropReason::None && in.recipeId == 65535);
+    // out of range or malformed: dropped (section 1)
+    for (char const* bad : { "1 CSHIFT 1 1/1 0,1", "1 CSHIFT 1 1/1 256,1", "1 CSHIFT 1 1/1 1,2", "1 CTAKE 1 1/1 2147483648",
+             "1 CTAKE 1 1/1 -1", "1 CSTEP 1 1/1 0,1,1", "1 CSTEP 1 1/1 41,0,1", "1 CSTEP 1 1/1 41,13,1",
+             "1 CSTEP 1 1/1 41,1,0", "1 CSTEP 1 1/1 41,1,64", "1 CREL 1 1/1 41,1,60001", "1 CREL 1 1/1 41,1,-1",
+             "1 CREL 1 1/1 0,1,0", "1 CORDER 1 1/1 1,103,5", "1 CORDER 1 1/1 1,103,51", "1 CORDER 1 1/1 1,0,0",
+             "1 CORDER 1 1/1 1,65536,0", "1 CORDER 1 1/1 0,103,0", "1 CCANCEL 1 1/1 0", "1 CSTAFF 1 1/1 0",
+             "1 CSTAFF 1 1/1 65536" })
+        CHECK_MSG(Parse(bad) == DropReason::OutOfRange, bad);
+    for (char const* bad : { "1 CSHIFT 1 1/1 1", "1 CSHIFT 1 1/1 1,1,1", "1 CTAKE 1 1/1", "1 CSTEP 1 1/1 41,1",
+             "1 CREL 1 1/1 41,1", "1 CREL 1 1/1 41,1,5,5", "1 CORDER 1 1/1 1,103", "1 CCANCEL 1 1/1 1,2",
+             "1 CSTAFF 1 1/1" })
+        CHECK_MSG(Parse(bad) == DropReason::FieldCount, bad);
+    CHECK(Parse("1 CSTEP 1 1/1 41,a,1") == DropReason::BadField);
+    CHECK(Parse("1 CORDER 1 1/1 1,103,1e1") == DropReason::BadField);
+    // the board of section 21: one cafe at a time, never "all"
+    CHECK(Parse("1 LBQ 3s 1/1 C,0,1,0,1", &in) == DropReason::None);
+    CHECK(in.board == Board::Cafe && in.seasonId == 0 && in.dungeonId == 1 && in.page == 1);
+    CHECK(Parse("1 LBQ 1 1/1 C,2964,2,0,3", &in) == DropReason::None && in.seasonId == 2964 && in.dungeonId == 2);
+    for (char const* bad : { "1 LBQ 1 1/1 C,0,0,0,1", "1 LBQ 1 1/1 C,0,3,0,1", "1 LBQ 1 1/1 C,0,255,0,1" })
+        CHECK_MSG(Parse(bad) == DropReason::OutOfRange, bad);
+    CHECK(Parse("1 LBQ 1 1/1 c,0,1,0,1") == DropReason::BadField);
+    // GET: CAFM carries the cafe, the others nothing
+    CHECK(Parse("1 GET z 1/1 CAFE;CAFST;CAFQ;CAFT;CAFM,1;CAFO;CAFP;CAFBF", &in) == DropReason::None);
+    CHECK(in.topics.size() == 8 && in.topics[0].topic == Topic::CafeList && in.topics[4].topic == Topic::CafeMenu &&
+        in.topics[4].arg1 == 1 && in.topics[7].topic == Topic::CafeBuffs);
+    CHECK(Parse("1 GET 1 1/1 CAFM,255", &in) == DropReason::None && in.topics[0].arg1 == 255);
+    CHECK_EQ(EncodeIntentBody(in), "1 GET 1 1/1 CAFM,255");
+    CHECK(Parse("1 GET 1 1/1 CAFM") == DropReason::BadTopic);
+    CHECK(Parse("1 GET 1 1/1 CAFM,0") == DropReason::OutOfRange);
+    CHECK(Parse("1 GET 1 1/1 CAFM,256") == DropReason::OutOfRange);
+    CHECK(Parse("1 GET 1 1/1 CAFE,1") == DropReason::BadTopic);
+    CHECK(Parse("1 GET 1 1/1 CAFAT") == DropReason::BadTopic);   // CAFAT is pushed only
+    // appended after section 20, unrevisioned, action intents
+    CHECK(static_cast<uint8_t>(IntentType::CafeShift) == static_cast<uint8_t>(IntentType::WarMode) + 1);
+    CHECK(static_cast<uint8_t>(Topic::CafeList) == static_cast<uint8_t>(Topic::Arena) + 1);
+    CHECK(static_cast<uint8_t>(Topic::CafeBuffs) + 1 == static_cast<uint8_t>(Topic::Count));
+    CHECK_EQN(RevisionedTopicCount, 9u);
+    char const* const ops[] = { "CSHIFT", "CTAKE", "CSTEP", "CREL", "CORDER", "CCANCEL", "CSTAFF" };
+    for (uint8_t i = 0; i < 7; ++i)
+    {
+        IntentType const t = static_cast<IntentType>(static_cast<uint8_t>(IntentType::CafeShift) + i);
+        CHECK_EQ(IntentOpName(t), ops[i]);
+        CHECK(IsActionIntent(t));
+    }
+    char const* const topics[] = { "CAFE", "CAFST", "CAFQ", "CAFT", "CAFM", "CAFO", "CAFP", "CAFBF" };
+    for (uint8_t i = 0; i < 8; ++i)
+    {
+        Topic const t = static_cast<Topic>(static_cast<uint8_t>(Topic::CafeList) + i);
+        CHECK_EQ(TopicName(t), topics[i]);
+        CHECK(!IsRevisioned(t));
+    }
+    CHECK(IsCafeId(1) && IsCafeId(2) && !IsCafeId(0) && !IsCafeId(3));
+    CHECK(IsCafeTipPct(0) && IsCafeTipPct(10) && IsCafeTipPct(25) && IsCafeTipPct(50) && !IsCafeTipPct(5) &&
+        !IsCafeTipPct(100));
+}
+
+TEST("cafe: the limits come from Limits; CTAKE, CSTEP and CREL are never duplicates, the other cafe intents are")
+{
+    // the guard: only RSPEC and the three cafe steps are exempt
+    for (std::size_t i = 0; i < static_cast<std::size_t>(IntentType::Count); ++i)
+    {
+        IntentType const t = static_cast<IntentType>(i);
+        bool const exempt = t == IntentType::RoyaleSpectate || t == IntentType::CafeTake || t == IntentType::CafeStep ||
+            t == IntentType::CafeRelease;
+        CHECK_MSG(IsDuplicateGuarded(t) == (IsActionIntent(t) && !exempt), IntentOpName(t));
+    }
+    Limits d;
+    CHECK_EQN(d.cafeShiftIntervalMs, 2000u);
+    CHECK_EQN(d.cafeTakeIntervalMs, 500u);
+    CHECK_EQN(d.cafeStepIntervalMs, 200u);
+    CHECK_EQN(d.cafeReleaseIntervalMs, 100u);
+    CHECK_EQN(d.cafeOrderIntervalMs, 2000u);
+
+    Endpoint ep;   // the default limits and the 1 s duplicate window
+    Feed(ep, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    Intent in;
+    // CSHIFT and CSTAFF share one bucket, 1 per 2 s; the same CSHIFT again within 1 s is a duplicate
+    CHECK(Feed(ep, "1 CSHIFT 2 1/1 1,1", 1000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CSHIFT 3 1/1 1,1", 1500).reason == DropReason::Duplicate);
+    ReceiveResult r = Feed(ep, "1 CSTAFF 4 1/1 108", 1600, &in);
+    CHECK(r.verdict == Verdict::Refused && r.reason == DropReason::Throttled && in.type == IntentType::CafeStaff);
+    CHECK(Feed(ep, "1 CSTAFF 5 1/1 108", 3100).verdict == Verdict::Accepted);
+    // CTAKE 1 per 0.5 s, "next" twice is two takes
+    CHECK(Feed(ep, "1 CTAKE 6 1/1 0", 4000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CTAKE 7 1/1 0", 4300).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 CTAKE 8 1/1 0", 4600).verdict == Verdict::Accepted);
+    // CSTEP 1 per 0.2 s: the same press again after an ERR (same payload, within 1 s) arrives
+    CHECK(Feed(ep, "1 CSTEP 9 1/1 41,4,16", 5000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CSTEP a 1/1 41,4,16", 5100, &in).verdict == Verdict::Refused && in.type == IntentType::CafeStep);
+    CHECK(Feed(ep, "1 CSTEP b 1/1 41,4,16", 5250).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CSTEP c 1/1 41,4,16", 5500).verdict == Verdict::Accepted);
+    // CREL 1 per 0.1 s, its own bucket (a CSTEP just before does not slow it)
+    CHECK(Feed(ep, "1 CREL d 1/1 41,4,500", 5510).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CREL e 1/1 41,4,500", 5560).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 CREL f 1/1 41,4,500", 5620).verdict == Verdict::Accepted);
+    // CORDER and CCANCEL share one bucket, 1 per 2 s; the same CORDER within 1 s is a duplicate
+    CHECK(Feed(ep, "1 CORDER g 1/1 1,103,10", 8000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CORDER h 1/1 1,103,10", 8400).reason == DropReason::Duplicate);
+    CHECK(Feed(ep, "1 CCANCEL i 1/1 1210", 8500).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 CCANCEL j 1/1 1210", 10100).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CCANCEL k 1/1 1210", 10500).reason == DropReason::Duplicate);
+    // the cafe's buckets leave the others alone
+    CHECK(Feed(ep, "1 WARMODE l 1/1 1", 10600).verdict == Verdict::Accepted);
+    // GET: each cafe topic once per second; CAFM once per second per cafe
+    CHECK(Feed(ep, "1 GET m 1/1 CAFE;CAFST;CAFM,1", 12000, &in).verdict == Verdict::Accepted && in.topics.size() == 3);
+    CHECK(Feed(ep, "1 GET n 1/1 CAFM,2;CAFM,1;CAFE", 12500, &in).verdict == Verdict::Accepted);
+    CHECK(in.topics.size() == 1 && in.topics[0].topic == Topic::CafeMenu && in.topics[0].arg1 == 2);
+    CHECK(Feed(ep, "1 GET o 1/1 CAFE", 12600).reason == DropReason::Throttled);
+    CHECK(Feed(ep, "1 GET p 1/1 CAFE;CAFM,1", 13100, &in).verdict == Verdict::Accepted && in.topics.size() == 2);
+
+    Limits l;
+    l.cafeShiftIntervalMs = 5000; l.cafeTakeIntervalMs = 0; l.cafeStepIntervalMs = 1000; l.cafeReleaseIntervalMs = 0;
+    l.cafeOrderIntervalMs = 3000;   // 0: no limit of its own
+    Endpoint lim(l);
+    Feed(lim, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    CHECK(Feed(lim, "1 CSHIFT 2 1/1 1,1", 1000).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CSHIFT 3 1/1 1,0", 4000).verdict == Verdict::Refused);
+    CHECK(Feed(lim, "1 CSHIFT 4 1/1 1,0", 6100).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CTAKE 5 1/1 7", 7000).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CTAKE 6 1/1 7", 7001).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CSTEP 7 1/1 1,1,1", 8000).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CSTEP 8 1/1 1,2,3", 8900).verdict == Verdict::Refused);
+    CHECK(Feed(lim, "1 CSTEP 9 1/1 1,2,3", 9100).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CREL a 1/1 1,2,1", 9101).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CREL b 1/1 1,2,1", 9102).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CORDER c 1/1 2,201,0", 10000).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CCANCEL d 1/1 5", 12000).verdict == Verdict::Refused);
+    CHECK(Feed(lim, "1 CCANCEL e 1/1 5", 13100).verdict == Verdict::Accepted);
+}
+
+TEST("cafe: the feature bit, the board, the macros and the ERR codes of section 21")
+{
+    CHECK_EQN(static_cast<uint32_t>(FeatureCafe), 131072u);
+    CHECK_EQN(static_cast<uint32_t>(FeatureCafe) & 0x1FFFFu, 0u);   // above every bit before it (arena is 65536)
+    CHECK(static_cast<char>(Board::Cafe) == 'C');
+    CHECK_EQN(BLEAKHOLD_UI_CAFE, 1);
+    CHECK_EQN(MaxCafeQueueRows, std::size_t(8));
+    CHECK_EQN(MaxCafeTickets, std::size_t(3));
+    CHECK_EQN(MaxCafeSteps, std::size_t(12));
+    CHECK_EQN(MaxCafeRecipes, std::size_t(40));
+    CHECK_EQN(MaxCafeAtRows, std::size_t(6));
+    CHECK_EQN(MaxCafeNameBytes, std::size_t(48));
+    CHECK_EQN(MaxCafeLineBytes, std::size_t(160));
+    CHECK(MaxCafeSteps == MaxCafeStepIndex);
+    std::string const doc = bhtest::ReadFile(g_repo + "/docs/BleakholdProtocol.md");
+    CHECK(doc.find("## 21. The caf\xC3\xA9") != std::string::npos);
+    CHECK(doc.find("131072 the caf\xC3\xA9 live") != std::string::npos);
+    CHECK(doc.find("| `[Caf\xC3\xA9] ` |") != std::string::npos);
+    for (Refusal const& r : { CafeErr::Off, CafeErr::Closed, CafeErr::Faction, CafeErr::Where, CafeErr::Level,
+             CafeErr::Combat, CafeErr::Mounted, CafeErr::Paused, CafeErr::Cap, CafeErr::BarFull, CafeErr::Afk,
+             CafeErr::Account, CafeErr::Shift, CafeErr::ShiftOrder, CafeErr::Busy, CafeErr::Station, CafeErr::Ticket,
+             CafeErr::Hands, CafeErr::Locked, CafeErr::Full, CafeErr::Taken, CafeErr::Self, CafeErr::Gold,
+             CafeErr::Order, CafeErr::Staff, CafeErr::Dead, CafeErr::Failed })
+    {
+        std::string const code = r.code;
+        bool ok = !code.empty() && code.size() <= CafeCodeBytes;
+        for (char c : code)
+            ok = ok && ((c >= 'a' && c <= 'z') || c == '_');
+        CHECK_MSG(ok, "code [" + code + "]");
+        CHECK_MSG(code.compare(0, 5, "cafe_") == 0 || code == "dead" || code == "failed", code);
+        CHECK_MSG(doc.find("| `" + code + "` |") != std::string::npos, code + " is in an error table of the document");
+        std::string const text = r.text;
+        CHECK_MSG(!text.empty() && text.size() <= MaxCafeLineBytes && CleanText(text) == text, code + " has a sentence");
+    }
+    // the generic "busy" (over a rate) is documented as everywhere
+    CHECK(doc.find("`busy` (over a caf\xC3\xA9 op's rate") != std::string::npos);
+}
+
+TEST("cafe: CAFST, CAFQ and CAFT keep their fields, caps and order")
+{
+    CafeState off;   // off shift: the shift fields are empty; the level and the day are always there
+    off.level = 10; off.xp = 5640; off.levelXp = 5640; off.flags = CafeFlagStaffDrink;
+    CHECK_EQ(EncodeCafeState(off), "0,0,10,5640,5640,,,,,,,,,,,,,16;D,0,0,0,0,0,0,0,0");
+    off.cafeId = 2;            // no cafe without a shift
+    off.rush = CafeRush{};     // no Rush record off shift
+    off.flags = 0xFFu;         // only the seven documented bits
+    off.warnSec = 4u;
+    CHECK_EQ(EncodeCafeState(off), "0,0,10,5640,5640,,,,,,,,,,,,,127,4;D,0,0,0,0,0,0,0,0");
+    CafeState on;
+    on.cafeId = 2; on.onShift = true; on.level = 3; on.xp = 400; on.levelXp = 320; on.nextLevelXp = 620u;
+    on.station = 'E'; on.nearStation = 0; on.nearDm = 40; on.maxTickets = 9;   // no nearest: no distance
+    CHECK_EQ(EncodeCafeState(on), "2,1,3,400,320,620,0,0,0,0,0,0,E,,,3;D,0,0,0,0,0,0,0,0");
+    on.station = 0; on.nearStation = 'G'; on.nearDm = 900; on.maxTickets = 0; on.flags = CafeFlagFacing;
+    CafeRush live;
+    live.rushState = CafeRushState::Live; live.rushSec = 600; live.rushServed = 31; live.rushGoal = 60;
+    live.myRushServed = 4;
+    on.rush = live;
+    CHECK_EQ(EncodeCafeState(on), "2,1,3,400,320,620,0,0,0,0,0,0,,G,255,1,,32;D,0,0,0,0,0,0,0,0;R,2,600,31,60,4");
+    on.rush = CafeRush{};      // no Rush now: rushSec is left empty
+    CHECK_EQ(Norm(EncodeCafeState(on)), "2,1,3,400,320,620,0,0,0,0,0,0,,G,255,1,,32;D,0,0,0,0,0,0,0,0;R,0,,0,0,0");
+
+    // CAFQ: waiting player orders, waiting NPC orders, the receiver's own, the rest; 8 rows at most, the rest counted
+    CafeQueue q;
+    q.cafeId = 1; q.count = 12; q.cap = 8; q.baristas = 3;
+    auto row = [](uint32_t id, CafeOrderKind kind, CafeQueueState state, char const* by) {
+        CafeQueueRow r;
+        r.orderId = id; r.kind = kind; r.recipeId = 101; r.customer = "C" + std::to_string(id); r.state = state;
+        r.takenBy = by; r.patienceMs = 1000; r.patienceMaxMs = 2000;
+        return r;
+    };
+    q.rows = { row(1, CafeOrderKind::Npc, CafeQueueState::Taken, "Brenna"), row(2, CafeOrderKind::Npc, CafeQueueState::Taken, "Aldric"),
+        row(3, CafeOrderKind::Group, CafeQueueState::Waiting, ""), row(4, CafeOrderKind::Player, CafeQueueState::House, ""),
+        row(5, CafeOrderKind::Npc, CafeQueueState::Waiting, ""), row(6, CafeOrderKind::Player, CafeQueueState::Waiting, ""),
+        row(7, CafeOrderKind::Npc, CafeQueueState::Waiting, ""), row(8, CafeOrderKind::Player, CafeQueueState::Taken, "Aldric"),
+        row(9, CafeOrderKind::Npc, CafeQueueState::Waiting, ""), row(10, CafeOrderKind::Player, CafeQueueState::Waiting, ""),
+        row(11, CafeOrderKind::Npc, CafeQueueState::Waiting, ""), row(12, CafeOrderKind::Npc, CafeQueueState::Taken, "Corwin") };
+    q.rows[2].group = 7u;
+    q.rows[4].needLevel = 4;
+    SortCafeQueueRows(q.rows, "Aldric");
+    std::string order;
+    for (CafeQueueRow const& r : q.rows)
+        order += std::to_string(r.orderId) + " ";
+    CHECK_EQ(order, "6 10 3 5 7 9 11 2 8 1 4 12 ");
+    std::vector<std::string> recs = SplitStr(EncodeCafeQueue(q), ';');
+    CHECK_EQN(recs.size(), MaxCafeQueueRows + 1);
+    CHECK_EQ(recs[0], "1,12,8,3,4");   // 4 rows not sent, none of them a waiting one
+    CHECK_EQ(recs[1], "6,P,101,C6,1000,2000,W,,0");
+    CHECK_EQ(recs[3], "3,G,101,C3,1000,2000,W,,0,7");
+    CHECK_EQ(recs[4], "5,N,101,C5,1000,2000,W,,4");
+    CHECK_EQ(recs[8], "2,N,101,C2,1000,2000,T,Aldric,0");
+    SortCafeQueueRows(q.rows, "Corwin");   // another receiver: his own row moves up
+    CHECK_EQN(q.rows[7].orderId, 12u);
+    q.rows.resize(8);
+    CHECK_EQ(SplitStr(EncodeCafeQueue(q), ';')[0], "1,12,8,3");   // nothing cut: `more` is left out
+    CafeQueueRow longName = row(13, CafeOrderKind::Npc, CafeQueueState::Waiting, "");
+    longName.customer = std::string(60, 'x') + ";";
+    q.rows = { longName };
+    CHECK_EQ(SplitStr(EncodeCafeQueue(q), ';')[1], "13,N,101," + std::string(MaxCafeNameBytes, 'x') + ",1000,2000,W,,0");
+
+    // CAFT: the single record 0 without tickets, at most 3 tickets of at most 12 steps
+    CHECK_EQ(EncodeCafeTickets(CafeTickets{}), "0");
+    CafeTickets tk;
+    for (uint32_t i = 1; i <= 5; ++i)
+    {
+        CafeTicket t;
+        t.ticketId = i; t.orderId = 100 + i; t.recipeId = 119; t.kind = CafeOrderKind::Npc; t.customer = "A,B";
+        t.nextStep = 2; t.inHand = true; t.orderLine = "One; two: three~";
+        for (uint32_t s = 1; s <= 14; ++s)
+            t.steps.push_back({ s, s == 1 ? CafeGrade::Perfect : (s == 2 ? CafeGrade::Off : CafeGrade::None) });
+        tk.tickets.push_back(t);
+    }
+    recs = SplitStr(EncodeCafeTickets(tk), ';');
+    CHECK_EQN(recs.size(), MaxCafeTickets);
+    std::vector<std::string> f = SplitStr(recs[0], ',');
+    CHECK_EQN(f.size(), std::size_t(12));
+    CHECK_EQ(f[4], "A%2CB");
+    CHECK_EQ(f[9], "One%3B two%3A three%7E");
+    CHECK_EQN(SplitStr(f[10], ':').size(), MaxCafeSteps);
+    CHECK(f[10].compare(0, 12, "1~P:2~O:3~N:") == 0);
+}
+
+TEST("cafe: CAFEV, CAFRES, CAFM, CAFO, CAFP, CAFBF, CAFSUM, CAFUI, CAFAT and CAFE keep to the document")
+{
+    CafeStepEvent ev;
+    ev.ticketId = 7; ev.stepIndex = 3; ev.actionId = 26; ev.event = CafeStepEventKind::Binned; ev.nextStep = 1;
+    CHECK_EQ(EncodeCafeStep(ev), "7,3,26,B,,,,,1");
+    ev.event = CafeStepEventKind::TutorialWrong; ev.nextStep = 3;
+    CHECK_EQ(EncodeCafeStep(ev), "7,3,26,W,,,,,3");
+    ev.event = CafeStepEventKind::Interrupted; ev.durMs = 2500u; ev.goldLoMs = 1500u; ev.goldHiMs = 1875u;
+    CHECK_EQ(EncodeCafeStep(ev), "7,3,26,I,2500,1500,1875,,3");
+    ev.event = CafeStepEventKind::Done; ev.grade = CafeGrade::Good; ev.nextStep = 4;
+    CHECK_EQ(EncodeCafeStep(ev), "7,3,26,D,2500,1500,1875,G,4");
+
+    CafeResult res;
+    res.ticketId = 9; res.recipeId = 219; res.quality = CafeQuality::Left; res.level = 10; res.customer = "Gorrak, the";
+    res.line = std::string(200, 'y');
+    std::vector<std::string> f = SplitStr(EncodeCafeResult(res), ',');
+    CHECK_EQN(f.size(), std::size_t(12));
+    CHECK_EQ(f[2], "L"); CHECK_EQ(f[9], "Gorrak%2C the"); CHECK_EQN(f[10].size(), MaxCafeLineBytes);
+    res.levelUp = true; res.quality = CafeQuality::Sloppy; res.line.clear(); res.xpCapped = 7;
+    CHECK_EQ(EncodeCafeResult(res), "9,219,S,0,0,0,0,1,10,Gorrak%2C the,,7");
+
+    CafeMenu menu;
+    menu.cafeId = 2; menu.open = CafeOpen::Paused; menu.ordersCap = 12; menu.reason = CafeErr::Paused.code;
+    for (uint32_t i = 0; i < 45; ++i)
+        menu.rows.push_back({ 201 + i, 200, false, i % 2 == 0 });
+    std::vector<std::string> recs = SplitStr(EncodeCafeMenu(menu), ';');
+    CHECK_EQN(recs.size(), MaxCafeRecipes + 1);
+    CHECK_EQ(recs[0], "2,2,0,0,0,0,12,0,cafe_paused");
+    CHECK_EQ(recs[1], "201,200,0,1");
+    CHECK_EQ(recs[2], "202,200,0,0");
+    menu.open = static_cast<CafeOpen>(9);   // not a state: the highest one
+    CHECK(EncodeCafeMenu(menu).compare(0, 4, "2,4,") == 0);
+
+    CHECK_EQ(EncodeCafeOrder(CafeOrderState{}), "0");
+    CafeOrderState o;
+    o.orderId = 5; o.cafeId = 2; o.recipeId = 207; o.state = CafeOrderStateId::Making; o.barista = "Morgra";
+    o.nextStep = 3; o.stepCount = 7; o.priceCopper = 18000; o.tipCopper = 9000;
+    CHECK_EQ(EncodeCafeOrder(o), "5,2,207,M,,Morgra,3,7,,18000,9000");
+    o.state = CafeOrderStateId::Finishing; o.barista.clear(); o.leftSec = 41u;
+    CHECK_EQ(EncodeCafeOrder(o), "5,2,207,F,,,3,7,41,18000,9000");
+    o.state = CafeOrderStateId::Expired; o.leftSec.reset();
+    CHECK_EQ(EncodeCafeOrder(o), "5,2,207,E,,,3,7,,18000,9000");
+
+    CafeProfile p;
+    p.rewards = 0xFFu;   // only the five documented bits
+    CHECK_EQ(EncodeCafeProfile(p), "1,0,0,,0,0,0,0,,0,31");
+    CafeWeek wk;
+    wk.weekId = 2964; wk.cafeId = 2; wk.points = 40; wk.drinks = 12; wk.perfectPermille = 1500; wk.days = 1;
+    p.week = wk;
+    for (uint32_t i = 0; i < 12; ++i)
+        p.lastWinners.push_back({ 2963, 1, "W~" + std::to_string(i), 100 });
+    recs = SplitStr(EncodeCafeProfile(p), ';');
+    CHECK_EQN(recs.size(), MaxCafes + 2);
+    CHECK_EQ(recs[1], "W,2964,2,,40,12,1000,1,0");   // not eligible: no rank; permille capped
+    CHECK_EQ(recs[2], "L,2963,1,W%7E0,100");
+
+    CafeBuffs b;
+    CHECK_EQ(EncodeCafeBuffs(b), ",,,0,1");
+    b.teaSec = 60u; b.shakeSec = 0u; b.shakeActive = true; b.coffeeCounts = false;
+    CHECK_EQ(EncodeCafeBuffs(b), ",60,0,1,0");
+
+    CafeSummary sum;
+    sum.cafeId = 2; sum.reason = CafeShiftEnd::FeatureOff; sum.staffDrink = true;
+    CHECK_EQ(EncodeCafeSummary(sum), "2,O,0,0,0,0,0,0,0,0,1");
+    for (CafeShiftEnd e : { CafeShiftEnd::Player, CafeShiftEnd::Combat, CafeShiftEnd::Afk, CafeShiftEnd::Idle,
+             CafeShiftEnd::Walked, CafeShiftEnd::Died, CafeShiftEnd::Mounted, CafeShiftEnd::Closed })
+    {
+        sum.reason = e;
+        CHECK(SplitStr(EncodeCafeSummary(sum), ',')[1] == std::string(1, static_cast<char>(e)));
+    }
+
+    for (char const* what : { "menu", "shift", "board", "help" })
+    {
+        CHECK(IsCafeUiTarget(what));
+        CHECK_EQ(EncodeCafeOpenUi(what, 2), std::string(what) + ",2");
+    }
+    CHECK(!IsCafeUiTarget("cafe") && !IsCafeUiTarget("") && !IsCafeUiTarget("MENU"));
+    CHECK_EQ(EncodeCafeOpenUi("menu;x", 1), ",1");   // never an unknown window
+
+    CafeAtBar bar;
+    bar.cafeId = 1;
+    CHECK_EQ(EncodeCafeAtBar(bar), "1,0");   // the last step ended: an empty list
+    for (uint32_t i = 0; i < 9; ++i)
+        bar.rows.push_back({ "Worker:" + std::to_string(i), 3, 10 * i, 3000, CafeStepKind::Timed, 2, 5 });
+    recs = SplitStr(EncodeCafeAtBar(bar), ';');
+    CHECK_EQN(recs.size(), MaxCafeAtRows + 1);
+    CHECK_EQ(recs[0], "1,6");   // count is the rows sent
+    CHECK_EQ(recs[6], "Worker%3A5,3,50,3000,H,2,5");
+
+    CafeList list;
+    list.rows.push_back({ 1, CafeOpen::Closed, 0, 0, CafeRushState::None, 99, 0 });   // no Rush: rushSec empty
+    list.rows.push_back({ 2, CafeOpen::NotOpen, 0, 3, CafeRushState::Live, 600, 75 });
+    CHECK_EQ(EncodeCafeList(list), "1,4,0,0,0,,0;2,3,0,3,2,600,75");
+    for (uint8_t i = 0; i < 12; ++i)
+        list.rows.push_back({ static_cast<uint8_t>(3 + i), CafeOpen::Off, 0, 0, CafeRushState::None, 0, 0 });
+    CHECK_EQN(SplitStr(EncodeCafeList(list), ';').size(), MaxCafes);
+}
+
+TEST("cafe: DEF H, G, F and U follow the arena kinds; LB and LBME board C use the common fields only")
+{
+    Definitions d;
+    d.arenaRewards = { ArenaRewardDef{} };
+    CafeDef h;
+    h.id = 2; h.name = "The Grinding Tusk"; h.cityKey = "org"; h.team = 'H'; h.zoneId = 1637; h.mapId = 1;
+    h.ownerName = "Grukka Steamtusk"; h.tagline = "Strong, brews; for: strong~backs."; h.colorHex = "B5402F";
+    d.cafes = { h };
+    CafeActionDef tap;
+    tap.id = 24; tap.station = 'V'; tap.key = 1; tap.kind = 'T'; tap.durMs = 500; tap.name = "Take Order"; tap.spellId = 100924;
+    CafeActionDef timed;
+    timed.id = 15; timed.station = 'B'; timed.key = 1; timed.kind = 'H'; timed.durMs = 2500; timed.goldLoPermille = 550u;
+    timed.goldHiPermille = 1200u; timed.name = "Blend"; timed.spellId = 100915;   // permille capped at 1000
+    d.cafeActions = { tap, timed };
+    CafeRecipeDef r;
+    r.id = 219; r.cafeId = 2; r.archetype = 19; r.family = 'M'; r.tier = 5; r.unlockLevel = 10; r.price80Copper = 18000;
+    r.buffMin = 50; r.name = "Valley of Honor Triple Scoop"; r.text = "Earned in the Ring, eaten in triumph.";
+    for (uint32_t i = 0; i < 14; ++i)
+        r.steps.push_back(i < 8 ? 11 : 25);
+    d.cafeRecipes = { r };
+    d.cafeLevels = { { 10, 5640, std::string(200, 'z') } };
+    std::vector<std::string> p = EncodeDefinitions(d, 8);
+    CHECK_EQN(p.size(), std::size_t(6));
+    CHECK(p[0].compare(0, 4, "Q,8;") == 0);
+    CHECK_EQ(p[1], "H,8;2,The Grinding Tusk,org,H,1637,1,Grukka Steamtusk,Strong%2C brews%3B for%3A strong%7Ebacks.,B5402F");
+    CHECK_EQ(p[2], "G,8;24,V,1,T,500,,,Take Order,,100924;15,B,1,H,2500,550,1000,Blend,,100915");
+    CHECK_EQ(p[3], "F,8;219,2,19,M,5,10,18000,50,11:11:11:11:11:11:11:11:25:25:25:25,Valley of Honor Triple Scoop,"
+        "Earned in the Ring%2C eaten in triumph.");
+    CHECK_EQ(p[4], "U,8;10,5640," + std::string(MaxCafeLineBytes, 'z'));
+    CHECK_EQ(p[5], "Z,8");
+    Definitions none;
+    none.arenaRewards = d.arenaRewards;
+    CHECK(DefinitionsHash(d) != DefinitionsHash(none));
+
+    Leaderboard lb;
+    lb.board = Board::Cafe; lb.seasonId = 2964u; lb.dungeonId = 2u; lb.classId = 0u; lb.page = 1; lb.pages = 1;
+    LeaderboardRow row;
+    row.rank = 1; row.dungeonId = 2u; row.value = 1990; row.timeSec = 801; row.dateEpoch = 1793900000u;
+    row.members = { { "Morgra", 3u } }; row.label = "131 drinks";
+    row.seasonWins = 1u; row.tierId = 2u;   // arena fields: never on board C
+    lb.rows = { row };
+    CHECK_EQ(EncodeLeaderboard(lb), "C,2964,2,0,1,1;1,2,1990,801,1793900000,Morgra~3,131 drinks");
+    LeaderboardMe me;
+    me.board = Board::Cafe; me.rank = 1u; me.topPercent = 1u; me.value = 1990; me.dungeonId = 2u; me.timeSec = 801;
+    me.barPermille = 1000u; me.label = "131 drinks"; me.topPermille = 5u;
+    CHECK_EQ(EncodeLeaderboardMe(me), "C,1,1,1990,2,801,1000,131 drinks");
+    LeaderboardMe nobody;
+    nobody.board = Board::Cafe;
+    CHECK_EQ(EncodeLeaderboardMe(nobody), "C");
+}
+
 TEST("endpoint: SEQ per message, revisions per topic, snapshots reset by HELLO")
 {
     Endpoint ep;
@@ -2617,6 +3066,174 @@ static std::map<std::string, std::string> BuiltExamples()
         e.op = IntentType::QueueJoin; e.seq = 91; e.code = ArenaErr::Closed.code;
         e.text = "Rated arena opens again when Arena Season 2 starts.";
         m["ERR 2k"] = EncodeError(e);
+    }
+    // the cafe (section 21): Aldric's shift, an order, the board, the definitions and a bystander
+    {
+        CafeList list;
+        list.rows = { { 1, CafeOpen::Open, 1, 2, CafeRushState::Soon, 180, 45 },
+            { 2, CafeOpen::Open, 0, 0, CafeRushState::Soon, 180, 60 } };
+        m["CAFE 4a"] = EncodeCafeList(list);
+        CafeDay day;
+        day.dayXp = 210; day.dayXpFull = 450; day.dayXpHalf = 450; day.dayTipsCopper = 30000; day.dayTipsCapCopper = 180000;
+        day.dayPoints = 180; day.dayPointsCap = 400; day.dayDrinks = 14;
+        CafeState off;
+        off.level = 6; off.xp = 1890; off.levelXp = 1600; off.nextLevelXp = 2320u; off.day = day;
+        m["CAFST 4b"] = EncodeCafeState(off);
+        CafeBuffs buffs;
+        buffs.coffeeSec = 1320u; buffs.shakeSec = 1800u; buffs.shakeActive = false; buffs.coffeeCounts = true;
+        m["CAFBF 4c"] = EncodeCafeBuffs(buffs);
+        CafeState on = off;
+        on.cafeId = 1; on.onShift = true; on.station = 'V'; on.nearStation = 'V'; on.nearDm = 3; on.maxTickets = 2;
+        on.tiredSec = 3600u; on.flags = CafeFlagMemory;
+        CafeRush rush;
+        rush.rushState = CafeRushState::Soon; rush.rushSec = 180; rush.rushGoal = 60;
+        on.rush = rush;
+        m["CAFST 4d"] = EncodeCafeState(on);
+
+        CafeQueueRow brenna;
+        brenna.orderId = 1209; brenna.kind = CafeOrderKind::Player; brenna.recipeId = 103; brenna.customer = "Brenna";
+        brenna.patienceMs = 25000; brenna.patienceMaxMs = 25000;
+        CafeQueueRow corwin;
+        corwin.orderId = 1207; corwin.kind = CafeOrderKind::Npc; corwin.recipeId = 101;
+        corwin.customer = "Sergeant Corwin Ashgrove"; corwin.patienceMs = 45000; corwin.patienceMaxMs = 48000;
+        CafeQueue q;
+        q.cafeId = 1; q.count = 2; q.cap = 6; q.baristas = 2;
+        q.rows = { corwin, brenna };
+        SortCafeQueueRows(q.rows, "Aldric");   // the waiting player's order first, as Ui::SendCafeQueue does
+        m["CAFQ 4e"] = EncodeCafeQueue(q);
+
+        auto steps = [](std::vector<uint32_t> const& ids) {
+            std::vector<CafeTicketStep> out;
+            for (uint32_t id : ids)
+                out.push_back({ id, CafeGrade::None });
+            return out;
+        };
+        CafeTicket t41;
+        t41.ticketId = 41; t41.orderId = 1209; t41.recipeId = 103; t41.kind = CafeOrderKind::Player; t41.customer = "Brenna";
+        t41.patienceMs = 57000; t41.patienceMaxMs = 60000; t41.nextStep = 1; t41.steps = steps({ 1, 3, 6, 16, 25 });
+        t41.tipHintCopper = 2100;
+        CafeTicket t42;
+        t42.ticketId = 42; t42.orderId = 1207; t42.recipeId = 101; t42.kind = CafeOrderKind::Npc;
+        t42.customer = "Sergeant Corwin Ashgrove"; t42.patienceMs = 43200; t42.patienceMaxMs = 43200; t42.nextStep = 1;
+        t42.orderLine = "Cathedral Black. No sugar, no chatter, no delay."; t42.steps = steps({ 1, 3, 4, 25 });
+        t42.tipHintCopper = 400;
+        m["CAFT 4f"] = EncodeCafeTickets(CafeTickets{ { t41, t42 } });
+
+        auto step = [](uint32_t ticket, uint32_t index, uint32_t action, CafeStepEventKind event, Opt<uint32_t> dur,
+                        Opt<uint32_t> lo, Opt<uint32_t> hi, CafeGrade grade, uint32_t next) {
+            CafeStepEvent e;
+            e.ticketId = ticket; e.stepIndex = index; e.actionId = action; e.event = event; e.durMs = dur; e.goldLoMs = lo;
+            e.goldHiMs = hi; e.grade = grade; e.nextStep = next;
+            return EncodeCafeStep(e);
+        };
+        auto const S = CafeStepEventKind::Started;
+        auto const D = CafeStepEventKind::Done;
+        m["CAFEV 4g"] = step(41, 1, 1, S, 1500u, std::nullopt, std::nullopt, CafeGrade::None, 1);
+        m["CAFEV 4h"] = step(41, 1, 1, D, 1500u, std::nullopt, std::nullopt, CafeGrade::Perfect, 2);
+        m["CAFEV 4i"] = step(41, 2, 3, S, 3000u, 2160u, 2610u, CafeGrade::None, 2);
+        m["CAFEV 4j"] = step(41, 2, 3, D, 3000u, 2160u, 2610u, CafeGrade::Perfect, 3);
+        m["CAFEV 4k"] = step(41, 3, 6, S, 2000u, 760u, 1160u, CafeGrade::None, 3);
+        m["CAFEV 4l"] = step(41, 3, 6, D, 2000u, 760u, 1160u, CafeGrade::Perfect, 4);
+        m["CAFEV 4o"] = step(41, 4, 16, S, 800u, std::nullopt, std::nullopt, CafeGrade::None, 4);
+        m["CAFEV 4q"] = step(42, 2, 5, CafeStepEventKind::Wrong, std::nullopt, std::nullopt, std::nullopt, CafeGrade::None, 1);
+        auto err = [](IntentType op, char const* seq, char const* code, char const* text) {
+            ErrorReply e;
+            e.op = op; e.seq = *ParseBase36(seq); e.code = code; e.text = text;
+            return EncodeError(e);
+        };
+        m["ERR 4m"] = err(IntentType::CafeStep, "3j", CafeErr::Station.code, "Walk to the Syrup Shelf first.");
+        m["ERR 4n"] = err(IntentType::CafeStep, "3k", CafeErr::Hands.code, CafeErr::Hands.text);
+        m["ERR 4s"] = err(IntentType::CafeStaff, "3o", CafeErr::Staff.code, CafeErr::Staff.text);
+        CafeResult res;
+        res.ticketId = 41; res.recipeId = 103; res.quality = CafeQuality::Perfect; res.xp = 32; res.tipCopper = 2100;
+        res.points = 22; res.streak = 1; res.levelUp = false; res.level = 6; res.customer = "Brenna";
+        m["CAFRES 4p"] = EncodeCafeResult(res);
+        CafeSummary sum;
+        sum.cafeId = 1; sum.reason = CafeShiftEnd::Player; sum.shiftSec = 1840; sum.drinks = 14; sum.perfects = 9;
+        sum.tipsCopper = 10600; sum.xp = 212; sum.xpLost = 0; sum.points = 190; sum.bestStreak = 4; sum.staffDrink = false;
+        m["CAFSUM 4r"] = EncodeCafeSummary(sum);
+
+        CafeMenu menu;
+        menu.cafeId = 1; menu.open = CafeOpen::Open; menu.baristas = 1; menu.houseEtaSec = 45; menu.ordersToday = 2;
+        menu.ordersCap = 12; menu.canOrder = true;
+        menu.rows = { { 101, 3500, true, true }, { 103, 5300, true, true }, { 119, 15800, false, true } };
+        m["CAFM 4t"] = EncodeCafeMenu(menu);
+        m["CAFO 4u"] = EncodeCafeOrder(CafeOrderState{});
+        CafeProfile prof;
+        prof.level = 6; prof.xp = 1890; prof.levelXp = 1600; prof.nextLevelXp = 2320u; prof.drinks = 412; prof.perfects = 301;
+        prof.bestStreak = 14; prof.fastestMs = 5120u; prof.rewards = CafeRewardApprentice;
+        CafeWeek week;
+        week.weekId = 2964; week.cafeId = 1; week.rank = 2u; week.points = 1830; week.drinks = 96; week.perfectPermille = 790;
+        week.days = 4; week.eligible = true;
+        prof.week = week;
+        prof.lastWinners = { { 2963, 1, "Brenna", 2480 }, { 2963, 2, "Morgra", 1990 } };
+        m["CAFP 4v"] = EncodeCafeProfile(prof);
+        CafeOrderState order;
+        order.orderId = 1210; order.cafeId = 1; order.recipeId = 103; order.state = CafeOrderStateId::Queued;
+        order.position = 1u; order.stepCount = 5; order.priceCopper = 5300; order.tipCopper = 530;
+        m["CAFO 4w"] = EncodeCafeOrder(order);
+        order.state = CafeOrderStateId::Cancelled; order.position.reset();
+        m["CAFO 4x"] = EncodeCafeOrder(order);
+
+        Leaderboard lb;
+        lb.board = Board::Cafe; lb.seasonId = 2964u; lb.dungeonId = 1u; lb.classId = 0u; lb.page = 1; lb.pages = 1;
+        auto row = [](uint32_t rank, int64_t points, int64_t perfect, uint32_t last, char const* who, uint32_t classId,
+                       char const* label) {
+            LeaderboardRow r;
+            r.rank = rank; r.dungeonId = 1u; r.value = points; r.timeSec = perfect; r.dateEpoch = last;
+            r.members = { { who, classId } }; r.label = label;
+            return r;
+        };
+        lb.rows = { row(1, 2310, 812, 1793900000u, "Brenna", 2, "142 drinks"),
+            row(2, 1830, 790, 1793890000u, "Aldric", 1, "96 drinks") };
+        m["LB 4y"] = EncodeLeaderboard(lb);
+        LeaderboardMe me;
+        me.board = Board::Cafe; me.rank = 2u; me.topPercent = 40u; me.value = 1830; me.dungeonId = 1u; me.timeSec = 790;
+        me.barPermille = 792u; me.label = "96 drinks";
+        m["LBME 4z"] = EncodeLeaderboardMe(me);
+
+        Definitions defs;
+        CafeDef sw;
+        sw.id = 1; sw.name = "The Lion's Roast"; sw.cityKey = "sw"; sw.team = 'A'; sw.zoneId = 1519; sw.mapId = 0;
+        sw.ownerName = "Rosalind Thornbury"; sw.tagline = "Coffee \xC2\xB7 Tea \xC2\xB7 Shakes, by the Cathedral steps";
+        sw.colorHex = "3F6FB5";
+        CafeDef org;
+        org.id = 2; org.name = "The Grinding Tusk"; org.cityKey = "org"; org.team = 'H'; org.zoneId = 1637; org.mapId = 1;
+        org.ownerName = "Grukka Steamtusk"; org.tagline = "Strong brews for strong backs."; org.colorHex = "B5402F";
+        defs.cafes = { sw, org };
+        auto action = [](uint32_t id, char station, uint32_t key, char kind, uint32_t dur, Opt<uint32_t> lo,
+                          Opt<uint32_t> hi, char const* name, char const* hordeName, uint32_t spell) {
+            CafeActionDef a;
+            a.id = id; a.station = station; a.key = key; a.kind = kind; a.durMs = dur; a.goldLoPermille = lo;
+            a.goldHiPermille = hi; a.name = name; a.hordeName = hordeName; a.spellId = spell;
+            return a;
+        };
+        defs.cafeActions = { action(1, 'G', 1, 'T', 1500, std::nullopt, std::nullopt, "Grind Beans", "", 100901),
+            action(3, 'E', 1, 'H', 3000, 700u, 850u, "Pull Shot", "", 100903),
+            action(21, 'S', 6, 'T', 800, std::nullopt, std::nullopt, "Elwynn Berry", "Cactus Apple", 100921) };
+        CafeRecipeDef black;
+        black.id = 101; black.cafeId = 1; black.archetype = 1; black.family = 'C'; black.tier = 1; black.unlockLevel = 1;
+        black.price80Copper = 4000; black.buffMin = 30; black.steps = { 1, 3, 4, 25 }; black.name = "Cathedral Black";
+        black.text = "Dark as the crypts beneath the Cathedral and twice as bracing.";
+        defs.cafeRecipes = { black };
+        defs.cafeLevels = { { 1, 0, "Black coffee, latte, green tea and black tea. One ticket at a time; the first drink is "
+                                    "forgiving." },
+            { 5, 1040, "Iced latte and mint tea. Apprentice's Apron." } };
+        std::vector<std::string> p = EncodeDefinitions(defs, 8);
+        m["DEF 50"] = p.at(0);
+        m["DEF 51"] = p.at(1);
+        m["DEF 52"] = p.at(2);
+        m["DEF 53"] = p.at(3);
+        Toast toast;
+        toast.kind = ToastKind::Info; toast.title = "Barista level 5"; toast.subtitle = "Apprentice's Apron unlocked";
+        toast.openTarget = "cafe";
+        m["TOAST 54"] = EncodeToast(toast);
+        m["CAFUI 55"] = EncodeCafeOpenUi(CafeUiMenu, 1);
+        CafeAtBar bar;
+        bar.cafeId = 1;
+        bar.rows = { { "Aldric", 3, 400, 3000, CafeStepKind::Timed, 2, 5 },
+            { "Rosalind Thornbury", 1, 900, 1500, CafeStepKind::Tap, 1, 4 } };
+        m["CAFAT 56"] = EncodeCafeAtBar(bar);
     }
     return m;
 }

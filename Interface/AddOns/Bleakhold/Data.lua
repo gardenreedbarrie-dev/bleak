@@ -230,6 +230,7 @@ Data.chatTags = {
     { tag = "Case", color = "C9A2F5", key = "case" },
     { tag = "Royale", color = "B98CFF", key = "royale" },
     { tag = "War", color = "E0604A", key = "war" },
+    { tag = "Caf\195\169", color = "D8B98A", key = "cafe" },   -- the server's UTF-8 bytes, kept ASCII here
 }
 
 -- The addon's sentence for a server refusal (ERR code), shown instead of the server's text (ns.ErrorText); a

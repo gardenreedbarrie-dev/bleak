@@ -88,6 +88,15 @@ namespace Bleakhold::CampRules
         return static_cast<uint32_t>(std::min<uint64_t>(sum, maxPct));
     }
 
+    // The same with the cafe's coffee (section 21): warmth plus the better of Well Fed and coffee, never both, at most
+    // maxPct. Coffee never adds to food: a raider with stat food and a coffee gets the food's bonus once.
+    inline uint32_t BonusPctWithCoffee(bool warm, uint32_t warmthPct, bool fed, uint32_t foodPct, bool coffee,
+        uint32_t coffeePct, uint32_t maxPct)
+    {
+        uint64_t const meal = std::max<uint64_t>(fed ? foodPct : 0, coffee ? coffeePct : 0);
+        return static_cast<uint32_t>(std::min<uint64_t>((warm ? uint64_t(warmthPct) : 0) + meal, maxPct));
+    }
+
     // amount + amount * pct / 100 (rounded down), saturating at 2^32 - 1.
     inline uint32_t AddPct(uint32_t amount, uint32_t pct)
     {

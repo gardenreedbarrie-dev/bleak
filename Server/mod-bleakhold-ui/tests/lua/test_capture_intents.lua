@@ -32,8 +32,8 @@ end
 
 test("every intent the addon can send, captured for the C++ parser", function(M, ns)
     local C = ns.Comm
-    -- camping, glide, field repair, Bleakhold Royale, War Mode and World PvP, arena seasons
-    FX.connect(M, H, { [6] = 512 + 1024 + 2048 + 4096 + 16384 + 32768 + 65536 })
+    -- camping, glide, field repair, Bleakhold Royale, War Mode and World PvP, arena seasons, the café
+    FX.connect(M, H, { [6] = 512 + 1024 + 2048 + 4096 + 16384 + 32768 + 65536 + 131072 })
     FX.all(M, H)
 
     -- the windows' own buttons (the paths players use)
@@ -227,6 +227,70 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
         end
         return out
     end)(), " "), "1 0 1", "the WARMODE intents the UI sent")
+    -- the café (section 21) through the client's encoder, with edge values, as the café's send gates space them:
+    -- CSHIFT and CSTAFF 2.3 s apart (one per 2 s together), CTAKE 0.65 s (one per 0.5 s), CSTEP 0.3 s (one per 0.2 s),
+    -- CREL 0.3 s (one per 0.1 s; at once), CORDER and CCANCEL 2.3 s (one per 2 s together). CTAKE, CSTEP and CREL
+    -- are sent again with the same payload inside the server's 1 s duplicate window: never duplicates (section 8).
+    M.Advance(2.3)
+    local cafe = {
+        { 2.3, "CSHIFT", 1, 1 }, { 0.65, "CTAKE", 0 }, { 0.65, "CTAKE", 0 }, { 0.65, "CTAKE", 2147483647 },
+        { 0.3, "CSTEP", 1, 1, 1 }, { 0.3, "CSTEP", 1, 1, 1 }, { 0.3, "CSTEP", 2147483647, 12, 63 },
+        { 0.3, "CREL", 1, 1, 0 }, { 0.3, "CREL", 1, 1, 0 }, { 0.3, "CREL", 2147483647, 12, 60000 },
+        { 2.3, "CSHIFT", 255, 0 }, { 2.3, "CSTAFF", 1 }, { 2.3, "CSTAFF", 65535 },
+        { 2.3, "CORDER", 1, 1, 0 }, { 2.3, "CORDER", 2, 201, 10 }, { 2.3, "CORDER", 1, 103, 25 },
+        { 2.3, "CORDER", 255, 65535, 50 }, { 2.3, "CCANCEL", 1 }, { 2.3, "CCANCEL", 2147483647 },
+        { 0.6, "LBQ", "C", 0, 1, 0, 1 }, { 0.6, "LBQ", "C", 2147483647, 2, 0, 999 },
+    }
+    local from = #M.sent + 1
+    for _, s in ipairs(cafe) do
+        H.eq(C.Send(unpack(s, 2)), true, "the client sends " .. s[2])
+        M.Advance(s[1])
+    end
+    local sentCafe = {}
+    for _, it in ipairs(H.intents(M, from)) do
+        sentCafe[#sentCafe + 1] = it.op .. " " .. it.payload
+    end
+    H.eq(table.concat(sentCafe, "|"), "CSHIFT 1,1|CTAKE 0|CTAKE 0|CTAKE 2147483647|CSTEP 1,1,1|CSTEP 1,1,1|"
+        .. "CSTEP 2147483647,12,63|CREL 1,1,0|CREL 1,1,0|CREL 2147483647,12,60000|CSHIFT 255,0|CSTAFF 1|CSTAFF 65535|"
+        .. "CORDER 1,1,0|CORDER 2,201,10|CORDER 1,103,25|CORDER 255,65535,50|CCANCEL 1|CCANCEL 2147483647|"
+        .. "LBQ C,0,1,0,1|LBQ C,2147483647,2,0,999", "the café intents went out, repeats included")
+    -- every other op keeps the 0.5 s identical-intent check
+    H.eq(C.Send("CSHIFT", 1, 1), true)
+    H.eq(select(2, C.Send("CSHIFT", 1, 1)), "dedup", "a second CSHIFT within 0.5 s is sent once")
+    M.Advance(2.3)
+    -- CREL goes out at once, ahead of what waits for a token, and still takes a token
+    M.Advance(3)
+    from = #M.sent + 1
+    for i = 1, 7 do
+        H.eq(C.Send("PING", 900 + i), true)
+    end
+    H.eq(C.Send("CREL", 2, 3, 2380), true)
+    local now = {}
+    for _, it in ipairs(H.intents(M, from)) do now[#now + 1] = it.op .. " " .. it.payload end
+    H.eq(table.concat(now, "|"), "PING 901|PING 902|PING 903|PING 904|PING 905|PING 906|CREL 2,3,2380",
+        "the release overtook the seventh PING")
+    M.Advance(0.3)
+    H.eq(#H.intents(M, from), 7, "the queue waits for the token the release took")
+    M.Advance(1)
+    H.eq(#H.intents(M, from), 8, "then the seventh PING goes")
+    M.Advance(2)
+    -- outside the schemas: refused by the client itself
+    H.eq(C.Send("CSHIFT", 0, 1), false, "a café id 1..255")
+    H.eq(C.Send("CSHIFT", 1, 2), false, "on is 0 or 1")
+    H.eq(C.Send("CTAKE", -1), false, "an order id 0..2147483647")
+    H.eq(C.Send("CSTEP", 1, 13, 1), false, "steps 1..12")
+    H.eq(C.Send("CSTEP", 1, 1, 64), false, "actions 1..63")
+    H.eq(C.Send("CSTEP", 0, 1, 1), false, "ticket ids from 1")
+    H.eq(C.Send("CREL", 1, 1, 60001), false, "clientMs 0..60000")
+    H.eq(C.Send("CREL", 1, 1), false, "CREL needs clientMs")
+    H.eq(C.Send("CORDER", 1, 103, 5), false, "a tip of 0, 10, 25 or 50")
+    H.eq(C.Send("CORDER", 1, 103, 100), false, "a tip of 0, 10, 25 or 50")
+    H.eq(C.Send("CORDER", 1, 0, 0), false, "recipes from 1")
+    H.eq(C.Send("CCANCEL", 0), false, "order ids from 1")
+    H.eq(C.Send("CSTAFF", 65536), false, "recipes up to 65535")
+    H.eq(C.Send("LBQ", "C", 0, 0, 0, 1), false, "café board: a café, never all")
+    H.eq(C.Send("LBQ", "C", 0, 3, 0, 1), false, "café board: café 1 or 2")
+    H.eq(C.Get("CAFAT"), false, "CAFAT is pushed only")
     -- GET of every topic; the client batches one frame's requests (8 records at most per GET)
     for _, topic in ipairs({ "WEEK", "ERA", "TASKS", "KEY", "BOARD", "QUEUE", "COLL", "LIDX", "SEASON", "FIRSTS", "MPLUS", "RIFT" }) do
         C.Refresh(topic)
@@ -244,6 +308,12 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
     C.Refresh("WPMAP")
     C.Refresh("WANTED")
     C.Refresh("ARENA")
+    for _, topic in ipairs({ "CAFE", "CAFST", "CAFQ", "CAFT", "CAFO", "CAFP", "CAFBF" }) do
+        C.Refresh(topic)
+    end
+    C.Refresh("CAFM", 1)
+    C.Refresh("CAFM", 2)
+    C.Refresh("CAFM", 255)
     M.Advance(10)
 
     local ops, topics, n = {}, {}, 0

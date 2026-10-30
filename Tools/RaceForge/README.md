@@ -124,7 +124,8 @@ their `Data` folder.
 ### Art archive names and sizes
 
 Every letter but F, K, O and W already names a patch the realm ships: H L R T V X Y Z (the realm; R is RaceForge's
-own `patch-R.MPQ`, Y the HD pack), A B C D E G I M N P S U (Reforged), J (a login screen) and Q (MapForge). The
+own `patch-R.MPQ`, Y the HD pack), A B C D E G I M N P S U (Reforged), J (a login screen) and Q (MapForge), and so do
+the digits 2 and 3 (stock), 4 (CafeForge's café archive) and 5 (MapForge). Free: F, K, O, W and 6-9. The
 launcher installs files by name, so an art archive under one of those names would replace that patch on every
 player's PC. The art therefore takes digits:
 
@@ -138,7 +139,8 @@ player's PC. The art therefore takes digits:
   that patch wins and the package's file is not used. For the package's files to win over Reforged's patches, give
   the free letter after them: `--art-letters W`. It still loses to X, Y and Z.
 - `--art-letters` takes A-Z and 4-9: `patch-0` and `patch-1` would sort below the stock patches, 2 and 3 are the
-  stock patches, and 5 is MapForge's archive for the server's extractors.
+  stock patches, 4 is CafeForge's café archive and 5 is MapForge's archive for the server's extractors (both are in
+  `taken_patches.json`, so 6-9 are the free digits).
 
 `taken_patches.json`, next to `races.json`, lists every name in use with its owner. RaceForge refuses an art name in
 it before it does anything else, and with `--patches-dir <folder>` (the realm's patch folder, or a client's `Data`
@@ -150,8 +152,9 @@ in the report: never publish such archives next to the realm's patches. When a n
 Size: MpqPack writes MPQ format 0 (v1), whose offsets are 32 bits, so each archive stays under 4 GiB. The client
 reads those offsets unsigned (`InitializeTables` in `Engine/Source/BlizzardCore/Source/Packages/Mopaq`), so
 archives between 2 and 4 GiB are fine. 3500 MB of files per archive leaves room for the tables (`--art-max-mb`
-takes at most 4000), and the four default names hold 14000 MB; for a larger package, add free characters
-(`--art-letters 46789`). The client also reads format 1 (v2, with 64-bit offsets, for archives over 4 GiB), but
+takes at most 4000), and the four default names hold 14000 MB; for a larger package, add a free letter
+(`--art-letters 6789F`; the refusal lists the free ones, and a letter sorts after the lettered patches before it, as
+above). The client also reads format 1 (v2, with 64-bit offsets, for archives over 4 GiB), but
 MpqPack does not write it.
 
 ## Output

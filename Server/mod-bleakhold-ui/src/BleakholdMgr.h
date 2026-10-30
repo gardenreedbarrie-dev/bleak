@@ -46,8 +46,8 @@ namespace Bleakhold
         uint32_t heartbeatMs = 15000;
         bool serverPullTimer = false;
         bool colorTagsWithoutAddon = true;
-        std::array<std::string, 8> tagColors{
-            { "E5C07B", "FF9D3B", "6CC6D9", "9FD8E5", "F1D9A0", "C9A2F5", "B98CFF", "E0604A" } };
+        std::array<std::string, 9> tagColors{
+            { "E5C07B", "FF9D3B", "6CC6D9", "9FD8E5", "F1D9A0", "C9A2F5", "B98CFF", "E0604A", "D8B98A" } };
         uint32_t tokenItemId = 0;
         uint32_t pointsPerToken = 0;
         uint32_t tokenPart = 1;
@@ -158,6 +158,7 @@ namespace Bleakhold
         void LegacyDelta(Player* player, uint32_t itemId, bool collected);
         void SetWeeklyBonusDone(Player* player, bool done);
         bool HasAddon(Player* player);
+        bool HasClientCap(Player* player, uint32_t cap);
         void QueueSystem(Player* player, std::string text);
         void Announce(Ui::AnnounceTag tag, std::string_view text, uint64_t onlyGuid = 0);
         // BleakholdUi.Case.Enable (the case list is empty to clients while it is off).
@@ -166,6 +167,8 @@ namespace Bleakhold
         // A change sends a new HELLO to every ready client on the next world tick.
         void SetFeature(uint32_t feature, bool on);
         bool FeatureOn(uint32_t feature);
+        // A new HELLO to every ready client on the next world tick (a per-player feature bit changed: BleakholdUi.Cafe.GmOnly).
+        void RefreshHello();
         // Pushes the full DEF set to one player (answer to GET DEF,0) or to every ready player.
         void SendDefinitions(Player* player);
         void BroadcastDefinitions();

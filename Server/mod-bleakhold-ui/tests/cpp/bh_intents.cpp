@@ -54,10 +54,29 @@ TEST("replayed with the client's timing, the server's limits never drop legitima
     Endpoint ep;
     std::map<std::string, int> verdicts;
     bool first = true;
+    // the cafe's CTAKE, CSTEP and CREL (section 21): never duplicates, so the client's spacing gets every one through,
+    // a repeat of the same payload within the duplicate window too
+    Limits const limits;
+    std::map<IntentType, std::pair<std::string, uint64_t>> lastCafe;
+    std::map<IntentType, int> cafeRepeats;
     for (Captured const& c : g_msgs)
     {
+        Intent parsed;
+        bool const ok = ParseClientMessage("BHc\t" + c.body, parsed) == DropReason::None;
+        bool const cafeStep = ok && (parsed.type == IntentType::CafeTake || parsed.type == IntentType::CafeStep ||
+            parsed.type == IntentType::CafeRelease);
         Intent in;
         ReceiveResult r = ep.Receive("BHc\t" + c.body, c.ms, in);
+        if (cafeStep)
+        {
+            CHECK_MSG(r.verdict == Verdict::Accepted, c.body + " -> " + DropReasonName(r.reason));
+            std::string const payload = EncodeIntentPayload(parsed);
+            auto it = lastCafe.find(parsed.type);
+            if (it != lastCafe.end() && it->second.first == payload && c.ms - it->second.second < limits.duplicateWindowMs)
+                ++cafeRepeats[parsed.type];
+            lastCafe[parsed.type] = { payload, c.ms };
+        }
+        CHECK_MSG(r.reason != DropReason::Duplicate || !ok || IsDuplicateGuarded(parsed.type), c.body);
         if (first)
         {
             CHECK_MSG(r.verdict == Verdict::Accepted && in.type == IntentType::Hello, "the client starts with HELLO");
@@ -72,6 +91,8 @@ TEST("replayed with the client's timing, the server's limits never drop legitima
             !r.muteStarted, c.body + " -> " + DropReasonName(r.reason));
         CHECK_MSG(!(in.type == IntentType::Get && r.verdict != Verdict::Accepted), "GET dropped: " + c.body);
     }
+    for (IntentType t : { IntentType::CafeTake, IntentType::CafeStep, IntentType::CafeRelease })
+        CHECK_MSG(cafeRepeats[t] >= 1, std::string("the capture repeats ") + IntentOpName(t) + " inside the window");
     std::printf("  replay of %zu captured intents:", g_msgs.size());
     for (auto const& [k, n] : verdicts)
         std::printf(" %s=%d", k.c_str(), n);

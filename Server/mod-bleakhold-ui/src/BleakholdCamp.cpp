@@ -9,6 +9,7 @@
  */
 
 #include "BleakholdCamp.h"
+#include "BleakholdCafe.h"
 #include "BleakholdMgr.h"
 #include "BleakholdUi.h"
 
@@ -617,20 +618,30 @@ namespace Bleakhold
 
     uint32_t Camp::XpBonusPct(Player* player)
     {
-        if (!player || !_xpOn.load())
+        if (!player)
             return 0;
         // nothing at the level cap (no XP to add to), nor for a character that turned XP off
         if (player->GetLevel() >= sWorld->getIntConfig(CONFIG_MAX_PLAYER_LEVEL) || player->HasPlayerFlag(PLAYER_FLAGS_NO_XP_GAIN))
             return 0;
+        // the cafe's coffee (section 21) counts as a meal: warmth plus the better of Well Fed and coffee, capped by
+        // BleakholdUi.Camp.MaxXpPct even with camping off; never on a battleground or arena map or a battlefield zone
+        bool const campOn = _xpOn.load();
+        Cafe const& cafe = Cafe::Instance();
+        uint32_t const coffeePct = cafe.CoffeeXpPct();
+        bool const coffeeOn = coffeePct > 0 && cafe.RewardPlaceOk(player);
+        if (!campOn && !coffeeOn)
+            return 0;
         bool warm = false;
+        if (campOn)
         {
             std::lock_guard<std::mutex> guard(_timerLock);
             auto it = _timers.find(Low(player));
             warm = it != _timers.end() && it->second.warmthEnd > NowSec();
         }
-        uint32_t const food = _xpFood.load();
+        uint32_t const food = campOn ? _xpFood.load() : 0;
         bool const fed = food > 0 && IsWellFed(player);
-        return CampRules::BonusPct(warm, fed, _xpWarmth.load(), food, _xpMax.load());
+        bool const coffee = coffeeOn && cafe.HasCoffee(player);
+        return CampRules::BonusPctWithCoffee(warm, _xpWarmth.load(), fed, food, coffee, coffeePct, _xpMax.load());
     }
 
     // =============================================================================================
@@ -1417,6 +1428,9 @@ namespace Bleakhold
             s.warmthSec = CampRules::SecondsLeft(t.warmthEnd, now);
             s.fed = IsWellFed(player);
         }
+        // the warmth indicator shows "fed" for the cafe's coffee too (section 21)
+        if (!s.fed && Cafe::Instance().CoffeeXpPct() > 0 && Cafe::Instance().RewardPlaceOk(player))
+            s.fed = Cafe::Instance().HasCoffee(player);
         s.xpPct = XpBonusPct(player);
         if (CanGlide(player))
             s.glideSec = CampRules::SecondsLeft(t.glideReadyAt, now);

@@ -22,6 +22,17 @@ test("chat: the [War] tag of World PvP (section 10) is coloured and can be hidde
     H.eq(M.FilterChat("CHAT_MSG_SYSTEM", f, "[War] The Alliance wins Crystalsong Forest."), nil)
 end)
 
+test("chat: the [Caf\195\169] tag of the cafe (section 21) is coloured and can be hidden", function(M, ns)
+    local f = M.env.ChatFrame1
+    H.eq(M.FilterChat("CHAT_MSG_SYSTEM", f, "[Caf\195\169] The Morning Rush starts in 5 minutes"),
+        "|cffD8B98A[Caf\195\169]|r The Morning Rush starts in 5 minutes")
+    H.eq(ns.Chat.byKey.cafe.color, "D8B98A")   -- BleakholdUi.Announce.Color.Cafe
+    M.env.SlashCmdList.BLEAKHOLD("chat cafe off 1")
+    H.eq(M.FilterChat("CHAT_MSG_SYSTEM", f, "[Caf\195\169] The Grinding Tusk out-brewed The Lion's Roast"), nil)
+    M.env.SlashCmdList.BLEAKHOLD("chat cafe on 1")
+    H.ok(M.FilterChat("CHAT_MSG_SYSTEM", f, "[Caf\195\169] back"))
+end)
+
 test("chat: a tag can be hidden per chat window", function(M, ns)
     M.env.SlashCmdList.BLEAKHOLD("chat season off 2")
     H.eq(M.FilterChat("CHAT_MSG_SYSTEM", M.env.ChatFrame2, "[Season] hidden here"), nil)

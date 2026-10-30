@@ -121,7 +121,7 @@ namespace Bleakhold
         // map thread (every movement packet of every player; a single atomic load while nobody glides)
         void OnPlayerMove(Player* player, MovementInfo const& movementInfo, uint32_t opcode);
         static void OnEnterCombat(Player* player);    // map thread: camp rest ends at once (rest allows logout in combat)
-        uint32_t XpBonusPct(Player* player);          // map thread: warmth + Well Fed, capped; 0 at the level cap
+        uint32_t XpBonusPct(Player* player);          // map thread: warmth + (Well Fed or coffee), capped; 0 at the cap
         void OnGameObjectAdded(GameObject* go);       // map threads: notes Basic Campfires and Camp.ExtraFireEntries
 
         // ---- GM command (world thread) ----

@@ -7,8 +7,9 @@
 //   * the Endpoint (rate limits, handshake, duplicates) gets the input at a time taken from the input
 //     and may never accept more than its token bucket allows;
 //   * EscapeText/BuildFrames/PayloadWriter keep their invariants for the input used as server text;
-//   * the Bleakhold Royale encoders (section 17), BGANN (section 18), the World PvP encoders (section 19) and ARENA /
-//     LB A (section 20) keep their field and record counts with the input as every name.
+//   * the Bleakhold Royale encoders (section 17), BGANN (section 18), the World PvP encoders (section 19), ARENA /
+//     LB A (section 20) and the cafe's encoders (section 21) keep their field and record counts with the input as every
+//     name.
 //
 // Standalone (mutation driver):  bh_fuzz [iterations] [seed] [corpus files...]
 // libFuzzer:                     build with -DBH_LIBFUZZER -fsanitize=fuzzer (see run_tests.sh)
@@ -100,7 +101,7 @@ namespace
                 return false;
             static std::regex const plain(
                 "WEEK|ERA|TASKS|KEY|BOARD|QUEUE|COLL|LIDX|SEASON|FIRSTS|MPLUS|RIFT|CASES|CAMPST|ROYS|ROYM|WMST|WPZ|WPMAP|"
-                "WANTED|ARENA");
+                "WANTED|ARENA|CAFE|CAFST|CAFQ|CAFT|CAFO|CAFP|CAFBF");
             for (std::string const& r : recs)
             {
                 std::vector<std::string> f = Split(r, ',');
@@ -112,6 +113,8 @@ namespace
                     continue;
                 if (f.size() == 2 && f[0] == "CASE" && RefInt(f[1], 1, I32))
                     continue;
+                if (f.size() == 2 && f[0] == "CAFM" && RefInt(f[1], 1, 255))   // the cafe's menu (section 21)
+                    continue;
                 return false;
             }
             return true;
@@ -122,8 +125,9 @@ namespace
         if (!payload.empty())
             f = Split(payload, ',');
         auto n = [&](std::size_t k) { return f.size() == k; };
-        if (op == "HELLO")
-            return n(4) && RefInt(f[0], 1, 999) && RefToken(f[1], 16) && RefInt(f[2], 0, I32) && RefToken(f[3], 8);
+        if (op == "HELLO")   // the fifth field, the client's caps, is optional
+            return (n(4) || (n(5) && RefInt(f[4], 0, I32))) && RefInt(f[0], 1, 999) && RefToken(f[1], 16) &&
+                RefInt(f[2], 0, I32) && RefToken(f[3], 8);
         if (op == "TCLAIM" || op == "TREROLL" || op == "BCLAIM" || op == "OUTFIT")
             return n(1) && RefInt(f[0], 1, I32);
         if (op == "QJOIN")
@@ -153,12 +157,14 @@ namespace
             return n(1) && RefInt(f[0], 0, 2);
         if (op == "LBQ")
         {
-            if (!(n(5) && (f[0] == "K" || f[0] == "R" || f[0] == "E" || f[0] == "F" || f[0] == "A") && RefInt(f[1], 0, I32) &&
-                    RefInt(f[2], 0, I32) && RefInt(f[3], 0, I32) && RefInt(f[4], 1, 999)))
+            if (!(n(5) && (f[0] == "K" || f[0] == "R" || f[0] == "E" || f[0] == "F" || f[0] == "A" || f[0] == "C") &&
+                    RefInt(f[1], 0, I32) && RefInt(f[2], 0, I32) && RefInt(f[3], 0, I32) && RefInt(f[4], 1, 999)))
                 return false;
-            // board A: one bracket, 1, 2, 3 or 5 (section 20)
-            long long const bracket = std::stoll(f[2]);
-            return f[0] != "A" || bracket == 1 || bracket == 2 || bracket == 3 || bracket == 5;
+            // board A: one bracket, 1, 2, 3 or 5 (section 20); board C: one cafe, 1 or 2 (section 21)
+            long long const third = std::stoll(f[2]);
+            if (f[0] == "A")
+                return third == 1 || third == 2 || third == 3 || third == 5;
+            return f[0] != "C" || third == 1 || third == 2;
         }
         if (op == "PING")
             return n(1) && RefInt(f[0], 0, I32);
@@ -170,6 +176,26 @@ namespace
             return n(2) && RefInt(f[0], 1, I32) && RefInt(f[1], 0, I32);
         if (op == "CAMP")   // M, P; or O with a skill line id
             return (n(1) && (f[0] == "M" || f[0] == "P")) || (n(2) && f[0] == "O" && RefInt(f[1], 1, I32));
+        // the cafe (section 21)
+        if (op == "CSHIFT")
+            return n(2) && RefInt(f[0], 1, 255) && RefInt(f[1], 0, 1);
+        if (op == "CTAKE")
+            return n(1) && RefInt(f[0], 0, I32);
+        if (op == "CSTEP")
+            return n(3) && RefInt(f[0], 1, I32) && RefInt(f[1], 1, 12) && RefInt(f[2], 1, 63);
+        if (op == "CREL")
+            return n(3) && RefInt(f[0], 1, I32) && RefInt(f[1], 1, 12) && RefInt(f[2], 0, 60000);
+        if (op == "CORDER")
+        {
+            if (!(n(3) && RefInt(f[0], 1, 255) && RefInt(f[1], 1, 65535) && RefInt(f[2], 0, 50)))
+                return false;
+            long long const tip = std::stoll(f[2]);
+            return tip == 0 || tip == 10 || tip == 25 || tip == 50;
+        }
+        if (op == "CCANCEL")
+            return n(1) && RefInt(f[0], 1, I32);
+        if (op == "CSTAFF")
+            return n(1) && RefInt(f[0], 1, 65535);
         return false;
     }
 
@@ -534,6 +560,114 @@ namespace
             name(f[4], WarPlaceBytes, "WPEV objective");
     }
 
+    // The input as every name and line of the cafe's messages (section 21): it may never add or remove a field or a
+    // record, and each name decodes to the input cleaned and cut to the encoder's limit.
+    void CheckCafeEncoders(std::string const& text, unsigned char k)
+    {
+        auto name = [&](std::string const& field, std::size_t maxBytes, char const* what) {
+            std::optional<std::string> back = Unescape(field);
+            if (!back || *back != CleanText(text, maxBytes))
+                Die(std::string(what) + ": the name does not decode to the cleaned input", text);
+        };
+        auto split = [&](std::string const& payload, std::size_t records, char const* what) {
+            std::vector<std::string> r = Split(payload, ';');
+            if (r.size() != records)
+                Die(std::string(what) + ": " + std::to_string(r.size()) + " records instead of " + std::to_string(records),
+                    text);
+            return r;
+        };
+        auto fields = [&](std::string const& record, std::size_t want, char const* what) {
+            std::vector<std::string> f = Split(record, ',');
+            if (f.size() != want)
+                Die(std::string(what) + ": " + std::to_string(f.size()) + " fields instead of " + std::to_string(want),
+                    text);
+            return f;
+        };
+
+        // CAFQ: up to 11 orders from the input's first byte, the input as both names; the waiting player orders come
+        // first and the cut rows are counted
+        CafeQueue q;
+        q.cafeId = 1; q.count = 1u + k % 11u; q.cap = 8; q.baristas = 1;
+        for (uint32_t i = 0; i < q.count; ++i)
+        {
+            CafeQueueRow row;
+            row.orderId = i + 1; row.kind = i % 3 == 0 ? CafeOrderKind::Player : CafeOrderKind::Npc; row.recipeId = 101;
+            row.customer = text; row.patienceMs = 1; row.patienceMaxMs = 2; row.needLevel = 1;
+            row.state = i % 2 ? CafeQueueState::Taken : CafeQueueState::Waiting; row.takenBy = text;
+            q.rows.push_back(row);
+        }
+        SortCafeQueueRows(q.rows, text);
+        std::size_t const sent = std::min<std::size_t>(q.rows.size(), MaxCafeQueueRows);
+        std::vector<std::string> r = split(EncodeCafeQueue(q), sent + 1, "CAFQ");
+        std::vector<std::string> f = fields(r[0], q.rows.size() > MaxCafeQueueRows ? 5 : 4, "CAFQ header");
+        for (std::size_t i = 1; i < r.size(); ++i)
+        {
+            f = fields(r[i], 9, "CAFQ order");
+            name(f[3], MaxCafeNameBytes, "CAFQ customer");
+            if (f[6] == "T")
+                name(f[7], MaxCafeNameBytes, "CAFQ takenBy");
+            if (i > 1 && f[6] == "W" && Split(r[i - 1], ',')[6] != "W")
+                Die("CAFQ: a waiting order after a taken one", text);
+        }
+
+        // CAFT: three tickets of eight steps, the input as the customer and the order line
+        CafeTickets tk;
+        for (uint32_t i = 0; i < 4; ++i)
+        {
+            CafeTicket t;
+            t.ticketId = i + 1; t.orderId = 9; t.recipeId = 119; t.customer = text; t.orderLine = text; t.nextStep = 1;
+            for (uint32_t s = 0; s < 8; ++s)
+                t.steps.push_back({ 11 + s, static_cast<CafeGrade>(static_cast<char>(k)) });   // a grade from the input
+            tk.tickets.push_back(t);
+        }
+        r = split(EncodeCafeTickets(tk), MaxCafeTickets, "CAFT");
+        f = fields(r[2], 12, "CAFT ticket");
+        name(f[4], MaxCafeNameBytes, "CAFT customer");
+        name(f[9], MaxCafeLineBytes, "CAFT orderLine");
+        if (Split(f[10], ':').size() != 8)
+            Die("CAFT: the steps list lost or added a step", text);
+
+        // CAFRES, CAFO, CAFP L, CAFAT: the input as names and lines
+        CafeResult res;
+        res.ticketId = 1; res.recipeId = 101; res.customer = text; res.line = text; res.xpCapped = 1;
+        f = fields(split(EncodeCafeResult(res), 1, "CAFRES")[0], 12, "CAFRES");
+        name(f[9], MaxCafeNameBytes, "CAFRES customer");
+        name(f[10], MaxCafeLineBytes, "CAFRES line");
+        CafeOrderState o;
+        o.orderId = 1u + k; o.cafeId = 2; o.recipeId = 201; o.state = CafeOrderStateId::Making; o.barista = text;
+        o.priceCopper = 200; o.tipCopper = 1;
+        f = fields(split(EncodeCafeOrder(o), 1, "CAFO")[0], 11, "CAFO");
+        name(f[5], MaxCafeNameBytes, "CAFO barista");
+        CafeProfile p;
+        p.lastWinners = { { 1, 1, text, 5 } };
+        f = fields(split(EncodeCafeProfile(p), 2, "CAFP")[1], 5, "CAFP L");
+        name(f[3], MaxCafeNameBytes, "CAFP winnerName");
+        CafeAtBar bar;
+        bar.cafeId = 1;
+        for (uint32_t i = 0; i < 1u + k % 9u; ++i)
+            bar.rows.push_back({ text, 3, i, 3000, CafeStepKind::Timed, 1, 4 });
+        std::size_t const workers = std::min<std::size_t>(bar.rows.size(), MaxCafeAtRows);
+        r = split(EncodeCafeAtBar(bar), workers + 1, "CAFAT");
+        if (r[0] != "1," + std::to_string(workers))
+            Die("CAFAT: count is not the rows sent", text);
+        f = fields(r[1], 7, "CAFAT worker");
+        name(f[0], MaxCafeNameBytes, "CAFAT name");
+
+        // CAFUI only ever names a known window; CAFST letters from the input are letters or empty
+        std::vector<std::string> ui = Split(EncodeCafeOpenUi(text, 1), ',');
+        if (ui.size() != 2 || (!ui[0].empty() && !IsCafeUiTarget(ui[0])) || (ui[0].empty() && IsCafeUiTarget(text)))
+            Die("CAFUI: the window is not the one given, or not one of the four", text);
+        CafeState st;
+        st.onShift = true; st.cafeId = 1; st.station = static_cast<char>(k); st.nearStation = text.empty() ? 'V' : text[0];
+        st.nearDm = 1000u + k; st.flags = 0xFFFFFFFFu;
+        f = fields(split(EncodeCafeState(st), 2, "CAFST")[0], 18, "CAFST");
+        for (std::size_t i : { std::size_t(12), std::size_t(13) })
+            if (f[i].size() > 1 || (f[i].size() == 1 && (f[i][0] < 'A' || f[i][0] > 'Z')))
+                Die("CAFST: a station that is not a letter", text);
+        if (f[17] != "127" || (!f[14].empty() && std::stoul(f[14]) > MaxCafeNearDm))
+            Die("CAFST: flags or nearDm outside the document", text);
+    }
+
     void FuzzOne(uint8_t const* data, std::size_t size)
     {
         std::string const raw(reinterpret_cast<char const*>(data), size);
@@ -545,6 +679,7 @@ namespace
         CheckEncoders(raw, k);
         CheckRoyaleEncoders(raw, k);
         CheckWarEncoders(raw, k);
+        CheckCafeEncoders(raw, k);
     }
 
 #ifndef BH_LIBFUZZER
@@ -562,9 +697,13 @@ namespace
             "1 GET m 1/1 CAMPST", "1 CAMP n 1/1 M", "1 CAMP o 1/1 O,164", "1 CAMP p 1/1 P", "1 GLIDE q 1/1", "1 REPAIR r 1/1",
             "1 GET s 1/1 ROYS;ROYM", "1 QJOIN t 1/1 B,901,0,4,1", "1 RDROP u 1/1 -412,96", "1 RDEPLOY v 1/1",
             "1 RSPEC w 1/1 2", "1 RDROP x 1/1 -17067,17067", "2 HELLO 1 1/1 2,2.0,7,deDE",
+            "1 HELLO 1 1/1 1,1.0.0,0,enUS,1",
             "1 GET x 1/1 WMST;WPZ;WPMAP;WANTED", "1 WARMODE y 1/1 1", "1 WARMODE z 1/1 0",
             "1 GET 1a 1/1 ARENA", "1 QJOIN 1b 1/1 A,1,1,4,1", "1 QJOIN 1c 1/1 A,1,0,4,1", "1 LBQ 1d 1/1 A,0,3,0,1",
             "1 LBQ 1e 1/1 A,2,1,8,2",
+            "1 GET z 1/1 CAFE;CAFST;CAFQ;CAFT;CAFM,1;CAFO;CAFP;CAFBF", "1 CSHIFT 3b 1/1 1,1", "1 CTAKE 3c 1/1 0",
+            "1 CSTEP 3e 1/1 41,1,1", "1 CREL 3g 1/1 41,2,2380", "1 CORDER 3q 1/1 1,103,10", "1 CCANCEL 3r 1/1 1210",
+            "1 CSTAFF 3o 1/1 108", "1 LBQ 3s 1/1 C,0,1,0,1", "1 CSTEP 3f 1/1 2147483647,12,63", "1 CREL 3h 1/1 1,1,60000",
         };
     }
 
@@ -575,7 +714,8 @@ namespace
         static char const* const words[] = { "2147483647", "2147483648", "-1", "0", "00000000000000000001", "999", "1000", "SET", "DEF", "WEEK", "CASE", "CASES", "CAMPST", "CAMP", "GLIDE", "REPAIR", "O,", "M", "P", "O",
             "HELLO", "GET", "BHc\t", "BHs\t", "1/1", "1/2", "99/99", "zzzzzz", "%00", "%2C", "\xC3\xA9", ";;", ",,",
             "R,0", "D,0", "B,", "B,901", "RDROP", "RDEPLOY", "RSPEC", "ROYS", "ROYM", "-17067", "17068", "-0", "--1",
-            "WARMODE", "WMST", "WPZ", "WPMAP", "WANTED", "WPCAP", "WPEV" };
+            "WARMODE", "WMST", "WPZ", "WPMAP", "WANTED", "WPCAP", "WPEV", "CSHIFT", "CTAKE", "CSTEP", "CREL", "CORDER",
+            "CCANCEL", "CSTAFF", "CAFM,", "CAFE", "CAFAT", "C,", "60000", "60001", "65535", "65536", ",10", ",25", ",50", "12,63" };
         int const steps = 1 + static_cast<int>(rng() % 4);
         for (int i = 0; i < steps; ++i)
         {

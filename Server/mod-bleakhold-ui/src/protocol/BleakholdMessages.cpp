@@ -661,6 +661,259 @@ namespace Bleakhold
         return w.Take();
     }
 
+    // ---- the cafe (section 21) ----
+    namespace
+    {
+        int64_t OpenNum(CafeOpen o) { return static_cast<int64_t>(std::min<uint8_t>(static_cast<uint8_t>(o), 4)); }
+        int64_t RushNum(CafeRushState r) { return static_cast<int64_t>(std::min<uint8_t>(static_cast<uint8_t>(r), 2)); }
+        int64_t CafePermille(uint32_t v) { return static_cast<int64_t>(std::min<uint32_t>(v, 1000)); }
+
+        // a Rush's seconds go with it: empty without a Rush
+        PayloadWriter& RushSec(PayloadWriter& w, CafeRushState state, uint32_t sec)
+        {
+            return state == CafeRushState::None ? w.Empty() : w.Int(sec);
+        }
+
+        // a step grade, or an empty field for none
+        PayloadWriter& Grade(PayloadWriter& w, CafeGrade g)
+        {
+            return g == CafeGrade::None ? w.Empty() : w.Char(Letter(g));
+        }
+
+        // a CAFT step's grade: one of the four letters (a tuple part is written as it is, so nothing else may get in)
+        char StepGrade(CafeGrade g)
+        {
+            bool const done = g == CafeGrade::Perfect || g == CafeGrade::Good || g == CafeGrade::Off;
+            return Letter(done ? g : CafeGrade::None);
+        }
+
+        bool IsStationLetter(char c) { return c >= 'A' && c <= 'Z'; }
+
+        // The CAFQ groups of SortCafeQueueRows: waiting player orders, waiting NPC orders, the receiver's own taken
+        // orders, everyone else's.
+        int QueueGroup(CafeQueueRow const& r, std::string_view receiver)
+        {
+            if (r.state == CafeQueueState::Waiting)
+                return r.kind == CafeOrderKind::Player ? 0 : 1;
+            if (r.state == CafeQueueState::Taken && !receiver.empty() && r.takenBy == receiver)
+                return 2;
+            return 3;
+        }
+    }
+
+    bool IsCafeUiTarget(std::string_view what)
+    {
+        return what == CafeUiMenu || what == CafeUiShift || what == CafeUiBoard || what == CafeUiHelp;
+    }
+
+    void SortCafeQueueRows(std::vector<CafeQueueRow>& rows, std::string_view receiver)
+    {
+        std::stable_sort(rows.begin(), rows.end(), [&](CafeQueueRow const& a, CafeQueueRow const& b) {
+            return QueueGroup(a, receiver) < QueueGroup(b, receiver);
+        });
+    }
+
+    std::string EncodeCafeList(CafeList const& m)
+    {
+        PayloadWriter w;
+        std::size_t n = 0;
+        for (CafeListRow const& r : m.rows)
+        {
+            if (n++ >= MaxCafes)
+                break;
+            w.Record().Int(r.cafeId).Int(OpenNum(r.open)).Int(r.baristas).Int(r.queueLen).Int(RushNum(r.rushState));
+            RushSec(w, r.rushState, r.rushSec).Int(r.houseEtaSec);
+        }
+        return w.Take();
+    }
+
+    std::string EncodeCafeState(CafeState const& m)
+    {
+        PayloadWriter w;
+        w.Int(m.onShift ? m.cafeId : 0).Bool(m.onShift).Int(m.level).Int(m.xp).Int(m.levelXp).Opt(m.nextLevelXp);
+        if (m.onShift)
+        {
+            w.Int(m.shiftSec).Int(m.drinks).Int(m.perfects).Int(m.streak).Int(m.tipsCopper).Int(m.shiftXp)
+                .Char(m.station).Char(m.nearStation);
+            if (IsStationLetter(m.nearStation))
+                w.Int(std::min(m.nearDm, MaxCafeNearDm));
+            else
+                w.Empty();
+            w.Int(std::clamp<uint32_t>(m.maxTickets, 1, static_cast<uint32_t>(MaxCafeTickets)));
+        }
+        else
+        {
+            // off shift the shift fields are empty: shiftSec .. maxTickets
+            for (int i = 0; i < 10; ++i)
+                w.Empty();
+        }
+        uint32_t const flags = m.flags & 0x7Fu;   // the documented bits
+        w.Opt(m.tiredSec);
+        if (flags)
+            w.Int(flags);
+        else
+            w.Empty();
+        w.Opt(m.warnSec);
+        CafeDay const& d = m.day;
+        w.Record().Char('D').Int(d.dayXp).Int(d.dayXpFull).Int(d.dayXpHalf).Int(d.dayTipsCopper).Int(d.dayTipsCapCopper)
+            .Int(d.dayPoints).Int(d.dayPointsCap).Int(d.dayDrinks);
+        if (m.onShift && m.rush)
+        {
+            CafeRush const& r = *m.rush;
+            w.Record().Char('R').Int(RushNum(r.rushState));
+            RushSec(w, r.rushState, r.rushSec).Int(r.rushServed).Int(r.rushGoal).Int(r.myRushServed);
+        }
+        return w.Take();
+    }
+
+    std::string EncodeCafeQueue(CafeQueue const& m)
+    {
+        PayloadWriter w;
+        std::size_t const more = m.rows.size() > MaxCafeQueueRows ? m.rows.size() - MaxCafeQueueRows : 0;
+        w.Int(m.cafeId).Int(m.count).Int(m.cap).Int(m.baristas);
+        if (more)
+            w.Int(static_cast<int64_t>(more));
+        std::size_t n = 0;
+        for (CafeQueueRow const& r : m.rows)
+        {
+            if (n++ >= MaxCafeQueueRows)
+                break;
+            w.Record().Int(r.orderId).Char(Letter(r.kind)).Int(r.recipeId).Text(r.customer, MaxCafeNameBytes)
+                .Int(r.patienceMs).Int(r.patienceMaxMs).Char(Letter(r.state)).Text(r.takenBy, MaxCafeNameBytes)
+                .Int(r.needLevel).Opt(r.group);
+        }
+        return w.Take();
+    }
+
+    std::string EncodeCafeTickets(CafeTickets const& m)
+    {
+        PayloadWriter w;
+        if (m.tickets.empty())
+        {
+            w.Int(0);   // no tickets: the single record "0"
+            return w.Take();
+        }
+        std::size_t n = 0;
+        for (CafeTicket const& t : m.tickets)
+        {
+            if (n++ >= MaxCafeTickets)
+                break;
+            std::vector<std::vector<std::string>> steps;
+            for (CafeTicketStep const& st : t.steps)
+                steps.push_back({ PayloadWriter::TuplePart(static_cast<int64_t>(st.actionId)),
+                    std::string(1, StepGrade(st.grade)) });
+            w.Record().Int(t.ticketId).Int(t.orderId).Int(t.recipeId).Char(Letter(t.kind))
+                .Text(t.customer, MaxCafeNameBytes).Int(t.patienceMs).Int(t.patienceMaxMs).Int(t.nextStep)
+                .Bool(t.inHand).Text(t.orderLine, MaxCafeLineBytes).Tuples(steps, MaxCafeSteps).Int(t.tipHintCopper);
+        }
+        return w.Take();
+    }
+
+    std::string EncodeCafeStep(CafeStepEvent const& m)
+    {
+        PayloadWriter w;
+        w.Int(m.ticketId).Int(m.stepIndex).Int(m.actionId).Char(Letter(m.event)).Opt(m.durMs).Opt(m.goldLoMs)
+            .Opt(m.goldHiMs);
+        Grade(w, m.grade).Int(m.nextStep);
+        return w.Take();
+    }
+
+    std::string EncodeCafeResult(CafeResult const& m)
+    {
+        PayloadWriter w;
+        w.Int(m.ticketId).Int(m.recipeId).Char(Letter(m.quality)).Int(m.xp).Int(m.tipCopper).Int(m.points).Int(m.streak)
+            .Bool(m.levelUp).Int(m.level).Text(m.customer, MaxCafeNameBytes).Text(m.line, MaxCafeLineBytes)
+            .Int(m.xpCapped);
+        return w.Take();
+    }
+
+    std::string EncodeCafeMenu(CafeMenu const& m)
+    {
+        PayloadWriter w;
+        w.Int(m.cafeId).Int(OpenNum(m.open)).Int(m.baristas).Int(m.houseEtaSec).Int(m.pendingOrderId).Int(m.ordersToday)
+            .Int(m.ordersCap).Bool(m.canOrder).Text(m.reason, CafeCodeBytes);
+        std::size_t n = 0;
+        for (CafeMenuRow const& r : m.rows)
+        {
+            if (n++ >= MaxCafeRecipes)
+                break;
+            w.Record().Int(r.recipeId).Int(r.priceCopper).Bool(r.byBarista).Bool(r.effective);
+        }
+        return w.Take();
+    }
+
+    std::string EncodeCafeOrder(CafeOrderState const& m)
+    {
+        PayloadWriter w;
+        if (!m.orderId)
+        {
+            w.Int(0);   // no order: the single record "0"
+            return w.Take();
+        }
+        w.Int(m.orderId).Int(m.cafeId).Int(m.recipeId).Char(Letter(m.state)).Opt(m.position)
+            .Text(m.barista, MaxCafeNameBytes).Int(m.nextStep).Int(m.stepCount).Opt(m.leftSec).Int(m.priceCopper)
+            .Int(m.tipCopper);
+        return w.Take();
+    }
+
+    std::string EncodeCafeProfile(CafeProfile const& m)
+    {
+        PayloadWriter w;
+        w.Int(m.level).Int(m.xp).Int(m.levelXp).Opt(m.nextLevelXp).Int(m.drinks).Int(m.perfects).Int(m.memoryDrinks)
+            .Int(m.bestStreak).Opt(m.fastestMs).Int(m.weeklyWins).Int(m.rewards & 0x1Fu);
+        if (m.week)
+        {
+            CafeWeek const& k = *m.week;
+            w.Record().Char('W').Int(k.weekId).Int(k.cafeId).Opt(k.rank).Int(k.points).Int(k.drinks)
+                .Int(CafePermille(k.perfectPermille)).Int(k.days).Bool(k.eligible);
+        }
+        std::size_t n = 0;
+        for (CafeLastWinner const& l : m.lastWinners)
+        {
+            if (n++ >= MaxCafes)
+                break;
+            w.Record().Char('L').Int(l.weekId).Int(l.cafeId).Text(l.winnerName, MaxCafeNameBytes).Int(l.points);
+        }
+        return w.Take();
+    }
+
+    std::string EncodeCafeBuffs(CafeBuffs const& m)
+    {
+        PayloadWriter w;
+        w.Opt(m.coffeeSec).Opt(m.teaSec).Opt(m.shakeSec).Bool(m.shakeActive).Bool(m.coffeeCounts);
+        return w.Take();
+    }
+
+    std::string EncodeCafeSummary(CafeSummary const& m)
+    {
+        PayloadWriter w;
+        w.Int(m.cafeId).Char(Letter(m.reason)).Int(m.shiftSec).Int(m.drinks).Int(m.perfects).Int(m.tipsCopper).Int(m.xp)
+            .Int(m.xpLost).Int(m.points).Int(m.bestStreak).Bool(m.staffDrink);
+        return w.Take();
+    }
+
+    std::string EncodeCafeOpenUi(std::string_view what, uint8_t cafeId)
+    {
+        PayloadWriter w;
+        w.Text(IsCafeUiTarget(what) ? what : std::string_view(), 8).Int(cafeId);
+        return w.Take();
+    }
+
+    std::string EncodeCafeAtBar(CafeAtBar const& m)
+    {
+        PayloadWriter w;
+        w.Int(m.cafeId).Int(static_cast<int64_t>(std::min(m.rows.size(), MaxCafeAtRows)));
+        std::size_t n = 0;
+        for (CafeAtBarRow const& r : m.rows)
+        {
+            if (n++ >= MaxCafeAtRows)
+                break;
+            w.Record().Text(r.name, MaxCafeNameBytes).Int(r.actionId).Int(r.startedAgoMs).Int(r.durMs)
+                .Char(Letter(r.kind)).Int(r.stepIndex).Int(r.stepCount);
+        }
+        return w.Take();
+    }
+
     std::string EncodeFirsts(FirstsList const& m)
     {
         PayloadWriter w;
@@ -717,6 +970,25 @@ namespace Bleakhold
         });
         kind('Q', d.arenaRewards, [](PayloadWriter& w, ArenaRewardDef const& e) {
             w.Int(e.id).Int(e.seasonId).Int(e.bracket).Int(e.tierId).Char(e.kind).Int(e.entry).Int(e.count).Text(e.text, 60);
+        });
+        // the cafe (section 21)
+        kind('H', d.cafes, [](PayloadWriter& w, CafeDef const& e) {
+            w.Int(e.id).Text(e.name, MaxCafeNameBytes).Text(e.cityKey, 8).Char(e.team).Int(e.zoneId).Int(e.mapId)
+                .Text(e.ownerName, MaxCafeNameBytes).Text(e.tagline, MaxCafeLineBytes).Text(e.colorHex, 6);
+        });
+        kind('G', d.cafeActions, [](PayloadWriter& w, CafeActionDef const& e) {
+            w.Int(e.id).Char(e.station).Int(e.key).Char(e.kind).Int(e.durMs);
+            OptPermille(w, e.goldLoPermille);
+            OptPermille(w, e.goldHiPermille);
+            w.Text(e.name, MaxCafeNameBytes).Text(e.hordeName, MaxCafeNameBytes).Int(e.spellId);
+        });
+        kind('F', d.cafeRecipes, [](PayloadWriter& w, CafeRecipeDef const& e) {
+            w.Int(e.id).Int(e.cafeId).Int(e.archetype).Char(e.family).Int(e.tier).Int(e.unlockLevel)
+                .Int(e.price80Copper).Int(e.buffMin).Ints(e.steps, MaxCafeSteps).Text(e.name, MaxCafeNameBytes)
+                .Text(e.text, MaxCafeLineBytes);
+        });
+        kind('U', d.cafeLevels, [](PayloadWriter& w, CafeLevelDef const& e) {
+            w.Int(e.level).Int(e.totalXp).Text(e.text, MaxCafeLineBytes);
         });
         PayloadWriter z;
         z.Char('Z').Int(dataVer);

@@ -30,7 +30,7 @@ Comm.CHUNK_TIMEOUT = 5           -- seconds from the first part until an incompl
 Comm.BURST = 6                   -- send throttle: bucket size ...
 Comm.RATE = 4                    -- ... refilled at this many messages per second
 Comm.QUEUE_MAX = 24              -- intents waiting for the throttle
-Comm.DEDUP = 0.5                 -- identical intents within this many seconds are sent once
+Comm.DEDUP = 0.5                 -- identical intents within this many seconds are sent once (not Comm.NODEDUP's)
 Comm.GET_COOLDOWN = 3            -- a topic is requested again at most this often
 Comm.MAX_GET_RECORDS = 8
 Comm.HELLO_RETRY = { 10, 30, 90 }
@@ -234,12 +234,14 @@ Comm.TOPICS = {
     WEEK = 0, ERA = 0, TASKS = 0, KEY = 0, BOARD = 0, QUEUE = 0, MPLUS = 0, RIFT = 0, COLL = 0,
     SET = 2, LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1, CASES = 0, CASE = 1, CAMPST = 0, ROYS = 0, ROYM = 0,
     WMST = 0, WPZ = 0, WPMAP = 0, WANTED = 0, ARENA = 0,
+    CAFE = 0, CAFST = 0, CAFQ = 0, CAFT = 0, CAFM = 1, CAFO = 0, CAFP = 0, CAFBF = 0,   -- the café (section 21)
 }
 
 -- A schema lists its fields in order; `min` (default: all of them) is how many must be given, the rest may be
 -- left off the end, and `check(...)` is called with the given values when they must agree with each other.
 Comm.INTENTS = {
-    HELLO = { int(1, 99), token(16), int(0, INT32), token(8) },       -- proto, addonVer, dataVer, locale
+    -- proto, addonVer, dataVer, locale, caps (optional: Comm.CAPS bits, left off without any)
+    HELLO = { int(1, 99), token(16), int(0, INT32), token(8), int(0, INT32), min = 4 },
     GET = "records",                                                  -- topic[,args] per record
     TCLAIM = { int(1, INT32) },                                       -- task uid (from TASKS)
     TREROLL = { int(1, INT32) },                                      -- task uid
@@ -261,11 +263,14 @@ Comm.INTENTS = {
     BCLAIM = { int(1, INT32) },                                       -- bounty id (from BOARD)
     WEHANDIN = {},
     OUTFIT = { int(1, INT32) },                                       -- legacy set id (from SET)
-    -- board (A arena: the bracket 1, 2, 3 or 5 in the dungeon field, section 20), season, dungeon, class, page
-    LBQ = { enum("K", "R", "E", "F", "A"), int(0, INT32), int(0, INT32), int(0, INT32), int(1, 999),
-        check = function(board, _, bracket)
-            local b = tonumber(bracket)
-            return board ~= "A" or b == 1 or b == 2 or b == 3 or b == 5
+    -- board (A arena: the bracket 1, 2, 3 or 5 in the dungeon field, section 20; C the café's Best Barista: the café, 1
+    -- or 2, section 21), season (C: the week, 0 this week), dungeon, class, page
+    LBQ = { enum("K", "R", "E", "F", "A", "C"), int(0, INT32), int(0, INT32), int(0, INT32), int(1, 999),
+        check = function(board, _, third)
+            local b = tonumber(third)
+            if board == "A" then return b == 1 or b == 2 or b == 3 or b == 5 end
+            if board == "C" then return b == 1 or b == 2 end
+            return true
         end },
     PING = { int(0, INT32) },
     EMOJI = { int(0, 255) },                                          -- emoji id (the server checks its catalogue)
@@ -279,7 +284,29 @@ Comm.INTENTS = {
     RDEPLOY = {},                                                     -- Royale: open the parachute now
     RSPEC = { int(0, 2) },                                            -- Royale spectator: 0 killer, 1 next, 2 previous
     WARMODE = { int(0, 1) },                                          -- War Mode: 1 on, 0 off (section 19)
+    -- the café (section 21): CSHIFT café, 1 start / 0 end; CTAKE order (0: the best one I can make); CSTEP ticket,
+    -- step (from 1), action; CREL ticket, step, ms since its CAFEV S arrived; CORDER café, recipe, tip (0, 10, 25 or
+    -- 50 %); CCANCEL my order; CSTAFF recipe (today's Staff Drink)
+    CSHIFT = { int(1, 255), int(0, 1) },
+    CTAKE = { int(0, INT32) },
+    CSTEP = { int(1, INT32), int(1, 12), int(1, 63) },
+    CREL = { int(1, INT32), int(1, 12), int(0, 60000) },
+    CORDER = { int(1, 255), int(1, 65535), int(0, 50),
+        check = function(_, _, tip)
+            tip = tonumber(tip)
+            return tip == 0 or tip == 10 or tip == 25 or tip == 50
+        end },
+    CCANCEL = { int(1, INT32) },
+    CSTAFF = { int(1, 65535) },
 }
+
+-- Ops that skip the identical-intent check (Comm.DEDUP): "next" twice is two takes, and a press again after an ERR is
+-- the same payload and must arrive (the server does not count them as duplicates either, section 8).
+Comm.NODEDUP = { CTAKE = true, CSTEP = true, CREL = true }
+-- Ops sent at once, ahead of anything queued and without waiting for a token (a release must go out in the frame of the
+-- key press: its gold zone is a few hundred ms). They still take a token, down to -2, so what follows waits a little.
+Comm.PRIORITY = { CREL = true }
+Comm.PRIORITY_FLOOR = -2
 
 local function checkField(spec, v)
     if spec.kind == "int" then
@@ -486,7 +513,7 @@ function Comm.Send(op, ...)
     end
     local key = op .. " " .. payload
     local now = GetTime()
-    if recent[key] and now - recent[key] < Comm.DEDUP then
+    if not Comm.NODEDUP[op] and recent[key] and now - recent[key] < Comm.DEDUP then
         return true, "dedup"
     end
     outSeq = outSeq % (SEQ_MOD - 1) + 1
@@ -497,6 +524,14 @@ function Comm.Send(op, ...)
     if #body > Comm.MAX_OUT_BODY then
         Comm.stats.refused = Comm.stats.refused + 1
         return false, "too long"
+    end
+    if Comm.PRIORITY[op] and (Comm.canSend or Comm.demo) then
+        refill(now)
+        tokens = math.max(tokens - 1, Comm.PRIORITY_FLOOR)
+        recent[key] = now
+        Comm.lastSeq = Comm.Base36(outSeq)
+        rawSend(body)
+        return true
     end
     if #queue >= Comm.QUEUE_MAX then
         Comm.stats.refused = Comm.stats.refused + 1
@@ -735,11 +770,20 @@ end
 ------------------------------------------------------------------------------------------------------
 -- Handshake and clock
 ------------------------------------------------------------------------------------------------------
+-- HELLO caps: the optional parts of the addon that are loaded (the café's UI sets CAFE_UI in Comm.clientCaps when
+-- it lands, so the café staff's gossip opens its windows). Without any, HELLO leaves the field off.
+Comm.CAPS = { CAFE_UI = 1 }
+Comm.clientCaps = 0
+
 function Comm.SendHello()
     local locale = GetLocale and GetLocale() or "enUS"
     -- a cache of another DEF schema (State.lua DEF_SCHEMA) is fetched again: its dataVer is no hint
     local dataVer = (ns.db.defsSchema == ns.DEF_SCHEMA and ns.db.defsVer and tonumber(ns.db.defsVer)) or 0
-    Comm.Send("HELLO", ns.PROTO, ns.VERSION, dataVer, locale)
+    if (Comm.clientCaps or 0) > 0 then
+        Comm.Send("HELLO", ns.PROTO, ns.VERSION, dataVer, locale, Comm.clientCaps)
+    else
+        Comm.Send("HELLO", ns.PROTO, ns.VERSION, dataVer, locale)
+    end
 end
 
 local function scheduleHelloRetry()
@@ -816,7 +860,8 @@ end)
 Comm.FEATURE = { RIFT_SCORE = 1, SHARDS = 2, DBM_BY_SERVER = 4, SEASON = 8, LEADERBOARDS = 16, COLLECTIONS = 32,
     EMOJI = 64, DANCE = 128, CASES = 256, CAMP = 512, GLIDE = 1024, FIELD_REPAIR = 2048, ROYALE = 4096,
     BG_ANNOUNCER = 8192, WAR_MODE = 16384, WORLD_PVP = 32768,   -- 32768 counts only with 16384 (ns.WarMode)
-    ARENA = 65536 }                                             -- arena seasons and the 1v1 ladder (section 20)
+    ARENA = 65536,                                              -- arena seasons and the 1v1 ladder (section 20)
+    CAFE = 131072 }                                             -- the café, for this player (section 21)
 
 function Comm.HasFeature(bitValue)
     local f = Comm.server and Comm.server.features or 0

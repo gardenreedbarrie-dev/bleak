@@ -10,7 +10,9 @@
 // ROYE, and the battleground kill announcer's BGANN of section 18) from its own Endpoint, so the main frames stay what
 // the existing checks expect. A third, `wpvp`, holds a World PvP Front with War Mode (section 19: WMST WPZ WPCAP
 // WPMAP WANTED WPEV and ERR wm_*), with names full of separators and UTF-8. A fourth, `arena`, holds an arena season
-// (section 20: HELLO bit 65536, ARENA, LB / LBME board A, DEF V and Q, QUEUE kind A, ERR arena_closed).
+// (section 20: HELLO bit 65536, ARENA, LB / LBME board A, DEF V and Q, QUEUE kind A, ERR arena_closed). A fifth, `cafe`,
+// holds a cafe shift and order (section 21: HELLO bit 131072, DEF H G F U, every cafe op, LB / LBME board C, ERR
+// cafe_hands).
 //
 // SPDX-License-Identifier: GPL-2.0-or-later
 
@@ -37,6 +39,8 @@ namespace
     std::vector<std::string> g_wpvpFrames;
     Endpoint g_arenaEp;
     std::vector<std::string> g_arenaFrames;
+    Endpoint g_cafeEp;
+    std::vector<std::string> g_cafeFrames;
 
     void SendOn(Endpoint& ep, std::vector<std::string>& out, char const* op, std::string const& payload)
     {
@@ -575,6 +579,198 @@ namespace
         fin.finals = { f };
         send("ARENA", EncodeArena(fin));
     }
+
+    // The cafe (section 21): a barista's shift at The Grinding Tusk and a customer's order, every cafe op, from its own
+    // Endpoint. A long CAFQ (11 orders, 8 sent, names of 24 characters full of separators) and a CAFT of 3 tickets of 8
+    // steps make the small frame sizes cut them. The last message of each op is the one test_server_frames.lua checks.
+    void CafeSession()
+    {
+        Intent hello;
+        if (g_cafeEp.Receive("BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUS", 1000, hello).verdict != Verdict::Accepted)
+        {
+            std::fprintf(stderr, "bh_gen: cafe HELLO not accepted\n");
+            std::exit(1);
+        }
+        auto send = [](char const* op, std::string const& payload) { SendOn(g_cafeEp, g_cafeFrames, op, payload); };
+
+        HelloReply h;
+        h.proto = 1; h.minProto = 1; h.serverEpoch = 1793900000; h.dataVer = 88;
+        h.featureBits = FeatureLeaderboards | FeatureCafe; h.realmName = "Bleakhold";
+        send("HELLO", EncodeHello(h));
+
+        Definitions d;
+        CafeDef sw;
+        sw.id = 1; sw.name = "The Lion's Roast"; sw.cityKey = "sw"; sw.team = 'A'; sw.zoneId = 1519; sw.mapId = 0;
+        sw.ownerName = "Rosalind Thornbury"; sw.tagline = "Coffee \xC2\xB7 Tea \xC2\xB7 Shakes, by the Cathedral steps";
+        sw.colorHex = "3F6FB5";
+        CafeDef org;
+        org.id = 2; org.name = "The Grinding Tusk"; org.cityKey = "org"; org.team = 'H'; org.zoneId = 1637; org.mapId = 1;
+        org.ownerName = "Grukka Steamtusk"; org.tagline = "Strong brews; for: strong~backs | 100%"; org.colorHex = "B5402F";
+        d.cafes = { sw, org };
+        CafeActionDef grind;
+        grind.id = 1; grind.station = 'G'; grind.key = 1; grind.kind = 'T'; grind.durMs = 1500; grind.name = "Grind Beans";
+        grind.spellId = 100901;
+        CafeActionDef shot;
+        shot.id = 3; shot.station = 'E'; shot.key = 1; shot.kind = 'H'; shot.durMs = 3000; shot.goldLoPermille = 700u;
+        shot.goldHiPermille = 850u; shot.name = "Pull Shot"; shot.spellId = 100903;
+        CafeActionDef berry;
+        berry.id = 21; berry.station = 'S'; berry.key = 6; berry.kind = 'T'; berry.durMs = 800; berry.name = "Elwynn Berry";
+        berry.hordeName = "Cactus Apple"; berry.spellId = 100921;
+        d.cafeActions = { grind, shot, berry };
+        CafeRecipeDef scoop;
+        scoop.id = 219; scoop.cafeId = 2; scoop.archetype = 19; scoop.family = 'M'; scoop.tier = 5; scoop.unlockLevel = 10;
+        scoop.price80Copper = 18000; scoop.buffMin = 50; scoop.steps = { 11, 11, 11, 18, 20, 15, 23, 25 };
+        scoop.name = "Valley of Honor Triple Scoop"; scoop.text = "Earned in the Ring, eaten in triumph.";
+        CafeRecipeDef black;
+        black.id = 101; black.cafeId = 1; black.archetype = 1; black.family = 'C'; black.tier = 1; black.unlockLevel = 1;
+        black.price80Copper = 4000; black.buffMin = 30; black.steps = { 1, 3, 4, 25 }; black.name = "Cathedral Black";
+        black.text = "Dark as the crypts beneath the Cathedral and twice as bracing.";
+        d.cafeRecipes = { black, scoop };
+        d.cafeLevels = { { 1, 0, "Black coffee, latte, green tea and black tea." }, { 10, 5640, "Triple scoop; the title." } };
+        for (std::string const& p : EncodeDefinitions(d, 88))
+            send("DEF", p);
+
+        CafeList list;
+        list.rows = { { 1, CafeOpen::Paused, 2, 5, CafeRushState::Live, 640, 75 },
+            { 2, CafeOpen::Closed, 0, 0, CafeRushState::None, 0, 120 } };
+        send("CAFE", EncodeCafeList(list));
+
+        CafeDay day;
+        day.dayXp = 470; day.dayXpFull = 450; day.dayXpHalf = 450; day.dayTipsCopper = 51000; day.dayTipsCapCopper = 205000;
+        day.dayPoints = 400; day.dayPointsCap = 500; day.dayDrinks = 31;
+        CafeState off;
+        off.level = 9; off.xp = 5000; off.levelXp = 4320; off.nextLevelXp = 5640u; off.day = day;
+        off.flags = CafeFlagStaffDrink;
+        send("CAFST", EncodeCafeState(off));
+        CafeState on = off;
+        on.cafeId = 2; on.onShift = true; on.shiftSec = 1250; on.drinks = 12; on.perfects = 7; on.streak = 3;
+        on.tipsCopper = 9200; on.shiftXp = 230; on.station = 0; on.nearStation = 'G'; on.nearDm = 12; on.maxTickets = 3;
+        on.tiredSec = 120u; on.flags = CafeFlagTutorial | CafeFlagMemory | CafeFlagFacing | CafeFlagHidden;
+        on.warnSec = 4u;
+        CafeRush rush;
+        rush.rushState = CafeRushState::Live; rush.rushSec = 640; rush.rushServed = 31; rush.rushGoal = 60;
+        rush.myRushServed = 6;
+        on.rush = rush;
+        send("CAFST", EncodeCafeState(on));
+
+        // eleven orders, in queue order; the receiver (Morgra) is shown the waiting ones first
+        CafeQueue q;
+        q.cafeId = 2; q.count = 11; q.cap = 8; q.baristas = 2;
+        for (uint32_t i = 1; i <= 11; ++i)
+        {
+            CafeQueueRow r;
+            r.orderId = 1300 + i; r.recipeId = 200 + i;
+            r.kind = i % 4 == 0 ? CafeOrderKind::Player : (i % 4 == 1 ? CafeOrderKind::Group : CafeOrderKind::Npc);
+            r.customer = "Kor'kron;Guard,No:" + std::to_string(10 + i) + "~Org";   // 24 characters
+            r.patienceMs = 1000 * i; r.patienceMaxMs = 48000;
+            r.state = i % 3 == 0 ? CafeQueueState::Taken : (i == 11 ? CafeQueueState::House : CafeQueueState::Waiting);
+            if (r.state == CafeQueueState::Taken)
+                r.takenBy = i == 6 ? "Morgra" : "Br\xC3\xA9nna";
+            r.needLevel = i == 5 ? 7 : 0;
+            if (r.kind == CafeOrderKind::Group)
+                r.group = 3u;
+            q.rows.push_back(r);
+        }
+        SortCafeQueueRows(q.rows, "Morgra");
+        send("CAFQ", EncodeCafeQueue(q));
+
+        send("CAFT", EncodeCafeTickets(CafeTickets{}));   // no tickets yet: "0"
+        CafeTickets tk;
+        for (uint32_t i = 1; i <= 3; ++i)
+        {
+            CafeTicket t;
+            t.ticketId = 60 + i; t.orderId = 1300 + i; t.recipeId = 219; t.kind = i == 2 ? CafeOrderKind::Player : CafeOrderKind::Npc;
+            t.customer = i == 2 ? "Br\xC3\xA9nna" : "Kor'kron;Guard,No:" + std::to_string(10 + i) + "~Org";
+            t.patienceMs = 30000 + i; t.patienceMaxMs = 78000; t.nextStep = i == 1 ? 4 : 1; t.inHand = i == 1;
+            t.orderLine = i == 2 ? "" : "Three scoops, caramel; chocolate: and cream~now | please";
+            for (uint32_t s = 0; s < scoop.steps.size(); ++s)
+                t.steps.push_back({ scoop.steps[s], i == 1 && s < 3 ? (s == 1 ? CafeGrade::Off : CafeGrade::Perfect)
+                    : CafeGrade::None });
+            t.tipHintCopper = 1800 + i;
+            tk.tickets.push_back(t);
+        }
+        send("CAFT", EncodeCafeTickets(tk));
+
+        CafeStepEvent ev;
+        ev.ticketId = 61; ev.stepIndex = 4; ev.actionId = 18; ev.event = CafeStepEventKind::Started; ev.durMs = 800u;
+        ev.nextStep = 4;
+        send("CAFEV", EncodeCafeStep(ev));
+        ev.ticketId = 61; ev.stepIndex = 6; ev.actionId = 15; ev.event = CafeStepEventKind::Done; ev.durMs = 2500u;
+        ev.goldLoMs = 1500u; ev.goldHiMs = 2000u; ev.grade = CafeGrade::Good; ev.nextStep = 7;
+        send("CAFEV", EncodeCafeStep(ev));
+
+        CafeResult res;
+        res.ticketId = 61; res.recipeId = 219; res.quality = CafeQuality::Sloppy; res.xp = 21; res.tipCopper = 1080;
+        res.points = 18; res.streak = 0; res.levelUp = true; res.level = 10; res.customer = "Kor'kron;Guard,No:11~Org";
+        res.line = "Lok'tar! Caf\xC3\xA9 strong enough; for: a~grunt | 100%"; res.xpCapped = 9;
+        send("CAFRES", EncodeCafeResult(res));
+
+        CafeMenu menu;
+        menu.cafeId = 2; menu.open = CafeOpen::Open; menu.baristas = 2; menu.houseEtaSec = 75; menu.pendingOrderId = 1304;
+        menu.ordersToday = 3; menu.ordersCap = 12; menu.canOrder = false; menu.reason = CafeErr::Order.code;
+        for (uint32_t i = 1; i <= 19; ++i)
+            menu.rows.push_back({ 200 + i, 200 + 100 * i, i < 19, i != 3 });
+        send("CAFM", EncodeCafeMenu(menu));
+
+        send("CAFO", EncodeCafeOrder(CafeOrderState{}));   // no order: "0"
+        CafeOrderState o;
+        o.orderId = 1304; o.cafeId = 2; o.recipeId = 204; o.state = CafeOrderStateId::Making; o.barista = "Morgra";
+        o.nextStep = 2; o.stepCount = 6; o.priceCopper = 12000; o.tipCopper = 3000;
+        send("CAFO", EncodeCafeOrder(o));
+        o.state = CafeOrderStateId::Finishing; o.barista.clear(); o.leftSec = 41u;
+        send("CAFO", EncodeCafeOrder(o));
+
+        CafeProfile prof;
+        prof.level = 9; prof.xp = 5000; prof.levelXp = 4320; prof.nextLevelXp = 5640u; prof.drinks = 1210;
+        prof.perfects = 830; prof.memoryDrinks = 44; prof.bestStreak = 21; prof.fastestMs = 4870u; prof.weeklyWins = 2;
+        prof.rewards = CafeRewardApprentice | CafeRewardGolden;
+        CafeWeek week;
+        week.weekId = 2964; week.cafeId = 2; week.points = 310; week.drinks = 41; week.perfectPermille = 702; week.days = 2;
+        week.eligible = false;
+        prof.week = week;
+        prof.lastWinners = { { 2963, 1, "Br\xC3\xA9nna", 2480 }, { 2963, 2, "Morgra, the Swift", 1990 } };
+        send("CAFP", EncodeCafeProfile(prof));
+
+        CafeBuffs buffs;
+        buffs.teaSec = 2400u; buffs.shakeSec = 900u; buffs.shakeActive = true; buffs.coffeeCounts = false;
+        send("CAFBF", EncodeCafeBuffs(buffs));
+
+        CafeSummary sum;
+        sum.cafeId = 2; sum.reason = CafeShiftEnd::Mounted; sum.shiftSec = 1310; sum.drinks = 13; sum.perfects = 7;
+        sum.tipsCopper = 10280; sum.xp = 251; sum.xpLost = 9; sum.points = 248; sum.bestStreak = 3; sum.staffDrink = true;
+        send("CAFSUM", EncodeCafeSummary(sum));
+        send("CAFUI", EncodeCafeOpenUi(CafeUiBoard, 2));
+
+        CafeAtBar empty;
+        empty.cafeId = 2;
+        send("CAFAT", EncodeCafeAtBar(empty));
+        CafeAtBar bar;
+        bar.cafeId = 2;
+        for (uint32_t i = 1; i <= 6; ++i)
+            bar.rows.push_back({ i == 1 ? "Grukka Steamtusk" : "Worker;" + std::to_string(i), 2 + i, 100 * i, 3000,
+                i % 2 ? CafeStepKind::Timed : CafeStepKind::Tap, i, 8 });
+        send("CAFAT", EncodeCafeAtBar(bar));
+
+        Leaderboard lb;
+        lb.board = Board::Cafe; lb.seasonId = 2964u; lb.dungeonId = 2u; lb.classId = 0u; lb.page = 1; lb.pages = 2;
+        for (uint32_t i = 1; i <= 10; ++i)
+        {
+            LeaderboardRow row;
+            row.rank = i; row.dungeonId = 2u; row.value = int64_t(2500 - 100 * i); row.timeSec = int64_t(900 - 10 * i);
+            row.dateEpoch = 1793890000u + i; row.members = { { "Barista" + std::to_string(i), 1u + i % 9u } };
+            row.label = std::to_string(150 - i) + " drinks";
+            lb.rows.push_back(row);
+        }
+        send("LB", EncodeLeaderboard(lb));
+        LeaderboardMe me;
+        me.board = Board::Cafe; me.rank = 4u; me.topPercent = 12u; me.value = 2100; me.dungeonId = 2u; me.timeSec = 860;
+        me.barPermille = 875u; me.label = "146 drinks";
+        send("LBME", EncodeLeaderboardMe(me));
+
+        ErrorReply e;
+        e.op = IntentType::CafeStep; e.seq = 77; e.code = CafeErr::Hands.code; e.text = CafeErr::Hands.text;
+        send("ERR", EncodeError(e));
+    }
 }
 
 int main(int argc, char** argv)
@@ -796,6 +992,7 @@ int main(int argc, char** argv)
     RoyaleSession();
     WarSession();
     ArenaSession();
+    CafeSession();
 
     std::ofstream out(argv[2], std::ios::binary);
     out << "-- generated by Server/mod-bleakhold-ui/tests/cpp/bh_gen.cpp (maxBody " << g_maxBody << "). Do not edit.\n";
@@ -816,12 +1013,17 @@ int main(int argc, char** argv)
         << g_arenaEp.Stats().messagesOut << ",\n    frames = {\n";
     for (std::string const& f : g_arenaFrames)
         out << "      " << LuaString(f) << ",\n";
+    out << "    },\n  },\n  cafe = {\n    messages = " << g_cafeEp.Stats().messagesOut << ",\n    frames = {\n";
+    for (std::string const& f : g_cafeFrames)
+        out << "      " << LuaString(f) << ",\n";
     out << "    },\n  },\n}\n";
     std::printf("bh_gen: %zu frames for %llu messages (max body %zu), Royale %zu frames for %llu messages, World PvP %zu "
-        "frames for %llu messages, Arena %zu frames for %llu messages -> %s\n", g_frames.size(),
+        "frames for %llu messages, Arena %zu frames for %llu messages, Cafe %zu frames for %llu messages -> %s\n",
+        g_frames.size(),
         static_cast<unsigned long long>(g_ep.Stats().messagesOut), g_maxBody, g_royaleFrames.size(),
         static_cast<unsigned long long>(g_royaleEp.Stats().messagesOut), g_wpvpFrames.size(),
         static_cast<unsigned long long>(g_wpvpEp.Stats().messagesOut), g_arenaFrames.size(),
-        static_cast<unsigned long long>(g_arenaEp.Stats().messagesOut), argv[2]);
+        static_cast<unsigned long long>(g_arenaEp.Stats().messagesOut), g_cafeFrames.size(),
+        static_cast<unsigned long long>(g_cafeEp.Stats().messagesOut), argv[2]);
     return 0;
 }

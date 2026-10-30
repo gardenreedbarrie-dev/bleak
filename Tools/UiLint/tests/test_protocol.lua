@@ -377,6 +377,28 @@ test("nothing is sent before the player is in the world", function(M, ns)
     H.ok(H.lastIntent(M, "HELLO"), "HELLO after PLAYER_ENTERING_WORLD")
 end, { noWorld = true })
 
+test("HELLO names the addon's optional parts (caps) only when it has some", function(M, ns)
+    local C = ns.Comm
+    M.Advance(0.5)
+    local hello = H.lastIntent(M, "HELLO")
+    H.ok(hello, "HELLO on entering the world")
+    H.eq(#hello.fields, 4, "the café's UI is not built: no caps field, as an older server expects")
+    H.eq(C.clientCaps, 0)
+    H.eq(C.EncodeIntent("HELLO", 1, "1.0.0", 0, "enUS", C.CAPS.CAFE_UI), "1,1.0.0,0,enUS,1")
+    H.eq(C.EncodeIntent("HELLO", 1, "1.0.0", 0, "enUS", 1, 1), nil, "one caps field at most")
+    -- the café's UI sets its bit; the next HELLO (login or /reload) carries it
+    C.clientCaps = C.CAPS.CAFE_UI
+    M.Advance(6)
+    local before = H.countIntents(M, "HELLO")
+    C.SendHello()
+    M.Advance(0.5)
+    H.eq(H.countIntents(M, "HELLO"), before + 1)
+    hello = H.lastIntent(M, "HELLO")
+    H.eq(#hello.fields, 5)
+    H.eq(hello.fields[5], "1", "caps bit 1: the café's UI")
+    C.clientCaps = 0
+end)
+
 test("before the server answers HELLO: intents are refused, GETs wait for the answer", function(M, ns)
     local C = ns.Comm
     M.Advance(0.5)

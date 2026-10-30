@@ -46,6 +46,13 @@ namespace Bleakhold
         RoyaleDeploy,     // RDEPLOY
         RoyaleSpectate,   // RSPEC    dir
         WarMode,          // WARMODE  on (section 19)
+        CafeShift,        // CSHIFT   cafeId, on (section 21)
+        CafeTake,         // CTAKE    orderId
+        CafeStep,         // CSTEP    ticketId, stepIndex, actionId
+        CafeRelease,      // CREL     ticketId, stepIndex, clientMs
+        CafeOrder,        // CORDER   cafeId, recipeId, tipPct
+        CafeCancel,       // CCANCEL  orderId
+        CafeStaff,        // CSTAFF   recipeId
         Count
     };
 
@@ -57,6 +64,8 @@ namespace Bleakhold
         RoyaleState, RoyaleMap,                                    // ROYS, ROYM (section 17)
         WarModeState, WarZone, WarMap, Wanted,                     // WMST, WPZ, WPMAP, WANTED (section 19)
         Arena,                                                     // ARENA (section 20)
+        CafeList, CafeState, CafeQueue, CafeTickets, CafeMenu,     // CAFE, CAFST, CAFQ, CAFT, CAFM (section 21)
+        CafeOrderState, CafeProfile, CafeBuffs,                    // CAFO, CAFP, CAFBF
         Count
     };
     inline constexpr uint8_t RevisionedTopicCount = 9;
@@ -65,13 +74,26 @@ namespace Bleakhold
     // tier 0, size 1), the 1v1 arena queue (section 20: activityId 1, tier 0 skirmish or 1 rated, size 1).
     enum class QueueKind : char { Dungeon = 'D', Rift = 'R', Royale = 'B', Arena = 'A' };
     // LBQ board. A (section 20): seasonId is an arena season id (0 = the current one), dungeonId the bracket.
-    enum class Board : char { Keys = 'K', Rift = 'R', RaidEchoes = 'E', Firsts = 'F', Arena = 'A' };
+    // C (section 21): seasonId is a week id (0 = this week), dungeonId the cafe.
+    enum class Board : char { Keys = 'K', Rift = 'R', RaidEchoes = 'E', Firsts = 'F', Arena = 'A', Cafe = 'C' };
     // QJOIN A: the one activity (the 1v1 queue); LBQ A: the brackets (1v1, 2v2, 3v3, 5v5).
     inline constexpr uint32_t ArenaActivityId = 1;
     inline constexpr bool IsArenaBracket(uint32_t bracket)
     {
         return bracket == 1 || bracket == 2 || bracket == 3 || bracket == 5;
     }
+    // The cafes (section 21): 1 The Lion's Roast (Stormwind), 2 The Grinding Tusk (Orgrimmar). CSHIFT, CORDER and GET
+    // CAFM take any id 1..255 (the server checks it); LBQ C only these two.
+    inline constexpr bool IsCafeId(uint32_t cafeId) { return cafeId == 1 || cafeId == 2; }
+    // CSTEP and CREL: steps 1..MaxCafeStepIndex of a ticket, action ids 1..MaxCafeActionId (the server checks its
+    // catalogue); CREL's clientMs is at most MaxCafeReleaseMs. CORDER's tip is one of four percentages.
+    inline constexpr uint32_t MaxCafeStepIndex = 12;
+    inline constexpr uint32_t MaxCafeActionId = 63;
+    inline constexpr uint32_t MaxCafeReleaseMs = 60000;
+    inline constexpr bool IsCafeTipPct(uint32_t pct) { return pct == 0 || pct == 10 || pct == 25 || pct == 50; }
+    // HELLO caps: the optional parts of the client that are loaded. Bit 1 the cafe's UI (section 21: the staff's
+    // gossip opens its windows with CAFUI only for it). A client without optional parts sends no caps field.
+    enum ClientCap : uint32_t { ClientCapCafeUi = 1 };
     // CAMP act (section 16): make camp, place a camp object, pack up my camp.
     enum class CampAct : char { Make = 'M', Object = 'O', Pack = 'P' };
     // RSPEC dir (section 17): watch the killer (or the first player alive), the next one, the previous one.
@@ -86,7 +108,7 @@ namespace Bleakhold
     struct TopicRequest
     {
         Topic topic = Topic::Week;
-        uint32_t arg1 = 0;  // SET: legacy tier; DEF: 0; CASE: the case item id
+        uint32_t arg1 = 0;  // SET: legacy tier; DEF: 0; CASE: the case item id; CAFM: the cafe id
         uint32_t arg2 = 0;  // SET: class id
     };
 
@@ -101,6 +123,7 @@ namespace Bleakhold
         std::string addonVersion;      // [A-Za-z0-9_.-]{1,16}
         uint32_t dataVersion = 0;
         std::string locale;            // [A-Za-z0-9_.-]{1,8}
+        uint32_t caps = 0;             // ClientCap bits; the optional fifth field (0 when left off)
 
         // GET
         std::vector<TopicRequest> topics;
@@ -131,8 +154,8 @@ namespace Bleakhold
 
         // LBQ
         Board board = Board::Keys;
-        uint32_t seasonId = 0;         // A: an arena season id; 0 = the current season
-        uint32_t dungeonId = 0;        // 0 = all; A: the bracket, 1, 2, 3 or 5 (never 0)
+        uint32_t seasonId = 0;         // A: an arena season id; 0 = the current season; C: a week id, 0 = this week
+        uint32_t dungeonId = 0;        // 0 = all; A: the bracket, 1, 2, 3 or 5 (never 0); C: the cafe, 1 or 2
         uint32_t classId = 0;          // 0 = all; A: teams with a member of this class
         uint32_t page = 1;             // from 1
 
@@ -164,6 +187,20 @@ namespace Bleakhold
 
         // WARMODE: the state the player asks for (1 on, 0 off; section 19)
         bool warModeOn = false;
+
+        // The cafe (section 21). CSHIFT: cafeId, cafeOn; CTAKE: orderId (0 = the best order I can make); CSTEP:
+        // ticketId, stepIndex (the ticket's next step, from 1), actionId; CREL: ticketId, stepIndex, clientMs (what the
+        // client measured from CAFEV S to the press; the server clamps it); CORDER: cafeId, recipeId, tipPct (0, 10, 25
+        // or 50); CCANCEL: orderId; CSTAFF: recipeId
+        uint8_t cafeId = 0;            // 1..255 (the server checks it is a cafe)
+        bool cafeOn = false;           // CSHIFT: 1 start a shift, 0 end it
+        uint32_t orderId = 0;          // CTAKE 0..2147483647, CCANCEL 1..2147483647
+        uint32_t ticketId = 0;         // 1..2147483647
+        uint8_t stepIndex = 0;         // 1..MaxCafeStepIndex
+        uint8_t actionId = 0;          // 1..MaxCafeActionId
+        uint16_t recipeId = 0;         // 1..65535
+        uint8_t tipPct = 0;            // IsCafeTipPct
+        uint16_t clientMs = 0;         // 0..MaxCafeReleaseMs
     };
 
     // Why a message was not accepted.
@@ -196,6 +233,10 @@ namespace Bleakhold
     char const* DropReasonName(DropReason reason);      // short name for logs and stats
     bool IsRevisioned(Topic topic);
     bool IsActionIntent(IntentType type);                // everything but HELLO, GET, LBQ and PING
+    // Whether the Endpoint's duplicate guard holds for an action intent: false for RSPEC (next, next is two steps) and
+    // the cafe's CTAKE, CSTEP and CREL ("next" twice is two takes; a re-press after an ERR is the same payload and
+    // must arrive). Their rate limits still hold.
+    bool IsDuplicateGuarded(IntentType type);
 
     // Parses a whole client chat text ("BHc\t" + body). On success fills `out` and returns
     // DropReason::None. Never keeps references into `chatText`.

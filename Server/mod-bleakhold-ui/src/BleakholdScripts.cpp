@@ -5,15 +5,19 @@
  * Hooks: the self-whisper that carries client messages (section 2), the prefix guard on every other
  * addon channel, login/logout, configuration and the world tick; for camping (section 16) the XP bonus,
  * the end of camp rest when combat starts, the campfires that enter the world, the glide's movement and Walk on Air in
- * the spellbook (spell_bleakhold_walk_on_air).
+ * the spellbook (spell_bleakhold_walk_on_air); for the cafe (section 21) the shift hooks, the shake helper, tea
+ * reputation, cast cancels of step spells, the .gobject guard and the gossip of the owners and head baristas.
  */
 
+#include "BleakholdCafe.h"
 #include "BleakholdCamp.h"
 #include "BleakholdCodec.h"
 #include "BleakholdData.h"
 #include "BleakholdMgr.h"
 
+#include "Creature.h"
 #include "GameObject.h"
+#include "PassiveAI.h"
 #include "Player.h"
 #include "ScriptMgr.h"
 #include "SharedDefines.h"
@@ -132,6 +136,7 @@ namespace
             WORLDHOOK_ON_AFTER_CONFIG_LOAD,
             WORLDHOOK_ON_STARTUP,
             WORLDHOOK_ON_UPDATE,
+            WORLDHOOK_ON_SHUTDOWN,
         }) { }
 
         void OnAfterConfigLoad(bool /*reload*/) override
@@ -144,6 +149,7 @@ namespace
             Mgr::Instance().MarkWorldThread();
             Data::Instance().LoadAll();
             Camp::Instance().OnStartup();
+            Cafe::Instance().OnStartup();   // always (whatever Cafe.Enable says), so .bleakhold reload can enable it
             Config const& c = Mgr::Instance().Cfg();
             LOG_INFO("server.loading", ">> Bleakhold UI protocol {}: data version {}, feature bits {}, frames up to {} bytes",
                 c.enable ? "enabled" : "DISABLED (BleakholdUi.Enable = 0)", Mgr::Instance().DataVersion(), c.featureBits, c.maxFrameBody);
@@ -153,7 +159,162 @@ namespace
         {
             Mgr::Instance().Update(diff);
         }
+
+        // after the world loop stopped (Main.cpp): the barista rows still in memory are saved at once
+        void OnShutdown() override
+        {
+            Cafe::Instance().OnShutdown();
+        }
     };
+
+    // The cafe (section 21; BleakholdCafe.cpp). Registered whatever BleakholdUi.Cafe.Enable says, so the login cleanup
+    // of the shift and speed auras always runs. Login, logout, map change and delete are world thread; the others
+    // run on map threads and touch only the player and atomics (the cafe queues the rest for its tick).
+    class BleakholdCafePlayerScript : public PlayerScript
+    {
+    public:
+        BleakholdCafePlayerScript() : PlayerScript("BleakholdCafePlayerScript", {
+            PLAYERHOOK_ON_LOGIN,
+            PLAYERHOOK_ON_BEFORE_LOGOUT,
+            PLAYERHOOK_ON_LOGOUT,
+            PLAYERHOOK_ON_DELETE_FROM_DB,
+            PLAYERHOOK_ON_MAP_CHANGED,
+            PLAYERHOOK_ON_PLAYER_ENTER_COMBAT,
+            PLAYERHOOK_ON_PLAYER_PVP_FLAG_CHANGE,
+            PLAYERHOOK_ON_DUEL_REQUEST,
+            PLAYERHOOK_ON_DUEL_START,
+            PLAYERHOOK_ON_GIVE_REPUTATION,
+        }) { }
+
+        void OnPlayerLogin(Player* player) override
+        {
+            Cafe::Instance().OnLogin(player);
+        }
+
+        // before the character is saved (WorldSession::LogoutPlayer): the shift ends and its auras go here
+        void OnPlayerBeforeLogout(Player* player) override
+        {
+            Cafe::Instance().OnBeforeLogout(player);
+        }
+
+        void OnPlayerLogout(Player* player) override
+        {
+            Cafe::Instance().OnLogout(player);
+        }
+
+        void OnPlayerDeleteFromDB(CharacterDatabaseTransaction /*trans*/, uint32 guid) override
+        {
+            Cafe::Instance().OnDeleteCharacter(guid);
+        }
+
+        void OnPlayerMapChanged(Player* player) override
+        {
+            Cafe::Instance().OnMapChanged(player);
+        }
+
+        void OnPlayerEnterCombat(Player* player, Unit* /*enemy*/) override
+        {
+            Cafe::Instance().OnEnterCombatMapThread(player);
+        }
+
+        void OnPlayerPVPFlagChange(Player* player, bool state) override
+        {
+            Cafe::Instance().OnPvpFlagMapThread(player, state);
+        }
+
+        void OnPlayerDuelRequest(Player* target, Player* challenger) override
+        {
+            Cafe::Instance().OnDuelMapThread(target, challenger);
+        }
+
+        void OnPlayerDuelStart(Player* player1, Player* player2) override
+        {
+            Cafe::Instance().OnDuelMapThread(player1, player2);
+        }
+
+        // Tea (section 21, Cafe.Buff.TeaRepPct): kill and quest reputation only, never on a battleground or arena
+        // map or in a battlefield zone, never for Buff.TeaExcludeFactions. Map thread.
+        void OnPlayerGiveReputation(Player* player, int32 factionID, float& amount, ReputationSource repSource) override
+        {
+            if (amount <= 0.0f || repSource == REPUTATION_SOURCE_SPELL || factionID <= 0)
+                return;
+            Cafe const& cafe = Cafe::Instance();
+            uint32 const pct = cafe.TeaRepPct();
+            if (!pct || !cafe.RewardPlaceOk(player) || cafe.TeaExcludesFaction(uint32(factionID)) || !cafe.HasTea(player))
+                return;
+            amount *= 1.0f + float(pct) / 100.0f;
+        }
+    };
+
+    // A cancelled cast of a cafe step spell (the player moved, pressed Escape): the step's hold ends (map thread; the
+    // cafe checks its atomic set of step spells and queues the rest for its tick).
+    class BleakholdCafeSpellScript : public AllSpellScript
+    {
+    public:
+        BleakholdCafeSpellScript() : AllSpellScript("BleakholdCafeSpellScript", { ALLSPELLHOOK_ON_CAST_CANCEL }) { }
+
+        void OnSpellCastCancel(Spell* /*spell*/, Unit* caster, SpellInfo const* spellInfo, bool /*bySelf*/) override
+        {
+            if (caster && spellInfo && caster->IsPlayer())
+                Cafe::Instance().OnSpellCancelMapThread(caster->GetGUID().GetCounter(), spellInfo->Id);
+        }
+    };
+
+    // The .gobject move / turn guard on cafe pieces (section 3.12.1): GameObject::SaveToDB reports every save here;
+    // the cafe only notes the spawn ids of its own pieces (map or world thread).
+    class BleakholdCafeGoScript : public AllGameObjectScript
+    {
+    public:
+        BleakholdCafeGoScript() : AllGameObjectScript("BleakholdCafeGoScript") { }
+
+        void OnGameObjectSaveToDB(GameObject* go) override
+        {
+            Cafe::Instance().OnGoSavedToDbMapThread(go->GetSpawnId(), go->GetEntry());
+        }
+    };
+
+    // The .npc guard on cafe creatures: Creature::SaveToDB (.npc set level / model / movetype / phase) reports every save
+    // here; the cafe only notes its own entries (map or world thread) and removes the row on its tick.
+    class BleakholdCafeCreatureScript : public AllCreatureScript
+    {
+    public:
+        BleakholdCafeCreatureScript() : AllCreatureScript("BleakholdCafeCreatureScript") { }
+
+        void OnCreatureSaveToDB(Creature* creature) override
+        {
+            Cafe::Instance().OnCreatureSavedToDbMapThread(creature->GetSpawnId(), creature->GetEntry());
+        }
+    };
+
+    // The owners (npc_bh_cafe_owner) and the head baristas (npc_bh_cafe_staff): the gossip menu of section 3.14, and
+    // NullCreatureAI so they never act on their own (the cafe's crowd moves them). GossipHello may run on a map
+    // thread and builds the menu from the cafe's snapshot; GossipSelect runs on the world thread.
+    template <char const* Name>
+    class BleakholdCafeNpcScript : public CreatureScript
+    {
+    public:
+        BleakholdCafeNpcScript() : CreatureScript(Name) { }
+
+        bool OnGossipHello(Player* player, Creature* creature) override
+        {
+            Cafe::Instance().GossipHello(player, creature);
+            return true;
+        }
+
+        bool OnGossipSelect(Player* player, Creature* creature, uint32 sender, uint32 action) override
+        {
+            Cafe::Instance().GossipSelect(player, creature, sender, action);
+            return true;
+        }
+
+        CreatureAI* GetAI(Creature* creature) const override
+        {
+            return new NullCreatureAI(creature);
+        }
+    };
+
+    constexpr char CafeOwnerScriptName[] = "npc_bh_cafe_owner";
+    constexpr char CafeStaffScriptName[] = "npc_bh_cafe_staff";
 
     // The glide (section 16): every movement packet, after the core handled the fall (Player::HandleFall) and before it
     // moves the player there. Map threads; one atomic load while nobody glides.
@@ -219,4 +380,10 @@ void AddBleakholdScripts()
     new BleakholdCampFireScript();
     new BleakholdGlideScript();
     RegisterSpellScript(spell_bleakhold_walk_on_air);
+    new BleakholdCafePlayerScript();
+    new BleakholdCafeSpellScript();
+    new BleakholdCafeGoScript();
+    new BleakholdCafeCreatureScript();
+    new BleakholdCafeNpcScript<CafeOwnerScriptName>();
+    new BleakholdCafeNpcScript<CafeStaffScriptName>();
 }

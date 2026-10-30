@@ -1,0 +1,1 @@
+-- Bleakhold: the café's HUD panels: strip, ticket, queue, result, buffs, order (protocol section 21); not built yet.

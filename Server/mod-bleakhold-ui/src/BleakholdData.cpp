@@ -7,6 +7,8 @@
  */
 
 #include "BleakholdData.h"
+#include "BleakholdCafe.h"
+#include "BleakholdCafeRules.h"
 #include "BleakholdCamp.h"
 #include "BleakholdCases.h"
 #include "BleakholdCodec.h"
@@ -510,6 +512,9 @@ namespace Bleakhold
             d = _tableDefs;
             editors = _editors;
         }
+        // the cafe's DEF H G F U (section 21) only with BleakholdUi.Cafe.Enable = 1: the version stays the same while off
+        if (Cafe::Instance().DefinitionsOn())
+            CafeRules::FillDefinitions(d);
         for (auto const& e : editors)
             e(d);
         Config const cfg = Mgr::Instance().CfgCopy();
@@ -1492,5 +1497,19 @@ namespace Bleakhold
         m.SetDefaultHandler(IntentType::Camp, [](Player* p, Intent const& in) { Camp::Instance().HandleCamp(p, in); });
         m.SetDefaultHandler(IntentType::Glide, [](Player* p, Intent const& in) { Camp::Instance().HandleGlide(p, in); });
         m.SetDefaultHandler(IntentType::Repair, [](Player* p, Intent const& in) { Camp::Instance().HandleRepair(p, in); });
+
+        // the cafe (section 21): BleakholdCafe.cpp; Mgr refuses these with CafeErr::Off while FeatureFor is false
+        m.SetDefaultHandler(IntentType::CafeShift, [](Player* p, Intent const& in) { Cafe::Instance().HandleShift(p, in); });
+        m.SetDefaultHandler(IntentType::CafeTake, [](Player* p, Intent const& in) { Cafe::Instance().HandleTake(p, in); });
+        m.SetDefaultHandler(IntentType::CafeStep, [](Player* p, Intent const& in) { Cafe::Instance().HandleStep(p, in); });
+        m.SetDefaultHandler(IntentType::CafeRelease, [](Player* p, Intent const& in) { Cafe::Instance().HandleRelease(p, in); });
+        m.SetDefaultHandler(IntentType::CafeOrder, [](Player* p, Intent const& in) { Cafe::Instance().HandleOrder(p, in); });
+        m.SetDefaultHandler(IntentType::CafeCancel, [](Player* p, Intent const& in) { Cafe::Instance().HandleCancel(p, in); });
+        m.SetDefaultHandler(IntentType::CafeStaff, [](Player* p, Intent const& in) { Cafe::Instance().HandleStaff(p, in); });
+        for (Topic t : { Topic::CafeList, Topic::CafeState, Topic::CafeQueue, Topic::CafeTickets, Topic::CafeMenu,
+                 Topic::CafeOrderState, Topic::CafeProfile, Topic::CafeBuffs })
+            m.SetDefaultProvider(t, [](Player* p, TopicRequest const& req) { Cafe::Instance().Provide(p, req); });
+        m.SetBoardHandler(Board::Cafe, [](Player* p, Intent const& in) { Cafe::Instance().AnswerBoard(p, in); });
+        m.AddHelloObserver([](Player* p, Intent const&) { Cafe::Instance().OnHello(p); });
     }
 }

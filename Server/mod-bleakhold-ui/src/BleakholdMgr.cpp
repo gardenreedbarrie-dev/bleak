@@ -4,6 +4,7 @@
  */
 
 #include "BleakholdMgr.h"
+#include "BleakholdCafe.h"
 #include "BleakholdCamp.h"
 #include "BleakholdCodec.h"
 #include "BleakholdData.h"
@@ -33,9 +34,10 @@ namespace Bleakhold
     namespace
     {
         constexpr char const* TagNames[] = {
-            "Raid Legacy", "Server First", "Season", "Queue", "Record", "Case", "Royale", "War",
+            "Raid Legacy", "Server First", "Season", "Queue", "Record", "Case", "Royale", "War", "Caf\xC3\xA9",
         };
         constexpr std::size_t TagCount = sizeof(TagNames) / sizeof(TagNames[0]);
+        static_assert(static_cast<std::size_t>(Ui::AnnounceTag::Cafe) + 1 == TagCount, "one name per AnnounceTag");
         constexpr uint64_t RunMaxAgeMs = 6ull * 3600 * 1000;
         constexpr uint64_t SweepIntervalMs = 60000;
 
@@ -183,11 +185,17 @@ namespace Bleakhold
         l.royaleDeployIntervalMs =
             sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.RoyaleDeployIntervalMs", 1000);
         l.warModeIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.WarModeIntervalMs", 2000);
+        // the cafe (section 21)
+        l.cafeShiftIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.CafeShiftIntervalMs", 2000);
+        l.cafeTakeIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.CafeTakeIntervalMs", 500);
+        l.cafeStepIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.CafeStepIntervalMs", 200);
+        l.cafeReleaseIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.CafeReleaseIntervalMs", 100);
+        l.cafeOrderIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.CafeOrderIntervalMs", 2000);
 
         c.heartbeatMs = 1000 * std::max<uint32_t>(1, sConfigMgr->GetOption<uint32_t>("BleakholdUi.KeyRun.HeartbeatSec", 15));
         c.colorTagsWithoutAddon = sConfigMgr->GetOption<bool>("BleakholdUi.Announce.ColorTagsWithoutAddon", true);
         char const* const colorKeys[] = { "RaidLegacy", "ServerFirst", "Season", "Queue", "Record", "Case", "Royale",
-            "War" };
+            "War", "Cafe" };
         static_assert(sizeof(colorKeys) / sizeof(colorKeys[0]) == TagCount, "one colour per tag");
         static_assert(std::tuple_size_v<decltype(c.tagColors)> == TagCount, "one default colour per tag");
         for (std::size_t i = 0; i < c.tagColors.size(); ++i)
@@ -214,6 +222,7 @@ namespace Bleakhold
                 slot.ep.SetLimits(_cfg.limits);
         }
         Camp::Instance().LoadConfig();   // never under the Mgr lock (lock order: Camp, then Mgr)
+        Cafe::Instance().LoadConfig();   // the same (lock order: Cafe, then Mgr)
     }
 
     Config Mgr::CfgCopy()
@@ -389,8 +398,12 @@ namespace Bleakhold
             }
             case IntentType::Get:
             {
+                // a GET of a cafe topic is answered with nothing while the cafe's bit is off for the player (section 21)
+                bool const cafe = Cafe::Instance().FeatureFor(player);
                 for (TopicRequest const& req : intent.topics)
                 {
+                    if (!cafe && Cafe::IsCafeTopic(req.topic))
+                        continue;
                     Ui::TopicProvider provider;
                     {
                         std::lock_guard<std::recursive_mutex> guard(_lock);
@@ -478,6 +491,14 @@ namespace Bleakhold
             return;
         }
 
+        // The cafe (section 21) is decided per player (BleakholdUi.Cafe.GmOnly): while its bit is off for this player every
+        // cafe intent gets ERR cafe_off, whoever handles it.
+        if (Cafe::IsCafeIntent(intent.type) && !Cafe::Instance().FeatureFor(player))
+        {
+            Refuse(player, intent, CafeErr::Off.code, CafeErr::Off.text);
+            return;
+        }
+
         // The 1v1 arena queue (section 20) is open only while its system has turned feature bit 65536 on.
         if (intent.type == IntentType::QueueJoin && intent.queueKind == QueueKind::Arena && !FeatureOn(FeatureArena))
         {
@@ -518,6 +539,10 @@ namespace Bleakhold
         h.utcOffsetMin = _cfg.utcOffsetAuto ? LocalUtcOffsetMinutes() : _cfg.utcOffsetMin;
         h.dataVer = DataVersion();
         h.featureBits = _cfg.featureBits | (cases ? static_cast<uint32_t>(FeatureCases) : 0u) | _runtimeFeatures.load();
+        // the cafe's bit is the player's own (GmOnly: game masters only), whatever SetFeature says
+        h.featureBits &= ~static_cast<uint32_t>(FeatureCafe);
+        if (Cafe::Instance().FeatureFor(player))
+            h.featureBits |= FeatureCafe;
         if (season)
             h.seasonId = season;
         if (resets.first)
@@ -536,6 +561,11 @@ namespace Bleakhold
         if (before == after)
             return;
         // clients learn feature bits from HELLO: tell the ones already connected (world thread)
+        After(0, [this]() { ForEachReadyPlayer([this](Player* p) { SendHello(p); }); });
+    }
+
+    void Mgr::RefreshHello()
+    {
         After(0, [this]() { ForEachReadyPlayer([this](Player* p) { SendHello(p); }); });
     }
 
@@ -782,6 +812,15 @@ namespace Bleakhold
         return s && s->ep.Ready();
     }
 
+    bool Mgr::HasClientCap(Player* player, uint32_t cap)
+    {
+        if (!player)
+            return false;
+        std::lock_guard<std::recursive_mutex> guard(_lock);
+        PlayerSlot* s = SlotFor(player, false);
+        return s && s->ep.Ready() && (s->ep.Hello().caps & cap) == cap;
+    }
+
     void Mgr::QueueSystem(Player* player, std::string text)
     {
         if (!player)
@@ -1007,6 +1046,7 @@ namespace Bleakhold
 
         Data::Instance().Update(now);
         Camp::Instance().Update(now);
+        Cafe::Instance().Update(now);
         FlushAll();
     }
 

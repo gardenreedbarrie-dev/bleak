@@ -6,7 +6,7 @@
  *   .bleakhold status                       protocol counters, data version, loaded rows
  *   .bleakhold reload                       re-read mod_bleakhold_ui.conf and the world tables (admin)
  *   .bleakhold debug on|off                 log every accepted intent and every drop reason (admin)
- *   .bleakhold announce <tag> <text>        tag: legacy, first, season, queue, record (admin)
+ *   .bleakhold announce <tag> <text>        tag: legacy, first, season, queue, record, cafe (admin)
  *   .bleakhold player                       counters of the selected player (or yourself)
  *   .bleakhold camp [show]                  camping state of the selected player (or yourself): fire, objects, timers
  *   .bleakhold camp reset                   clears their make-camp and glide cooldowns
@@ -14,8 +14,25 @@
  *   .bleakhold test <what>                  push sample data to the selected player (or yourself):
  *        all week era tasks taskdone key board queue run rift collections season leaderboard firsts toast announce defs camp
  * The test data is only shown in that player's own UI (and remembered until they log out).
+ *
+ * The cafe (section 21; <city> is sw or org; [slot] left out means the piece nearest to you):
+ *   .cafe build <city> [force]              builds the whole cafe from your position and facing (admin)
+ *   .cafe list [city]                       slots, roles, entries, offsets and world positions
+ *   .cafe show|hide <city>                  marker objects on every marker and work spot for 120 s
+ *   .cafe near <city>                       the three slots nearest to you
+ *   .cafe here <city> [slot]                moves a piece to your position and facing (admin)
+ *   .cafe nudge <city> [slot] <fwd> <left> <up> [turnDeg]   offsets in the cafe frame (admin)
+ *   .cafe turn <city> [slot] <deg> | undo <city> | snap <city> [slot]                        (admin)
+ *   .cafe rotate <city> <deg> | shift <city> <fwd> <left> <up>   moves the whole cafe (admin)
+ *   .cafe add <city> <role> [entry] | remove <city> <slot>   chair table decor kegtable parasol path (admin)
+ *   .cafe enable <city> 0|1 | reload | status | flags [days]
+ *   .cafe test customer <city> [persona] | rush <city> [minutes] | weekly [dry]               (admin)
+ *   .cafe barista <name>|"<first last>" level|xp|reset [n]                                   (admin)
+ * A whole number right after <city> is a slot: ".cafe nudge sw 3 0.5 0 0" nudges slot 3, ".cafe nudge sw 0.5 0 0" the
+ * nearest piece.
  */
 
+#include "BleakholdCafe.h"
 #include "BleakholdCamp.h"
 #include "BleakholdData.h"
 #include "BleakholdMgr.h"
@@ -26,6 +43,7 @@
 #include "Config.h"
 #include "GameTime.h"
 #include "ObjectAccessor.h"
+#include "ObjectMgr.h"
 #include "Player.h"
 #include "ScriptMgr.h"
 
@@ -267,9 +285,39 @@ public:
             { "camp",     campTable },
             { "test",     HandleTest,     SEC_GAMEMASTER,    Console::No },
         };
+        static ChatCommandTable cafeTestTable =
+        {
+            { "customer", HandleCafeTestCustomer, SEC_ADMINISTRATOR, Console::No },
+            { "rush",     HandleCafeTestRush,     SEC_ADMINISTRATOR, Console::Yes },
+            { "weekly",   HandleCafeTestWeekly,   SEC_ADMINISTRATOR, Console::Yes },
+        };
+        static ChatCommandTable cafeTable =
+        {
+            { "build",   HandleCafeBuild,   SEC_ADMINISTRATOR, Console::No },
+            { "list",    HandleCafeList,    SEC_GAMEMASTER,    Console::Yes },
+            { "show",    HandleCafeShow,    SEC_GAMEMASTER,    Console::No },
+            { "hide",    HandleCafeHide,    SEC_GAMEMASTER,    Console::No },
+            { "near",    HandleCafeNear,    SEC_GAMEMASTER,    Console::No },
+            { "here",    HandleCafeHere,    SEC_ADMINISTRATOR, Console::No },
+            { "nudge",   HandleCafeNudge,   SEC_ADMINISTRATOR, Console::No },
+            { "turn",    HandleCafeTurn,    SEC_ADMINISTRATOR, Console::No },
+            { "undo",    HandleCafeUndo,    SEC_ADMINISTRATOR, Console::No },
+            { "rotate",  HandleCafeRotate,  SEC_ADMINISTRATOR, Console::No },
+            { "shift",   HandleCafeShift,   SEC_ADMINISTRATOR, Console::No },
+            { "snap",    HandleCafeSnap,    SEC_ADMINISTRATOR, Console::No },
+            { "add",     HandleCafeAdd,     SEC_ADMINISTRATOR, Console::No },
+            { "remove",  HandleCafeRemove,  SEC_ADMINISTRATOR, Console::No },
+            { "enable",  HandleCafeEnable,  SEC_ADMINISTRATOR, Console::Yes },
+            { "reload",  HandleCafeReload,  SEC_ADMINISTRATOR, Console::Yes },
+            { "status",  HandleCafeStatus,  SEC_GAMEMASTER,    Console::Yes },
+            { "flags",   HandleCafeFlags,   SEC_GAMEMASTER,    Console::Yes },
+            { "test",    cafeTestTable },
+            { "barista", HandleCafeBarista, SEC_ADMINISTRATOR, Console::Yes },
+        };
         static ChatCommandTable commandTable =
         {
             { "bleakhold", bleakholdTable },
+            { "cafe",      cafeTable },
         };
         return commandTable;
     }
@@ -341,14 +389,16 @@ public:
             t = Ui::AnnounceTag::Queue;
         else if (tag == "record")
             t = Ui::AnnounceTag::Record;
+        else if (tag == "cafe")
+            t = Ui::AnnounceTag::Cafe;
         else
         {
-            handler->SendSysMessage("Usage: .bleakhold announce legacy|first|season|queue|record <text>");
+            handler->SendSysMessage("Usage: .bleakhold announce legacy|first|season|queue|record|cafe <text>");
             return true;
         }
         if (text.empty())
         {
-            handler->SendSysMessage("Usage: .bleakhold announce legacy|first|season|queue|record <text>");
+            handler->SendSysMessage("Usage: .bleakhold announce legacy|first|season|queue|record|cafe <text>");
             return true;
         }
         Ui::Announce(t, text);
@@ -460,6 +510,198 @@ public:
             return true;
         }
         handler->PSendSysMessage("Bleakhold: sent test data ({}) to {}.", what, p->GetName());
+        return true;
+    }
+
+    // ---- the cafe (section 21; Cafe::Cmd* in BleakholdCafeSite.cpp, world thread) ----
+    static Cafe::Reply ReplyTo(ChatHandler* handler)
+    {
+        return [handler](std::string const& line) { handler->SendSysMessage(line); };
+    }
+
+    // sw 1, org 2; anything else is answered here and gives 0
+    static uint8_t CityOf(ChatHandler* handler, std::string_view city)
+    {
+        uint8_t const id = Cafe::CafeIdOf(city);
+        if (!id)
+            handler->PSendSysMessage("Cafe: \"{}\" is no cafe city; use sw (Stormwind) or org (Orgrimmar).", city);
+        return id;
+    }
+
+    static bool HandleCafeBuild(ChatHandler* handler, std::string_view city, Optional<std::string_view> force)
+    {
+        if (force && *force != "force")
+        {
+            handler->SendSysMessage("Usage: .cafe build sw|org [force]");
+            return true;
+        }
+        if (uint8_t const id = CityOf(handler, city))
+            Cafe::Instance().CmdBuild(handler->GetPlayer(), id, force.has_value(), ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeList(ChatHandler* handler, Optional<std::string_view> city)
+    {
+        uint8_t id = 0;
+        if (city && !(id = CityOf(handler, *city)))
+            return true;
+        Cafe::Instance().CmdList(id, ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeShow(ChatHandler* handler, std::string_view city)
+    {
+        if (uint8_t const id = CityOf(handler, city))
+            Cafe::Instance().CmdShow(handler->GetPlayer(), id, true, ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeHide(ChatHandler* handler, std::string_view city)
+    {
+        if (uint8_t const id = CityOf(handler, city))
+            Cafe::Instance().CmdShow(handler->GetPlayer(), id, false, ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeNear(ChatHandler* handler, std::string_view city)
+    {
+        if (uint8_t const id = CityOf(handler, city))
+            Cafe::Instance().CmdNear(handler->GetPlayer(), id, ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeHere(ChatHandler* handler, std::string_view city, Optional<uint16> slot)
+    {
+        if (uint8_t const id = CityOf(handler, city))
+            Cafe::Instance().CmdHere(handler->GetPlayer(), id, slot, ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeNudge(ChatHandler* handler, std::string_view city, Optional<uint16> slot, float fwd, float left,
+        float up, Optional<float> turnDeg)
+    {
+        if (uint8_t const id = CityOf(handler, city))
+            Cafe::Instance().CmdNudge(handler->GetPlayer(), id, slot, fwd, left, up, turnDeg.value_or(0.0f),
+                ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeTurn(ChatHandler* handler, std::string_view city, Optional<uint16> slot, float deg)
+    {
+        if (uint8_t const id = CityOf(handler, city))
+            Cafe::Instance().CmdTurn(handler->GetPlayer(), id, slot, deg, ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeUndo(ChatHandler* handler, std::string_view city)
+    {
+        if (uint8_t const id = CityOf(handler, city))
+            Cafe::Instance().CmdUndo(handler->GetPlayer(), id, ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeRotate(ChatHandler* handler, std::string_view city, float deg)
+    {
+        if (uint8_t const id = CityOf(handler, city))
+            Cafe::Instance().CmdRotate(handler->GetPlayer(), id, deg, ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeShift(ChatHandler* handler, std::string_view city, float fwd, float left, float up)
+    {
+        if (uint8_t const id = CityOf(handler, city))
+            Cafe::Instance().CmdShift(handler->GetPlayer(), id, fwd, left, up, ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeSnap(ChatHandler* handler, std::string_view city, Optional<uint16> slot)
+    {
+        if (uint8_t const id = CityOf(handler, city))
+            Cafe::Instance().CmdSnap(handler->GetPlayer(), id, slot, ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeAdd(ChatHandler* handler, std::string_view city, std::string_view role, Optional<uint32> entry)
+    {
+        if (uint8_t const id = CityOf(handler, city))
+            Cafe::Instance().CmdAdd(handler->GetPlayer(), id, role, entry.value_or(0), ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeRemove(ChatHandler* handler, std::string_view city, uint16 slot)
+    {
+        if (uint8_t const id = CityOf(handler, city))
+            Cafe::Instance().CmdRemove(handler->GetPlayer(), id, slot, ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeEnable(ChatHandler* handler, std::string_view city, uint32 on)
+    {
+        if (on > 1)
+        {
+            handler->SendSysMessage("Usage: .cafe enable sw|org 0|1");
+            return true;
+        }
+        if (uint8_t const id = CityOf(handler, city))
+            Cafe::Instance().CmdEnable(handler->GetPlayer(), id, on == 1, ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeReload(ChatHandler* handler)
+    {
+        Cafe::Instance().CmdReload(handler->GetPlayer(), ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeStatus(ChatHandler* handler)
+    {
+        Cafe::Instance().CmdStatus(ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeFlags(ChatHandler* handler, Optional<uint32> days)
+    {
+        Cafe::Instance().CmdFlags(days.value_or(7), ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeTestCustomer(ChatHandler* handler, std::string_view city, Optional<uint32> persona)
+    {
+        if (uint8_t const id = CityOf(handler, city))
+            Cafe::Instance().CmdTestCustomer(handler->GetPlayer(), id, persona.value_or(0), ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeTestRush(ChatHandler* handler, std::string_view city, Optional<uint32> minutes)
+    {
+        if (uint8_t const id = CityOf(handler, city))
+            Cafe::Instance().CmdTestRush(handler->GetPlayer(), id, minutes.value_or(0), ReplyTo(handler));
+        return true;
+    }
+
+    static bool HandleCafeTestWeekly(ChatHandler* handler, Optional<std::string_view> dry)
+    {
+        if (dry && *dry != "dry")
+        {
+            handler->SendSysMessage("Usage: .cafe test weekly [dry]");
+            return true;
+        }
+        Cafe::Instance().CmdTestWeekly(handler->GetPlayer(), dry.has_value(), ReplyTo(handler));
+        return true;
+    }
+
+    // QuotedString: a two-part name (mod-two-names) is one argument in quotes, .cafe barista "Arthas Menethil" level 5;
+    // a one-word name needs none (QuotedString::TryConsume takes an unquoted token too).
+    static bool HandleCafeBarista(ChatHandler* handler, QuotedString quoted, std::string_view what, Optional<uint32> n)
+    {
+        std::string name = quoted;
+        if (!normalizePlayerName(name))
+        {
+            handler->SendSysMessage("Usage: .cafe barista <name> level <1-10> | xp <n> | reset (two names in quotes: "
+                "\"First Last\")");
+            return true;
+        }
+        Cafe::Instance().CmdBarista(handler->GetPlayer(), name, what, n.value_or(0), ReplyTo(handler));
         return true;
     }
 };

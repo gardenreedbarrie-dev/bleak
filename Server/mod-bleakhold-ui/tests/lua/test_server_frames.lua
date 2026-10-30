@@ -696,3 +696,137 @@ test("C++ arena frames: the live ARENA before the season ended", function(M, ns)
     H.eq(#a.matches, 2); H.eq(a.matches[1].change, 14); H.eq(a.matches[2].verdict, 2); H.eq(a.matches[2].reason, "E")
     H.eq(a.matches[1].reason, nil)
 end)
+
+------------------------------------------------------------------------------------------------------
+-- The café (section 21): the C++ module's café session (bh_gen.cpp `cafe`: HELLO bit 131072, DEF H G F U, every café
+-- op, LB / LBME board C, ERR cafe_hands) into the addon at every frame size. Until the café's own parsers land the
+-- addon keeps the records as they came (S.cafeRaw[op], raw fields); every value is read back from there.
+------------------------------------------------------------------------------------------------------
+for _, size in ipairs({ 1000, 251, 64 }) do
+    test("C++ café frames (max body " .. size .. ") reach the addon's state", function(M, ns)
+        local data = loadFrames(size).cafe
+        H.ok(data and #data.frames >= data.messages and data.messages >= 28, "bh_gen wrote the café session")
+        local C, S, U = ns.Comm, ns.S, ns.U
+        feed(M, data)
+        M.Advance(1)
+        noDrops(C, "cafe")
+        H.eq(C.stats.framesIn, #data.frames, "frames in")
+        H.eq(C.stats.gaps, 0, "revision gaps")
+        H.eq(C.stats.dups, 0, "duplicates")
+        if size < 1000 then
+            H.ok(#data.frames > data.messages, "small frames: messages were chunked")
+        end
+        H.ok(C.HasFeature(C.FEATURE.CAFE) and C.FEATURE.CAFE == 131072, "HELLO feature bit 131072: the café")
+        local raw = S.cafeRaw
+        local function rec(op, i) return assert(raw[op], "no " .. op)[i or 1] end
+        local function int(f) return U.Int(f) end
+        local function str(f) return U.Str(f) end
+        local function joined(r, from, to)
+            local out = {}
+            for i = from, to do out[#out + 1] = r[i] or "" end
+            return table.concat(out, ",")
+        end
+
+        -- DEF H G F U (kept raw), and Z still closes the set
+        H.eq(ns.db.defsVer, 88, "DEF Z stored the data version")
+        local def = assert(raw.DEF, "no café DEF kinds")
+        H.eq(def.H[1][1], "H"); H.eq(#def.H, 3)
+        H.eq(joined(def.H[2], 1, 7), "1,The Lion's Roast,sw,A,1519,0,Rosalind Thornbury")
+        H.eq(str(def.H[2][8]), "Coffee \194\183 Tea \194\183 Shakes, by the Cathedral steps"); H.eq(def.H[2][9], "3F6FB5")
+        H.eq(str(def.H[3][8]), "Strong brews; for: strong~backs | 100%"); H.eq(def.H[3][4], "H")
+        H.eq(#def.G, 4)
+        H.eq(joined(def.G[2], 1, 10), "1,G,1,T,1500,,,Grind Beans,,100901")
+        H.eq(joined(def.G[3], 1, 10), "3,E,1,H,3000,700,850,Pull Shot,,100903")
+        H.eq(str(def.G[4][8]), "Elwynn Berry"); H.eq(str(def.G[4][9]), "Cactus Apple"); H.eq(int(def.G[4][10]), 100921)
+        H.eq(#def.F, 3)
+        H.eq(joined(def.F[3], 1, 8), "219,2,19,M,5,10,18000,50")
+        H.eq(table.concat(U.IntList(def.F[3][9], 12, 1, 63), ":"), "11:11:11:18:20:15:23:25")
+        H.eq(str(def.F[3][10]), "Valley of Honor Triple Scoop"); H.eq(str(def.F[3][11]), "Earned in the Ring, eaten in triumph.")
+        H.eq(table.concat(U.IntList(def.F[2][9], 12, 1, 63), ":"), "1:3:4:25")
+        H.eq(#def.U, 3); H.eq(int(def.U[3][2]), 5640); H.eq(str(def.U[3][3]), "Triple scoop; the title.")
+        H.eq(str(def.U[2][3]), "Black coffee, latte, green tea and black tea.")
+
+        -- CAFE: café 1 paused in a live Rush, café 2 closed for safety without one
+        H.eq(joined(rec("CAFE", 1), 1, 7), "1,2,2,5,2,640,75")
+        H.eq(joined(rec("CAFE", 2), 1, 7), "2,4,0,0,0,,120")
+        H.eq(#raw.CAFE, 2)
+
+        -- CAFST: the last one, on shift (the off-shift one before it had the Staff Drink flag)
+        local st = rec("CAFST")
+        H.eq(joined(st, 1, 19), "2,1,9,5000,4320,5640,1250,12,7,3,9200,230,,G,12,3,120,99,4")
+        H.eq(joined(rec("CAFST", 2), 1, 9), "D,470,450,450,51000,205000,400,500,31")
+        H.eq(joined(rec("CAFST", 3), 1, 6), "R,2,640,31,60,6")
+        H.eq(int(st[18]), 1 + 2 + 32 + 64, "flags: tutorial, from memory, not facing the grinder, hidden")
+
+        -- CAFQ: 8 of 11 orders, the waiting ones first, the rest counted
+        local q = raw.CAFQ
+        H.eq(#q, 9); H.eq(joined(q[1], 1, 5), "2,11,8,2,3")
+        local ids = {}
+        for i = 2, #q do ids[#ids + 1] = q[i][1] end
+        H.eq(table.concat(ids, " "), "1304 1308 1301 1302 1305 1307 1310 1306", "waiting players, waiting NPCs, mine")
+        H.eq(str(q[2][4]), "Kor'kron;Guard,No:14~Org"); H.eq(#str(q[2][4]), 24); H.eq(q[2][2], "P"); H.eq(int(q[2][6]), 48000)
+        H.eq(q[4][2], "G"); H.eq(int(q[4][10]), 3, "a Rush group")
+        H.eq(int(q[6][9]), 7, "needs barista level 7"); H.eq(q[6][7], "W")
+        H.eq(q[9][7], "T"); H.eq(str(q[9][8]), "Morgra"); H.eq(q[9][10], nil, "no group")
+
+        -- CAFT: three tickets of eight steps (the empty "0" before it was replaced)
+        local t = raw.CAFT
+        H.eq(#t, 3)
+        H.eq(joined(t[1], 1, 4), "61,1301,219,N"); H.eq(str(t[1][5]), "Kor'kron;Guard,No:11~Org")
+        H.eq(joined(t[1], 6, 9), "30001,78000,4,1")
+        H.eq(str(t[1][10]), "Three scoops, caramel; chocolate: and cream~now | please")
+        local steps = {}
+        for _, item in ipairs(U.List(t[1][11], 12)) do
+            local tp = U.Tuple(item, 2)
+            steps[#steps + 1] = tp[1] .. tp[2]
+        end
+        H.eq(table.concat(steps, " "), "11P 11O 11P 18N 20N 15N 23N 25N")
+        H.eq(int(t[1][12]), 1801)
+        H.eq(str(t[2][5]), "Br\195\169nna"); H.eq(t[2][4], "P"); H.eq(str(t[2][10]), nil, "a player says no line")
+        H.eq(int(t[3][12]), 1803); H.eq(#U.List(t[3][11], 12), 8)
+
+        -- CAFEV, CAFRES
+        H.eq(joined(rec("CAFEV"), 1, 9), "61,6,15,D,2500,1500,2000,G,7")
+        local res = rec("CAFRES")
+        H.eq(joined(res, 1, 9), "61,219,S,21,1080,18,0,1,10"); H.eq(str(res[10]), "Kor'kron;Guard,No:11~Org")
+        H.eq(str(res[11]), "Lok'tar! Caf\195\169 strong enough; for: a~grunt | 100%"); H.eq(int(res[12]), 9)
+
+        -- CAFM: nineteen recipes of café 2; no order now (one is pending)
+        local m = raw.CAFM
+        H.eq(#m, 20); H.eq(joined(m[1], 1, 9), "2,1,2,75,1304,3,12,0,cafe_order")
+        H.eq(joined(m[2], 1, 4), "201,300,1,1"); H.eq(joined(m[4], 1, 4), "203,500,1,0"); H.eq(joined(m[20], 1, 4), "219,2100,0,1")
+
+        -- CAFO: the last one, the owner finishing it after the barista's failure
+        H.eq(joined(rec("CAFO"), 1, 11), "1304,2,204,F,,,2,6,41,12000,3000")
+
+        -- CAFP, CAFBF, CAFSUM, CAFUI
+        local p = raw.CAFP
+        H.eq(#p, 4); H.eq(joined(p[1], 1, 11), "9,5000,4320,5640,1210,830,44,21,4870,2,5")
+        H.eq(joined(p[2], 1, 9), "W,2964,2,,310,41,702,2,0", "not eligible: no rank")
+        H.eq(str(p[3][4]), "Br\195\169nna"); H.eq(str(p[4][4]), "Morgra, the Swift"); H.eq(int(p[4][5]), 1990)
+        H.eq(joined(rec("CAFBF"), 1, 5), ",2400,900,1,0")
+        H.eq(joined(rec("CAFSUM"), 1, 11), "2,M,1310,13,7,10280,251,9,248,3,1")
+        H.eq(joined(rec("CAFUI"), 1, 2), "board,2")
+
+        -- CAFAT: the empty list, then six workers
+        local at = raw.CAFAT
+        H.eq(#at, 7); H.eq(joined(at[1], 1, 2), "2,6")
+        H.eq(str(at[2][1]), "Grukka Steamtusk"); H.eq(joined(at[2], 2, 7), "3,100,3000,H,1,8")
+        H.eq(str(at[4][1]), "Worker;3"); H.eq(joined(at[7], 2, 7), "8,600,3000,T,6,8")
+
+        -- LB and LBME board C through the addon's leaderboard state
+        local lb = S.lb.C
+        H.ok(lb, "board C parsed")
+        H.eq(lb.board, "C"); H.eq(lb.seasonId, 2964); H.eq(lb.dungeonId, 2); H.eq(lb.pages, 2); H.eq(#lb.rows, 10)
+        H.eq(lb.rows[1].value, 2400); H.eq(lb.rows[1].timeSec, 890); H.eq(lb.rows[1].label, "149 drinks")
+        H.eq(lb.rows[1].members[1].name, "Barista1"); H.eq(lb.rows[1].members[1].classId, 2)
+        H.eq(lb.rows[10].value, 1500); H.eq(lb.rows[10].date, 1793890010)
+        local me = S.lbme.C
+        H.eq(me.rank, 4); H.eq(me.topPercent, 12); H.eq(me.value, 2100); H.eq(me.dungeonId, 2); H.eq(me.timeSec, 860)
+        H.eq(me.barPermille, 875); H.eq(me.label, "146 drinks")
+
+        -- ERR cafe_hands
+        H.eq(S.err.op, "CSTEP"); H.eq(S.err.code, "cafe_hands"); H.eq(S.err.seq, "25")
+        H.eq(S.err.text, "Finish or bin the drink in your hands first.")
+    end)
+end

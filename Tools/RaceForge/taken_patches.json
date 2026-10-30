@@ -26,6 +26,10 @@
         {
             "comment": "Tools/MapForge: staged in the server's extractor copy of the client only (server/extract/patch-5.MPQ)",
             "names": ["patch-5.MPQ"]
+        },
+        {
+            "comment": "Tools/CafeForge: the café archive (café models, textures, icons, markers, café-only DBC copies)",
+            "names": ["patch-4.MPQ"]
         }
     ]
 }

@@ -297,6 +297,15 @@ jobs:
           python3 -I Tools/DanceForge/tests/run_tests.py
           python3 -I Tools/DanceForge/danceforge.py check
 
+      - name: CafeForge tests
+        run: |
+          python3 -I Tools/CafeForge/tests/run_tests.py
+          python3 -I Tools/CafeForge/cafeforge.py data --check
+
+      # the café's models: writer, checker, the native harness (g++), geometry, textures and the golden hashes
+      - name: ModelForge tests
+        run: python3 -I Tools/ModelForge/tests/run_tests.py
+
       - name: Grass wind shader patch tests
         run: bash Tools/GrassWind/tests/run_tests.sh
 

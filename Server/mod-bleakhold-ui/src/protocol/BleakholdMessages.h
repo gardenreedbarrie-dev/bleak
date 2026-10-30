@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace Bleakhold
@@ -66,6 +67,7 @@ namespace Bleakhold
         FeatureWarMode = 16384,       // War Mode is live (WARMODE, WMST, WANTED, section 19); Ui::SetFeature
         FeatureWorldPvp = 32768,      // World PvP objectives are live (WPZ, WPCAP, WPMAP, section 19); Ui::SetFeature
         FeatureArena = 65536,         // arena seasons and the 1v1 ladder are live (ARENA, section 20); Ui::SetFeature
+        FeatureCafe = 131072,         // the cafe is live (section 21); Ui::SetFeature, sent per player (GmOnly)
     };
 
     // One reward line of MPE / RIFTE.
@@ -114,7 +116,8 @@ namespace Bleakhold
         ToastKind kind = ToastKind::Info;
         std::string title;
         std::string subtitle;
-        std::string openTarget;   // tasks, dungeons, keys, rift, collections, season, leaderboards, royale or empty
+        std::string openTarget;   // tasks, dungeons, keys, rift, collections, season, leaderboards, royale, arena, cafe
+                                  // or empty
     };
 
     // ---------------------------------------------------------------------------------------------
@@ -166,6 +169,41 @@ namespace Bleakhold
         std::string text;
     };
 
+    // The cafe (section 21). H a cafe, G a barista action, F a recipe, U a barista level.
+    struct CafeDef
+    {
+        uint32_t id = 0;
+        std::string name;
+        std::string cityKey;                 // sw, org
+        char team = 'A';                     // A Alliance, H Horde
+        uint32_t zoneId = 0, mapId = 0;
+        std::string ownerName, tagline;
+        std::string colorHex;                // the faction trim, RRGGBB
+    };
+    struct CafeActionDef
+    {
+        uint32_t id = 0;
+        char station = 'V';                  // G E K C B S V
+        uint32_t key = 1;                    // the barista bar slot at that station, 1..8
+        char kind = 'T';                     // T tap, H timed (hold and release)
+        uint32_t durMs = 0;
+        Opt<uint32_t> goldLoPermille, goldHiPermille;   // timed actions only
+        std::string name;
+        std::string hordeName;               // empty: the same at the Horde cafe
+        uint32_t spellId = 0;
+    };
+    struct CafeRecipeDef
+    {
+        uint32_t id = 0;                     // cafeId * 100 + archetype
+        uint32_t cafeId = 0;
+        uint32_t archetype = 0;              // 1..19: C1-C7 1-7, T1-T6 8-13, M1-M6 14-19
+        char family = 'C';                   // C coffee, T tea, M milkshake
+        uint32_t tier = 1, unlockLevel = 1, price80Copper = 0, buffMin = 0;
+        std::vector<uint32_t> steps;         // action ids, at most MaxCafeSteps
+        std::string name, text;
+    };
+    struct CafeLevelDef { uint32_t level = 0, totalXp = 0; std::string text; };
+
     struct Definitions
     {
         std::vector<AffixDef> affixes;              // A
@@ -183,6 +221,10 @@ namespace Bleakhold
         std::vector<RiftBossDef> riftBosses;        // R
         std::vector<ArenaTierDef> arenaTiers;       // V (section 20)
         std::vector<ArenaRewardDef> arenaRewards;   // Q (section 20)
+        std::vector<CafeDef> cafes;                 // H (section 21)
+        std::vector<CafeActionDef> cafeActions;     // G
+        std::vector<CafeRecipeDef> cafeRecipes;     // F
+        std::vector<CafeLevelDef> cafeLevels;       // U
     };
 
     // ---------------------------------------------------------------------------------------------
@@ -377,12 +419,13 @@ namespace Bleakhold
     struct LeaderboardRow
     {
         uint32_t rank = 0;
-        Opt<uint32_t> dungeonId;             // A: the bracket
-        Opt<int64_t> value;                  // K: key level, R: floor, E: empty, A: rating
-        Opt<int64_t> timeSec;                // K: time left (negative = over time), R: run time, E: kill time, A: empty
-        Opt<uint32_t> dateEpoch;             // A: the team's last game
+        Opt<uint32_t> dungeonId;             // A: the bracket; C: the cafe
+        Opt<int64_t> value;                  // K: key level, R: floor, E: empty, A: rating, C: points
+        Opt<int64_t> timeSec;                // K: time left (negative = over time), R: run time, E: kill time,
+                                             // A: empty, C: Perfect permille
+        Opt<uint32_t> dateEpoch;             // A: the team's last game; C: the barista's last drink
         std::vector<LeaderboardMember> members;
-        std::string label;                   // E: boss name, A: the team's name
+        std::string label;                   // E: boss name, A: the team's name, C: "142 drinks"
         // board A only (section 20), after label: season wins and games, the projected (or final) tier (DEF V),
         // flags (ArenaLadderFlags)
         Opt<uint32_t> seasonWins, seasonGames, tierId, flags;
@@ -401,11 +444,11 @@ namespace Bleakhold
     {
         Board board = Board::Keys;
         Opt<uint32_t> rank, topPercent;
-        Opt<int64_t> value;                  // A: rating
-        Opt<uint32_t> dungeonId;             // A: the bracket
-        Opt<int64_t> timeSec;                // A: empty
-        Opt<uint32_t> barPermille;           // A: progress toward the next tier's effective cutoff
-        std::string label;                   // A: the projected tier's name
+        Opt<int64_t> value;                  // A: rating; C: points
+        Opt<uint32_t> dungeonId;             // A: the bracket; C: the cafe
+        Opt<int64_t> timeSec;                // A: empty; C: Perfect permille
+        Opt<uint32_t> barPermille;           // A: progress toward the next tier's effective cutoff; C: points / #1's
+        std::string label;                   // A: the projected tier's name; C: "96 drinks"
         // board A only (section 20), after label: the rank in permille of the ladder (for "top 0.4%"), the projected
         // tier (DEF V)
         Opt<uint32_t> topPermille, tierId;
@@ -984,6 +1027,307 @@ namespace Bleakhold
         inline constexpr Refusal Gold{ "arena_gold", "You cannot pay for a 1v1 arena team." };
     }
 
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // The cafe (section 21): CAFE CAFST CAFQ CAFT CAFEV CAFRES CAFM CAFO CAFP CAFBF CAFSUM CAFUI CAFAT, all
+    // unrevisioned ("the last one counts"); DEF H G F U; LB / LBME board C. The server decides everything (the station
+    // a barista is at, every timer and grade, prices, money, rewards); these are views of its state. Times in ms and
+    // sec count from the moment the message arrives. BLEAKHOLD_UI_CAFE tells a server module that this API exists
+    // (Ui::SendCafe*, FeatureCafe, Board::Cafe, Definitions::cafes / cafeActions / cafeRecipes / cafeLevels).
+    // ---------------------------------------------------------------------------------------------------------------
+#define BLEAKHOLD_UI_CAFE 1
+    inline constexpr std::size_t MaxCafes = 8;            // CAFE records, CAFP L records (two cafes today)
+    inline constexpr std::size_t MaxCafeQueueRows = 8;    // CAFQ order records (the rest is counted in `more`)
+    inline constexpr std::size_t MaxCafeTickets = 3;      // CAFT records
+    inline constexpr std::size_t MaxCafeSteps = 12;       // steps of a recipe (CAFT steps, DEF F steps)
+    inline constexpr std::size_t MaxCafeRecipes = 40;     // CAFM recipe records
+    inline constexpr std::size_t MaxCafeAtRows = 6;       // CAFAT worker records
+    inline constexpr std::size_t MaxCafeNameBytes = 48;   // character, customer, drink and cafe names
+    inline constexpr std::size_t MaxCafeLineBytes = 160;  // spoken lines and texts
+    inline constexpr std::size_t CafeCodeBytes = 24;      // an ERR code (CAFM reason)
+    inline constexpr uint32_t MaxCafeNearDm = 255;        // CAFST nearDm: decimetres, capped
+
+    // CAFE / CAFM open: feature off, open, paused (danger nearby), not open yet (disabled or not placed), closed for
+    // safety (a pause that lasted too long)
+    enum class CafeOpen : uint8_t { Off = 0, Open = 1, Paused = 2, NotOpen = 3, Closed = 4 };
+    // Morning Rush: none, soon (it starts in rushSec), live (it ends in rushSec)
+    enum class CafeRushState : uint8_t { None = 0, Soon = 1, Live = 2 };
+    // CAFST flags
+    enum CafeStateFlags : uint32_t
+    {
+        CafeFlagTutorial = 1,       // the tutorial drink is pending (a wrong step is "not that one", nothing lost)
+        CafeFlagMemory = 2,         // from-memory mode allowed (cosmetic)
+        CafeFlagTired = 4,          // Tired: rewards reduced
+        CafeFlagOutside = 8,        // outside the shift radius: the shift ends in warnSec
+        CafeFlagStaffDrink = 16,    // CSTAFF possible now
+        CafeFlagFacing = 32,        // at nearStation's spot but not facing it ("Turn to face the Grinder")
+        CafeFlagHidden = 64,        // mounted, shapeshifted, stealthed or invisible: the shift ends in warnSec
+    };
+    // CAFQ / CAFT kind: an NPC, a player, an NPC of a Rush group
+    enum class CafeOrderKind : char { Npc = 'N', Player = 'P', Group = 'G' };
+    // CAFQ state: waiting, taken by a barista, the house is making it
+    enum class CafeQueueState : char { Waiting = 'W', Taken = 'T', House = 'H' };
+    // a step's grade: not done yet, Perfect, Good, Off (taps are recorded as P)
+    enum class CafeGrade : char { None = 'N', Perfect = 'P', Good = 'G', Off = 'O' };
+    // CAFEV event: started, done (with its grade), interrupted (no penalty), wrong step (ruined, back to step 1), wrong
+    // step on the tutorial drink (nothing lost), binned by the player
+    enum class CafeStepEventKind : char
+    {
+        Started = 'S', Done = 'D', Interrupted = 'I', Wrong = 'X', TutorialWrong = 'W', Binned = 'B'
+    };
+    // CAFAT kind of the running step: a tap or a timed step
+    enum class CafeStepKind : char { Tap = 'T', Timed = 'H' };
+    // CAFRES quality: Perfect, Good, Sloppy, Ruined, Left (the customer's patience ran out, or the customer is gone)
+    enum class CafeQuality : char { Perfect = 'P', Good = 'G', Sloppy = 'S', Ruined = 'R', Left = 'L' };
+    // CAFO state: queued, being made by a barista, the house is making it, the house is finishing it after a barista's
+    // failure (CCANCEL allowed), ready at the counter, delivered, cancelled or refunded in full, pickup expired
+    enum class CafeOrderStateId : char
+    {
+        Queued = 'Q', Making = 'M', House = 'H', Finishing = 'F', Ready = 'R', Delivered = 'D', Cancelled = 'X',
+        Expired = 'E'
+    };
+    // CAFSUM reason: ended by the player, combat, AFK, idle, walked away, died / logged out / changed map, mounted or
+    // hidden too long, the cafe closed, the feature was turned off
+    enum class CafeShiftEnd : char
+    {
+        Player = 'E', Combat = 'C', Afk = 'A', Idle = 'I', Walked = 'W', Died = 'D', Mounted = 'M', Closed = 'X',
+        FeatureOff = 'O'
+    };
+    // CAFP rewards bits (the level rewards)
+    enum CafeRewardBits : uint32_t
+    {
+        CafeRewardApprentice = 1, CafeRewardMaster = 2, CafeRewardGolden = 4, CafeRewardTitle = 8, CafeRewardLegend = 16
+    };
+    // CAFUI what
+    inline constexpr std::string_view CafeUiMenu = "menu";
+    inline constexpr std::string_view CafeUiShift = "shift";
+    inline constexpr std::string_view CafeUiBoard = "board";
+    inline constexpr std::string_view CafeUiHelp = "help";
+    bool IsCafeUiTarget(std::string_view what);
+
+    struct CafeListRow       // a CAFE record: one cafe
+    {
+        uint8_t cafeId = 0;
+        CafeOpen open = CafeOpen::Off;
+        uint32_t baristas = 0;               // on shift there now
+        uint32_t queueLen = 0;
+        CafeRushState rushState = CafeRushState::None;
+        uint32_t rushSec = 0;                // to the Rush's start (Soon) or end (Live); not sent without a Rush
+        uint32_t houseEtaSec = 0;            // what a new order would wait for the house now
+    };
+    struct CafeList { std::vector<CafeListRow> rows; };   // CAFE
+
+    struct CafeDay           // CAFST D: today's progress and caps
+    {
+        uint32_t dayXp = 0, dayXpFull = 0, dayXpHalf = 0;              // XP today; the full-rate and half-rate caps
+        uint32_t dayTipsCopper = 0, dayTipsCapCopper = 0;
+        uint32_t dayPoints = 0, dayPointsCap = 0;
+        uint32_t dayDrinks = 0;
+    };
+    struct CafeRush          // CAFST R: the Rush at the barista's cafe (on shift only)
+    {
+        CafeRushState rushState = CafeRushState::None;
+        uint32_t rushSec = 0;
+        uint32_t rushServed = 0, rushGoal = 0, myRushServed = 0;
+    };
+    struct CafeState         // CAFST: the barista
+    {
+        uint8_t cafeId = 0;                  // 0 when not on shift
+        bool onShift = false;
+        uint32_t level = 1, xp = 0, levelXp = 0;      // the barista level and the total XP: always set
+        Opt<uint32_t> nextLevelXp;                    // the total XP of the next level (empty at the top level)
+        // on shift only (sent empty off shift)
+        uint32_t shiftSec = 0, drinks = 0, perfects = 0, streak = 0, tipsCopper = 0, shiftXp = 0;
+        char station = 0;                    // the station letter the barista is at (0: none)
+        char nearStation = 0;                // the nearest station letter (0: none)
+        uint32_t nearDm = 0;                 // its distance in decimetres (at most MaxCafeNearDm; with nearStation)
+        uint32_t maxTickets = 1;             // 1..MaxCafeTickets
+        Opt<uint32_t> tiredSec;              // until Tired (empty: no Tired timer)
+        uint32_t flags = 0;                  // CafeStateFlags (sent empty when 0)
+        Opt<uint32_t> warnSec;               // until a flag 8 or 64 warning ends the shift
+        CafeDay day;
+        std::optional<CafeRush> rush;        // sent on shift only
+    };
+
+    struct CafeQueueRow      // a CAFQ order record
+    {
+        uint32_t orderId = 0;
+        CafeOrderKind kind = CafeOrderKind::Npc;
+        uint32_t recipeId = 0;
+        std::string customer;
+        uint32_t patienceMs = 0, patienceMaxMs = 0;
+        CafeQueueState state = CafeQueueState::Waiting;
+        std::string takenBy;                 // the barista's name; empty while free
+        uint32_t needLevel = 0;              // 0: the receiver can make it, else the barista level it needs
+        Opt<uint32_t> group;                 // the Rush group id
+    };
+    struct CafeQueue         // CAFQ: the queue of one cafe
+    {
+        uint8_t cafeId = 0;
+        uint32_t count = 0;                  // orders in the queue
+        uint32_t cap = 0;
+        uint32_t baristas = 0;
+        // in queue order; Ui::SendCafeQueue puts them in the documented order for the receiver (SortCafeQueueRows) and
+        // the encoder sends the first MaxCafeQueueRows, counting the rest in `more`
+        std::vector<CafeQueueRow> rows;
+    };
+    // The order of CAFQ rows for `receiver` (a barista's name), keeping the queue order inside each group: waiting
+    // player orders, waiting NPC orders, the receiver's own taken orders, everyone else's taken and house orders.
+    void SortCafeQueueRows(std::vector<CafeQueueRow>& rows, std::string_view receiver);
+
+    struct CafeTicketStep { uint32_t actionId = 0; CafeGrade grade = CafeGrade::None; };
+    struct CafeTicket        // a CAFT record: one of the barista's open tickets
+    {
+        uint32_t ticketId = 0, orderId = 0, recipeId = 0;
+        CafeOrderKind kind = CafeOrderKind::Npc;
+        std::string customer;
+        uint32_t patienceMs = 0, patienceMaxMs = 0;
+        uint32_t nextStep = 1;               // from 1
+        bool inHand = false;                 // a step is done: the cup is in the barista's hands
+        std::string orderLine;               // what the customer said (empty for player orders)
+        std::vector<CafeTicketStep> steps;   // every step, at most MaxCafeSteps
+        uint32_t tipHintCopper = 0;
+    };
+    struct CafeTickets { std::vector<CafeTicket> tickets; };   // CAFT; no tickets: the single record "0"
+
+    struct CafeStepEvent     // CAFEV
+    {
+        uint32_t ticketId = 0, stepIndex = 0, actionId = 0;
+        CafeStepEventKind event = CafeStepEventKind::Started;
+        Opt<uint32_t> durMs;                 // S and D
+        Opt<uint32_t> goldLoMs, goldHiMs;    // timed steps, from the start
+        CafeGrade grade = CafeGrade::None;   // D (None is sent empty)
+        uint32_t nextStep = 1;               // the ticket's next step now, from 1
+    };
+
+    struct CafeResult        // CAFRES: a drink result
+    {
+        uint32_t ticketId = 0, recipeId = 0;
+        CafeQuality quality = CafeQuality::Good;
+        uint32_t xp = 0;
+        uint32_t tipCopper = 0;              // the barista's earnings: the NPC tip, or the wage plus the customer's tip
+        uint32_t points = 0, streak = 0;
+        bool levelUp = false;
+        uint32_t level = 1;
+        std::string customer;
+        std::string line;                    // the customer's thanks (the complaint for L)
+        uint32_t xpCapped = 0;               // the XP the daily cap cut from this drink
+    };
+
+    struct CafeMenuRow { uint32_t recipeId = 0, priceCopper = 0; bool byBarista = false, effective = true; };
+    struct CafeMenu          // CAFM: the menu of one cafe for the receiver
+    {
+        uint8_t cafeId = 0;
+        CafeOpen open = CafeOpen::Off;
+        uint32_t baristas = 0, houseEtaSec = 0;
+        uint32_t pendingOrderId = 0;         // the receiver's pending order (0: none)
+        uint32_t ordersToday = 0, ordersCap = 0;
+        bool canOrder = false;
+        std::string reason;                  // an ERR code when canOrder is false (cafe_cap, cafe_paused, ...)
+        std::vector<CafeMenuRow> rows;       // at most MaxCafeRecipes
+    };
+
+    struct CafeOrderState    // CAFO: the receiver's order (orderId 0: none, the single record "0")
+    {
+        uint32_t orderId = 0;
+        uint8_t cafeId = 0;
+        uint32_t recipeId = 0;
+        CafeOrderStateId state = CafeOrderStateId::Queued;
+        Opt<uint32_t> position;              // Q: the place in the queue, from 1
+        std::string barista;                 // M: who is making it
+        // the steps done, 0..stepCount (M, H, F: finished so far; R: stepCount; else 0). Not the next step's index
+        // from 1 of CSTEP, CAFT and CAFEV: CAFT's nextStep for the same ticket is this + 1.
+        uint32_t nextStep = 0, stepCount = 0;
+        Opt<uint32_t> leftSec;               // H, F: about the time left; R: to pick it up
+        uint32_t priceCopper = 0, tipCopper = 0;
+    };
+
+    struct CafeWeek          // CAFP W: the receiver this week
+    {
+        uint32_t weekId = 0;
+        uint8_t cafeId = 0;
+        Opt<uint32_t> rank;                  // empty when not eligible
+        uint32_t points = 0, drinks = 0, perfectPermille = 0, days = 0;
+        bool eligible = false;
+    };
+    struct CafeLastWinner { uint32_t weekId = 0; uint8_t cafeId = 0; std::string winnerName; uint32_t points = 0; };
+    struct CafeProfile       // CAFP: the receiver's barista profile
+    {
+        uint32_t level = 1, xp = 0, levelXp = 0;
+        Opt<uint32_t> nextLevelXp;           // empty at the top level
+        uint32_t drinks = 0, perfects = 0, memoryDrinks = 0, bestStreak = 0;
+        Opt<uint32_t> fastestMs;             // the fastest drink (empty: none yet)
+        uint32_t weeklyWins = 0;
+        uint32_t rewards = 0;                // CafeRewardBits
+        std::optional<CafeWeek> week;
+        std::vector<CafeLastWinner> lastWinners;   // last week's winner of each cafe, at most MaxCafes
+    };
+
+    struct CafeBuffs         // CAFBF: the receiver's cafe buffs (seconds left; empty: not active)
+    {
+        Opt<uint32_t> coffeeSec, teaSec, shakeSec;
+        bool shakeActive = false;            // the shake's speed works right now (resting in a city or inn, ...)
+        bool coffeeCounts = true;            // false at the level cap, with XP off, or with the cafe XP off
+    };
+
+    struct CafeSummary       // CAFSUM: a shift ended
+    {
+        uint8_t cafeId = 0;
+        CafeShiftEnd reason = CafeShiftEnd::Player;
+        uint32_t shiftSec = 0, drinks = 0, perfects = 0, tipsCopper = 0, xp = 0, xpLost = 0, points = 0, bestStreak = 0;
+        bool staffDrink = false;             // CSTAFF possible now
+    };
+
+    struct CafeAtBarRow      // a CAFAT record: one worker's running step
+    {
+        std::string name;
+        uint32_t actionId = 0;
+        uint32_t startedAgoMs = 0, durMs = 0;
+        CafeStepKind kind = CafeStepKind::Tap;
+        uint32_t stepIndex = 1, stepCount = 1;
+    };
+    struct CafeAtBar         // CAFAT: who works at the bar (an empty list: the last step ended)
+    {
+        uint8_t cafeId = 0;
+        std::vector<CafeAtBarRow> rows;      // at most MaxCafeAtRows (count is the rows sent)
+    };
+
+    // ERR codes of the cafe (section 21) with a default sentence. Codes that carry a name or a number get their own
+    // sentence: cafe_station (the station's name), cafe_locked (the level), cafe_level (BleakholdUi.Cafe.MinLevel) and
+    // the daily cap of cafe_order, as in Ui::Refuse(player, intent, CafeErr::Station.code, "Walk to the Espresso Machine
+    // first."). `dead`, `busy` and `failed` are the generic codes.
+    namespace CafeErr
+    {
+        inline constexpr Refusal Off{ "cafe_off", "The caf\xC3\xA9 is closed." };
+        inline constexpr Refusal Closed{ "cafe_closed", "The caf\xC3\xA9 has closed its doors for now." };
+        inline constexpr Refusal Faction{ "cafe_faction", "They don't serve your kind here." };
+        inline constexpr Refusal Where{ "cafe_where", "Go to the caf\xC3\xA9 first." };
+        inline constexpr Refusal Level{ "cafe_level", "You need level 10 to work a shift." };
+        inline constexpr Refusal Combat{ "cafe_combat", "Not while you are in combat." };
+        inline constexpr Refusal Mounted{ "cafe_mounted", "Get down and show yourself first." };
+        inline constexpr Refusal Paused{ "cafe_paused", "Danger nearby: the caf\xC3\xA9 has paused." };
+        inline constexpr Refusal Cap{ "cafe_cap", "The caf\xC3\xA9 is full right now; try again in a minute." };
+        inline constexpr Refusal BarFull{ "cafe_bar_full", "The bar is full right now." };
+        inline constexpr Refusal Afk{ "cafe_afk", "You can't work while away." };
+        inline constexpr Refusal Account{ "cafe_account",
+            "Someone on your account or network is already working a shift." };
+        inline constexpr Refusal Shift{ "cafe_shift", "You are not on shift." };
+        inline constexpr Refusal ShiftOrder{ "cafe_shift", "Finish your shift before ordering." };
+        inline constexpr Refusal Busy{ "cafe_busy", "Finish what you are doing first." };
+        inline constexpr Refusal Station{ "cafe_station", "Walk to the right station first." };
+        inline constexpr Refusal Ticket{ "cafe_ticket", "That ticket has changed." };
+        inline constexpr Refusal Hands{ "cafe_hands", "Finish or bin the drink in your hands first." };
+        inline constexpr Refusal Locked{ "cafe_locked", "You need a higher barista level for that drink." };
+        inline constexpr Refusal Full{ "cafe_full", "You can't hold more tickets." };
+        inline constexpr Refusal Taken{ "cafe_taken", "Someone else took that order." };
+        inline constexpr Refusal Self{ "cafe_self", "You cannot make drinks for your own characters." };
+        inline constexpr Refusal Gold{ "cafe_gold", "You can't afford that." };
+        inline constexpr Refusal Order{ "cafe_order", "You already have an order waiting." };
+        inline constexpr Refusal Staff{ "cafe_staff", "No staff drink for you today." };
+        inline constexpr Refusal Dead{ "dead", "You cannot do that while dead." };
+        inline constexpr Refusal Failed{ "failed", "That did not work; try again." };
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Encoders: payload of each op (without frame header). `rev` is the revision of the topic.
     // ---------------------------------------------------------------------------------------------
@@ -1029,6 +1373,19 @@ namespace Bleakhold
     std::string EncodeWanted(WantedList const& m);           // WANTED
     std::string EncodeWarEvent(WarEvent const& m);           // WPEV
     std::string EncodeArena(ArenaState const& m);            // ARENA
+    std::string EncodeCafeList(CafeList const& m);           // CAFE
+    std::string EncodeCafeState(CafeState const& m);         // CAFST
+    std::string EncodeCafeQueue(CafeQueue const& m);         // CAFQ
+    std::string EncodeCafeTickets(CafeTickets const& m);     // CAFT
+    std::string EncodeCafeStep(CafeStepEvent const& m);      // CAFEV
+    std::string EncodeCafeResult(CafeResult const& m);       // CAFRES
+    std::string EncodeCafeMenu(CafeMenu const& m);           // CAFM
+    std::string EncodeCafeOrder(CafeOrderState const& m);    // CAFO
+    std::string EncodeCafeProfile(CafeProfile const& m);     // CAFP
+    std::string EncodeCafeBuffs(CafeBuffs const& m);         // CAFBF
+    std::string EncodeCafeSummary(CafeSummary const& m);     // CAFSUM
+    std::string EncodeCafeOpenUi(std::string_view what, uint8_t cafeId);   // CAFUI (what: IsCafeUiTarget)
+    std::string EncodeCafeAtBar(CafeAtBar const& m);         // CAFAT
 
     // DEF: one payload per non-empty kind, in a fixed order, followed by "Z,<dataVer>".
     std::vector<std::string> EncodeDefinitions(Definitions const& d, uint32_t dataVer);

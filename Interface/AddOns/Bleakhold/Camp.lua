@@ -257,7 +257,7 @@ local function orbLines()
         lines[#lines + 1] = { "Warmth: " .. U.Clock(w) .. " (+" .. (c and c.xp or 0) .. "% XP)", C.goldLight }
     end
     if c and c.fed then
-        lines[#lines + 1] = { "Well fed: bonus XP from food", C.goldLight }
+        lines[#lines + 1] = { "Well fed: bonus XP from food or caf\195\169 coffee", C.goldLight }
     end
     local g = leftOf("glide")
     if g then
@@ -612,7 +612,7 @@ ind:SetScript("OnEnter", function(self)
         lines[#lines + 1] = { "Warmth: " .. U.Clock(ceil(w)) .. " left", C.goldLight }
     end
     if c and c.fed then
-        lines[#lines + 1] = { "Well fed: bonus XP from food", C.goldLight }
+        lines[#lines + 1] = { "Well fed: bonus XP from food or caf\195\169 coffee", C.goldLight }
     end
     if c and (c.xp or 0) > 0 then
         lines[#lines + 1] = { "+" .. c.xp .. "% experience from kills and quests", C.teal }

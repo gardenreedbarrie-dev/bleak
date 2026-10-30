@@ -47,6 +47,13 @@ namespace Bleakhold
             { "RDEPLOY", IntentType::RoyaleDeploy },
             { "RSPEC", IntentType::RoyaleSpectate },
             { "WARMODE", IntentType::WarMode },
+            { "CSHIFT", IntentType::CafeShift },
+            { "CTAKE", IntentType::CafeTake },
+            { "CSTEP", IntentType::CafeStep },
+            { "CREL", IntentType::CafeRelease },
+            { "CORDER", IntentType::CafeOrder },
+            { "CCANCEL", IntentType::CafeCancel },
+            { "CSTAFF", IntentType::CafeStaff },
         }};
 
         struct TopicInfo
@@ -81,6 +88,14 @@ namespace Bleakhold
             { "WPMAP", Topic::WarMap, 0 },
             { "WANTED", Topic::Wanted, 0 },
             { "ARENA", Topic::Arena, 0 },
+            { "CAFE", Topic::CafeList, 0 },
+            { "CAFST", Topic::CafeState, 0 },
+            { "CAFQ", Topic::CafeQueue, 0 },
+            { "CAFT", Topic::CafeTickets, 0 },
+            { "CAFM", Topic::CafeMenu, 1 },
+            { "CAFO", Topic::CafeOrderState, 0 },
+            { "CAFP", Topic::CafeProfile, 0 },
+            { "CAFBF", Topic::CafeBuffs, 0 },
         }};
 
         constexpr char const* DropNames[] = {
@@ -149,6 +164,15 @@ namespace Bleakhold
             return r;
         }
 
+        DropReason Medium(std::string_view f, int64_t lo, int64_t hi, uint16_t& out)
+        {
+            uint32_t v = 0;
+            DropReason r = Int(f, lo, hi, v);
+            if (r == DropReason::None)
+                out = static_cast<uint16_t>(v);
+            return r;
+        }
+
         DropReason Token(std::string_view f, std::size_t maxLen, std::string& out)
         {
             if (f.empty() || f.size() > maxLen)
@@ -191,6 +215,13 @@ namespace Bleakhold
                 case IntentType::RoyaleDeploy: return 0;
                 case IntentType::RoyaleSpectate: return 1;
                 case IntentType::WarMode: return 1;
+                case IntentType::CafeShift: return 2;
+                case IntentType::CafeTake: return 1;
+                case IntentType::CafeStep: return 3;
+                case IntentType::CafeRelease: return 3;
+                case IntentType::CafeOrder: return 3;
+                case IntentType::CafeCancel: return 1;
+                case IntentType::CafeStaff: return 1;
                 default: return -1;
             }
         }
@@ -227,6 +258,8 @@ namespace Bleakhold
                     BH_TRY(Int(f[1], 0, 0, req.arg1));   // "DEF,0": all kinds
                 else if (info->topic == Topic::Case)
                     BH_TRY(Int(f[1], 1, Int32Max, req.arg1));
+                else if (info->topic == Topic::CafeMenu)
+                    BH_TRY(Int(f[1], 1, 255, req.arg1));   // "CAFM,cafeId" (section 21)
                 out.topics.push_back(req);
             }
             return DropReason::None;
@@ -241,9 +274,10 @@ namespace Bleakhold
             std::vector<std::string_view> f;
             if (!payload.empty())
                 f = Split(payload, ',');
-            // CAMP O carries the skill line id; CAMP M and CAMP P carry nothing more
+            // CAMP O carries the skill line id; CAMP M and CAMP P carry nothing more. HELLO may add its caps.
             int const want = type == IntentType::Camp && !f.empty() && f[0] == "O" ? 2 : FieldCountOf(type);
-            if (static_cast<int>(f.size()) != want)
+            bool const helloCaps = type == IntentType::Hello && static_cast<int>(f.size()) == want + 1;
+            if (static_cast<int>(f.size()) != want && !helloCaps)
                 return DropReason::FieldCount;
             switch (type)
             {
@@ -252,6 +286,8 @@ namespace Bleakhold
                     BH_TRY(Token(f[1], 16, out.addonVersion));
                     BH_TRY(Int(f[2], 0, Int32Max, out.dataVersion));
                     BH_TRY(Token(f[3], 8, out.locale));
+                    if (helloCaps)
+                        BH_TRY(Int(f[4], 0, Int32Max, out.caps));
                     break;
                 case IntentType::TaskClaim:
                 case IntentType::TaskReroll:
@@ -313,6 +349,7 @@ namespace Bleakhold
                         case 'E': out.board = Board::RaidEchoes; break;
                         case 'F': out.board = Board::Firsts; break;
                         case 'A': out.board = Board::Arena; break;
+                        case 'C': out.board = Board::Cafe; break;
                         default: return DropReason::BadField;
                     }
                     BH_TRY(Int(f[1], 0, Int32Max, out.seasonId));
@@ -321,6 +358,9 @@ namespace Bleakhold
                     BH_TRY(Int(f[4], 1, 999, out.page));
                     // the arena board is one bracket at a time (section 20)
                     if (out.board == Board::Arena && !IsArenaBracket(out.dungeonId))
+                        return DropReason::OutOfRange;
+                    // the cafe board is one cafe at a time (section 21)
+                    if (out.board == Board::Cafe && !IsCafeId(out.dungeonId))
                         return DropReason::OutOfRange;
                     break;
                 }
@@ -368,6 +408,41 @@ namespace Bleakhold
                     out.warModeOn = on == 1;
                     break;
                 }
+                // the cafe (section 21)
+                case IntentType::CafeShift:
+                {
+                    BH_TRY(Small(f[0], 1, 255, out.cafeId));
+                    uint32_t on = 0;
+                    BH_TRY(Int(f[1], 0, 1, on));
+                    out.cafeOn = on == 1;
+                    break;
+                }
+                case IntentType::CafeTake:
+                    BH_TRY(Int(f[0], 0, Int32Max, out.orderId));
+                    break;
+                case IntentType::CafeStep:
+                    BH_TRY(Int(f[0], 1, Int32Max, out.ticketId));
+                    BH_TRY(Small(f[1], 1, MaxCafeStepIndex, out.stepIndex));
+                    BH_TRY(Small(f[2], 1, MaxCafeActionId, out.actionId));
+                    break;
+                case IntentType::CafeRelease:
+                    BH_TRY(Int(f[0], 1, Int32Max, out.ticketId));
+                    BH_TRY(Small(f[1], 1, MaxCafeStepIndex, out.stepIndex));
+                    BH_TRY(Medium(f[2], 0, MaxCafeReleaseMs, out.clientMs));
+                    break;
+                case IntentType::CafeOrder:
+                    BH_TRY(Small(f[0], 1, 255, out.cafeId));
+                    BH_TRY(Medium(f[1], 1, 65535, out.recipeId));
+                    BH_TRY(Small(f[2], 0, 50, out.tipPct));
+                    if (!IsCafeTipPct(out.tipPct))
+                        return DropReason::OutOfRange;
+                    break;
+                case IntentType::CafeCancel:
+                    BH_TRY(Int(f[0], 1, Int32Max, out.orderId));
+                    break;
+                case IntentType::CafeStaff:
+                    BH_TRY(Medium(f[0], 1, 65535, out.recipeId));
+                    break;
                 default:
                     break;
             }
@@ -412,6 +487,20 @@ namespace Bleakhold
                 return false;
             default:
                 return true;
+        }
+    }
+
+    bool IsDuplicateGuarded(IntentType type)
+    {
+        switch (type)
+        {
+            case IntentType::RoyaleSpectate:
+            case IntentType::CafeTake:
+            case IntentType::CafeStep:
+            case IntentType::CafeRelease:
+                return false;
+            default:
+                return IsActionIntent(type);
         }
     }
 
@@ -509,7 +598,8 @@ namespace Bleakhold
         switch (in.type)
         {
             case IntentType::Hello:
-                return n(in.proto) + "," + in.addonVersion + "," + n(in.dataVersion) + "," + in.locale;
+                return n(in.proto) + "," + in.addonVersion + "," + n(in.dataVersion) + "," + in.locale +
+                    (in.caps ? "," + n(in.caps) : std::string());
             case IntentType::Get:
             {
                 std::string out;
@@ -520,7 +610,7 @@ namespace Bleakhold
                     out += TopicName(t.topic);
                     if (t.topic == Topic::Set)
                         out += "," + n(t.arg1) + "," + n(t.arg2);
-                    else if (t.topic == Topic::Def || t.topic == Topic::Case)
+                    else if (t.topic == Topic::Def || t.topic == Topic::Case || t.topic == Topic::CafeMenu)
                         out += "," + n(t.arg1);
                 }
                 return out;
@@ -558,6 +648,19 @@ namespace Bleakhold
                 return n(static_cast<uint32_t>(in.spectateDir));
             case IntentType::WarMode:
                 return in.warModeOn ? "1" : "0";
+            case IntentType::CafeShift:
+                return n(in.cafeId) + (in.cafeOn ? ",1" : ",0");
+            case IntentType::CafeTake:
+            case IntentType::CafeCancel:
+                return n(in.orderId);
+            case IntentType::CafeStep:
+                return n(in.ticketId) + "," + n(in.stepIndex) + "," + n(in.actionId);
+            case IntentType::CafeRelease:
+                return n(in.ticketId) + "," + n(in.stepIndex) + "," + n(in.clientMs);
+            case IntentType::CafeOrder:
+                return n(in.cafeId) + "," + n(in.recipeId) + "," + n(in.tipPct);
+            case IntentType::CafeStaff:
+                return n(in.recipeId);
             default:
                 return std::string();
         }

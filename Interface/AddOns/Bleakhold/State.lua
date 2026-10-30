@@ -45,6 +45,7 @@ local function reset()
     S.warZoneNames = {}
     S.warObjNames = {}
     S.arena = nil
+    S.cafeRaw = {}
 end
 reset()
 ns.ResetState = reset
@@ -198,6 +199,8 @@ ns.DEF_PARSERS = DEF_PARSERS
 -- matches the server's.
 local DEF_SCHEMA = 2
 ns.DEF_SCHEMA = DEF_SCHEMA
+-- DEF H G F U (section 21): the cafés, barista actions, recipes and barista levels
+local CAFE_DEF_KINDS = { H = true, G = true, F = true, U = true }
 
 Comm.Handle("DEF", function(r)
     local head = r[1] or {}
@@ -208,6 +211,13 @@ Comm.Handle("DEF", function(r)
             ns.db.defsVer = U.Int(head[2], Comm.server.dataVer, 0, INT32)
             ns.db.defsSchema = DEF_SCHEMA
         end
+        ns.Fire("STATE", "DEF")
+        return
+    end
+    -- the café's kinds (section 21): kept raw until their parsers land (they are not part of DEF_SCHEMA yet)
+    if kind and CAFE_DEF_KINDS[kind] then
+        S.cafeRaw.DEF = S.cafeRaw.DEF or {}
+        S.cafeRaw.DEF[kind] = r
         ns.Fire("STATE", "DEF")
         return
     end
@@ -715,7 +725,7 @@ end)
 ------------------------------------------------------------------------------------------------------
 -- Leaderboards
 ------------------------------------------------------------------------------------------------------
-local BOARDS = { K = true, R = true, E = true, F = true, A = true }
+local BOARDS = { K = true, R = true, E = true, F = true, A = true, C = true }   -- C: the café (section 21)
 ns.BOARDS = BOARDS
 
 Comm.Handle("LB", function(r)
@@ -860,6 +870,23 @@ Comm.Handle("ARENA", function(r)
     S.arena = a
     changed("ARENA")
 end)
+
+------------------------------------------------------------------------------------------------------
+-- The café (section 21), all unrevisioned: the records as they came (S.cafeRaw[op] = records, raw fields), until
+-- the café's own parsers land. A lost chunk asks for the op's state again (CAFEV for CAFT; CAFRES and CAFSUM for
+-- CAFST; CAFM needs its café id, so the menu asks itself; CAFUI and CAFAT wait for the next one).
+------------------------------------------------------------------------------------------------------
+local CAFE_OPS = { CAFE = "CAFE", CAFST = "CAFST", CAFQ = "CAFQ", CAFT = "CAFT", CAFEV = "CAFT", CAFRES = "CAFST",
+    CAFM = false, CAFO = "CAFO", CAFP = "CAFP", CAFBF = "CAFBF", CAFSUM = "CAFST", CAFUI = false, CAFAT = false }
+for op, topic in pairs(CAFE_OPS) do
+    if topic then
+        Comm.MapOpToTopic(op, topic)
+    end
+    Comm.Handle(op, function(r)
+        S.cafeRaw[op] = r
+        changed(op)
+    end)
+end
 
 Comm.MapOpToTopic("FIRSTS", "FIRSTS")
 Comm.Handle("FIRSTS", function(r)

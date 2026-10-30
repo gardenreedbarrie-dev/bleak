@@ -29,6 +29,12 @@ Animations.lua
 Transmog.lua
 Cases.lua
 Camp.lua
+CafeData.lua
+Cafe.lua
+CafeBar.lua
+CafeHud.lua
+CafeWindow.lua
+CafeMenu.lua
 RoyaleArtData.lua
 RoyaleStyle.lua
 Royale.lua

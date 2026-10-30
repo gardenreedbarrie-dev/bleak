@@ -337,6 +337,7 @@ Ui::OnRequest(Topic::Week, [](Player* p, TopicRequest const&) { MySeason::SendWe
 Ui::OnDefinitionsLoaded([](Definitions& d) { /* add dungeons, affixes... from your own tables */ });
 Ui::SetResetTimesSource([] { return std::make_pair(MyTasks::NextDaily(), MyTasks::NextWeekly()); });
 bool hasUi = Ui::HasAddon(player);
+bool hasCafeUi = Ui::HasClientCap(player, ClientCapCafeUi);   // an optional part of the addon its HELLO named (caps)
 // Emoji bubbles work out of the box (BleakholdUi.Emoji.*). The module applies the cooldown and
 // BleakholdUi.Emoji.Enable before any handler. Your own handler replaces the rest of the module's
 // (Data::Emoji in src/BleakholdData.cpp), so keep its checks: the id is in the catalogue (BleakholdEmoji.h,

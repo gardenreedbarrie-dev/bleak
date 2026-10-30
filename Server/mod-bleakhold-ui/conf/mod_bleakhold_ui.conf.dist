@@ -143,6 +143,12 @@ BleakholdUi.Frame.MaxBody = 1000
 #                                              many ms                                     Default: 1000
 #    BleakholdUi.RateLimit.WarModeIntervalMs     WARMODE (turn War Mode on or off, section 19) one per this
 #                                              many ms; the server's own toggle cooldown is far longer   Default: 2000
+#    BleakholdUi.RateLimit.CafeShiftIntervalMs   the cafe (section 21): CSHIFT and CSTAFF, one each per ms
+#                                                                                         Default: 2000
+#    BleakholdUi.RateLimit.CafeTakeIntervalMs    CTAKE one per this many ms                 Default: 500
+#    BleakholdUi.RateLimit.CafeStepIntervalMs    CSTEP one per this many ms                 Default: 200
+#    BleakholdUi.RateLimit.CafeReleaseIntervalMs CREL one per this many ms                  Default: 100
+#    BleakholdUi.RateLimit.CafeOrderIntervalMs   CORDER and CCANCEL, one each per ms        Default: 2000
 
 BleakholdUi.RateLimit.Burst = 10
 BleakholdUi.RateLimit.PerSecond = 5
@@ -163,6 +169,11 @@ BleakholdUi.RateLimit.RepairIntervalMs = 2000
 BleakholdUi.RateLimit.RoyaleIntervalMs = 500
 BleakholdUi.RateLimit.RoyaleDeployIntervalMs = 1000
 BleakholdUi.RateLimit.WarModeIntervalMs = 2000
+BleakholdUi.RateLimit.CafeShiftIntervalMs = 2000
+BleakholdUi.RateLimit.CafeTakeIntervalMs = 500
+BleakholdUi.RateLimit.CafeStepIntervalMs = 200
+BleakholdUi.RateLimit.CafeReleaseIntervalMs = 100
+BleakholdUi.RateLimit.CafeOrderIntervalMs = 2000
 
 ###################################################################################################
 # EMOJI BUBBLES (EMOJI: an emoji over the player's head for everyone nearby; needs the Bleakhold client)
@@ -480,6 +491,247 @@ BleakholdUi.Glide.StartVisualKit = 13709
 BleakholdUi.Glide.CastSpell = 100801
 
 ###################################################################################################
+# BLEAKHOLD CAFE (protocol section 21: CSHIFT, CTAKE, CSTEP, CREL, CORDER, CCANCEL, CSTAFF and the CAF* topics)
+#
+# Two cafes, The Lion's Roast in Stormwind (sw) and The Grinding Tusk in Orgrimmar (org): players work shifts
+# behind the bar and make coffee, tea and milkshakes for NPC customers and for other players, who order and pay
+# for them. A GM places each cafe once with ".cafe build sw" (see .cafe in the commands); the furniture stays
+# where it is and is spawned at every start, whatever Cafe.Enable says. The tables come from
+# data/sql/db-world/03_bleakhold_cafe_tables.sql, data/sql/db-characters/01_bleakhold_cafe_characters.sql and
+# the templates of data/sql/db-world/04_bleakhold_cafe_templates.sql (made by Tools/CafeForge).
+# Times are in seconds unless the key says Ms or Min; distances in yards; money in copper.
+###################################################################################################
+#
+#    BleakholdUi.Cafe.Enable
+#        Description: The cafe (feature bit 131072). 0 ends every shift without penalty, refunds every order
+#                     that was paid and not served, and sends the customers home; the furniture stays.
+#                     0 -> 1 by .bleakhold reload works: the startup checks always run.
+#        Default:     0 - Disabled
+#                     1 - Enabled
+#
+#    BleakholdUi.Cafe.GmOnly
+#        Description: 1 = only game masters get the feature bit, work shifts and order, NPC customers only
+#                     come while a game master is near, and only they read the [Cafe] announcements (testing on
+#                     the live realm before the launch).
+#        Default:     1
+#
+#    BleakholdUi.Cafe.UseNewArt
+#        Description: 1 = the cafe's own models (needs the Bleakhold client patch on every player and the
+#                     display rows on the server); 0 = stock stand-in models.
+#        Default:     0
+#
+#    BleakholdUi.Cafe.MinLevel           level needed for a shift (1..80)                     Default: 10
+#    BleakholdUi.Cafe.ShiftRadius        yards from the cafe within which a shift lasts (10..60)  Default: 30
+#    BleakholdUi.Cafe.LeaveWarnSec       seconds outside ShiftRadius before the shift ends    Default: 10
+#    BleakholdUi.Cafe.StationRadius      yards from a station's spot to work at it (0.8..3)   Default: 1.5
+#    BleakholdUi.Cafe.StationLeaveRadius yards at which a running step at a station breaks (at least
+#                                        StationRadius, up to 6)                             Default: 2
+#    BleakholdUi.Cafe.StationArcDeg      degrees of the facing arc toward a station (30..360) Default: 120
+#    BleakholdUi.Cafe.TickMs             the cafe's tick in ms (100..1000)                    Default: 250
+#    BleakholdUi.Cafe.StateGapMs         the least ms between two CAFST of one player (100..2000) Default: 250
+#    BleakholdUi.Cafe.IdleTicketSec      a shift that holds a ticket ends after this many seconds without an
+#                                        action (its tickets go back to the queue)           Default: 120
+#    BleakholdUi.Cafe.IdleSec            a shift without a step for this long ends            Default: 300
+#    BleakholdUi.Cafe.MaxBaristasPerIp   shifts at once from one IP address (1..10)           Default: 2
+#    BleakholdUi.Cafe.MaxBaristas        baristas behind one bar (1..8)                       Default: 4
+#    BleakholdUi.Cafe.WarnSec            seconds mounted, shapeshifted, stealthed or invisible before the
+#                                        shift ends (1..30)                                   Default: 5
+#    BleakholdUi.Cafe.LatencyCompMaxMs   the most a CREL client time may be behind the server's (100..1000)
+#                                                                                         Default: 400
+#    BleakholdUi.Cafe.ReleaseSlackMs     added to the session latency for that bound (0..400) Default: 150
+#    BleakholdUi.Cafe.GoodPadPermille    the Good band around the Perfect window (0..300)    Default: 100
+#    BleakholdUi.Cafe.GoldShiftPermille  the most the Perfect window moves per ticket (0..150) Default: 50
+#
+#    BleakholdUi.Cafe.Customer.Enable            NPC customers                              Default: 1
+#    BleakholdUi.Cafe.Customer.IntervalSec       seconds between two arrivals (5..600)      Default: 30
+#    BleakholdUi.Cafe.Customer.JitterSec         random part of that (0..300)               Default: 8
+#    BleakholdUi.Cafe.Customer.BaristaFactorPct  each barista after the first (up to four) makes customers
+#                                                come this much faster, percent (100..400)  Default: 160
+#    BleakholdUi.Cafe.Customer.MaxAlive          customers at once (0..12)                  Default: 6
+#    BleakholdUi.Cafe.Customer.RushMaxAlive      customers at once in the Morning Rush (0..16) Default: 8
+#    BleakholdUi.Cafe.Customer.AmbientMax        customers at once while nobody is on shift; they order
+#                                                from the owner (0..8)                      Default: 2
+#    BleakholdUi.Cafe.Customer.QueueCap          customers in the queue (1..8)              Default: 6
+#    BleakholdUi.Cafe.Customer.RushQueueCap      customers in the queue in the Rush (1..8)  Default: 8
+#    BleakholdUi.Cafe.Customer.NearPlayerRadius  customers only come while a player is this near (10..200)
+#                                                                                         Default: 60
+#    BleakholdUi.Cafe.Customer.QueuePatienceSec  a customer waits this long to be served   Default: 60
+#    BleakholdUi.Cafe.Customer.DrinkPatienceSec  and this long for the drink, plus PerLineSec per recipe
+#                                                line                                      Default: 30
+#    BleakholdUi.Cafe.Customer.PerLineSec                                                  Default: 6
+#    BleakholdUi.Cafe.Customer.SitMinSec / SitMaxSec  seconds a served customer sits      Default: 40 / 70
+#    BleakholdUi.Cafe.Customer.DrinkSpell        a spell a seated customer casts on itself while drinking
+#                                                (431 is a drink visual); 0 = the eat emote  Default: 0
+#    BleakholdUi.Cafe.Customer.NamedCooldownSec  seconds before the same named regular comes back Default: 600
+#
+#    BleakholdUi.Cafe.Order.Enable               player orders (CORDER)                     Default: 1
+#    BleakholdUi.Cafe.Order.MaxPerDay            orders of one player per day               Default: 12
+#    BleakholdUi.Cafe.Order.OrderRadius          yards from the cafe to order               Default: 40
+#    BleakholdUi.Cafe.Order.TakeTimeoutSec       a waiting order nobody takes goes to the house after this
+#                                                                                         Default: 25
+#    BleakholdUi.Cafe.Order.MaxPendingPerCafe    open orders per cafe (1..20)               Default: 6
+#    BleakholdUi.Cafe.Order.MaxRuins             ruined tickets of an order before the house takes it over
+#                                                (1..5)                                     Default: 2
+#    BleakholdUi.Cafe.Order.HouseWorkers         staff who make house orders (1..2)         Default: 2
+#    BleakholdUi.Cafe.Order.HouseBaseSec / HousePerLineSec  how long the house takes      Default: 30 / 5
+#    BleakholdUi.Cafe.Order.PickupRadius         yards from the counter to pick a drink up (seated at a cafe
+#                                                table, the errand boy brings it instead)   Default: 15
+#    BleakholdUi.Cafe.Order.PickupSec            a ready drink waits this long; then the price comes back by
+#                                                mail (the barista keeps the wage)          Default: 180
+#    BleakholdUi.Cafe.Order.BaristaSharePct      the barista's share of the price (0..100); an order keeps the
+#                                                share it was paid at                       Default: 60
+#    BleakholdUi.Cafe.Order.PairBoostPerDay      orders per day between the same two players that still count
+#                                                in full                                   Default: 3
+#    BleakholdUi.Cafe.Price.MinCopper            the lowest price of a drink                Default: 200
+#    BleakholdUi.Cafe.Price.LevelFloorPct        prices scale with the customer's level (level / 80), but never
+#                                                below this percent of the level 80 price    Default: 10
+#
+#    BleakholdUi.Cafe.Xp.DailyFull / DailyHalf   barista XP per day in full, then at half; after both, none
+#                                                                                         Default: 450 / 450
+#    BleakholdUi.Cafe.Tip.DailyBaseCopper / DailyPerLevelCopper  NPC tips per day: base plus per
+#                                                character level                           Default: 5000 / 2500
+#    BleakholdUi.Cafe.Points.DailyCap / RushExtra  weekly board points per day, and RushExtra more on a Rush
+#                                                day                                       Default: 400 / 100
+#    BleakholdUi.Cafe.Tired.AfterMin / RestMin / Pct  after AfterMin minutes of shifts a barista is Tired
+#                                                (rewards at Pct percent) until RestMin minutes off shift
+#                                                                                         Default: 60 / 15 / 50
+#
+#    BleakholdUi.Cafe.Buff.CoffeeXpPct           extra kill and quest XP with a coffee buff; counts as Well Fed
+#                                                (the better of the two, within BleakholdUi.Camp.MaxXpPct)
+#                                                0 = coffee gives no XP                     Default: 5
+#    BleakholdUi.Cafe.Buff.TeaRepPct             extra kill and quest reputation with a tea buff Default: 5
+#    BleakholdUi.Cafe.Buff.TeaExcludeFactions    factions tea never adds to (PvP factions; add any War Mode
+#                                                faction)                    Default: "509,510,729,730,889,890"
+#    BleakholdUi.Cafe.Buff.MaxMin                the most minutes a drink buff adds up to (10..600) Default: 60
+#    Coffee and tea never work on a battleground or arena map or in a battlefield zone (Wintergrasp).
+#
+#    BleakholdUi.Cafe.Rush.Enable                the Morning Rush (0: no new one; a running one still ends)
+#                                                                                         Default: 1
+#    BleakholdUi.Cafe.Rush.Times                 start times, realm local time, a comma list of HH:MM
+#                                                                                         Default: "08:00"
+#    BleakholdUi.Cafe.Rush.Minutes / WarnMinutes  its length, and the warning before it   Default: 20 / 5
+#    BleakholdUi.Cafe.Rush.Goal                  drinks the whole bar serves for the Rush reward Default: 60
+#    BleakholdUi.Cafe.Rush.SurvivorMin / SurvivorXp  drinks a barista serves during a Rush that meets its
+#                                                Goal for the Rush Survivor XP (and that XP) Default: 5 / 50
+#
+#    BleakholdUi.Cafe.Weekly.Enable              the weekly board and its payout            Default: 1
+#    BleakholdUi.Cafe.Weekly.MinDrinks / MinDays  drinks and days a barista needs to rank  Default: 50 / 3
+#    BleakholdUi.Cafe.Weekly.RewardCopper        the payout of places 1, 2, 3, ... by mail
+#                                    Default: "500000,300000,200000,50000,50000,50000,50000,50000,50000,50000"
+#    BleakholdUi.Cafe.Title.BaristaId / LegendId / LegendWins  CharTitles ids of the barista titles (0 = no
+#                                                title) and the weekly wins for the second  Default: 190 / 191 / 3
+#    BleakholdUi.Cafe.DailyResetHour / WeeklyResetWeekday  only when the realm gives no reset time: the hour
+#                                                (0..23) and weekday (0 = Sunday)           Default: 6 / 3
+#
+#    BleakholdUi.Cafe.Close.HostileNearRadius / HostileRadius / HostileDz  a PvP-flagged player of the other
+#                                                faction within HostileNearRadius (or in combat within
+#                                                HostileRadius), at most HostileDz above or below, in sight,
+#                                                pauses the cafe                             Default: 15 / 40 / 5
+#    BleakholdUi.Cafe.Close.ConfirmSec / ResumeSec / PauseMaxSec / ReopenSec  seconds before the pause, before
+#                                                the cafe resumes, the longest pause before it closes, and the
+#                                                time it stays closed                       Default: 5 / 20 / 90 / 120
+#
+#    BleakholdUi.Cafe.Bot.MinDrinks / PerfectPermille / SdMs  a barista with at least MinDrinks drinks in a
+#                                                day, at least PerfectPermille of them Perfect and a release
+#                                                spread under SdMs ms, is noted for .cafe flags at the end of
+#                                                the shift (nothing else happens)
+#                                                                                         Default: 200 / 980 / 30
+#    BleakholdUi.Cafe.OverheadKits               spell visuals over the stations (later)    Default: 0
+
+BleakholdUi.Cafe.Enable = 0
+BleakholdUi.Cafe.GmOnly = 1
+BleakholdUi.Cafe.UseNewArt = 0
+BleakholdUi.Cafe.MinLevel = 10
+BleakholdUi.Cafe.ShiftRadius = 30
+BleakholdUi.Cafe.LeaveWarnSec = 10
+BleakholdUi.Cafe.StationRadius = 1.5
+BleakholdUi.Cafe.StationLeaveRadius = 2.0
+BleakholdUi.Cafe.StationArcDeg = 120
+BleakholdUi.Cafe.TickMs = 250
+BleakholdUi.Cafe.StateGapMs = 250
+BleakholdUi.Cafe.IdleTicketSec = 120
+BleakholdUi.Cafe.IdleSec = 300
+BleakholdUi.Cafe.MaxBaristasPerIp = 2
+BleakholdUi.Cafe.MaxBaristas = 4
+BleakholdUi.Cafe.WarnSec = 5
+BleakholdUi.Cafe.LatencyCompMaxMs = 400
+BleakholdUi.Cafe.ReleaseSlackMs = 150
+BleakholdUi.Cafe.GoodPadPermille = 100
+BleakholdUi.Cafe.GoldShiftPermille = 50
+BleakholdUi.Cafe.Customer.Enable = 1
+BleakholdUi.Cafe.Customer.IntervalSec = 30
+BleakholdUi.Cafe.Customer.JitterSec = 8
+BleakholdUi.Cafe.Customer.BaristaFactorPct = 160
+BleakholdUi.Cafe.Customer.MaxAlive = 6
+BleakholdUi.Cafe.Customer.RushMaxAlive = 8
+BleakholdUi.Cafe.Customer.AmbientMax = 2
+BleakholdUi.Cafe.Customer.QueueCap = 6
+BleakholdUi.Cafe.Customer.RushQueueCap = 8
+BleakholdUi.Cafe.Customer.NearPlayerRadius = 60
+BleakholdUi.Cafe.Customer.QueuePatienceSec = 60
+BleakholdUi.Cafe.Customer.DrinkPatienceSec = 30
+BleakholdUi.Cafe.Customer.PerLineSec = 6
+BleakholdUi.Cafe.Customer.SitMinSec = 40
+BleakholdUi.Cafe.Customer.SitMaxSec = 70
+BleakholdUi.Cafe.Customer.DrinkSpell = 0
+BleakholdUi.Cafe.Customer.NamedCooldownSec = 600
+BleakholdUi.Cafe.Order.Enable = 1
+BleakholdUi.Cafe.Order.MaxPerDay = 12
+BleakholdUi.Cafe.Order.OrderRadius = 40
+BleakholdUi.Cafe.Order.TakeTimeoutSec = 25
+BleakholdUi.Cafe.Order.MaxPendingPerCafe = 6
+BleakholdUi.Cafe.Order.MaxRuins = 2
+BleakholdUi.Cafe.Order.HouseWorkers = 2
+BleakholdUi.Cafe.Order.HouseBaseSec = 30
+BleakholdUi.Cafe.Order.HousePerLineSec = 5
+BleakholdUi.Cafe.Order.PickupRadius = 15
+BleakholdUi.Cafe.Order.PickupSec = 180
+BleakholdUi.Cafe.Order.BaristaSharePct = 60
+BleakholdUi.Cafe.Order.PairBoostPerDay = 3
+BleakholdUi.Cafe.Price.MinCopper = 200
+BleakholdUi.Cafe.Price.LevelFloorPct = 10
+BleakholdUi.Cafe.Xp.DailyFull = 450
+BleakholdUi.Cafe.Xp.DailyHalf = 450
+BleakholdUi.Cafe.Tip.DailyBaseCopper = 5000
+BleakholdUi.Cafe.Tip.DailyPerLevelCopper = 2500
+BleakholdUi.Cafe.Points.DailyCap = 400
+BleakholdUi.Cafe.Points.RushExtra = 100
+BleakholdUi.Cafe.Tired.AfterMin = 60
+BleakholdUi.Cafe.Tired.RestMin = 15
+BleakholdUi.Cafe.Tired.Pct = 50
+BleakholdUi.Cafe.Buff.CoffeeXpPct = 5
+BleakholdUi.Cafe.Buff.TeaRepPct = 5
+BleakholdUi.Cafe.Buff.TeaExcludeFactions = "509,510,729,730,889,890"
+BleakholdUi.Cafe.Buff.MaxMin = 60
+BleakholdUi.Cafe.Rush.Enable = 1
+BleakholdUi.Cafe.Rush.Times = "08:00"
+BleakholdUi.Cafe.Rush.Minutes = 20
+BleakholdUi.Cafe.Rush.WarnMinutes = 5
+BleakholdUi.Cafe.Rush.Goal = 60
+BleakholdUi.Cafe.Rush.SurvivorMin = 5
+BleakholdUi.Cafe.Rush.SurvivorXp = 50
+BleakholdUi.Cafe.Weekly.Enable = 1
+BleakholdUi.Cafe.Weekly.MinDrinks = 50
+BleakholdUi.Cafe.Weekly.MinDays = 3
+BleakholdUi.Cafe.Weekly.RewardCopper = "500000,300000,200000,50000,50000,50000,50000,50000,50000,50000"
+BleakholdUi.Cafe.Title.BaristaId = 190
+BleakholdUi.Cafe.Title.LegendId = 191
+BleakholdUi.Cafe.Title.LegendWins = 3
+BleakholdUi.Cafe.DailyResetHour = 6
+BleakholdUi.Cafe.WeeklyResetWeekday = 3
+BleakholdUi.Cafe.Close.HostileNearRadius = 15
+BleakholdUi.Cafe.Close.HostileRadius = 40
+BleakholdUi.Cafe.Close.HostileDz = 5
+BleakholdUi.Cafe.Close.ConfirmSec = 5
+BleakholdUi.Cafe.Close.ResumeSec = 20
+BleakholdUi.Cafe.Close.PauseMaxSec = 90
+BleakholdUi.Cafe.Close.ReopenSec = 120
+BleakholdUi.Cafe.Bot.MinDrinks = 200
+BleakholdUi.Cafe.Bot.PerfectPermille = 980
+BleakholdUi.Cafe.Bot.SdMs = 30
+BleakholdUi.Cafe.OverheadKits = 0
+
+###################################################################################################
 # KEYSTONE RUNS
 ###################################################################################################
 #
@@ -496,7 +748,7 @@ BleakholdUi.KeyRun.HeartbeatSec = 15
 BleakholdUi.KeyRun.ServerPullTimer = 0
 
 ###################################################################################################
-# CHAT ANNOUNCEMENTS ([Raid Legacy], [Server First], [Season], [Queue], [Record], [Case], [Royale], [War])
+# CHAT ANNOUNCEMENTS ([Raid Legacy], [Server First], [Season], [Queue], [Record], [Case], [Royale], [War], [Cafe])
 ###################################################################################################
 #
 #    BleakholdUi.Announce.ColorTagsWithoutAddon
@@ -516,6 +768,7 @@ BleakholdUi.Announce.Color.Record = "F1D9A0"
 BleakholdUi.Announce.Color.Case = "C9A2F5"
 BleakholdUi.Announce.Color.Royale = "B98CFF"
 BleakholdUi.Announce.Color.War = "E0604A"
+BleakholdUi.Announce.Color.Cafe = "D8B98A"
 
 ###################################################################################################
 # WAR EFFORT TOKEN HAND-IN (the "Hand in" button of the Season window)

@@ -169,6 +169,8 @@ test("camp: the warmth and food indicator counts down and hides when the bonus e
     H.contains(ind.text:GetText(), "Well fed")
     M.Fire(ind, "OnEnter")
     H.contains(table.concat(M.env.GameTooltip.__lines or {}, "\n"), "+5% experience", "tooltip")
+    -- fed is also the café's coffee (section 21): the tooltip names both, never food alone
+    H.contains(table.concat(M.env.GameTooltip.__lines or {}, "\n"), "from food or caf\195\169 coffee", "fed's sources")
     M.Fire(ind, "OnLeave")
     campst(M, {})
     M.Advance(1.2)

@@ -55,6 +55,17 @@
  *      OnDefinitionsLoaded editor (Definitions::arenaTiers, arenaRewards). Without a board handler LBQ A gets an empty
  *      LB.
  *
+ *   7. The cafe (section 21): the cafe system owns every rule (stations, timers, grades, money) and pushes views:
+ *          Ui::SetFeature(FeatureCafe, true);                   // the cafe passed its checks (HELLO bit 131072)
+ *          Ui::OnIntent(IntentType::CafeStep, [](Player* p, Intent const& in) { ... in.ticketId, in.stepIndex ... });
+ *          Ui::OnRequest(Topic::CafeState, [](Player* p, TopicRequest const&) { Ui::SendCafeState(p, ...); });
+ *          Ui::OnBoardQuery(Board::Cafe, [](Player* p, Intent const& in) { ... LB + LBME of cafe in.dungeonId ... });
+ *          Ui::SendCafeStep(barista, event); Ui::SendCafeAtBar(nearby, bar); ...
+ *      GET CAFM carries the cafe id in TopicRequest::arg1. DEF H, G, F and U come from your OnDefinitionsLoaded editor
+ *      (Definitions::cafes, cafeActions, cafeRecipes, cafeLevels). The bit is decided per player (GmOnly): while it is
+ *      off for a player the module answers every cafe intent with ERR cafe_off (CafeErr::Off), whoever handles it, and
+ *      a GET of a cafe topic with nothing.
+ *
  * Threading: every function here may be called from any thread (map update threads included). The
  * module queues the frames and sends them from the world thread. Your handlers and providers are
  * always called on the world thread, never while the module holds a lock.
@@ -96,12 +107,15 @@ namespace Bleakhold::Ui
     //   ERR royale_off and RDEPLOY is dropped, also with your handler.
     //   WARMODE -> ERR "unavailable"; while FeatureWarMode is off it gets ERR wm_off, also with your handler.
     //   While FeatureArena is off QJOIN with kind A gets ERR arena_off, also with your handler.
+    //   CSHIFT CTAKE CSTEP CREL CORDER CCANCEL CSTAFF (section 21) -> the module's cafe; while the cafe bit is off
+    //   for the player they get ERR cafe_off.
     //   HELLO, GET and PING are handled by the module.
     using IntentHandler = std::function<void(Player* player, Intent const& intent)>;
     void OnIntent(IntentType type, IntentHandler handler);
 
-    // Your handler for LBQ of one board (Board::Arena, section 20). It answers that board whoever handles LBQ (yours
-    // through OnIntent, or the module's own tables, which keep K R E F). Without one, LBQ A gets an empty LB and LBME.
+    // Your handler for LBQ of one board (Board::Arena, section 20; Board::Cafe, section 21). It answers that board
+    // whoever handles LBQ (yours through OnIntent, or the module's own tables, which keep K R E F). Without one, LBQ A
+    // gets an empty LB and LBME.
     void OnBoardQuery(Board board, IntentHandler handler);
 
     // The SMSG_PLAY_SPELL_VISUAL kit that shows emoji `emojiId` (< EmojiCatalogueCount, BleakholdEmoji.h)
@@ -128,6 +142,11 @@ namespace Bleakhold::Ui
     // True when this player's client completed the handshake (has the Bleakhold addon running).
     bool HasAddon(Player* player);
 
+    // True when the client's last HELLO named every bit of `cap` in its caps (ClientCap in protocol/BleakholdIntent.h,
+    // for example ClientCapCafeUi): the optional parts of the addon it has loaded. A choice of what to show, never a
+    // permission.
+    bool HasClientCap(Player* player, uint32_t cap);
+
     // HELLO feature bits (FeatureBits in BleakholdMessages.h) that your system turns on at runtime, on top of the
     // ones mod_bleakhold_ui.conf sets: SetFeature(FeatureRoyale, true) once Bleakhold Royale validated its data,
     // false when it turns off. false only withdraws an earlier true; it never hides a bit the configuration sets.
@@ -146,7 +165,8 @@ namespace Bleakhold::Ui
     //   ERA -> bleakhold_week_schedule; SEASON -> bleakhold_season + war effort tables;
     //   SET, LIDX -> bleakhold_legacy_set; FIRSTS -> bleakhold_server_first; MPLUS -> the run tracker;
     //   DEF -> the definition tables; CAMPST -> the module's camping state; ROYS ROYM WMST WPZ WPMAP WANTED ARENA
-    //   -> nothing. Example:
+    //   -> nothing; CAFE CAFST CAFQ CAFT CAFM CAFO CAFP CAFBF -> the module's cafe (nothing while its bit is off for
+    //   the player). Example:
     //     Ui::OnRequest(Topic::Week, [](Player* p, TopicRequest const&) { Ui::SendWeek(p, MySeason::Week(p)); });
     using TopicProvider = std::function<void(Player* player, TopicRequest const& request)>;
     void OnRequest(Topic topic, TopicProvider provider);
@@ -225,6 +245,25 @@ namespace Bleakhold::Ui
     // push from a login hook comes before the client's HELLO and is dropped). Push it after each of the player's rated
     // matches, and to everyone on every change of the season's state.
     void SendArena(Player* player, ArenaState const& state);
+    // The cafe (section 21), all unrevisioned and never remembered ("the last one counts"): answer each GET from your
+    // own state. The list versions send the same message to every player given (encoded once): CAFE to every ready
+    // player on a change, CAFAT to the players near the bar. SendCafeQueue orders the rows for the receiver
+    // (SortCafeQueueRows by the player's name) before it cuts them; SendCafeOpenUi sends nothing for an unknown `what`.
+    void SendCafeList(Player* player, CafeList const& list);              // CAFE
+    void SendCafeList(std::vector<Player*> const& players, CafeList const& list);
+    void SendCafeState(Player* player, CafeState const& state);           // CAFST
+    void SendCafeQueue(Player* player, CafeQueue const& queue);           // CAFQ
+    void SendCafeTickets(Player* player, CafeTickets const& tickets);     // CAFT (empty -> record "0")
+    void SendCafeStep(Player* player, CafeStepEvent const& event);        // CAFEV
+    void SendCafeResult(Player* player, CafeResult const& result);        // CAFRES
+    void SendCafeMenu(Player* player, CafeMenu const& menu);              // CAFM
+    void SendCafeOrder(Player* player, CafeOrderState const& order);      // CAFO (orderId 0 -> record "0")
+    void SendCafeProfile(Player* player, CafeProfile const& profile);     // CAFP
+    void SendCafeBuffs(Player* player, CafeBuffs const& buffs);           // CAFBF
+    void SendCafeSummary(Player* player, CafeSummary const& summary);     // CAFSUM
+    void SendCafeOpenUi(Player* player, std::string_view what, uint8_t cafeId);   // CAFUI (menu, shift, board, help)
+    void SendCafeAtBar(Player* player, CafeAtBar const& bar);             // CAFAT
+    void SendCafeAtBar(std::vector<Player*> const& players, CafeAtBar const& bar);
     // Low-level keystone run messages for one player. Prefer the run tracker below.
     void SendKeyRunStart(Player* player, Bleakhold::KeyRunStart const& start);   // MPS
     void SendKeyRunState(Player* player, KeyRunState const& state);   // MP
@@ -267,7 +306,7 @@ namespace Bleakhold::Ui
     // Server-wide chat announcements (CHAT_MSG_SYSTEM with a tag the addon colours and can hide)
     // =============================================================================================
     // War: World PvP Fronts (start, end, the warning before one; section 19).
-    enum class AnnounceTag : uint8_t { RaidLegacy, ServerFirst, Season, Queue, Record, Case, Royale, War };
+    enum class AnnounceTag : uint8_t { RaidLegacy, ServerFirst, Season, Queue, Record, Case, Royale, War, Cafe };
     // To every online player. `text` is server text and may contain real |Hitem:...|h links.
     void Announce(AnnounceTag tag, std::string_view text);
     void AnnounceTo(Player* player, AnnounceTag tag, std::string_view text);

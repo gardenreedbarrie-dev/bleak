@@ -216,7 +216,7 @@ class Action:
     link: str
     dest: str
     backup: str
-    backup_plan: str = ""  # replace and add: "take", "keep" or "aside" (backup_plan()); "" when nothing is there
+    backup_plan: str = ""  # replace and add: "take", "keep", "aside" or "added" (backup_plan()); "" when nothing is there
 
     def text(self) -> str:
         return {
@@ -234,8 +234,14 @@ class Action:
 def backup_plan(dest: str, backup: str, item: dict | None) -> str:
     """What happens to OUT/old-patches/<path> before dest is replaced: "take" a backup of dest (there is none yet),
     "keep" the one there (it is dest, or the file of before an earlier install from OUT whose archive dest still is),
-    or put it "aside" first (another install replaced the archive since: going back to that backup would undo it)."""
+    put it "aside" first (another install replaced the archive since: going back to that backup would undo it), or
+    none at all, "added": dest is the archive an earlier install from OUT added (a new archive, its record says no
+    backup) and still is, so going back removes it as before; a backup of it would put that earlier copy back."""
     if not os.path.lexists(backup):
+        if (item is not None and not item["backup"] and os.path.isfile(dest)
+                and fingerprint(dest) == installed_of(item)):
+            return "added"
+
         return "take" if os.path.isfile(dest) else ""
 
     if os.path.isfile(dest) and same_file(dest, backup):
@@ -429,6 +435,10 @@ def keep_backup(action: Action, out_dir: str, say) -> None:
         say(f"backup already there: {action.backup}")
         return
 
+    if action.backup_plan == "added":
+        say(f"no backup: an earlier install from this folder added {action.dest} (--restore removes it)")
+        return
+
     os.makedirs(os.path.dirname(action.backup), exist_ok=True)
 
     try:
@@ -488,7 +498,9 @@ def dry_backup_text(action: Action, out_dir: str) -> str:
         return text + (f" and back up {action.dest} there anew" if action.kind == "replace" else "")
 
     return {"take": f"would back up {action.dest} to {action.backup}",
-            "keep": f"would keep the backup {action.backup}"}.get(action.backup_plan, "")
+            "keep": f"would keep the backup {action.backup}",
+            "added": f"would keep no backup: an earlier install from this folder added {action.dest}"}.get(
+                action.backup_plan, "")
 
 
 def run(out_dir: str, patches_dir: str, dry_run: bool = False, restore: bool = False, say=print) -> int:
@@ -575,7 +587,9 @@ def run(out_dir: str, patches_dir: str, dry_run: bool = False, restore: bool = F
             keep_backup(action, out_dir, say)
 
         for action in work:
-            item = {"backup": action.kind == "replace", "tool": (manifest or {}).get("tool", ""), "at": now()}
+            # an archive an earlier install from OUT added stays one install added: --restore removes it
+            item = {"backup": action.kind == "replace" and action.backup_plan != "added",
+                    "tool": (manifest or {}).get("tool", ""), "at": now()}
 
             if item["backup"]:
                 item["backup_size"], item["backup_mtime_ns"] = fingerprint(action.backup)

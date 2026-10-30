@@ -672,6 +672,25 @@ return function(opts)
                 key = key, command = command }
         end
     end
+    -- the café's barista bar (CafeBar.lua): a key clicks a named button, the client's command "CLICK name:mouseButton"
+    -- in the same list (M.OverrideButton(key) answers the button and whether the binding has priority)
+    env.SetOverrideBindingClick = function(owner, isPriority, key, button, mouseButton)
+        local usage = "Usage: SetOverrideBindingClick(owner, isPriority, \"KEY\", \"buttonName\"[, \"mouseButton\"])"
+        bindingOwner(owner, usage)
+        assert(type(key) == "string" and type(button) == "string", usage)
+        assert(not M.combat, "SetOverrideBindingClick in combat")
+        env.SetOverrideBinding(owner, isPriority, key, "CLICK " .. button .. ":" .. (mouseButton or "LeftButton"))
+        local b = M.overrideBindings[#M.overrideBindings]
+        b.button = button
+    end
+    function M.OverrideButton(key)
+        local command = M.OverrideAction(key)
+        for _, b in ipairs(M.overrideBindings) do
+            if b.key == key and b.command == command and b.button then
+                return b.button, b.priority
+            end
+        end
+    end
     env.ClearOverrideBindings = function(owner)
         bindingOwner(owner, "Usage: ClearOverrideBindings(owner)")
         assert(not M.combat, "ClearOverrideBindings in combat")

@@ -24,6 +24,7 @@ namespace Bleakhold::Ui
     void Refuse(Player* player, Intent const& intent, std::string_view code, std::string_view text) { M().Refuse(player, intent, code, text); }
     void OnHello(std::function<void(Player*, Intent const&)> observer) { M().AddHelloObserver(std::move(observer)); }
     bool HasAddon(Player* player) { return M().HasAddon(player); }
+    bool HasClientCap(Player* player, uint32_t cap) { return M().HasClientCap(player, cap); }
     void SetFeature(uint32_t feature, bool on) { M().SetFeature(feature, on); }
     bool FeatureOn(uint32_t feature) { return M().FeatureOn(feature); }
 
@@ -236,6 +237,88 @@ namespace Bleakhold::Ui
     void SendArena(Player* player, ArenaState const& m)
     {
         M().Push(player, "ARENA", Topic::Count, nullptr, [&](uint32_t) { return EncodeArena(m); });
+    }
+
+    // ---- the cafe (section 21) ----
+    void SendCafeList(Player* player, CafeList const& m)
+    {
+        M().Push(player, "CAFE", Topic::Count, nullptr, [&](uint32_t) { return EncodeCafeList(m); });
+    }
+
+    void SendCafeList(std::vector<Player*> const& players, CafeList const& m)
+    {
+        PushAll(players, "CAFE", EncodeCafeList(m));
+    }
+
+    void SendCafeState(Player* player, CafeState const& m)
+    {
+        M().Push(player, "CAFST", Topic::Count, nullptr, [&](uint32_t) { return EncodeCafeState(m); });
+    }
+
+    void SendCafeQueue(Player* player, CafeQueue const& m)
+    {
+        if (!player)
+            return;
+        // the rows a barista can take are never the ones cut: waiting rows first, then the receiver's own
+        CafeQueue sorted = m;
+        SortCafeQueueRows(sorted.rows, player->GetName());
+        M().Push(player, "CAFQ", Topic::Count, nullptr, [&](uint32_t) { return EncodeCafeQueue(sorted); });
+    }
+
+    void SendCafeTickets(Player* player, CafeTickets const& m)
+    {
+        M().Push(player, "CAFT", Topic::Count, nullptr, [&](uint32_t) { return EncodeCafeTickets(m); });
+    }
+
+    void SendCafeStep(Player* player, CafeStepEvent const& m)
+    {
+        M().Push(player, "CAFEV", Topic::Count, nullptr, [&](uint32_t) { return EncodeCafeStep(m); });
+    }
+
+    void SendCafeResult(Player* player, CafeResult const& m)
+    {
+        M().Push(player, "CAFRES", Topic::Count, nullptr, [&](uint32_t) { return EncodeCafeResult(m); });
+    }
+
+    void SendCafeMenu(Player* player, CafeMenu const& m)
+    {
+        M().Push(player, "CAFM", Topic::Count, nullptr, [&](uint32_t) { return EncodeCafeMenu(m); });
+    }
+
+    void SendCafeOrder(Player* player, CafeOrderState const& m)
+    {
+        M().Push(player, "CAFO", Topic::Count, nullptr, [&](uint32_t) { return EncodeCafeOrder(m); });
+    }
+
+    void SendCafeProfile(Player* player, CafeProfile const& m)
+    {
+        M().Push(player, "CAFP", Topic::Count, nullptr, [&](uint32_t) { return EncodeCafeProfile(m); });
+    }
+
+    void SendCafeBuffs(Player* player, CafeBuffs const& m)
+    {
+        M().Push(player, "CAFBF", Topic::Count, nullptr, [&](uint32_t) { return EncodeCafeBuffs(m); });
+    }
+
+    void SendCafeSummary(Player* player, CafeSummary const& m)
+    {
+        M().Push(player, "CAFSUM", Topic::Count, nullptr, [&](uint32_t) { return EncodeCafeSummary(m); });
+    }
+
+    void SendCafeOpenUi(Player* player, std::string_view what, uint8_t cafeId)
+    {
+        if (IsCafeUiTarget(what))
+            M().Push(player, "CAFUI", Topic::Count, nullptr, [&](uint32_t) { return EncodeCafeOpenUi(what, cafeId); });
+    }
+
+    void SendCafeAtBar(Player* player, CafeAtBar const& m)
+    {
+        M().Push(player, "CAFAT", Topic::Count, nullptr, [&](uint32_t) { return EncodeCafeAtBar(m); });
+    }
+
+    void SendCafeAtBar(std::vector<Player*> const& players, CafeAtBar const& m)
+    {
+        PushAll(players, "CAFAT", EncodeCafeAtBar(m));
     }
 
     void RiftStatus(Player* player, RiftState const& m)

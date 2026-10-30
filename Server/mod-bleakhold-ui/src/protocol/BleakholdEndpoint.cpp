@@ -65,6 +65,11 @@ namespace Bleakhold::Proto
         _royaleDeploy.Configure(1, perInterval(l.royaleDeployIntervalMs));
         _royaleSpectate.Configure(1, perInterval(l.royaleIntervalMs));
         _warMode.Configure(1, perInterval(l.warModeIntervalMs));
+        _cafeShift.Configure(1, perInterval(l.cafeShiftIntervalMs));
+        _cafeTake.Configure(1, perInterval(l.cafeTakeIntervalMs));
+        _cafeStep.Configure(1, perInterval(l.cafeStepIntervalMs));
+        _cafeRelease.Configure(1, perInterval(l.cafeReleaseIntervalMs));
+        _cafeOrder.Configure(1, perInterval(l.cafeOrderIntervalMs));
     }
 
     void Endpoint::CountDrop(uint64_t nowMs, ReceiveResult& r)
@@ -105,6 +110,15 @@ namespace Bleakhold::Proto
             case IntentType::RoyaleDeploy: return _royaleDeploy.Take(nowMs);
             case IntentType::RoyaleSpectate: return _royaleSpectate.Take(nowMs);
             case IntentType::WarMode: return _warMode.Take(nowMs);
+            case IntentType::CafeShift:
+            case IntentType::CafeStaff:
+                return _cafeShift.Take(nowMs);
+            case IntentType::CafeTake: return _cafeTake.Take(nowMs);
+            case IntentType::CafeStep: return _cafeStep.Take(nowMs);
+            case IntentType::CafeRelease: return _cafeRelease.Take(nowMs);
+            case IntentType::CafeOrder:
+            case IntentType::CafeCancel:
+                return _cafeOrder.Take(nowMs);
             case IntentType::TaskClaim:
             case IntentType::TaskReroll:
             case IntentType::BountyClaim:
@@ -135,7 +149,7 @@ namespace Bleakhold::Proto
             std::string key = TopicName(t.topic);
             if (t.topic == Topic::Set)
                 key += "," + std::to_string(t.arg1) + "," + std::to_string(t.arg2);
-            else if (t.topic == Topic::Case)
+            else if (t.topic == Topic::Case || t.topic == Topic::CafeMenu)
                 key += "," + std::to_string(t.arg1);
             // a small request with a large answer: the client asks for these once per login or window
             bool const heavy = t.topic == Topic::Def || t.topic == Topic::Lidx || t.topic == Topic::Board;
@@ -229,10 +243,12 @@ namespace Bleakhold::Proto
         else if (IsActionIntent(parsed.type))
         {
             // duplicate guard: the same intent as the last accepted one of its op, within the window. RSPEC is a step
-            // through the players alive, so the same dir again is a new request (its rate limit still holds).
+            // through the players alive, so the same dir again is a new request; the cafe's CTAKE ("next" twice is two
+            // takes), CSTEP and CREL (a re-press after an ERR is the same payload) neither (IsDuplicateGuarded). Their
+            // rate limits still hold.
             LastIntent& last = _last[static_cast<std::size_t>(parsed.type)];
             std::string key = EncodeIntentPayload(parsed);
-            bool const dedupe = parsed.type != IntentType::RoyaleSpectate;
+            bool const dedupe = IsDuplicateGuarded(parsed.type);
             if (dedupe && _limits.duplicateWindowMs && last.set && last.key == key &&
                 nowMs - last.atMs < _limits.duplicateWindowMs)
             {

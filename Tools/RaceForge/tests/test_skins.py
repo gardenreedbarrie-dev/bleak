@@ -1127,6 +1127,35 @@ class InstallRecordTests(unittest.TestCase):
         self.assertEqual(install.run(out, self.patches, restore=restore, say=lines.append), 0)
         return "\n".join(lines)
 
+    def test_an_added_archive_replaced_by_the_next_install_is_still_removed_by_restore(self):
+        # a tool adds patch-4.MPQ (origin "new"); its next run into the same folder finds its own archive in the patch
+        # folder and replaces it (origin "patches"): --restore must remove it, not put the first copy back
+        out = os.path.join(self.tmp, "cafe")
+        new = os.path.join(self.patches, "patch-4.MPQ")
+
+        def produce(data: bytes, origin: str):
+            from rflib import update
+            update.clean_out_dir(out, True, ("client", "install.json"))
+            path = os.path.join(out, "client", "patch-4.MPQ")
+            self.write(path, data)
+            size, mtime = install.fingerprint(new) if origin == "patches" else (None, None)
+            entries = [install.entry("patch-4.MPQ", "Data\\patch-4.MPQ", origin, new if origin == "patches" else "",
+                                     size, mtime, path)]
+            install.write_manifest(out, "cafeforge.py build", self.patches, None, entries, True)
+
+        produce(b"cafe v1", "new")
+        self.assertIn(f"added: {new}", self.run_install(out))
+        produce(b"cafe v2", "patches")
+        text = self.run_install(out)
+        self.assertIn(f"no backup: an earlier install from this folder added {new}", text)
+        self.assertIn(f"replaced: {new}", text)
+        self.assertFalse(os.path.exists(os.path.join(out, "old-patches", "patch-4.MPQ")))
+        self.assertEqual(self.read(new), b"cafe v2")
+        text = self.run_install(out, restore=True)
+        self.assertIn(f"removed: {new}", text)
+        self.assertFalse(os.path.exists(new))                       # before the fix: "cafe v1" was put back
+        self.assertEqual(sorted(os.listdir(self.patches)), ["Patch-R.MPQ"])
+
     def test_running_again_into_the_folder_keeps_the_way_back(self):
         # after the install, skins runs again into the same folder: up to date (install.json without archives), then
         # with a new archive it does not install, then cut off (checks_passed false): --restore still goes back
