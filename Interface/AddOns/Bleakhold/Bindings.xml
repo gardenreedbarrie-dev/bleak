@@ -29,4 +29,7 @@
 	<Binding name="BLEAKHOLD_ROYALE_MAP">
 		BleakholdToggle("royalemap")
 	</Binding>
+	<Binding name="BLEAKHOLD_CAFE">
+		BleakholdToggle("cafe")
+	</Binding>
 </Bindings>

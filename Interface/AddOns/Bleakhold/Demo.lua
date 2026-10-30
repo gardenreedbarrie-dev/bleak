@@ -115,7 +115,8 @@ end
 
 local function pushHello()
     local now = time()
-    Demo.Push("HELLO", { { ns.PROTO, 1, now, 0, 0, 2 + 8 + 16 + 32 + 64 + 4096 + 8192 + 16384 + 32768 + 65536, 1,
+    -- (131072: the café, section 21)
+    Demo.Push("HELLO", { { ns.PROTO, 1, now, 0, 0, 2 + 8 + 16 + 32 + 64 + 4096 + 8192 + 16384 + 32768 + 65536 + 131072, 1,
         now + 7 * 3600 + 12 * 60, now + 3 * 86400 + 5 * 3600, "Bleakhold", "bleakhold.com" } })
 end
 
@@ -369,6 +370,10 @@ function Demo.Respond(op, payload)
     if ns.Arena and ns.Arena.DemoRespond(op, recs) then
         return
     end
+    -- the café: its topics of a GET, a shift, the steps, an order and its board (Cafe.lua)
+    if ns.Cafe and ns.Cafe.DemoRespond(op, recs) then
+        return
+    end
     if op == "HELLO" then
         pushHello()
     elseif op == "GET" then
@@ -532,6 +537,10 @@ function Demo.Stop(silent)
     if ns.Countdown then
         ns.Countdown.frame:Hide()
     end
+    -- the café's HUD and key overrides go with its demo state
+    if ns.Cafe then
+        ns.Cafe.Reset()
+    end
     if not silent then
         ns.Print("demo mode off.")
         if Comm.canSend then
@@ -540,9 +549,16 @@ function Demo.Stop(silent)
     end
 end
 
-ns.AddCommand("demo", "preview every window with sample data: /bh demo [off]", function(args)
-    if (args or ""):lower() == "off" then
+ns.AddCommand("demo", "preview every window with sample data: /bh demo [off|cafe]", function(args)
+    args = (args or ""):lower()
+    if args == "off" then
         Demo.Stop(false)
+    elseif args == "cafe" then
+        -- a 60 s scripted barista shift (Cafe.lua)
+        Demo.Start()
+        if ns.Cafe then
+            ns.Cafe.DemoShift()
+        end
     else
         Demo.Start()
     end

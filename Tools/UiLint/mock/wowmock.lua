@@ -485,13 +485,14 @@ return function(opts)
     end
     function IMPL.SetFormattedText(self, fmt, ...) IMPL.SetText(self, string.format(fmt, ...)) end
     function IMPL.GetText(self) return self.__text end
-    -- M.clientCut: as in game, a FontString with both a width and a height measures the text GetDisplayText already
-    -- cut with "..." (CSimpleFontString::GetStringWidth), so never more than its width. Off by default, so the tests
-    -- that check a line is not cut can still measure the whole of it.
+    -- CSimpleFontString::GetStringWidth measures the text as shown (GetDisplayText(width, height)): with both a width
+    -- and a height set it is cut to the box with "...", so it is never wider than the width. Tests opt in with
+    -- M.clientCut (or its other name, M.measureAsShown); off by default, so the tests that check a line is not cut can
+    -- still measure the whole of it.
     function IMPL.GetStringWidth(self)
         local size = self.__font and self.__font[2] or 12
         local full = #(self.__text or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "") * size * 0.52
-        if M.clientCut and self.__w > 0 and self.__h > 0 then
+        if (M.clientCut or M.measureAsShown) and (self.__w or 0) > 0 and (self.__h or 0) > 0 then
             return math.min(full, self.__w)
         end
         return full
@@ -792,8 +793,16 @@ return function(opts)
     function IMPL.GetFacing(self) return self.__facing or 0 end
     function IMPL.SetPosition(self, x, y, z) self.__pos = { num(x, "SetPosition"), num(y, "x"), num(z, "x") } end
     function IMPL.GetPosition(self) local p = self.__pos or { 0, 0, 0 } return p[1], p[2], p[3] end
+    -- Model:SetModel(file) and SetModelScale(scale) (CSimpleModel_Scripts.cpp): kept for tests (__model, __modelScale)
+    function IMPL.SetModel(self, file)
+        assert(type(file) == "string", "Usage: SetModel(\"file\")")
+        self.__model = file
+    end
+    function IMPL.SetModelScale(self, s) self.__modelScale = num(s, "SetModelScale") end
 
     function IMPL.SetOwner(self, owner, anchor) self.__owner = owner; self.__lines = {}; self.__item = nil; self.__shown = true end
+    function IMPL.GetOwner(self) return self.__owner end
+    function IMPL.IsOwned(self, f) return (self.__shown and self.__owner == f) and 1 or nil end
     function IMPL.ClearLines(self) self.__lines = {}; self.__item = nil; fire(self, "OnTooltipCleared") end
     function IMPL.AddLine(self, text, r, g, b, wrap)
         self.__lines = self.__lines or {}
@@ -869,6 +878,9 @@ return function(opts)
     env.GetRealZoneText = function() return M.zone end
     env.GetInstanceInfo = function() return M.zone, M.instanceType, 1, "Normal", 5, 0, nil end
     env.InCombatLockdown = function() return M.combat and 1 or nil end
+    env.UnitAffectingCombat = function(unit) return (unit == "player" and M.combat) and 1 or nil end
+    -- M.dead: the player is dead or a ghost (the café's summary card waits for PLAYER_ALIVE / PLAYER_UNGHOST)
+    env.UnitIsDeadOrGhost = function(unit) return (unit == "player" and M.dead) and 1 or nil end
     env.IsShiftKeyDown = function() return M.shift and 1 or nil end
     -- the player's movement (Script_IsFalling: 1 while falling or jumping); tests set M.falling
     env.IsFalling = function() return M.falling and 1 or nil end

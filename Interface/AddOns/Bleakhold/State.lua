@@ -45,6 +45,19 @@ local function reset()
     S.warZoneNames = {}
     S.warObjNames = {}
     S.arena = nil
+    -- the café (section 21): see its section below for the shapes
+    S.cafes = {}
+    S.cafeState = nil
+    S.cafeQueue = nil
+    S.cafeTickets = {}
+    S.cafeStep = nil
+    S.cafeResult = nil
+    S.cafeMenu = {}
+    S.cafeOrder = nil
+    S.cafeProfile = nil
+    S.cafeBuffs = nil
+    S.cafeSummary = nil
+    S.cafeAtBar = {}
     S.cafeRaw = {}
 end
 reset()
@@ -154,6 +167,11 @@ function ns.ClassColor(id)
     return c and c.color or "ECE7DD"
 end
 
+-- The café's station letters (section 21): G grinder, E espresso machine, K kettle, C cold box, B blender, S syrup
+-- shelf, V serving counter.
+local CAFE_STATIONS = { G = true, E = true, K = true, C = true, B = true, S = true, V = true }
+ns.CAFE_STATIONS = CAFE_STATIONS
+
 local DEF_PARSERS = {
     A = function(f) return { name = U.Str(f[2], nil, 40), text = U.Str(f[3], nil, 200) } end,
     E = function(f) return { name = U.Str(f[2], nil, 48), text = U.Str(f[3], nil, 200), tier = U.Int(f[4], nil, 0, 99) } end,
@@ -192,15 +210,45 @@ local DEF_PARSERS = {
             text = U.Str(f[8], nil, 60),
         }
     end,
+    -- the café (section 21): H a café, G a barista action, F a recipe, U a barista level (its id is the level). The
+    -- getters of Cafe.lua lay these over the built-in CafeData.lua; a field left empty keeps the built-in value.
+    H = function(f)
+        local team = U.Str(f[4], nil, 1)
+        return {
+            name = U.Str(f[2], nil, 48), cityKey = U.Str(f[3], nil, 8), team = (team == "A" or team == "H") and team or nil,
+            zoneId = U.Int(f[5], nil, 0, INT32), mapId = U.Int(f[6], nil, 0, INT32), ownerName = U.Str(f[7], nil, 48),
+            tagline = U.Str(f[8], nil, 160), colorHex = U.Str(f[9], nil, 6),
+        }
+    end,
+    G = function(f)
+        local station = U.Str(f[2], nil, 1)
+        local kind = U.Str(f[4], nil, 1)
+        return {
+            station = station and CAFE_STATIONS[station] and station or nil, key = U.Int(f[3], nil, 1, 8),
+            kind = (kind == "T" or kind == "H") and kind or nil, durMs = U.Int(f[5], nil, 1, 60000),
+            goldLoPermille = U.Int(f[6], nil, 0, 1000), goldHiPermille = U.Int(f[7], nil, 0, 1000),
+            name = U.Str(f[8], nil, 48), hordeName = U.Str(f[9], nil, 48), spellId = U.Int(f[10], nil, 0, INT32),
+        }
+    end,
+    F = function(f)
+        local family = U.Str(f[4], nil, 1)
+        local steps = U.IntList(f[9], 12, 1, 63)
+        return {
+            cafeId = U.Int(f[2], nil, 1, 255), archetype = U.Int(f[3], nil, 1, 99),
+            family = (family == "C" or family == "T" or family == "M") and family or nil, tier = U.Int(f[5], nil, 1, 9),
+            unlockLevel = U.Int(f[6], nil, 1, 99), price80Copper = U.Int(f[7], nil, 0, INT32),
+            buffMin = U.Int(f[8], nil, 0, 999), steps = #steps > 0 and steps or nil, name = U.Str(f[10], nil, 48),
+            text = U.Str(f[11], nil, 160),
+        }
+    end,
+    U = function(f) return { totalXp = U.Int(f[2], nil, 0, INT32), text = U.Str(f[3], nil, 160) } end,
 }
 ns.DEF_PARSERS = DEF_PARSERS
 -- The kinds above, as a number: raise it whenever DEF_PARSERS gains a kind. A cache saved under another schema (an
--- addon that skipped kinds it did not know, such as V and Q before the arena) is fetched again even when its dataVer
--- matches the server's.
-local DEF_SCHEMA = 2
+-- addon that skipped kinds it did not know, such as V and Q before the arena, or H, G, F and U before the café) is
+-- fetched again even when its dataVer matches the server's.
+local DEF_SCHEMA = 3
 ns.DEF_SCHEMA = DEF_SCHEMA
--- DEF H G F U (section 21): the cafés, barista actions, recipes and barista levels
-local CAFE_DEF_KINDS = { H = true, G = true, F = true, U = true }
 
 Comm.Handle("DEF", function(r)
     local head = r[1] or {}
@@ -211,13 +259,6 @@ Comm.Handle("DEF", function(r)
             ns.db.defsVer = U.Int(head[2], Comm.server.dataVer, 0, INT32)
             ns.db.defsSchema = DEF_SCHEMA
         end
-        ns.Fire("STATE", "DEF")
-        return
-    end
-    -- the café's kinds (section 21): kept raw until their parsers land (they are not part of DEF_SCHEMA yet)
-    if kind and CAFE_DEF_KINDS[kind] then
-        S.cafeRaw.DEF = S.cafeRaw.DEF or {}
-        S.cafeRaw.DEF[kind] = r
         ns.Fire("STATE", "DEF")
         return
     end
@@ -872,9 +913,28 @@ Comm.Handle("ARENA", function(r)
 end)
 
 ------------------------------------------------------------------------------------------------------
--- The café (section 21), all unrevisioned: the records as they came (S.cafeRaw[op] = records, raw fields), until
--- the café's own parsers land. A lost chunk asks for the op's state again (CAFEV for CAFT; CAFRES and CAFSUM for
--- CAFST; CAFM needs its café id, so the menu asks itself; CAFUI and CAFAT wait for the next one).
+-- The café (section 21). Every café message is unrevisioned (the last one counts); the fields keep the protocol's
+-- names. Times in ...Ms and ...Sec count from recvAt, the GetTime() the message arrived at (ns.Cafe.Left, LeftMs).
+-- Yes/no fields keep the protocol's 0 and 1 (canOrder, byBarista, effective, levelUp, shakeActive, coffeeCounts,
+-- staffDrink, eligible), except S.cafeState.onShift and a ticket's inHand, which are booleans. A lost chunk asks for
+-- the op's state again (CAFEV for CAFT; CAFRES and CAFSUM for CAFST; CAFM needs its café id, so the menu asks itself;
+-- CAFUI and CAFAT wait for the next one).
+--   S.cafes[cafeId]      CAFE   { cafeId, open (0 off, 1 open, 2 paused, 3 not open yet, 4 closed for safety),
+--                               baristas, queueLen, rushState (0 none, 1 soon, 2 live), rushSec, houseEtaSec }
+--   S.cafeState          CAFST  the player as a barista, with .day (always) and .rush (on shift, else nil)
+--   S.cafeQueue          CAFQ   { cafeId, count, cap, baristas, more, rows = { orderId, kind, recipeId, customer,
+--                               patienceMs, patienceMaxMs, state, takenBy, needLevel, group } }
+--   S.cafeTickets        CAFT   the tickets in ticket id order, each with steps = { { actionId, grade } }; {} none
+--   S.cafeStep           CAFEV  the last step event; CAFE_STEP fires with it
+--   S.cafeResult         CAFRES the last drink result; CAFE_RESULT fires
+--   S.cafeMenu[cafeId]   CAFM   with rows (menu order) and byRecipe[recipeId] = row
+--   S.cafeOrder          CAFO   the player's order, nil when there is none
+--   S.cafeProfile        CAFP   with .week (W, or nil) and .last[cafeId] (L)
+--   S.cafeBuffs          CAFBF  nil while no café buff runs; a timer that is not running is nil
+--   S.cafeSummary        CAFSUM the last shift's summary; CAFE_SUMMARY fires
+--   S.cafeAtBar[cafeId]  CAFAT  { cafeId, count, rows = { name, actionId, startedAgoMs, durMs, kind, stepIndex,
+--                               stepCount } }
+--   CAFUI                       not kept: CAFE_UI fires with what (menu, shift, board, help) and the café id
 ------------------------------------------------------------------------------------------------------
 local CAFE_OPS = { CAFE = "CAFE", CAFST = "CAFST", CAFQ = "CAFQ", CAFT = "CAFT", CAFEV = "CAFT", CAFRES = "CAFST",
     CAFM = false, CAFO = "CAFO", CAFP = "CAFP", CAFBF = "CAFBF", CAFSUM = "CAFST", CAFUI = false, CAFAT = false }
@@ -882,10 +942,391 @@ for op, topic in pairs(CAFE_OPS) do
     if topic then
         Comm.MapOpToTopic(op, topic)
     end
-    Comm.Handle(op, function(r)
+end
+
+-- the protocol's caps (BleakholdMessages.h): queue rows, tickets, steps, recipes, at-bar rows, name and line bytes
+local CAFE_ROWS, CAFE_TICKETS, CAFE_STEPS, CAFE_RECIPES, CAFE_AT_ROWS = 8, 3, 12, 40, 6
+local CAFE_NAME, CAFE_LINE = 48, 160
+local CAFE_MS = 3600000          -- no café timer in milliseconds runs longer than an hour
+local CAFE_SEC = 864000
+
+local function letters(...)
+    local t = {}
+    for i = 1, select("#", ...) do
+        t[select(i, ...)] = true
+    end
+    return t
+end
+local CAFE_KINDS = letters("N", "P", "G")                       -- an NPC, a player, an NPC of a Rush group
+local CAFE_QUEUE_STATES = letters("W", "T", "H")                -- waiting, taken, the house makes it
+local CAFE_GRADES = letters("N", "P", "G", "O")                 -- not done, Perfect, Good, Off
+local CAFE_EVENTS = letters("S", "D", "I", "X", "W", "B")       -- started, done, interrupted, ruined, wrong, binned
+local CAFE_QUALITIES = letters("P", "G", "S", "R", "L")         -- Perfect, Good, Sloppy, Ruined, Left
+local CAFE_ORDER_STATES = letters("Q", "M", "H", "F", "R", "D", "X", "E")
+local CAFE_END_REASONS = letters("E", "C", "A", "I", "W", "D", "M", "X", "O")
+local CAFE_AT_KINDS = letters("T", "H")
+local CAFE_WINDOWS = { menu = true, shift = true, board = true, help = true }
+
+local function cafeLetter(raw, allowed, default)
+    local s = U.Str(raw, nil, 1)
+    if s and allowed[s] then
+        return s
+    end
+    return default
+end
+
+-- an id: above 0 (U.Int clamps, so "0" would read as 1 with a floor of 1: the record 0 means none)
+local function cafeIdOf(raw, hi)
+    local v = U.Int(raw, nil, 0, hi or INT32)
+    return v and v > 0 and v or nil
+end
+
+-- patience left and its total: the total is never below what is left
+local function patience(rawLeft, rawMax)
+    local left = U.Int(rawLeft, 0, 0, CAFE_MS)
+    return left, max(left, U.Int(rawMax, 0, 0, CAFE_MS))
+end
+
+Comm.Handle("CAFE", function(r)
+    local list, now = {}, GetTime()
+    for i = 1, math.min(#r, 16) do
+        local e = r[i]
+        local id = cafeIdOf(e[1], 255)
+        if id then
+            list[id] = {
+                cafeId = id, open = U.Int(e[2], 0, 0, 4), baristas = U.Int(e[3], 0, 0, 255), queueLen = U.Int(e[4], 0, 0, 999),
+                rushState = U.Int(e[5], 0, 0, 2), rushSec = U.Int(e[6], nil, 0, CAFE_SEC),
+                houseEtaSec = U.Int(e[7], nil, 0, CAFE_SEC), recvAt = now,
+            }
+        end
+    end
+    S.cafes = list
+    changed("CAFE")
+end)
+
+Comm.Handle("CAFST", function(r)
+    local f = r[1]
+    local cafeId = U.Int(f[1], 0, 0, 255)
+    local on = U.Bool(f[2], false) and cafeId > 0
+    local st = {
+        cafeId = cafeId, onShift = on, level = U.Int(f[3], 1, 1, 10), xp = U.Int(f[4], 0, 0, INT32),
+        levelXp = U.Int(f[5], 0, 0, INT32), nextLevelXp = U.Int(f[6], nil, 0, INT32), shiftSec = U.Int(f[7], nil, 0, CAFE_SEC),
+        drinks = U.Int(f[8], 0, 0, INT32), perfects = U.Int(f[9], 0, 0, INT32), streak = U.Int(f[10], 0, 0, INT32),
+        tipsCopper = U.Int(f[11], 0, 0, INT32), shiftXp = U.Int(f[12], 0, 0, INT32),
+        station = cafeLetter(f[13], CAFE_STATIONS), nearStation = cafeLetter(f[14], CAFE_STATIONS),
+        nearDm = U.Int(f[15], nil, 0, 255), maxTickets = U.Int(f[16], 1, 1, CAFE_TICKETS),
+        tiredSec = U.Int(f[17], nil, 0, CAFE_SEC), flags = U.Int(f[18], 0, 0, INT32), warnSec = U.Int(f[19], nil, 0, CAFE_SEC),
+        recvAt = GetTime(),
+    }
+    for i = 2, math.min(#r, 4) do
+        local e = r[i]
+        local tag = U.Str(e[1], nil, 1)
+        if tag == "D" then
+            st.day = {
+                dayXp = U.Int(e[2], 0, 0, INT32), dayXpFull = U.Int(e[3], 0, 0, INT32), dayXpHalf = U.Int(e[4], 0, 0, INT32),
+                dayTipsCopper = U.Int(e[5], 0, 0, INT32), dayTipsCapCopper = U.Int(e[6], 0, 0, INT32),
+                dayPoints = U.Int(e[7], 0, 0, INT32), dayPointsCap = U.Int(e[8], 0, 0, INT32), dayDrinks = U.Int(e[9], 0, 0, INT32),
+            }
+        elseif tag == "R" and on then
+            st.rush = {
+                rushState = U.Int(e[2], 0, 0, 2), rushSec = U.Int(e[3], nil, 0, CAFE_SEC), rushServed = U.Int(e[4], 0, 0, INT32),
+                rushGoal = U.Int(e[5], 0, 0, INT32), myRushServed = U.Int(e[6], 0, 0, INT32),
+            }
+        end
+    end
+    st.day = st.day or { dayXp = 0, dayXpFull = 0, dayXpHalf = 0, dayTipsCopper = 0, dayTipsCapCopper = 0, dayPoints = 0,
+        dayPointsCap = 0, dayDrinks = 0 }
+    -- the Rush's seconds count from the same arrival (Cafe.Left reads recvAt)
+    st.day.recvAt = st.recvAt
+    if st.rush then
+        st.rush.recvAt = st.recvAt
+    end
+    S.cafeState = st
+    -- kept across /reload (S is not): after the next HELLO the client asks for the tickets and the queue too
+    if not Comm.demo then
+        ns.cdb.cafeOnShift = on or nil
+    end
+    changed("CAFST")
+end)
+
+Comm.Handle("CAFQ", function(r)
+    local f = r[1]
+    local q = {
+        cafeId = U.Int(f[1], 0, 0, 255), count = U.Int(f[2], 0, 0, 9999), cap = U.Int(f[3], 0, 0, 9999),
+        baristas = U.Int(f[4], 0, 0, 255), more = U.Int(f[5], 0, 0, 9999), rows = {}, recvAt = GetTime(),
+    }
+    for i = 2, math.min(#r, 1 + 4 * CAFE_ROWS) do
+        local e = r[i]
+        local id = cafeIdOf(e[1], INT32)
+        if id and #q.rows < CAFE_ROWS then
+            local left, total = patience(e[5], e[6])
+            q.rows[#q.rows + 1] = {
+                orderId = id, kind = cafeLetter(e[2], CAFE_KINDS, "N"), recipeId = cafeIdOf(e[3], 65535),
+                customer = U.Str(e[4], nil, CAFE_NAME), patienceMs = left, patienceMaxMs = total,
+                state = cafeLetter(e[7], CAFE_QUEUE_STATES, "W"), takenBy = U.Str(e[8], nil, CAFE_NAME),
+                needLevel = U.Int(e[9], 0, 0, 99), group = U.Int(e[10], nil, 0, INT32),
+            }
+        end
+    end
+    S.cafeQueue = q
+    changed("CAFQ")
+end)
+
+Comm.Handle("CAFT", function(r)
+    local list, now = {}, GetTime()
+    for i = 1, math.min(#r, 4 * CAFE_TICKETS) do
+        local e = r[i]
+        local id = cafeIdOf(e[1], INT32)
+        if id and #list < CAFE_TICKETS then
+            local steps = {}
+            for _, item in ipairs(U.List(e[11], CAFE_STEPS)) do
+                local t = U.Tuple(item, 2)
+                local action = cafeIdOf(t[1], 63)
+                if action then
+                    steps[#steps + 1] = { actionId = action, grade = cafeLetter(t[2], CAFE_GRADES, "N") }
+                end
+            end
+            local left, total = patience(e[6], e[7])
+            list[#list + 1] = {
+                ticketId = id, orderId = cafeIdOf(e[2], INT32), recipeId = cafeIdOf(e[3], 65535),
+                kind = cafeLetter(e[4], CAFE_KINDS, "N"), customer = U.Str(e[5], nil, CAFE_NAME), patienceMs = left,
+                patienceMaxMs = total, nextStep = U.Int(e[8], 1, 1, CAFE_STEPS), inHand = U.Bool(e[9], false),
+                orderLine = U.Str(e[10], nil, CAFE_LINE), steps = steps, tipHintCopper = U.Int(e[12], 0, 0, INT32),
+                recvAt = now,
+            }
+        end
+    end
+    table.sort(list, function(a, b) return a.ticketId < b.ticketId end)
+    S.cafeTickets = list
+    changed("CAFT")
+end)
+
+Comm.Handle("CAFEV", function(r)
+    local f = r[1]
+    local ticketId = cafeIdOf(f[1], INT32)
+    local event = cafeLetter(f[4], CAFE_EVENTS)
+    if not ticketId or not event then
+        return
+    end
+    -- recvAt is the moment CREL's clientMs counts from (section 21): stamped here, as the message arrives
+    local step = {
+        ticketId = ticketId, stepIndex = U.Int(f[2], 1, 1, CAFE_STEPS), actionId = cafeIdOf(f[3], 63), event = event,
+        durMs = U.Int(f[5], nil, 0, 60000), goldLoMs = U.Int(f[6], nil, 0, 60000), goldHiMs = U.Int(f[7], nil, 0, 60000),
+        grade = cafeLetter(f[8], CAFE_GRADES), nextStep = U.Int(f[9], nil, 1, CAFE_STEPS), recvAt = GetTime(),
+    }
+    S.cafeStep = step
+    -- the CAFT that follows can wait for the next 250 ms push: until it comes, the ticket takes the event's nextStep,
+    -- so a press right after a release, a bin or a ruin names the step the server expects now
+    -- (D done, X ruined, B binned: S, I and W leave the ticket where it was)
+    local ticketMoved = false
+    for _, t in ipairs(S.cafeTickets) do
+        if t.ticketId == ticketId and (event == "D" or event == "X" or event == "B") then
+            if step.nextStep and t.nextStep ~= step.nextStep then
+                t.nextStep = step.nextStep
+                ticketMoved = true
+            end
+            if event == "D" then
+                if not t.inHand then t.inHand = true; ticketMoved = true end
+                local s = t.steps[step.stepIndex]
+                if s and step.grade and s.grade ~= step.grade then s.grade = step.grade; ticketMoved = true end
+            elseif event == "X" or event == "B" then
+                t.nextStep, t.inHand = 1, false
+                for _, s in ipairs(t.steps) do s.grade = "N" end
+                ticketMoved = true
+            end
+            break
+        end
+    end
+    changed("CAFEV")
+    ns.Fire("CAFE_STEP", step)
+    -- after CAFE_STEP: the timing bar ends its run with the grade before the bar lays itself out again
+    if ticketMoved then
+        changed("CAFT")
+    end
+end)
+
+Comm.Handle("CAFRES", function(r)
+    local f = r[1]
+    local quality = cafeLetter(f[3], CAFE_QUALITIES)
+    if not quality then
+        return
+    end
+    local res = {
+        ticketId = cafeIdOf(f[1], INT32), recipeId = cafeIdOf(f[2], 65535), quality = quality,
+        xp = U.Int(f[4], 0, 0, INT32), tipCopper = U.Int(f[5], 0, 0, INT32), points = U.Int(f[6], 0, 0, INT32),
+        streak = U.Int(f[7], 0, 0, INT32), levelUp = U.Int(f[8], 0, 0, 1), level = U.Int(f[9], nil, 1, 10),
+        customer = U.Str(f[10], nil, CAFE_NAME), line = U.Str(f[11], nil, CAFE_LINE), xpCapped = U.Int(f[12], 0, 0, INT32),
+        recvAt = GetTime(),
+    }
+    S.cafeResult = res
+    changed("CAFRES")
+    ns.Fire("CAFE_RESULT", res)
+end)
+
+Comm.Handle("CAFM", function(r)
+    local f = r[1]
+    local id = cafeIdOf(f[1], 255)
+    if not id then
+        return
+    end
+    local m = {
+        cafeId = id, open = U.Int(f[2], 0, 0, 4), baristas = U.Int(f[3], 0, 0, 255), houseEtaSec = U.Int(f[4], nil, 0, CAFE_SEC),
+        pendingOrderId = U.Int(f[5], 0, 0, INT32), ordersToday = U.Int(f[6], 0, 0, 9999), ordersCap = U.Int(f[7], 0, 0, 9999),
+        canOrder = U.Int(f[8], 0, 0, 1), reason = U.Str(f[9], nil, 24), rows = {}, byRecipe = {}, recvAt = GetTime(),
+    }
+    for i = 2, math.min(#r, 1 + CAFE_RECIPES) do
+        local e = r[i]
+        local recipeId = cafeIdOf(e[1], 65535)
+        if recipeId and not m.byRecipe[recipeId] then
+            local row = { recipeId = recipeId, priceCopper = U.Int(e[2], 0, 0, INT32), byBarista = U.Int(e[3], 0, 0, 1),
+                effective = U.Int(e[4], 1, 0, 1) }
+            m.rows[#m.rows + 1] = row
+            m.byRecipe[recipeId] = row
+        end
+    end
+    S.cafeMenu[id] = m
+    changed("CAFM")
+end)
+
+Comm.Handle("CAFO", function(r)
+    local f = r[1]
+    local id = cafeIdOf(f[1], INT32)
+    local state = cafeLetter(f[4], CAFE_ORDER_STATES)
+    if id and state then
+        S.cafeOrder = {
+            orderId = id, cafeId = U.Int(f[2], 0, 0, 255), recipeId = cafeIdOf(f[3], 65535), state = state,
+            position = U.Int(f[5], nil, 1, 9999), barista = U.Str(f[6], nil, CAFE_NAME), nextStep = U.Int(f[7], 0, 0, CAFE_STEPS),
+            stepCount = U.Int(f[8], 0, 0, CAFE_STEPS), leftSec = U.Int(f[9], nil, 0, CAFE_SEC),
+            priceCopper = U.Int(f[10], 0, 0, INT32), tipCopper = U.Int(f[11], 0, 0, INT32), recvAt = GetTime(),
+        }
+    else
+        S.cafeOrder = nil     -- the record 0: no order
+    end
+    changed("CAFO")
+end)
+
+Comm.Handle("CAFP", function(r)
+    local f = r[1]
+    local p = {
+        level = U.Int(f[1], 1, 1, 10), xp = U.Int(f[2], 0, 0, INT32), levelXp = U.Int(f[3], 0, 0, INT32),
+        nextLevelXp = U.Int(f[4], nil, 0, INT32), drinks = U.Int(f[5], 0, 0, INT32), perfects = U.Int(f[6], 0, 0, INT32),
+        memoryDrinks = U.Int(f[7], 0, 0, INT32), bestStreak = U.Int(f[8], 0, 0, INT32), fastestMs = U.Int(f[9], nil, 0, INT32),
+        weeklyWins = U.Int(f[10], 0, 0, INT32), rewards = U.Int(f[11], 0, 0, 255), last = {}, recvAt = GetTime(),
+    }
+    for i = 2, math.min(#r, 8) do
+        local e = r[i]
+        local tag = U.Str(e[1], nil, 1)
+        if tag == "W" then
+            p.week = {
+                weekId = U.Int(e[2], 0, 0, INT32), cafeId = U.Int(e[3], 0, 0, 255), rank = U.Int(e[4], nil, 1, INT32),
+                points = U.Int(e[5], 0, 0, INT32), drinks = U.Int(e[6], 0, 0, INT32), perfectPermille = U.Int(e[7], 0, 0, 1000),
+                days = U.Int(e[8], 0, 0, 7), eligible = U.Int(e[9], 0, 0, 1),
+            }
+        elseif tag == "L" then
+            local cafeId = cafeIdOf(e[3], 255)
+            if cafeId then
+                p.last[cafeId] = { weekId = U.Int(e[2], 0, 0, INT32), cafeId = cafeId, winnerName = U.Str(e[4], nil, CAFE_NAME),
+                    points = U.Int(e[5], 0, 0, INT32) }
+            end
+        end
+    end
+    S.cafeProfile = p
+    changed("CAFP")
+end)
+
+Comm.Handle("CAFBF", function(r)
+    local f = r[1]
+    local function timer(raw)
+        local v = U.Int(raw, nil, 0, CAFE_SEC)
+        return v and v > 0 and v or nil
+    end
+    local b = { coffeeSec = timer(f[1]), teaSec = timer(f[2]), shakeSec = timer(f[3]), shakeActive = U.Int(f[4], 0, 0, 1),
+        coffeeCounts = U.Int(f[5], 1, 0, 1), recvAt = GetTime() }
+    S.cafeBuffs = (b.coffeeSec or b.teaSec or b.shakeSec) and b or nil
+    changed("CAFBF")
+end)
+
+Comm.Handle("CAFSUM", function(r)
+    local f = r[1]
+    local sum = {
+        cafeId = U.Int(f[1], 0, 0, 255), reason = cafeLetter(f[2], CAFE_END_REASONS, "E"), shiftSec = U.Int(f[3], 0, 0, CAFE_SEC),
+        drinks = U.Int(f[4], 0, 0, INT32), perfects = U.Int(f[5], 0, 0, INT32), tipsCopper = U.Int(f[6], 0, 0, INT32),
+        xp = U.Int(f[7], 0, 0, INT32), xpLost = U.Int(f[8], 0, 0, INT32), points = U.Int(f[9], 0, 0, INT32),
+        bestStreak = U.Int(f[10], 0, 0, INT32), staffDrink = U.Int(f[11], 0, 0, 1), recvAt = GetTime(),
+    }
+    S.cafeSummary = sum
+    changed("CAFSUM")
+    ns.Fire("CAFE_SUMMARY", sum)
+end)
+
+Comm.Handle("CAFUI", function(r)
+    local f = r[1]
+    local what = U.Str(f[1], nil, 8)
+    if what and CAFE_WINDOWS[what] then
+        changed("CAFUI")
+        ns.Fire("CAFE_UI", what, cafeIdOf(f[2], 255))
+    end
+end)
+
+Comm.Handle("CAFAT", function(r)
+    local f = r[1]
+    local id = cafeIdOf(f[1], 255)
+    if not id then
+        return
+    end
+    local a = { cafeId = id, count = U.Int(f[2], 0, 0, 255), rows = {}, recvAt = GetTime() }
+    for i = 2, math.min(#r, 1 + 4 * CAFE_AT_ROWS) do
+        local e = r[i]
+        local name = U.Str(e[1], nil, CAFE_NAME)
+        if name and #a.rows < CAFE_AT_ROWS then
+            a.rows[#a.rows + 1] = {
+                name = name, actionId = cafeIdOf(e[2], 63), startedAgoMs = U.Int(e[3], 0, 0, CAFE_MS),
+                durMs = U.Int(e[4], 0, 0, 60000), kind = cafeLetter(e[5], CAFE_AT_KINDS, "T"),
+                stepIndex = U.Int(e[6], nil, 1, CAFE_STEPS), stepCount = U.Int(e[7], nil, 1, CAFE_STEPS),
+            }
+        end
+    end
+    S.cafeAtBar[id] = a
+    changed("CAFAT")
+end)
+
+-- The records as they came too (S.cafeRaw[op], and S.cafeRaw.DEF[kind] for H G F U): what the module's own Lua tests
+-- (Server/mod-bleakhold-ui/tests/lua/test_server_frames.lua) read back until they move to the parsed state above.
+for op in pairs(CAFE_OPS) do
+    local parse = Comm.handlers[op]
+    Comm.Handle(op, function(r, ...)
         S.cafeRaw[op] = r
-        changed(op)
+        return parse(r, ...)
     end)
+end
+do
+    local parseDef = Comm.handlers.DEF
+    local RAW_DEF = { H = true, G = true, F = true, U = true }
+    Comm.Handle("DEF", function(r, ...)
+        local kind = U.Str(r[1] and r[1][1], nil, 1)
+        if kind and RAW_DEF[kind] then
+            S.cafeRaw.DEF = S.cafeRaw.DEF or {}
+            S.cafeRaw.DEF[kind] = r
+        end
+        return parseDef(r, ...)
+    end)
+end
+
+-- Every café state gone (a HELLO without bit 131072): the café's frames read it as off.
+function ns.ClearCafeState()
+    local had = S.cafeState or S.cafeQueue or S.cafeOrder or S.cafeBuffs or #S.cafeTickets > 0 or next(S.cafes)
+        or next(S.cafeAtBar) or next(S.cafeMenu) or S.cafeProfile
+    S.cafes, S.cafeState, S.cafeQueue, S.cafeTickets, S.cafeStep, S.cafeResult = {}, nil, nil, {}, nil, nil
+    S.cafeMenu, S.cafeOrder, S.cafeProfile, S.cafeBuffs, S.cafeSummary, S.cafeAtBar = {}, nil, nil, nil, nil, {}
+    S.cafeRaw = {}
+    if not Comm.demo then
+        ns.cdb.cafeOnShift = nil
+    end
+    if had then
+        for _, op in ipairs({ "CAFE", "CAFST", "CAFQ", "CAFT", "CAFM", "CAFO", "CAFP", "CAFBF", "CAFAT" }) do
+            changed(op)
+        end
+    end
 end
 
 Comm.MapOpToTopic("FIRSTS", "FIRSTS")
@@ -1689,7 +2130,7 @@ Comm.Handle("WPEV", function(r)
 end)
 
 local TOAST_TARGETS = { tasks = true, dungeons = true, keys = true, rift = true, collections = true, season = true,
-    leaderboards = true, royale = true, arena = true }
+    leaderboards = true, royale = true, arena = true, cafe = true }
 Comm.Handle("TOAST", function(r)
     local f = r[1]
     local title = U.Str(f[2], nil, 60)
@@ -1737,5 +2178,20 @@ ns.On("HELLO", function(s)
     elseif S.arena then
         S.arena = nil
         changed("ARENA")
+    end
+    -- the café (section 21): the server pushes CAFE, CAFBF, CAFST and CAFO after HELLO with bit 131072, and CAFT and
+    -- CAFQ while the player is on shift; asking makes sure (the login push can come before HELLO, and /reload has
+    -- none: whether a shift ran before it is kept in BleakholdCharDB). Without the bit every café state is gone
+    if Comm.HasFeature(F.CAFE) then
+        Comm.Get("CAFE")
+        Comm.Get("CAFST")
+        Comm.Get("CAFBF")
+        Comm.Get("CAFO")
+        if (S.cafeState and S.cafeState.onShift) or (not Comm.demo and ns.cdb.cafeOnShift) then
+            Comm.Get("CAFT")
+            Comm.Get("CAFQ")
+        end
+    else
+        ns.ClearCafeState()
     end
 end)
