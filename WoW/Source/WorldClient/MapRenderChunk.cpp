@@ -20,6 +20,7 @@
 #include "WoW/Source/WorldClient/Map.h"
 #include "WoW/Source/WorldClient/MapArea.h"
 #include "WoW/Source/WorldClient/MapChunk.h"
+#include "WoW/Source/WorldClient/MapTerrainTiling.h"
 #include "WoW/Source/WorldClient/MapLight.h"
 #include "WoW/Source/WorldClient/Types.h"
 #include "WoW/Source/WorldClient/World.h"
@@ -2101,6 +2102,11 @@ void CMapRenderChunk::SetVertexShader(CMapRenderChunk* renderChunk, int32_t laye
 
     consts.m_texScale[layerCount] = alphaScale;
 
+    // BLEAKHOLD(terraintiling): the tiling modern textures ask for, when every layer of the chunk is drawn at once.
+    if (layerCount == renderChunk->m_layersCount + 1) {
+        MapTerrainTiling::ScaleTiling(renderChunk, consts.m_texScale, renderChunk->m_layersCount);
+    }
+
     CGxShader* shader = CMapRenderChunk::GetVertexShader(pointLights, layerCount - 1, specular, vertexColor, a3, CShadowCache::GetShadowValue());
     g_theGxDevicePtr->RsSet(GxRs_VertexShader, shader);
     g_theGxDevicePtr->ShaderConstantsSet(GxSh_Vertex, 0, reinterpret_cast<const float*>(&consts), sizeof(SVertexShaderConstants) / sizeof(C4Vector));
@@ -2529,6 +2535,7 @@ void CMapRenderChunk::RenderMultiPassVertexPixelShaderBigAlpha(CMapRenderChunk* 
             }
         }
 
+        MapTerrainTiling::UploadLayerTiling(renderChunk, i); // BLEAKHOLD(terraintiling): each pass samples layer slot 1
         GxShaderConstantsSet(GxSh_Pixel, 0, s_layerChannel[i], 1);
         g_theGxDevicePtr->Draw(&renderChunk->m_batch, 1);
 
@@ -2604,6 +2611,7 @@ void CMapRenderChunk::RenderMultiPassVertexPixelShader(CMapRenderChunk* renderCh
             }
         }
 
+        MapTerrainTiling::UploadLayerTiling(renderChunk, i); // BLEAKHOLD(terraintiling): each pass samples layer slot 1
         GxShaderConstantsSet(GxSh_Pixel, 0, s_layerChannel[i], 1);
         g_theGxDevicePtr->Draw(&renderChunk->m_batch, 1);
 

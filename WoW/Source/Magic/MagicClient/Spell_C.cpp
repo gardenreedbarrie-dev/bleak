@@ -91,6 +91,10 @@
 #include "Engine/Source/Frame/CSimpleTop.h"
 #include "WoW/Source/DB/Rec/GlyphPropertiesRec.h"
 #include "WoW/Source/DB/Rec/GlyphSlotRec.h"
+#include "WoW/Common/BleakholdDance.h"
+#include "WoW/Common/BleakholdEmoji.h"
+#include "WoW/Source/Ui/BleakholdDance.h"
+#include "WoW/Source/Ui/EmojiBubbleFrame.h"
 #if defined(_MSC_VER)
 #include <malloc.h>
 #else
@@ -4826,6 +4830,24 @@ int32_t Packet_SMSG_PLAY_SPELL_VISUAL(void* param, NETMESSAGE msgId, uint32_t ti
     msg->Get(guid.m_guid);
     uint32_t kitId;
     msg->Get(kitId);
+
+    // BLEAKHOLD(emoji): kits BLEAKHOLD_EMOJI_KIT_BASE + N show emoji N over the unit instead of a SpellVisualKit
+    // (stock clients find no such kit and ignore them).
+    uint32_t emoji;
+
+    if (BleakholdEmojiFromKit(kitId, &emoji)) {
+        CGEmojiBubbleFrame::ShowEmoji(guid, emoji);
+        return 1;
+    }
+
+    // BLEAKHOLD(dance): kits BLEAKHOLD_DANCE_KIT_BASE + N start (or keep in step) Bleakhold dance N on the unit.
+    uint32_t dance;
+
+    if (BleakholdDanceFromKit(kitId, &dance)) {
+        CGBleakholdDance::OnKit(guid, dance);
+        return 1;
+    }
+
     SpellVisualKitRec* kit = g_spellVisualKitDB.GetRecord(kitId);
 
     if (kit) {

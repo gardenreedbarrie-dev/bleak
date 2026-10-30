@@ -1,0 +1,39 @@
+{
+    "_readme": "Patch archive names that RaceForge never writes customization art to (--art-letters). Names are relative to the client's Data folder and compared without regard to case, as Windows and the client do (patch-y.MPQ and Patch-Y.MPQ are one file). Add a name here when a new patch ships; build --patches-dir also refuses every name already in the realm's patch folder. --force-letters overrides both, with a warning.",
+    "taken": [
+        {
+            "comment": "Blizzard: the stock 3.3.5a patches",
+            "names": ["patch.MPQ", "patch-2.MPQ", "patch-3.MPQ", "enUS/patch-enUS.MPQ", "enUS/patch-enUS-2.MPQ", "enUS/patch-enUS-3.MPQ"]
+        },
+        {
+            "comment": "Bleakhold realm: H L T V X Z, R (RaceForge's own patch-R.MPQ, rebuilt by the realm), Y (the HD pack) and the locale patch enUS-8",
+            "names": ["patch-H.MPQ", "patch-L.MPQ", "patch-R.MPQ", "patch-T.MPQ", "patch-V.MPQ", "patch-X.MPQ", "patch-Y.MPQ", "patch-Z.MPQ",
+                      "enUS/patch-enUS-8.MPQ"]
+        },
+        {
+            "comment": "Reforged: mirrored from the partner project (the launcher's HD pack)",
+            "names": ["patch-A.MPQ", "patch-B.MPQ", "patch-C.MPQ", "patch-D.MPQ", "patch-E.MPQ", "patch-G.MPQ", "patch-I.MPQ", "patch-M.MPQ",
+                      "patch-N.MPQ", "patch-P.MPQ", "patch-S.MPQ", "patch-U.MPQ"]
+        },
+        {
+            "comment": "WoW Forever's login screen (by space_slam)",
+            "names": ["patch-J.MPQ"]
+        },
+        {
+            "comment": "Tools/MapForge: the map archive",
+            "names": ["patch-Q.MPQ"]
+        },
+        {
+            "comment": "Tools/MapForge: staged in the server's extractor copy of the client only (server/extract/patch-5.MPQ)",
+            "names": ["patch-5.MPQ"]
+        },
+        {
+            "comment": "Tools/CafeForge: the café archive (café models, textures, icons, markers, café-only DBC copies)",
+            "names": ["patch-4.MPQ"]
+        },
+        {
+            "comment": "RaceForge customize, the realm's appearance options: patch-6 and patch-7 (the Ascension package's textures), patch-~ (its models, above every lettered patch), patch-K (marks and eye sprites), patch-O (Patch-R's old art, moved once by customize --move-art), patch-F (the High Elf purple skins, skins --art-archive)",
+            "names": ["patch-6.MPQ", "patch-7.MPQ", "patch-~.MPQ", "patch-K.MPQ", "patch-O.MPQ", "patch-F.MPQ"]
+        }
+    ]
+}

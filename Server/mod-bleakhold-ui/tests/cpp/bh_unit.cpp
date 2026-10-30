@@ -1,0 +1,3293 @@
+// mod-bleakhold-ui tests: unit tests of the core-independent protocol code, and every example frame of
+// docs/BleakholdProtocol.md.
+//
+//   bh_unit <repo root>
+//
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+#include "bh_check.h"
+
+#include "BleakholdCodec.h"
+#include "BleakholdEndpoint.h"
+#include "BleakholdIntent.h"
+#include "BleakholdMessages.h"
+#include "../../src/BleakholdCampRules.h"
+#include "../../src/BleakholdCases.h"
+#include "../../src/BleakholdDance.h"
+#include "../../src/BleakholdEmoji.h"
+
+#include <cmath>
+#include <limits>
+#include <map>
+#include <set>
+
+using namespace Bleakhold;
+using namespace Bleakhold::Proto;
+
+static std::string g_repo;
+
+// ---------------------------------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------------------------------
+static std::vector<std::string> SplitStr(std::string const& s, char sep)
+{
+    std::vector<std::string> out;
+    std::size_t start = 0;
+    while (true)
+    {
+        std::size_t p = s.find(sep, start);
+        if (p == std::string::npos)
+        {
+            out.push_back(s.substr(start));
+            return out;
+        }
+        out.push_back(s.substr(start, p - start));
+        start = p + 1;
+    }
+}
+
+// Payload compared the way the client reads it: a missing trailing field is the same as an empty one.
+static std::string Norm(std::string const& payload)
+{
+    std::string out;
+    std::vector<std::string> recs = SplitStr(payload, ';');
+    for (std::size_t r = 0; r < recs.size(); ++r)
+    {
+        std::vector<std::string> f = SplitStr(recs[r], ',');
+        while (f.size() > 1 && f.back().empty())
+            f.pop_back();
+        if (r)
+            out += ';';
+        for (std::size_t i = 0; i < f.size(); ++i)
+        {
+            if (i)
+                out += ',';
+            out += f[i];
+        }
+    }
+    return out;
+}
+
+static std::string Chat(std::string const& body) { return "BHc\t" + body; }
+
+static DropReason Parse(std::string const& body, Intent* out = nullptr)
+{
+    Intent tmp;
+    DropReason r = ParseClientMessage(Chat(body), tmp);
+    if (out)
+        *out = tmp;
+    return r;
+}
+
+static std::vector<std::string> DocLines(char const* prefix)
+{
+    std::string const doc = bhtest::ReadFile(g_repo + "/docs/BleakholdProtocol.md");
+    std::vector<std::string> out;
+    std::string const p = std::string(prefix) + " ";
+    for (std::string const& line : SplitStr(doc, '\n'))
+        if (line.compare(0, p.size(), p) == 0)
+            out.push_back(line.substr(p.size()));
+    return out;
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Codec
+// ---------------------------------------------------------------------------------------------------
+TEST("base36 round trip and limits")
+{
+    CHECK_EQ(Base36(0), "0");
+    CHECK_EQ(Base36(35), "z");
+    CHECK_EQ(Base36(36), "10");
+    CHECK_EQ(Base36(SeqModulo - 1), "zzzzzz");
+    CHECK_EQ(Base36(SeqModulo), "0");
+    for (uint32_t v : { 1u, 7u, 1295u, 46655u, 1000000u, SeqModulo - 1 })
+        CHECK_EQN(*ParseBase36(Base36(v)), v);
+    CHECK(!ParseBase36(""));
+    CHECK(!ParseBase36("1234567"));
+    CHECK(!ParseBase36("A"));
+    CHECK(!ParseBase36("-1"));
+    CHECK_EQN(NextSeq(0), 1u);
+    CHECK_EQN(NextSeq(41), 42u);
+    CHECK_EQN(NextSeq(SeqModulo - 1), 1u);
+}
+
+TEST("escaping covers separators, percent, pipe and control bytes")
+{
+    CHECK_EQ(EscapeText("a;b,c:d~e|f%g"), "a%3Bb%2Cc%3Ad%7Ee%7Cf%25g");
+    CHECK_EQ(EscapeText("tab\there\nnew\x7F"), "tab%09here%0Anew%7F");
+    CHECK_EQ(EscapeText(std::string("nul\0byte", 8)), "nulbyte");
+    CHECK_EQ(EscapeText("caf\xC3\xA9"), "caf\xC3\xA9");
+    CHECK_EQ(EscapeText("bad\xFF\xFEx"), "bad??x");
+    CHECK_EQ(EscapeText("\xE2\x82"), "??");
+    CHECK_EQ(EscapeText("\xC0\x80"), "??");           // overlong NUL
+    CHECK_EQ(EscapeText("\xED\xA0\x80"), "???");      // UTF-16 surrogate
+    CHECK_EQ(EscapeText(std::string(30, 'x') + "\xC3\xA9", 31), std::string(30, 'x'));   // never half a sequence
+    CHECK_EQ(EscapeText("\xC3\xA9\xC3\xA9\xC3\xA9", 5), "\xC3\xA9\xC3\xA9");
+    std::string ascii;
+    for (int b = 1; b < 128; ++b)
+        ascii += static_cast<char>(b);
+    std::string const e = EscapeText(ascii);
+    CHECK(e.find_first_of(";,:~|") == std::string::npos);
+    for (char c : e)
+        CHECK(static_cast<unsigned char>(c) >= 0x20 && static_cast<unsigned char>(c) != 0x7F);
+    CHECK_EQ(*Unescape(e), ascii);
+    CHECK(!Unescape("%4"));
+    CHECK(!Unescape("abc%"));
+    CHECK(!Unescape("%G1"));
+    CHECK(!Unescape("%00"));
+    CHECK_EQ(*Unescape("%41%42"), "AB");
+}
+
+TEST("payload writer: records, lists, tuples, trailing empty fields")
+{
+    PayloadWriter w;
+    w.Int(1).Empty().Text("x,y").Empty().Empty();
+    w.Record().Ints(std::vector<uint32_t>{ 1, 3, 4 }).Texts({ "a:b", "c" }).Empty();
+    w.Record().Empty().Empty();
+    w.Record().Tuples({ { PayloadWriter::TuplePart("Na~me"), PayloadWriter::TuplePart(int64_t(3)) }, { "B", "2" } });
+    CHECK_EQ(w.Take(), "1,,x%2Cy;1:3:4,a%3Ab:c;,;Na%7Eme~3:B~2");
+    PayloadWriter v;
+    v.Empty();
+    CHECK_EQ(v.Take(), "");
+    PayloadWriter o;
+    o.Opt(Opt<uint32_t>()).Opt(Opt<uint32_t>(5)).Opt(Opt<bool>(true)).Opt(Opt<bool>()).Opt(Opt<int32_t>(-3));
+    CHECK_EQ(o.Take(), ",5,1,,-3");
+    PayloadWriter c;
+    c.Char('K').Char('k').Char(';');
+    CHECK_EQ(c.Take(), "K");
+}
+
+static void CheckFrames(std::string const& op, uint32_t seq, std::string const& payload, std::size_t maxBody)
+{
+    std::vector<std::string> frames = BuildFrames(op, seq, payload, maxBody);
+    CHECK_MSG(!frames.empty(), "frames for maxBody " + std::to_string(maxBody));
+    std::string joined;
+    for (std::size_t i = 0; i < frames.size(); ++i)
+    {
+        std::string const& f = frames[i];
+        CHECK_MSG(f.size() <= maxBody, "frame within maxBody");
+        std::string const head = "1 " + op + " " + Base36(seq) + " " + std::to_string(i + 1) + "/" + std::to_string(frames.size());
+        CHECK_MSG(f.compare(0, head.size(), head) == 0, "header " + head);
+        std::string part = f.size() > head.size() ? f.substr(head.size() + 1) : std::string();
+        CHECK(f.size() == head.size() || f[head.size()] == ' ');
+        if (!part.empty())
+        {
+            CHECK_MSG(part.back() != '%', "no cut right after %");
+            CHECK_MSG(part.size() < 2 || part[part.size() - 2] != '%', "no cut inside %XX");
+            unsigned char const first = static_cast<unsigned char>(part[0]);
+            CHECK_MSG(i == 0 || !(first >= 0x80 && first < 0xC0), "no part starts inside a UTF-8 sequence");
+        }
+        joined += part;
+    }
+    CHECK_MSG(joined == payload, "reassembles");
+}
+
+TEST("frames: chunking at records, never inside an escape or UTF-8")
+{
+    PayloadWriter w;
+    for (int i = 0; i < 80; ++i)
+        w.Record().Int(i).Text("Na%me;" + std::to_string(i)).Text("\xC3\xA9\xE2\x82\xAC caf\xC3\xA9 \xF0\x9F\x98\x80");
+    std::string const payload = w.Take();
+    for (std::size_t maxBody : { 64u, 100u, 233u, 251u, 255u, 1000u })
+        CheckFrames("LB", 77, payload, maxBody);
+    // dense escapes and multibyte text without any record separator
+    std::string dense;
+    for (int i = 0; i < 900; ++i)
+        dense += (i % 3 == 0) ? std::string("%2C") : (i % 3 == 1 ? std::string("\xE2\x82\xAC") : std::string("\xF0\x9F\x98\x80"));
+    for (std::size_t maxBody : { 64u, 65u, 66u, 67u, 99u, 1000u })
+        CheckFrames("BOARD", 1295, dense, maxBody);
+    CHECK_EQ(BuildFrames("QLEAVE", 9, "", 1000).at(0), "1 QLEAVE 9 1/1");
+    CHECK(BuildFrames("week", 1, "x").empty());
+    CHECK(BuildFrames("TOOLONGOP", 1, "x").empty());
+    CHECK(BuildFrames("WEEK", 1, std::string(MaxAssembled + 1, 'x')).empty());
+    CHECK(BuildFrames("WEEK", 1, std::string(99 * 60, 'x'), 64).empty());   // more than 99 parts
+    CHECK(BuildFrames("WEEK", 1, "x", 10).empty());
+    std::size_t const capped = BuildFrames("WEEK", 1, std::string(5000, 'x'), 5000).at(0).size();   // capped at 1000
+    CHECK(capped <= 1000 && capped >= 990);
+}
+
+TEST("definition hash is stable, content based and never zero")
+{
+    Definitions a;
+    a.affixes.push_back({ 1, "Fortified", "x" });
+    Definitions b = a;
+    CHECK_EQN(DefinitionsHash(a), DefinitionsHash(b));
+    b.affixes[0].text = "y";
+    CHECK(DefinitionsHash(a) != DefinitionsHash(b));
+    CHECK(DefinitionsHash(Definitions()) != 0);
+    CHECK(DefinitionsHash(a) <= 0x7FFFFFFFu);
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Client messages
+// ---------------------------------------------------------------------------------------------------
+TEST("every C> example of the document is accepted and re-encodes byte for byte")
+{
+    std::vector<std::string> lines = DocLines("C>");
+    CHECK(lines.size() >= 17);
+    bool seen[static_cast<std::size_t>(IntentType::Count)] = {};
+    for (std::string const& body : lines)
+    {
+        Intent in;
+        DropReason r = Parse(body, &in);
+        CHECK_MSG(r == DropReason::None, body + " -> " + DropReasonName(r));
+        if (r != DropReason::None)
+            continue;
+        CHECK_EQ(EncodeIntentBody(in), body);
+        seen[static_cast<std::size_t>(in.type)] = true;
+    }
+    for (std::size_t i = 0; i < static_cast<std::size_t>(IntentType::Count); ++i)
+        CHECK_MSG(seen[i], std::string("example for ") + IntentOpName(static_cast<IntentType>(i)));
+    // a few decoded values
+    Intent in;
+    CHECK(Parse("1 QJOIN 6 1/1 D,389,2,4,3", &in) == DropReason::None);
+    CHECK(in.type == IntentType::QueueJoin && in.queueKind == QueueKind::Dungeon && in.activityId == 389 && in.tier == 2 &&
+        in.roles == RoleDamage && in.groupSize == 3 && in.seq == 6);
+    CHECK(Parse("1 GET 3 1/1 SET,1,2", &in) == DropReason::None);
+    CHECK(in.topics.size() == 1 && in.topics[0].topic == Topic::Set && in.topics[0].arg1 == 1 && in.topics[0].arg2 == 2);
+    CHECK(Parse("1 HELLO 1 1/1 1,1.0.0,0,enUS", &in) == DropReason::None);
+    CHECK(in.proto == 1 && in.addonVersion == "1.0.0" && in.dataVersion == 0 && in.locale == "enUS" && in.caps == 0);
+    // the optional caps (section 21: bit 1 the cafe's UI); a client without optional parts leaves the field off
+    CHECK(Parse("1 HELLO 1 1/1 1,1.0.0,0,enUS,1", &in) == DropReason::None);
+    CHECK(in.locale == "enUS" && in.caps == ClientCapCafeUi);
+    CHECK(EncodeIntentPayload(in) == "1,1.0.0,0,enUS,1");
+    CHECK(Parse("1 HELLO 1 1/1 1,1.0.0,0,enUS,0", &in) == DropReason::None && in.caps == 0);
+    CHECK(EncodeIntentPayload(in) == "1,1.0.0,0,enUS");
+    CHECK(Parse("1 LBQ g 1/1 K,1,0,0,2", &in) == DropReason::None);
+    CHECK(in.board == Board::Keys && in.seasonId == 1 && in.page == 2 && in.seq == 16);
+    CHECK(Parse("1 EMOJI i 1/1 7", &in) == DropReason::None);
+    CHECK(in.type == IntentType::Emoji && in.emojiId == 7 && in.seq == 18);
+    CHECK(Parse("1 EMOJI i 1/1 255", &in) == DropReason::None && in.emojiId == 255);
+    CHECK(Parse("1 DANCE j 1/1 5", &in) == DropReason::None);
+    CHECK(in.type == IntentType::Dance && in.danceId == 5 && in.seq == 19);
+    CHECK(Parse("1 DANCE j 1/1 1023", &in) == DropReason::None && in.danceId == 1023);
+    CHECK(Parse("1 CASEOPEN l 1/1 990001,7", &in) == DropReason::None);
+    CHECK(in.type == IntentType::CaseOpen && in.caseItemId == 990001 && in.caseNonce == 7 && in.seq == 21);
+    CHECK(Parse("1 GET k 1/1 CASES;CASE,990001", &in) == DropReason::None);
+    CHECK(in.topics.size() == 2 && in.topics[0].topic == Topic::Cases && in.topics[1].topic == Topic::Case &&
+        in.topics[1].arg1 == 990001);
+    CHECK(Parse("1 GET m 1/1 CAMPST", &in) == DropReason::None);
+    CHECK(in.topics.size() == 1 && in.topics[0].topic == Topic::CampState && in.seq == 22);
+    CHECK(Parse("1 CAMP n 1/1 M", &in) == DropReason::None);
+    CHECK(in.type == IntentType::Camp && in.campAct == CampAct::Make && in.campSkill == 0 && in.seq == 23);
+    CHECK(Parse("1 CAMP o 1/1 O,164", &in) == DropReason::None);
+    CHECK(in.type == IntentType::Camp && in.campAct == CampAct::Object && in.campSkill == 164 && in.seq == 24);
+    CHECK(Parse("1 CAMP p 1/1 P", &in) == DropReason::None);
+    CHECK(in.type == IntentType::Camp && in.campAct == CampAct::Pack && in.campSkill == 0);
+    CHECK(Parse("1 CAMP p 1/1 O,2147483647", &in) == DropReason::None && in.campSkill == 2147483647u);
+    CHECK(Parse("1 GLIDE q 1/1", &in) == DropReason::None && in.type == IntentType::Glide && in.seq == 26);
+    CHECK(Parse("1 REPAIR r 1/1", &in) == DropReason::None && in.type == IntentType::Repair && in.seq == 27);
+    // Bleakhold Royale (section 17)
+    CHECK(Parse("1 GET s 1/1 ROYS;ROYM", &in) == DropReason::None);
+    CHECK(in.topics.size() == 2 && in.topics[0].topic == Topic::RoyaleState && in.topics[1].topic == Topic::RoyaleMap);
+    CHECK(Parse("1 QJOIN t 1/1 B,901,0,4,1", &in) == DropReason::None);
+    CHECK(in.type == IntentType::QueueJoin && in.queueKind == QueueKind::Royale && in.activityId == 901 &&
+        in.tier == 0 && in.roles == RoleDamage && in.groupSize == 1 && in.seq == 29);
+    CHECK(Parse("1 RDROP u 1/1 -412,96", &in) == DropReason::None);
+    CHECK(in.type == IntentType::RoyaleDrop && in.dropX == -412 && in.dropY == 96 && in.seq == 30);
+    CHECK(Parse("1 RDROP u 1/1 -17067,17067", &in) == DropReason::None && in.dropX == -17067 && in.dropY == 17067);
+    CHECK(Parse("1 RDROP u 1/1 0,-0", &in) == DropReason::None && in.dropX == 0 && in.dropY == 0);
+    CHECK_EQ(EncodeIntentBody(in), "1 RDROP u 1/1 0,0");
+    CHECK(Parse("1 RDEPLOY v 1/1", &in) == DropReason::None && in.type == IntentType::RoyaleDeploy && in.seq == 31);
+    CHECK(Parse("1 RSPEC w 1/1 2", &in) == DropReason::None);
+    CHECK(in.type == IntentType::RoyaleSpectate && in.spectateDir == SpectateDir::Previous && in.seq == 32);
+    CHECK(Parse("1 RSPEC w 1/1 0", &in) == DropReason::None && in.spectateDir == SpectateDir::Killer);
+    CHECK(Parse("1 RSPEC w 1/1 1", &in) == DropReason::None && in.spectateDir == SpectateDir::Next);
+    CHECK_EQ(IntentOpName(IntentType::RoyaleDeploy), "RDEPLOY");
+    CHECK_EQ(TopicName(Topic::RoyaleMap), "ROYM");
+    CHECK(!IsRevisioned(Topic::RoyaleState) && !IsRevisioned(Topic::RoyaleMap));
+    CHECK(IsActionIntent(IntentType::RoyaleDrop) && IsActionIntent(IntentType::RoyaleDeploy) &&
+        IsActionIntent(IntentType::RoyaleSpectate));
+    // World PvP and War Mode (section 19)
+    CHECK(Parse("1 GET x 1/1 WMST;WPZ;WPMAP;WANTED", &in) == DropReason::None);
+    CHECK(in.topics.size() == 4 && in.topics[0].topic == Topic::WarModeState && in.topics[1].topic == Topic::WarZone &&
+        in.topics[2].topic == Topic::WarMap && in.topics[3].topic == Topic::Wanted && in.seq == 33);
+    CHECK(Parse("1 WARMODE y 1/1 1", &in) == DropReason::None);
+    CHECK(in.type == IntentType::WarMode && in.warModeOn && in.seq == 34);
+    CHECK(Parse("1 WARMODE y 1/1 0", &in) == DropReason::None && in.type == IntentType::WarMode && !in.warModeOn);
+    CHECK_EQ(EncodeIntentBody(in), "1 WARMODE y 1/1 0");
+    CHECK_EQ(IntentOpName(IntentType::WarMode), "WARMODE");
+    CHECK_EQ(TopicName(Topic::Wanted), "WANTED");
+    CHECK(!IsRevisioned(Topic::WarModeState) && !IsRevisioned(Topic::WarZone) && !IsRevisioned(Topic::WarMap) &&
+        !IsRevisioned(Topic::Wanted));
+    CHECK(IsActionIntent(IntentType::WarMode));
+}
+
+TEST("cases: chances add up to 10000 and the roll follows the weights")
+{
+    using namespace Bleakhold::Cases;
+    std::vector<uint32_t> c = Chances({ 12, 12, 12, 12, 12, 12, 12, 12, 4 });
+    uint32_t sum = 0;
+    for (uint32_t v : c)
+        sum += v;
+    CHECK(sum == 10000u);
+    CHECK(c[0] == 1200 || c[0] == 1201);
+    CHECK(c[8] == 400u);
+    c = Chances({ 1, 1, 1 });
+    CHECK(c[0] + c[1] + c[2] == 10000 && c[0] == 3334 && c[1] == 3333 && c[2] == 3333);
+    c = Chances({ 5, 0, 5 });
+    CHECK(c[0] == 5000 && c[1] == 0 && c[2] == 5000);
+    c = Chances({ 0, 0 });
+    CHECK(c[0] == 0 && c[1] == 0);
+    c = Chances({ 4000000000u, 4000000000u, 1 });   // big weights do not overflow
+    CHECK(c[0] + c[1] + c[2] == 10000 && c[0] == 5000 && c[2] == 0);
+    std::vector<uint32_t> const w = { 45, 45, 10 };
+    CHECK(TotalWeight(w) == 100u);
+    CHECK(Pick(w, 0) == 0u);
+    CHECK(Pick(w, 44) == 0u);
+    CHECK(Pick(w, 45) == 1u);
+    CHECK(Pick(w, 89) == 1u);
+    CHECK(Pick(w, 90) == 2u);
+    CHECK(Pick(w, 99) == 2u);
+    CHECK(Pick(w, 100) == 3u);                    // out of range: none
+    CHECK(Pick({ 0, 3 }, 0) == 1u);               // a weight of 0 is never picked
+    CHECK(Pick({}, 0) == 0u);
+}
+
+TEST("dance catalogue fits the protocol")
+{
+    // src/BleakholdDance.h is generated from Tools/DanceForge/dances.json (its tests compare the rest)
+    CHECK(DanceCatalogueCount >= 1 && DanceCatalogueCount <= MaxDances);
+    std::set<std::string> keys;
+    for (uint32_t i = 0; i < DanceCatalogueCount; ++i)
+    {
+        std::string const k = DanceCatalogueKeys[i];
+        bool ok = !k.empty() && k[0] >= 'a' && k[0] <= 'z' && k.size() <= 32;
+        for (char c : k)
+            ok = ok && ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_');
+        CHECK_MSG(ok, "dance key [" + k + "]");
+        CHECK_MSG(keys.insert(k).second, "dance key " + k + " is unique");
+        CHECK_MSG(DanceLoopMs[i] >= 1000 && DanceLoopMs[i] <= 60000, "dance loop of " + k);
+    }
+    CHECK_EQ(DanceCatalogueKeys[0], "string_swing");
+    Intent in;
+    CHECK(Parse("1 DANCE i 1/1 " + std::to_string(DanceCatalogueCount - 1), &in) == DropReason::None &&
+        in.danceId == DanceCatalogueCount - 1);
+}
+
+TEST("emoji catalogue fits the protocol")
+{
+    // src/BleakholdEmoji.h is generated from Tools/EmojiForge/emojis.json (its tests compare the rest)
+    CHECK(EmojiCatalogueCount >= 1 && EmojiCatalogueCount <= MaxEmojis);
+    std::set<std::string> keys;
+    for (uint32_t i = 0; i < EmojiCatalogueCount; ++i)
+    {
+        std::string const k = EmojiCatalogueKeys[i];
+        bool ok = !k.empty() && k[0] >= 'a' && k[0] <= 'z';
+        for (char c : k)
+            ok = ok && ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_');
+        CHECK_MSG(ok, "emoji key [" + k + "]");
+        CHECK_MSG(keys.insert(k).second, "emoji key " + k + " is unique");
+    }
+    CHECK_EQ(EmojiCatalogueKeys[0], "joy");
+    // the last id fits the wire field
+    Intent in;
+    CHECK(Parse("1 EMOJI i 1/1 " + std::to_string(EmojiCatalogueCount - 1), &in) == DropReason::None &&
+        uint32_t(in.emojiId) == EmojiCatalogueCount - 1);
+}
+
+TEST("malformed client messages are dropped with the right reason")
+{
+    struct Bad { std::string text; DropReason why; };
+    std::vector<Bad> const bad = {
+        { "BHs\t1 WEEK 1 1/1 1", DropReason::ServerPrefix },
+        { "BHs", DropReason::ServerPrefix },
+        { "AzerothCore\t1 X", DropReason::NotBleakhold },
+        { "BHcx\t1 PING 1 1/1 1", DropReason::NotBleakhold },
+        { "BHc", DropReason::BadHeader },
+        { "BHc\t", DropReason::BadHeader },
+        { "BHc\t1 PING 1 1/1 " + std::string(240, '1'), DropReason::TooLong },
+        { std::string("BHc\t1 PING 1 1/1 1\0", 19), DropReason::Nul },
+        { "BHc\t1 PING 1 1/1 1\t2", DropReason::BadField },
+        { "BHc\t1 ping 1 1/1 1", DropReason::BadHeader },
+        { "BHc\t1 P 1 1/1 1", DropReason::BadHeader },
+        { "BHc\t1 PINGPONG 1 1/1 1", DropReason::UnknownOp },
+        { "BHc\t1 PINGPONGS 1 1/1 1", DropReason::BadHeader },
+        { "BHc\t1  PING 1 1/1 1", DropReason::BadHeader },
+        { "BHc\t1 PING 1 1/1,1", DropReason::BadHeader },
+        { "BHc\t1 PING A 1/1 1", DropReason::BadHeader },
+        { "BHc\t1 PING 1234567 1/1 1", DropReason::BadHeader },
+        { "BHc\t1 PING 1 0/1 1", DropReason::BadHeader },
+        { "BHc\t1 PING 1 2/1 1", DropReason::BadHeader },
+        { "BHc\t1 PING 1 1/100 1", DropReason::BadHeader },
+        { "BHc\t1 PING 1 1/2 1", DropReason::Chunked },
+        { "BHc\t1234 PING 1 1/1 1", DropReason::BadHeader },
+        { "BHc\t2 PING 1 1/1 1", DropReason::Version },
+        { "BHc\t0 PING 1 1/1 1", DropReason::Version },
+        { "BHc\t1 SCORE 1 1/1 999", DropReason::UnknownOp },
+        { "BHc\t1 MPE 1 1/1 1,1", DropReason::UnknownOp },
+        { "BHc\t1 TCLAIM 1 1/1", DropReason::FieldCount },
+        { "BHc\t1 TCLAIM 1 1/1 1,2", DropReason::FieldCount },
+        { "BHc\t1 TCLAIM 1 1/1 1;2", DropReason::FieldCount },
+        { "BHc\t1 TCLAIM 1 1/1 x", DropReason::BadField },
+        { "BHc\t1 TCLAIM 1 1/1 1.5", DropReason::BadField },
+        { "BHc\t1 TCLAIM 1 1/1 1e5", DropReason::BadField },
+        { "BHc\t1 TCLAIM 1 1/1 0x10", DropReason::BadField },
+        { "BHc\t1 TCLAIM 1 1/1 +5", DropReason::BadField },
+        { "BHc\t1 TCLAIM 1 1/1  5", DropReason::BadField },
+        { "BHc\t1 TCLAIM 1 1/1 5 ", DropReason::BadField },
+        { "BHc\t1 TCLAIM 1 1/1 nan", DropReason::BadField },
+        { "BHc\t1 TCLAIM 1 1/1 %31", DropReason::BadField },
+        { "BHc\t1 TCLAIM 1 1/1 0", DropReason::OutOfRange },
+        { "BHc\t1 TCLAIM 1 1/1 -1", DropReason::OutOfRange },
+        { "BHc\t1 TCLAIM 1 1/1 2147483648", DropReason::OutOfRange },
+        { "BHc\t1 TCLAIM 1 1/1 9999999999999999", DropReason::BadField },
+        { "BHc\t1 QJOIN 1 1/1 X,1,0,4,5", DropReason::BadField },
+        { "BHc\t1 QJOIN 1 1/1 DD,1,0,4,5", DropReason::BadField },
+        { "BHc\t1 QJOIN 1 1/1 D,1,4,4,5", DropReason::OutOfRange },
+        { "BHc\t1 QJOIN 1 1/1 D,1,0,0,5", DropReason::OutOfRange },
+        { "BHc\t1 QJOIN 1 1/1 D,1,0,8,5", DropReason::OutOfRange },
+        { "BHc\t1 QJOIN 1 1/1 D,1,0,4,6", DropReason::OutOfRange },
+        { "BHc\t1 QJOIN 1 1/1 D,1,0,4,0", DropReason::OutOfRange },
+        { "BHc\t1 QJOIN 1 1/1 D,0,0,4,5", DropReason::OutOfRange },
+        { "BHc\t1 QJOIN 1 1/1 R,5,0,4,1", DropReason::OutOfRange },
+        { "BHc\t1 QJOIN 1 1/1 D,1,0,4", DropReason::FieldCount },
+        { "BHc\t1 QREPLY 1 1/1 77,2", DropReason::OutOfRange },
+        { "BHc\t1 QREPLY 1 1/1 0,1", DropReason::OutOfRange },
+        { "BHc\t1 QLEAVE 1 1/1 1", DropReason::FieldCount },
+        { "BHc\t1 QLEAVE 1 1/1  ", DropReason::FieldCount },
+        { "BHc\t1 KMODE 1 1/1 3", DropReason::OutOfRange },
+        { "BHc\t1 KSTART 1 1/1 1", DropReason::FieldCount },
+        { "BHc\t1 LBQ 1 1/1 X,1,0,0,1", DropReason::BadField },
+        { "BHc\t1 LBQ 1 1/1 K,1,0,0,0", DropReason::OutOfRange },
+        { "BHc\t1 LBQ 1 1/1 K,1,0,0,1000", DropReason::OutOfRange },
+        { "BHc\t1 EMOJI 1 1/1 256", DropReason::OutOfRange },
+        { "BHc\t1 EMOJI 1 1/1 -1", DropReason::OutOfRange },
+        { "BHc\t1 EMOJI 1 1/1", DropReason::FieldCount },
+        { "BHc\t1 EMOJI 1 1/1 1,2", DropReason::FieldCount },
+        { "BHc\t1 EMOJI 1 1/1 x", DropReason::BadField },
+        { "BHc\t1 DANCE 1 1/1 1024", DropReason::OutOfRange },
+        { "BHc\t1 DANCE 1 1/1 -1", DropReason::OutOfRange },
+        { "BHc\t1 DANCE 1 1/1", DropReason::FieldCount },
+        { "BHc\t1 DANCE 1 1/1 1,2", DropReason::FieldCount },
+        { "BHc\t1 DANCE 1 1/1 a", DropReason::BadField },
+        { "BHc\t1 CASEOPEN 1 1/1 0,1", DropReason::OutOfRange },
+        { "BHc\t1 CASEOPEN 1 1/1 2147483648,1", DropReason::OutOfRange },
+        { "BHc\t1 CASEOPEN 1 1/1 1,2147483648", DropReason::OutOfRange },
+        { "BHc\t1 CASEOPEN 1 1/1 1,-1", DropReason::OutOfRange },
+        { "BHc\t1 CASEOPEN 1 1/1", DropReason::FieldCount },
+        { "BHc\t1 CASEOPEN 1 1/1 1", DropReason::FieldCount },
+        { "BHc\t1 CASEOPEN 1 1/1 1,2,3", DropReason::FieldCount },
+        { "BHc\t1 CASEOPEN 1 1/1 x,1", DropReason::BadField },
+        { "BHc\t1 GET 1 1/1 CASE", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 CASE,0", DropReason::OutOfRange },
+        { "BHc\t1 GET 1 1/1 CASES,1", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 CAMPST,1", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 CAMPSTATE", DropReason::BadTopic },
+        { "BHc\t1 CAMP 1 1/1", DropReason::FieldCount },
+        { "BHc\t1 CAMP 1 1/1 O", DropReason::FieldCount },
+        { "BHc\t1 CAMP 1 1/1 M,0", DropReason::FieldCount },
+        { "BHc\t1 CAMP 1 1/1 P,164", DropReason::FieldCount },
+        { "BHc\t1 CAMP 1 1/1 O,164,1", DropReason::FieldCount },
+        { "BHc\t1 CAMP 1 1/1 M;P", DropReason::FieldCount },
+        { "BHc\t1 CAMP 1 1/1 X", DropReason::BadField },
+        { "BHc\t1 CAMP 1 1/1 m", DropReason::BadField },
+        { "BHc\t1 CAMP 1 1/1 MP", DropReason::BadField },
+        { "BHc\t1 CAMP 1 1/1 1", DropReason::BadField },
+        { "BHc\t1 CAMP 1 1/1 X,1", DropReason::FieldCount },
+        { "BHc\t1 CAMP 1 1/1 O,0", DropReason::OutOfRange },
+        { "BHc\t1 CAMP 1 1/1 O,-1", DropReason::OutOfRange },
+        { "BHc\t1 CAMP 1 1/1 O,2147483648", DropReason::OutOfRange },
+        { "BHc\t1 CAMP 1 1/1 O,x", DropReason::BadField },
+        { "BHc\t1 CAMP 1 1/1 O,", DropReason::BadField },
+        { "BHc\t1 GLIDE 1 1/1 1", DropReason::FieldCount },
+        { "BHc\t1 REPAIR 1 1/1 0", DropReason::FieldCount },
+        { "BHc\t1 REPAIRS 1 1/1", DropReason::UnknownOp },
+        { "BHc\t1 HELLO 1 1/1 1,1.0 beta,0,enUS", DropReason::BadField },
+        { "BHc\t1 HELLO 1 1/1 1,,0,enUS", DropReason::BadField },
+        { "BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUSenUSx", DropReason::BadField },
+        { "BHc\t1 HELLO 1 1/1 1,12345678901234567,0,enUS", DropReason::BadField },
+        { "BHc\t1 HELLO 1 1/1 0,1.0.0,0,enUS", DropReason::OutOfRange },
+        { "BHc\t1 HELLO 1 1/1 1,1.0.0,0", DropReason::FieldCount },
+        { "BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUS,1,1", DropReason::FieldCount },
+        { "BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUS,x", DropReason::BadField },
+        { "BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUS,2147483648", DropReason::OutOfRange },
+        { "BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUS,", DropReason::BadField },
+        { "BHc\t1 GET 1 1/1", DropReason::FieldCount },
+        { "BHc\t1 GET 1 1/1 WEEK;", DropReason::FieldCount },
+        { "BHc\t1 GET 1 1/1 WEEK;;ERA", DropReason::FieldCount },
+        { "BHc\t1 GET 1 1/1 WEEK;ERA;TASKS;KEY;BOARD;QUEUE;COLL;LIDX;SEASON", DropReason::FieldCount },
+        { "BHc\t1 GET 1 1/1 SECRETS", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 week", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 WEEK,1", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 SET,1", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 SET,1,2,3", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 SET,1,x", DropReason::BadField },
+        { "BHc\t1 GET 1 1/1 DEF", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 DEF,1", DropReason::OutOfRange },
+        // Bleakhold Royale (section 17)
+        { "BHc\t1 QJOIN 1 1/1 B,0,0,4,1", DropReason::OutOfRange },        // the mode id is never 0
+        { "BHc\t1 QJOIN 1 1/1 B,901,1,4,1", DropReason::OutOfRange },      // no tiers
+        { "BHc\t1 QJOIN 1 1/1 B,901,0,4,2", DropReason::OutOfRange },      // solo
+        { "BHc\t1 QJOIN 1 1/1 B,901,0,0,1", DropReason::OutOfRange },
+        { "BHc\t1 QJOIN 1 1/1 B,901,0,4", DropReason::FieldCount },
+        { "BHc\t1 QJOIN 1 1/1 b,901,0,4,1", DropReason::BadField },
+        { "BHc\t1 QJOIN 1 1/1 BR,901,0,4,1", DropReason::BadField },
+        { "BHc\t1 RDROP 1 1/1", DropReason::FieldCount },
+        { "BHc\t1 RDROP 1 1/1 104", DropReason::FieldCount },
+        { "BHc\t1 RDROP 1 1/1 104,96,1", DropReason::FieldCount },
+        { "BHc\t1 RDROP 1 1/1 104;96", DropReason::FieldCount },
+        { "BHc\t1 RDROP 1 1/1 104,", DropReason::BadField },
+        { "BHc\t1 RDROP 1 1/1 ,96", DropReason::BadField },
+        { "BHc\t1 RDROP 1 1/1 104.5,96", DropReason::BadField },
+        { "BHc\t1 RDROP 1 1/1 +104,96", DropReason::BadField },
+        { "BHc\t1 RDROP 1 1/1 --104,96", DropReason::BadField },
+        { "BHc\t1 RDROP 1 1/1 -,96", DropReason::BadField },
+        { "BHc\t1 RDROP 1 1/1 17068,96", DropReason::OutOfRange },
+        { "BHc\t1 RDROP 1 1/1 104,-17068", DropReason::OutOfRange },
+        { "BHc\t1 RDROP 1 1/1 -2147483649,0", DropReason::OutOfRange },
+        { "BHc\t1 RDROP 1 1/1 -9999999999999999,0", DropReason::BadField },
+        { "BHc\t1 RDEPLOY 1 1/1 1", DropReason::FieldCount },
+        { "BHc\t1 RDEPLOY 1 1/1 ,", DropReason::FieldCount },
+        { "BHc\t1 RDEPLOYS 1 1/1", DropReason::UnknownOp },
+        { "BHc\t1 RSPEC 1 1/1", DropReason::FieldCount },
+        { "BHc\t1 RSPEC 1 1/1 1,2", DropReason::FieldCount },
+        { "BHc\t1 RSPEC 1 1/1 3", DropReason::OutOfRange },
+        { "BHc\t1 RSPEC 1 1/1 -1", DropReason::OutOfRange },
+        { "BHc\t1 RSPEC 1 1/1 N", DropReason::BadField },
+        { "BHc\t1 GET 1 1/1 ROYS,1", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 ROYM,0", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 ROYO", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 ROYE", DropReason::BadTopic },
+        { "BHc\t1 WARMODE 1 1/1", DropReason::FieldCount },
+        { "BHc\t1 WARMODE 1 1/1 1,1", DropReason::FieldCount },
+        { "BHc\t1 WARMODE 1 1/1 1;1", DropReason::FieldCount },
+        { "BHc\t1 WARMODE 1 1/1 2", DropReason::OutOfRange },
+        { "BHc\t1 WARMODE 1 1/1 -1", DropReason::OutOfRange },
+        { "BHc\t1 WARMODE 1 1/1 on", DropReason::BadField },
+        { "BHc\t1 WARMODES 1 1/1 1", DropReason::UnknownOp },
+        { "BHc\t1 GET 1 1/1 WMST,1", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 WPZ,2817", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 WPCAP", DropReason::BadTopic },
+        { "BHc\t1 GET 1 1/1 WPEV", DropReason::BadTopic },
+    };
+    for (Bad const& b : bad)
+    {
+        Intent in;
+        DropReason r = ParseClientMessage(b.text, in);
+        CHECK_MSG(r == b.why, bhtest::Show(b.text) + ": got " + DropReasonName(r) + ", expected " + DropReasonName(b.why));
+    }
+    // accepted edge cases (the document allows them)
+    CHECK(Parse("1 QLEAVE 9 1/1 ") == DropReason::None);           // trailing space with an empty payload
+    CHECK(Parse("2 HELLO 1 1/1 2,2.0.0,0,enUS") == DropReason::None); // HELLO of another version is read
+    Intent in;
+    CHECK(Parse("1 PING 1 1/1 007", &in) == DropReason::None && in.nonce == 7);
+    CHECK(Parse("1 PING 01 01/01 5", &in) == DropReason::None && in.seq == 1);
+    CHECK(Parse("1 GET zzzzzz 1/1 WEEK;WEEK", &in) == DropReason::None && in.seq == SeqModulo - 1 && in.topics.size() == 2);
+    CHECK(Parse("1 GET 8 1/1 WEEK;ERA;TASKS;KEY;BOARD;QUEUE;COLL;DEF,0") == DropReason::None);
+    CHECK(Parse("1 TCLAIM 1 1/1 2147483647", &in) == DropReason::None && in.taskUid == 2147483647u);
+    std::string const max = "1 PING zzzzzz 1/1 " + std::string(MaxClientBody - 18, '0');
+    CHECK_EQN(max.size(), MaxClientBody);
+    CHECK(Parse(max) == DropReason::BadField);   // 233 digits: not a number, but not too long either
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Endpoint: handshake, rate limits, duplicates, SEQ and revisions
+// ---------------------------------------------------------------------------------------------------
+static ReceiveResult Feed(Endpoint& ep, std::string const& body, uint64_t t, Intent* out = nullptr)
+{
+    Intent tmp;
+    ReceiveResult r = ep.Receive(Chat(body), t, tmp);
+    if (out)
+        *out = tmp;
+    return r;
+}
+
+TEST("endpoint: nothing but HELLO before the handshake")
+{
+    Endpoint ep;
+    CHECK(!ep.Ready());
+    CHECK(Feed(ep, "1 GET 1 1/1 WEEK", 1000).reason == DropReason::NoHello);
+    CHECK(Feed(ep, "1 TCLAIM 2 1/1 5", 1100).reason == DropReason::NoHello);
+    Intent scratch;
+    CHECK(ep.Receive("hello there", 1200, scratch).verdict == Verdict::NotOurs);
+    ReceiveResult h = Feed(ep, "1 HELLO 3 1/1 1,1.0.0,0,enUS", 1300);
+    CHECK(h.verdict == Verdict::Accepted && ep.Ready());
+    CHECK(Feed(ep, "1 GET 4 1/1 WEEK", 1400).verdict == Verdict::Accepted);
+    CHECK_EQ(ep.Hello().locale, "enUS");
+}
+
+TEST("endpoint: the client's caps come with each HELLO (a /reload without the cafe's UI drops them)")
+{
+    Endpoint ep;
+    CHECK(Feed(ep, "1 HELLO 1 1/1 1,1.0.0,0,enUS,1", 1000).verdict == Verdict::Accepted);
+    CHECK(ep.Ready() && (ep.Hello().caps & ClientCapCafeUi));
+    CHECK(Feed(ep, "1 HELLO 2 1/1 1,1.0.0,0,enUS", 7000).verdict == Verdict::Accepted);
+    CHECK(ep.Ready() && ep.Hello().caps == 0);
+}
+
+TEST("endpoint: token bucket of 10 refilled at 5 per second")
+{
+    Limits l;
+    l.duplicateWindowMs = 0;
+    Endpoint ep(l);
+    Feed(ep, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    int ok = 0;
+    for (int i = 0; i < 20; ++i)
+        if (Feed(ep, "1 PING " + Base36(uint32_t(i + 2)) + " 1/1 1", 0).verdict == Verdict::Accepted)
+            ++ok;
+    CHECK_EQN(ok, 9);   // 10 tokens, HELLO took one
+    CHECK_EQN(ep.Stats().dropped[static_cast<std::size_t>(DropReason::Flood)], 11u);
+    ok = 0;
+    for (int i = 0; i < 20; ++i)
+        if (Feed(ep, "1 PING 1 1/1 1", 1000).verdict == Verdict::Accepted)
+            ++ok;
+    CHECK_EQN(ok, 5);   // one second refills five
+    ok = 0;
+    for (int t = 2000; t < 12000; t += 100)   // 10 per second offered for 10 s
+        if (Feed(ep, "1 PING 1 1/1 1", uint64_t(t)).verdict == Verdict::Accepted)
+            ++ok;
+    CHECK(ok >= 54 && ok <= 56);   // 5 left from the last second + 5 per second for 10 s
+}
+
+TEST("endpoint: 200 drops within a minute mute the player for 60 s")
+{
+    Endpoint ep;
+    Feed(ep, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    bool muted = false;
+    int sent = 0;
+    for (uint64_t t = 0; t < 30000 && !muted; t += 10, ++sent)
+        muted = Feed(ep, "1 PING 1 1/1 x", t).muteStarted;   // malformed: every one is a drop
+    CHECK(muted);
+    CHECK(sent >= 200 && sent < 260);
+    CHECK(Feed(ep, "1 PING 1 1/1 1", 40000).reason == DropReason::Muted);
+    CHECK(Feed(ep, "1 PING 1 1/1 1", 95000).verdict == Verdict::Accepted);
+    CHECK_EQN(ep.Stats().mutes, 1u);
+}
+
+TEST("endpoint: per-op limits of section 8")
+{
+    Limits l;
+    l.duplicateWindowMs = 0;
+    Endpoint ep(l);
+    Feed(ep, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    // HELLO 1 per 5 s
+    CHECK(Feed(ep, "1 HELLO 2 1/1 1,1.0.0,0,enUS", 1000).reason == DropReason::Throttled);
+    CHECK(Feed(ep, "1 HELLO 3 1/1 1,1.0.0,0,enUS", 5000).verdict == Verdict::Accepted);
+    // GET: each topic once per second, SET per (tier, class)
+    Intent in;
+    CHECK(Feed(ep, "1 GET 4 1/1 WEEK;ERA", 6000, &in).verdict == Verdict::Accepted && in.topics.size() == 2);
+    CHECK(Feed(ep, "1 GET 5 1/1 WEEK;KEY", 6100, &in).verdict == Verdict::Accepted && in.topics.size() == 1 && in.topics[0].topic == Topic::Key);
+    CHECK(Feed(ep, "1 GET 6 1/1 WEEK;ERA", 6200).reason == DropReason::Throttled);
+    CHECK(Feed(ep, "1 GET 7 1/1 WEEK", 7000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 GET 8 1/1 SET,1,1;SET,1,2", 7100, &in).verdict == Verdict::Accepted && in.topics.size() == 2);
+    CHECK(Feed(ep, "1 GET 9 1/1 SET,1,1", 7200).reason == DropReason::Throttled);
+    // large answers: DEF, LIDX, BOARD at most every 5 s (a new HELLO resets it)
+    CHECK(Feed(ep, "1 GET 9 1/1 DEF,0;LIDX;BOARD", 7300, &in).verdict == Verdict::Accepted && in.topics.size() == 3);
+    CHECK(Feed(ep, "1 GET 9 1/1 DEF,0;LIDX;BOARD", 8400).reason == DropReason::Throttled);
+    CHECK(Feed(ep, "1 GET 9 1/1 DEF,0;LIDX;BOARD", 12300, &in).verdict == Verdict::Accepted && in.topics.size() == 3);
+    // LBQ 2 per second
+    CHECK(Feed(ep, "1 LBQ a 1/1 K,1,0,0,1", 9000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 LBQ b 1/1 K,1,0,0,2", 9100).verdict == Verdict::Accepted);
+    ReceiveResult r = Feed(ep, "1 LBQ c 1/1 K,1,0,0,3", 9200, &in);
+    CHECK(r.verdict == Verdict::Refused && in.type == IntentType::LeaderboardQuery && in.seq == 12);
+    // QJOIN / QLEAVE / QREPLY: 1 per second each
+    CHECK(Feed(ep, "1 QJOIN d 1/1 D,389,2,4,3", 11000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 QLEAVE e 1/1", 11100).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 QJOIN f 1/1 D,389,1,4,3", 11200).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 QJOIN g 1/1 D,389,1,4,3", 12100).verdict == Verdict::Accepted);
+    // KMODE / KSTART / KCANCEL: 1 per 2 s each
+    CHECK(Feed(ep, "1 KMODE h 1/1 2", 14000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 KMODE i 1/1 1", 15000).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 KSTART j 1/1", 15100).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 KMODE k 1/1 1", 16100).verdict == Verdict::Accepted);
+    // claims: 2 per second together
+    CHECK(Feed(ep, "1 TCLAIM l 1/1 1", 20000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 BCLAIM m 1/1 2", 20100).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 OUTFIT n 1/1 3", 20200).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 WEHANDIN o 1/1", 20700).verdict == Verdict::Accepted);
+    // EMOJI: 1 per 2.5 s (at 24500 the bucket holds exactly one token again)
+    CHECK(Feed(ep, "1 EMOJI p 1/1 1", 22000).verdict == Verdict::Accepted);
+    ReceiveResult e = Feed(ep, "1 EMOJI q 1/1 2", 23000, &in);
+    CHECK(e.verdict == Verdict::Refused && in.type == IntentType::Emoji && in.emojiId == 2);
+    CHECK(Feed(ep, "1 EMOJI r 1/1 2", 24600).verdict == Verdict::Accepted);
+    // DANCE: 1 per second
+    CHECK(Feed(ep, "1 DANCE s 1/1 1", 30000).verdict == Verdict::Accepted);
+    ReceiveResult dn = Feed(ep, "1 DANCE t 1/1 2", 30500, &in);
+    CHECK(dn.verdict == Verdict::Refused && in.type == IntentType::Dance && in.danceId == 2);
+    CHECK(Feed(ep, "1 DANCE u 1/1 2", 31100).verdict == Verdict::Accepted);
+    // CASEOPEN: 1 per second
+    CHECK(Feed(ep, "1 CASEOPEN v 1/1 990001,1", 40000).verdict == Verdict::Accepted);
+    ReceiveResult cs = Feed(ep, "1 CASEOPEN w 1/1 990002,2", 40500, &in);
+    CHECK(cs.verdict == Verdict::Refused && in.type == IntentType::CaseOpen && in.caseItemId == 990002);
+    CHECK(Feed(ep, "1 CASEOPEN x 1/1 990002,3", 41100).verdict == Verdict::Accepted);
+    // CAMP: 1 per second, every act together
+    CHECK(Feed(ep, "1 CAMP y 1/1 M", 50000).verdict == Verdict::Accepted);
+    ReceiveResult cp = Feed(ep, "1 CAMP z 1/1 O,164", 50500, &in);
+    CHECK(cp.verdict == Verdict::Refused && in.type == IntentType::Camp && in.campAct == CampAct::Object && in.campSkill == 164);
+    CHECK(Feed(ep, "1 CAMP 10 1/1 O,164", 51100).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CAMP 11 1/1 P", 51600).verdict == Verdict::Refused);
+    // GLIDE: 1 per second (another op's bucket is not touched)
+    CHECK(Feed(ep, "1 GLIDE 12 1/1", 51700).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 GLIDE 13 1/1", 53000).verdict == Verdict::Accepted);
+    // REPAIR: 1 per 2 s (the duplicate guard drops a repeat within 1 s; after it the bucket answers busy)
+    CHECK(Feed(ep, "1 REPAIR 14 1/1", 60000).verdict == Verdict::Accepted);
+    ReceiveResult rp = Feed(ep, "1 REPAIR 15 1/1", 61500, &in);
+    CHECK(rp.verdict == Verdict::Refused && in.type == IntentType::Repair);
+    CHECK(Feed(ep, "1 REPAIR 16 1/1", 62100).verdict == Verdict::Accepted);
+    // RDROP and RSPEC: 1 per 0.5 s each (2 per second); RDEPLOY: 1 per second (section 17)
+    CHECK(Feed(ep, "1 RDROP 17 1/1 104,96", 70000).verdict == Verdict::Accepted);
+    ReceiveResult rd = Feed(ep, "1 RDROP 18 1/1 -50,-60", 70300, &in);
+    CHECK(rd.verdict == Verdict::Refused && in.type == IntentType::RoyaleDrop && in.dropX == -50 && in.dropY == -60);
+    CHECK(Feed(ep, "1 RDROP 19 1/1 -50,-60", 70550).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RSPEC 1a 1/1 1", 70560).verdict == Verdict::Accepted);   // its own bucket
+    CHECK(Feed(ep, "1 RSPEC 1b 1/1 2", 70900).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 RSPEC 1c 1/1 2", 71100).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RDEPLOY 1d 1/1", 71110).verdict == Verdict::Accepted);
+    ReceiveResult dp = Feed(ep, "1 RDEPLOY 1e 1/1", 71800, &in);
+    CHECK(dp.verdict == Verdict::Refused && in.type == IntentType::RoyaleDeploy);
+    CHECK(Feed(ep, "1 RDEPLOY 1f 1/1", 72200).verdict == Verdict::Accepted);
+    // QJOIN B shares the QJOIN bucket
+    CHECK(Feed(ep, "1 QJOIN 1g 1/1 B,901,0,4,1", 80000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 QJOIN 1h 1/1 D,389,1,4,3", 80500).verdict == Verdict::Refused);
+    // GET ROYS and ROYM: each topic once per second
+    CHECK(Feed(ep, "1 GET 1i 1/1 ROYS;ROYM", 81000, &in).verdict == Verdict::Accepted && in.topics.size() == 2);
+    CHECK(Feed(ep, "1 GET 1j 1/1 ROYS", 81500).reason == DropReason::Throttled);
+    CHECK(Feed(ep, "1 GET 1k 1/1 ROYS", 82000).verdict == Verdict::Accepted);
+}
+
+TEST("endpoint: the Bleakhold Royale limits come from Limits")
+{
+    Limits l;
+    l.duplicateWindowMs = 0;
+    l.royaleIntervalMs = 2000;
+    l.royaleDeployIntervalMs = 0;   // 0: no limit of its own
+    Endpoint ep(l);
+    Feed(ep, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    CHECK(Feed(ep, "1 RDROP 2 1/1 1,1", 1000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RDROP 3 1/1 2,2", 2500).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 RDROP 4 1/1 2,2", 3100).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RSPEC 5 1/1 1", 3200).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RSPEC 6 1/1 1", 4000).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 RDEPLOY 7 1/1", 5000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RDEPLOY 8 1/1", 5001).verdict == Verdict::Accepted);
+}
+
+TEST("endpoint: the War Mode limit comes from Limits; a repeated WARMODE within the window is a duplicate")
+{
+    Limits l;
+    l.warModeIntervalMs = 2000;
+    Endpoint ep(l);
+    Feed(ep, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    CHECK(Feed(ep, "1 WARMODE 2 1/1 1", 1000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 WARMODE 3 1/1 1", 1500).reason == DropReason::Duplicate);
+    Intent in;
+    ReceiveResult r = Feed(ep, "1 WARMODE 4 1/1 0", 2500, &in);
+    CHECK(r.verdict == Verdict::Refused && in.type == IntentType::WarMode && !in.warModeOn);
+    CHECK(Feed(ep, "1 WARMODE 5 1/1 0", 3100).verdict == Verdict::Accepted);
+    // the other limits are untouched by it
+    CHECK(Feed(ep, "1 GLIDE 6 1/1", 3200).verdict == Verdict::Accepted);
+    Limits off;
+    off.warModeIntervalMs = 0;   // 0: no limit of its own
+    off.duplicateWindowMs = 0;
+    Endpoint free(off);
+    Feed(free, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    CHECK(Feed(free, "1 WARMODE 2 1/1 1", 1000).verdict == Verdict::Accepted);
+    CHECK(Feed(free, "1 WARMODE 3 1/1 0", 1001).verdict == Verdict::Accepted);
+    CHECK(Feed(free, "1 GET 4 1/1 WMST;WPMAP", 1100, &in).verdict == Verdict::Accepted && in.topics.size() == 2);
+    CHECK(Feed(free, "1 GET 5 1/1 WMST", 1200).reason == DropReason::Throttled);
+}
+
+TEST("endpoint: the camping limits come from Limits")
+{
+    Limits l;
+    l.duplicateWindowMs = 0;
+    l.campIntervalMs = 5000;
+    l.glideIntervalMs = 3000;
+    l.repairIntervalMs = 0;   // 0: no limit of its own
+    Endpoint ep(l);
+    Feed(ep, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    CHECK(Feed(ep, "1 CAMP 2 1/1 M", 1000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CAMP 3 1/1 P", 4000).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 CAMP 4 1/1 P", 6100).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 GLIDE 5 1/1", 7000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 GLIDE 6 1/1", 9000).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 GLIDE 7 1/1", 10100).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 REPAIR 8 1/1", 11000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 REPAIR 9 1/1", 11001).verdict == Verdict::Accepted);
+}
+
+TEST("endpoint: the same action twice within the window is ignored")
+{
+    Endpoint ep;
+    Feed(ep, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    CHECK(Feed(ep, "1 TCLAIM 2 1/1 103", 1000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 TCLAIM 3 1/1 103", 1600).reason == DropReason::Duplicate);
+    CHECK(Feed(ep, "1 TCLAIM 4 1/1 104", 1700).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 TCLAIM 5 1/1 103", 3000).verdict == Verdict::Accepted);   // window over: the handler decides
+    CHECK(Feed(ep, "1 KMODE 6 1/1 2", 4000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 KMODE 7 1/1 0", 6500).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 KMODE 8 1/1 2", 9000).verdict == Verdict::Accepted);      // not the same as the last one
+    // EMOJI: the same id is dropped before the cooldown answers "busy" (section 13)
+    CHECK(Feed(ep, "1 EMOJI 9 1/1 7", 10000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 EMOJI a 1/1 7", 10500).reason == DropReason::Duplicate);
+    CHECK(Feed(ep, "1 EMOJI b 1/1 8", 10600).verdict == Verdict::Refused);
+    // DANCE: the same dance again at once is dropped too
+    CHECK(Feed(ep, "1 DANCE c 1/1 3", 20000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 DANCE d 1/1 3", 20400).reason == DropReason::Duplicate);
+    // CASEOPEN: the same request again at once is dropped too; a new one (another nonce) is not (section 15)
+    CHECK(Feed(ep, "1 CASEOPEN e 1/1 990001,5", 30000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CASEOPEN f 1/1 990001,5", 30400).reason == DropReason::Duplicate);
+    CHECK(Feed(ep, "1 CASEOPEN g 1/1 990001,6", 31500).verdict == Verdict::Accepted);
+    // CAMP: the same act again at once is dropped; another act is a new request (and meets the rate limit)
+    CHECK(Feed(ep, "1 CAMP h 1/1 M", 40000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CAMP i 1/1 M", 40300).reason == DropReason::Duplicate);
+    CHECK(Feed(ep, "1 CAMP j 1/1 O,164", 40400).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 CAMP k 1/1 O,164", 41500).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CAMP l 1/1 O,164", 41900).reason == DropReason::Duplicate);
+    CHECK(Feed(ep, "1 CAMP m 1/1 O,171", 42600).verdict == Verdict::Accepted);
+    // GLIDE and REPAIR have no fields: any repeat within the window is a duplicate
+    CHECK(Feed(ep, "1 GLIDE n 1/1", 50000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 GLIDE o 1/1", 50900).reason == DropReason::Duplicate);
+    CHECK(Feed(ep, "1 REPAIR p 1/1", 50950).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 REPAIR q 1/1", 51000).reason == DropReason::Duplicate);
+    // RDROP: the same pin again at once is dropped, another pin meets the rate limit (section 17)
+    CHECK(Feed(ep, "1 RDROP r 1/1 104,96", 60000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RDROP s 1/1 104,96", 60800).reason == DropReason::Duplicate);
+    CHECK(Feed(ep, "1 RDROP t 1/1 104,97", 61300).verdict == Verdict::Accepted);
+    // RDEPLOY has no fields: a repeat within the window is a duplicate
+    CHECK(Feed(ep, "1 RDEPLOY u 1/1", 62000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RDEPLOY v 1/1", 62900).reason == DropReason::Duplicate);
+    // RSPEC "next" twice is two steps: never a duplicate, only its rate limit holds
+    CHECK(Feed(ep, "1 RSPEC w 1/1 1", 70000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RSPEC x 1/1 1", 70600).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 RSPEC y 1/1 1", 70700).verdict == Verdict::Refused);
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Camping (section 16): the core-independent rules of src/BleakholdCampRules.h and the CAMPST encoder
+// ---------------------------------------------------------------------------------------------------
+TEST("camping: tiers, id lists, XP bonus, repair rules")
+{
+    using namespace Bleakhold::CampRules;
+    Tiers const t = DefaultTierSkill;
+    CHECK(TierFor(0, t) == 0 && TierFor(74, t) == 0 && TierFor(75, t) == 1 && TierFor(224, t) == 1 && TierFor(225, t) == 2 &&
+        TierFor(374, t) == 2 && TierFor(375, t) == 3 && TierFor(450, t) == 3 && TierFor(0xFFFFFFFFu, t) == 3);
+    CHECK(ParseIds("22") == std::vector<uint32_t>({ 22 }));
+    CHECK(ParseIds(" 75, 225 ;375 ") == std::vector<uint32_t>({ 75, 225, 375 }));
+    CHECK(ParseIds("").empty() && ParseIds("x, ,").empty());
+    CHECK(ParseIds("4294967295,4294967296,7") == std::vector<uint32_t>({ 4294967295u, 7 }));   // too big: dropped
+    CHECK(ParseIds("-5") == std::vector<uint32_t>({ 5 }));
+    CHECK(ParseTiers("75,225,375") && *ParseTiers("75,225,375") == t);
+    CHECK(ParseTiers("1 2 3") && (*ParseTiers("1 2 3"))[2] == 3u);
+    CHECK(!ParseTiers("75,225") && !ParseTiers("75,225,375,450") && !ParseTiers("0,225,375") && !ParseTiers("75,75,375") &&
+        !ParseTiers("375,225,75") && !ParseTiers(""));
+    CHECK(BonusPct(false, false, 10, 5, 25) == 0);
+    CHECK(BonusPct(true, false, 10, 5, 25) == 10);
+    CHECK(BonusPct(false, true, 10, 5, 25) == 5);
+    CHECK(BonusPct(true, true, 10, 5, 25) == 15);
+    CHECK(BonusPct(true, true, 20, 15, 25) == 25);   // capped
+    CHECK(BonusPct(true, true, 0xFFFFFFFFu, 0xFFFFFFFFu, 100) == 100);
+    CHECK(AddPct(100, 15) == 115 && AddPct(5, 15) == 5 && AddPct(7, 15) == 8 && AddPct(0, 25) == 0 && AddPct(1000, 0) == 1000);
+    CHECK(AddPct(0xFFFFFFFFu, 25) == 0xFFFFFFFFu);   // saturates
+    CHECK(RepairCostMod(false, 10) == 1.0f && RepairCostMod(true, 10) == 0.9f && RepairCostMod(true, 0) == 1.0f &&
+        RepairCostMod(true, 250) == 0.0f);
+    CHECK(RepairAllowed(true, 75, 75, false, false) && !RepairAllowed(true, 74, 75, false, false));
+    CHECK(!RepairAllowed(false, 450, 75, false, false));            // feature 2048 off
+    CHECK(RepairAllowed(false, 0, 75, true, true));                 // a camp anvil, no blacksmithing
+    CHECK(RepairAllowed(true, 450, 75, false, true));               // either way
+    CHECK(!RepairAllowed(false, 0, 75, false, true));               // camping off: an anvil is just a decoration
+    CHECK(!RepairAllowed(true, 0, 0, false, false));                // MinSkill 0 still needs the profession
+    CHECK(SecondsLeft(100, 40) == 60 && SecondsLeft(40, 40) == 0 && SecondsLeft(0, 40) == 0);
+}
+
+TEST("camping: the repair toast shows the money that went")
+{
+    using namespace Bleakhold::CampRules;
+    // Player::DurabilityRepairAll returns 0 when the player pays: the toast uses the money before and after
+    CHECK(MoneySpent(50000, 39797) == 10203 && MoneySpent(10, 10) == 0 && MoneySpent(5, 9) == 0);
+    CHECK(MoneySpent(0xFFFFFFFFu, 0) == 0xFFFFFFFFu);
+    CHECK_EQ(MoneyText(MoneySpent(50000, 39797)), "1g 2s 3c");
+    CHECK_EQ(MoneyText(0), "0c");
+    CHECK_EQ(MoneyText(99), "99c");
+    CHECK_EQ(MoneyText(200), "2s 0c");
+    CHECK_EQ(MoneyText(10000), "1g 0s 0c");
+    CHECK_EQ(MoneyText(0xFFFFFFFFu), "429496g 72s 95c");
+}
+
+TEST("camping: camp rest never takes over rest without a rest bit")
+{
+    using namespace Bleakhold::CampRules;
+    CHECK(MaySetCampRestBit(false, false));    // not resting: the camp's bit makes the rest
+    CHECK(MaySetCampRestBit(true, true));      // an inn or city bit: it keeps the rest when the camp's bit goes
+    CHECK(!MaySetCampRestBit(true, false));    // mod-guildhouse's SetRestState: removing the bit later would end it
+}
+
+TEST("camping: camp objects carry no crafting station tied to a place")
+{
+    using namespace Bleakhold::CampRules;
+    std::vector<uint32_t> const def = ParseIds(DefaultAllowedFocusIds);
+    CHECK(def == std::vector<uint32_t>({ 1, 3, 4 }));   // anvil, forge, cooking fire
+    CHECK(FocusAllowed(0, def) && FocusAllowed(1, def) && FocusAllowed(3, def) && FocusAllowed(4, def));
+    CHECK(!FocusAllowed(2, def));                       // a loom
+    CHECK(!FocusAllowed(663, def));                     // Alchemy Lab
+    CHECK(!FocusAllowed(1426, def));                    // Mana Loom
+    CHECK(FocusAllowed(0, {}) && !FocusAllowed(4, {}));
+    CHECK(FocusAllowed(663, ParseIds("1, 663")));
+    // the defaults: no location-tied station (gameobject_template: focus 663 Alchemy Labs, focus 1426 Mana Looms);
+    // the tier 3 Alchemy and Tailoring objects are inert generic objects with the look of the trade
+    for (Profession const& p : DefaultProfessions)
+        for (uint32_t o : p.objects)
+            for (uint32_t station : { 187115u, 177387u, 180631u, 183848u, 184803u, 185000u })
+                CHECK_MSG(o != station, std::string(p.key) + " has no location-tied crafting station");
+    CHECK(DefaultProfessions[0].skill == 171 && DefaultProfessions[0].objects[2] == 190689);    // Apothecary Table
+    CHECK(DefaultProfessions[10].skill == 197 && DefaultProfessions[10].objects[2] == 188216);  // Armor Stand
+}
+
+TEST("camping: the buff check takes Sayge's fortunes and refuses XP, area and harmful spells")
+{
+    using namespace Bleakhold::CampRules;
+    auto aura = [] { BuffEffect e; e.present = true; e.positive = true; return e; };
+    // Spell.dbc 3.3.5a, Sayge's Dark Fortune of Spirit 23738: effect 0 a positive MOD_PERCENT_STAT aura on
+    // TARGET_UNIT_TARGET_ANY, effect 1 TRIGGER_SPELL 23770 (a dummy aura flagged AURA_IS_DEBUFF), which the core marks
+    // negative: SpellInfo::IsPositive() is false, yet the fortune is a buff
+    BuffEffect markerTrigger;
+    markerTrigger.present = true;
+    markerTrigger.inertTrigger = true;
+    BuffEffects const sayge = { aura(), markerTrigger, BuffEffect{} };
+    CHECK(CheckBuff(sayge) == BuffProblem::None);
+    // a scroll (one positive aura), Well Fed 57399 (three)
+    CHECK(CheckBuff({ aura(), BuffEffect{}, BuffEffect{} }) == BuffProblem::None);
+    CHECK(CheckBuff({ aura(), aura(), aura() }) == BuffProblem::None);
+    // the same trigger of a spell that is not an inert marker (a scripted, linked or real debuff): refused
+    BuffEffect harmfulTrigger;
+    harmfulTrigger.present = true;
+    CHECK(CheckBuff({ aura(), harmfulTrigger, BuffEffect{} }) == BuffProblem::NotBuff);
+    // a debuff, and a spell whose only effect is the inert trigger (it does the player no good)
+    BuffEffect debuff;
+    debuff.present = true;
+    CHECK(CheckBuff({ debuff, BuffEffect{}, BuffEffect{} }) == BuffProblem::NotBuff);
+    CHECK(CheckBuff({ markerTrigger, BuffEffect{}, BuffEffect{} }) == BuffProblem::NotBuff);
+    CHECK(CheckBuff({ BuffEffect{}, BuffEffect{}, BuffEffect{} }) == BuffProblem::NotBuff);
+    // XP auras (Ribbon Dance 29175), area auras and area or chain targets stay refused, positive or not
+    BuffEffect xp = aura();
+    xp.changesXp = true;
+    CHECK(CheckBuff({ aura(), xp, BuffEffect{} }) == BuffProblem::ChangesXp);
+    BuffEffect area = aura();
+    area.areaAura = true;
+    CHECK(CheckBuff({ area, BuffEffect{}, BuffEffect{} }) == BuffProblem::AreaAura);
+    BuffEffect raid = aura();
+    raid.reachesOthers = true;   // Prayer of Fortitude: APPLY_AURA on TARGET_UNIT_CASTER_AREA_RAID
+    CHECK(CheckBuff({ raid, BuffEffect{}, BuffEffect{} }) == BuffProblem::ReachesOthers);
+    BuffEffect xpTrigger = markerTrigger;
+    xpTrigger.changesXp = true;
+    CHECK(CheckBuff({ aura(), xpTrigger, BuffEffect{} }) == BuffProblem::ChangesXp);
+    // facts in an unused slot count for nothing
+    BuffEffect ghost = xp;
+    ghost.present = false;
+    CHECK(CheckBuff({ aura(), BuffEffect{}, ghost }) == BuffProblem::None);
+    CHECK_EQ(std::string(BuffProblemText(BuffProblem::NotBuff)), "is not a buff");
+    CHECK(std::string(BuffProblemText(BuffProblem::None)).empty());
+    for (BuffProblem p : { BuffProblem::ChangesXp, BuffProblem::AreaAura, BuffProblem::ReachesOthers })
+        CHECK(!std::string(BuffProblemText(p)).empty());
+}
+
+TEST("camping: object slots stand apart around the fire")
+{
+    using namespace Bleakhold::CampRules;
+    for (float o : { 0.0f, 1.0f, 3.14159f, 6.0f })
+    {
+        Offset a = SlotOffset(0, o, 2.6f), b = SlotOffset(1, o, 2.6f), c = SlotOffset(2, o, 2.6f);
+        auto dist = [](Offset const& x, Offset const& y) { return std::sqrt((x.x - y.x) * (x.x - y.x) + (x.y - y.y) * (x.y - y.y)); };
+        auto radius = [](Offset const& x) { return std::sqrt(x.x * x.x + x.y * x.y); };
+        CHECK(std::fabs(radius(a) - 2.6f) < 0.01f && std::fabs(radius(b) - 2.6f) < 0.01f && std::fabs(radius(c) - 2.6f) < 0.01f);
+        CHECK(dist(a, b) > 4.4f && dist(b, c) > 4.4f && dist(a, c) > 4.4f);   // 2.6 * sqrt(3) = 4.5
+        CHECK(a.angle >= 0.0f && a.angle < 6.2832f);
+        // slot 0 stands beyond the fire as its maker sees it (the fire faces the way its maker looked, 1.5 yd ahead of
+        // them), never on the maker's side; the others stand at least 1 yd beside the maker's spot
+        CHECK(a.x * std::cos(o) + a.y * std::sin(o) > 2.5f);
+        float const mx = -1.5f * std::cos(o), my = -1.5f * std::sin(o);
+        for (Offset const& q : { b, c })
+            CHECK(std::sqrt((q.x - mx) * (q.x - mx) + (q.y - my) * (q.y - my)) > 1.0f);
+        // every object faces the fire
+        CHECK(std::fabs(std::cos(b.angle) * b.x + std::sin(b.angle) * b.y + 2.6f) < 0.01f);
+    }
+    CHECK(SlotOffset(3, 0.0f, 2.0f).x == SlotOffset(0, 0.0f, 2.0f).x);
+}
+
+TEST("camping: the default professions are complete and distinct")
+{
+    using namespace Bleakhold::CampRules;
+    std::set<uint32_t> skills;
+    std::set<std::string> keys;
+    std::set<uint32_t> objects;
+    for (Profession const& p : DefaultProfessions)
+    {
+        CHECK_MSG(skills.insert(p.skill).second, std::string("skill of ") + p.key + " is unique");
+        CHECK_MSG(keys.insert(p.key).second, std::string("key ") + p.key + " is unique");
+        std::string const k = p.key;
+        bool ok = !k.empty();
+        for (char ch : k)
+            ok = ok && ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z'));
+        CHECK_MSG(ok, "profession key [" + k + "] is a config key part");
+        for (uint8_t i = 0; i < TierCount; ++i)
+        {
+            CHECK_MSG(p.objects[i] != 0 && p.buffs[i] != 0, k + " tier " + std::to_string(i + 1));
+            CHECK_MSG(objects.insert(p.objects[i]).second, k + " objects are not shared with another tier or profession");
+        }
+        CHECK_MSG(p.buffs[0] != p.buffs[1] && p.buffs[1] != p.buffs[2] && p.buffs[0] != p.buffs[2], k + " buffs differ per tier");
+        // never an aura that raises XP itself (the module's bonus would come on top): Ribbon Dance
+        for (uint32_t b : p.buffs)
+            CHECK_MSG(b != 29175, k + " gives no XP aura");
+    }
+    CHECK(DefaultProfessions.size() == 14);
+    for (uint32_t s : { 129u, 164u, 165u, 171u, 182u, 185u, 186u, 197u, 202u, 333u, 356u, 393u, 755u, 773u })
+        CHECK_MSG(skills.count(s), "profession " + std::to_string(s));
+    CHECK(SkillBlacksmithing == 164 && AnvilTier == 2);
+    CHECK(DefaultProfessions[1].skill == 164 && DefaultProfessions[1].objects[2] == 171715);   // The Great Anvil
+}
+
+TEST("camping: CAMPST is sent again only when more than a timer changed")
+{
+    using namespace Bleakhold::CampRules;
+    CampState a;
+    a.state = CampStateId::Resting; a.settleSec = 40; a.fireSec = 800; a.mine = true; a.cooldownSec = 700; a.warmthSec = 0;
+    a.xpPct = 5; a.objects = { { 171, 1, false } }; a.place = { { 164, 2 } }; a.glideSec = 0u; a.repair = false; a.fed = true;
+    CampState b = a;
+    CHECK(!Changed(a, b));
+    b.settleSec = 10; b.fireSec = 300; b.cooldownSec = 1;   // counting down
+    CHECK(!Changed(a, b));
+    auto changedBy = [&](auto edit) { CampState c = a; edit(c); return Changed(a, c); };
+    CHECK(changedBy([](CampState& c) { c.state = CampStateId::Camping; }));
+    CHECK(changedBy([](CampState& c) { c.fireSec = 0; }));            // the fire went out
+    CHECK(changedBy([](CampState& c) { c.cooldownSec = 0; }));        // the cooldown is over
+    CHECK(changedBy([](CampState& c) { c.warmthSec = 1800; }));       // the warmth started
+    CHECK(changedBy([](CampState& c) { c.xpPct = 15; }));
+    CHECK(changedBy([](CampState& c) { c.mine = false; }));
+    CHECK(changedBy([](CampState& c) { c.objects.push_back({ 164, 2, true }); }));
+    CHECK(changedBy([](CampState& c) { c.objects[0].tier = 2; }));
+    CHECK(changedBy([](CampState& c) { c.place.clear(); }));
+    CHECK(changedBy([](CampState& c) { c.place[0].tier = 3; }));
+    CHECK(changedBy([](CampState& c) { c.glideSec = 120u; }));        // glide used
+    CHECK(changedBy([](CampState& c) { c.glideSec.reset(); }));       // cannot glide any more
+    CHECK(changedBy([](CampState& c) { c.repair = true; }));
+    CHECK(changedBy([](CampState& c) { c.fed = false; }));
+    CHECK(changedBy([](CampState& c) { c.glidingSec = 10u; }));     // a glide began
+    CampState gliding = a;
+    gliding.glidingSec = 10u;
+    CampState later = gliding;
+    later.glidingSec = 4u;
+    CHECK(!Changed(gliding, later));                                 // its seconds count down on the client
+    later.glidingSec.reset();
+    CHECK(Changed(gliding, later));                                  // it ended (landed)
+    later.glidingSec = 0u;
+    CHECK(Changed(gliding, later) && !Changed(a, later));            // 0 is no glide, like an empty field
+}
+
+TEST("camping: the CAMPST encoder keeps to the document")
+{
+    CampState s;
+    CHECK_EQ(EncodeCampState(s), "N,0,0,0,0,0,0,,,,0,0");                // nothing: glide empty in the middle
+    s.settleSec = 30;                                                     // settle only with R
+    CHECK_EQ(EncodeCampState(s), "N,0,0,0,0,0,0,,,,0,0");
+    s.state = CampStateId::Resting;
+    CHECK_EQ(EncodeCampState(s), "R,30,0,0,0,0,0,,,,0,0");
+    s.state = CampStateId::Camping;
+    s.objects = { { 164, 0, true }, { 171, 9, false } };                 // tiers clamped to 1..3
+    s.glideSec = 0u;
+    CHECK_EQ(EncodeCampState(s), "C,0,0,0,0,0,0,164~1~1:171~3~0,,0,0,0");
+    for (uint32_t i = 0; i < 20; ++i)
+    {
+        s.objects.push_back({ 100 + i, 1, false });
+        s.place.push_back({ 200 + i, 2 });
+    }
+    std::string const big = EncodeCampState(s);
+    std::vector<std::string> f = SplitStr(big, ',');
+    CHECK(f.size() == 12);
+    CHECK(SplitStr(f[7], ':').size() == MaxCampObjects && SplitStr(f[8], ':').size() == MaxCampPlaces);
+    // gliding: a 13th field while a glide runs, left out (trailing empty) otherwise, so older clients read the rest
+    CampState g;
+    g.glideSec = 90u;
+    g.glidingSec = 10u;
+    CHECK_EQ(EncodeCampState(g), "N,0,0,0,0,0,0,,,90,0,0,10");
+    g.glidingSec.reset();
+    CHECK_EQ(EncodeCampState(g), "N,0,0,0,0,0,0,,,90,0,0");
+}
+
+TEST("camping: the glide pushes along the facing and never lifts the player")
+{
+    using namespace Bleakhold::CampRules;
+    CHECK(WalkOnAirSpell == 100800 && SlowFallSpell == 130);
+    // the descent of a feather-falling client (CMovementShared::GetFeatherFallVelocity), positive = down
+    CHECK(FeatherFallSpeed(0.0f, 0) == 0.0f);
+    CHECK(std::fabs(FeatherFallSpeed(3.0f, 100) - (3.0f + FallGravity * 0.1f)) < 0.001f);
+    CHECK(FeatherFallSpeed(30.0f, 0) == SafeFallTerminal);           // a fast fall is caught at the terminal speed
+    CHECK(FeatherFallSpeed(2.0f, 60000) == SafeFallTerminal);
+    CHECK(FeatherFallSpeed(-7.955547f, 0) == 0.0f);                   // the rising part of a jump: never up
+    CHECK(FeatherFallSpeed(-7.955547f, 200) == 0.0f);
+    CHECK(FeatherFallSpeed(-7.955547f, 1000) == SafeFallTerminal);
+    CHECK(FeatherFallSpeed(std::nanf(""), 0) == SafeFallTerminal);
+    CHECK(FeatherFallSpeed(-std::numeric_limits<float>::infinity(), 0) == SafeFallTerminal);
+    for (uint32_t ms : { 0u, 1u, 50u, 360u, 999u, 0xFFFFFFFFu })
+        for (float z : { -100.0f, -7.9f, -1.0f, 0.0f, 0.5f, 6.99f, 7.0f, 60.0f, 1e30f })
+        {
+            float const v = FeatherFallSpeed(z, ms);
+            CHECK_MSG(v >= 0.0f && v <= SafeFallTerminal, "descent in 0..terminal");
+        }
+    // turning
+    CHECK(AngleBetween(1.0f, 1.0f) == 0.0f);
+    CHECK(std::fabs(AngleBetween(0.0f, 3.14159265f) - 3.14159265f) < 0.0001f);
+    CHECK(std::fabs(AngleBetween(0.05f, 6.28318530718f - 0.05f) - 0.1f) < 0.0001f);   // across north: 0.1, not 2 pi
+    CHECK(std::fabs(AngleBetween(-1.0f, 1.0f) - 2.0f) < 0.0001f);
+    CHECK(std::fabs(AngleBetween(20.0f, 20.0f + 6.28318530718f * 3.0f)) < 0.001f);
+    CHECK(AngleBetween(std::nanf(""), 1.0f) == 0.0f);
+    // KnockbackFrom pushes away from the point: the point behind sends the player along the facing
+    for (float o : { 0.0f, 0.7f, 1.5707963f, 3.1415926f, 4.0f, 6.2f })
+    {
+        Point2 const from = PushOrigin(100.0f, -50.0f, o);
+        float const dx = 100.0f - from.x, dy = -50.0f - from.y;
+        CHECK(std::fabs(std::sqrt(dx * dx + dy * dy) - 1.0f) < 0.001f);
+        CHECK(std::fabs(dx - std::cos(o)) < 0.001f && std::fabs(dy - std::sin(o)) < 0.001f);
+    }
+    CHECK(GlideMinHeight > 0.0f && GlideSteerAngle > 0.0f && GlideSteerGapMs >= 100 && GlideMaxPushes >= 50);
+    CHECK(GlideMaxForwardSpeed <= 30.0f);
+}
+
+TEST("camping: GLIDE refusals come in their order")
+{
+    using namespace Bleakhold::CampRules;
+    GlideFacts ok;
+    ok.raceOk = true;
+    ok.alive = true;
+    CHECK(CheckGlide(ok) == GlideRefusal::None);   // on the ground: allowed, the glide waits for a ledge
+    auto with = [&](auto edit) { GlideFacts f = ok; edit(f); return CheckGlide(f); };
+    CHECK(with([](GlideFacts& f) { f.raceOk = false; }) == GlideRefusal::Race);
+    CHECK(with([](GlideFacts& f) { f.noGlideMap = true; }) == GlideRefusal::Here);
+    CHECK(with([](GlideFacts& f) { f.alive = false; }) == GlideRefusal::Dead);
+    CHECK(with([](GlideFacts& f) { f.mounted = true; }) == GlideRefusal::Mounted);
+    CHECK(with([](GlideFacts& f) { f.flying = true; }) == GlideRefusal::Flying);
+    CHECK(with([](GlideFacts& f) { f.inWater = true; }) == GlideRefusal::Water);
+    CHECK(with([](GlideFacts& f) { f.held = true; }) == GlideRefusal::Held);
+    CHECK(with([](GlideFacts& f) { f.cooldownLeft = 1; }) == GlideRefusal::Cooldown);
+    CHECK(with([](GlideFacts& f) { f.requireFalling = true; }) == GlideRefusal::Ground);
+    CHECK(with([](GlideFacts& f) { f.requireFalling = true; f.inAir = true; }) == GlideRefusal::None);
+    CHECK(with([](GlideFacts& f) { f.inAir = true; }) == GlideRefusal::None);
+    // the first problem wins: the race before the map, the map before death, ..., the cooldown last
+    CHECK(with([](GlideFacts& f) { f.raceOk = false; f.noGlideMap = true; f.alive = false; }) == GlideRefusal::Race);
+    CHECK(with([](GlideFacts& f) { f.noGlideMap = true; f.alive = false; f.mounted = true; }) == GlideRefusal::Here);
+    CHECK(with([](GlideFacts& f) { f.alive = false; f.mounted = true; }) == GlideRefusal::Dead);
+    CHECK(with([](GlideFacts& f) { f.mounted = true; f.flying = true; f.inWater = true; }) == GlideRefusal::Mounted);
+    CHECK(with([](GlideFacts& f) { f.flying = true; f.inWater = true; f.held = true; }) == GlideRefusal::Flying);
+    CHECK(with([](GlideFacts& f) { f.inWater = true; f.held = true; f.cooldownLeft = 5; }) == GlideRefusal::Water);
+    CHECK(with([](GlideFacts& f) { f.held = true; f.requireFalling = true; f.cooldownLeft = 5; }) ==
+        GlideRefusal::Held);
+    CHECK(with([](GlideFacts& f) { f.requireFalling = true; f.cooldownLeft = 5; }) == GlideRefusal::Ground);
+    // every GLIDE code is a short machine code with a sentence, in the document's error table
+    std::string const doc = bhtest::ReadFile(g_repo + "/docs/BleakholdProtocol.md");
+    for (Refusal const& r : { GlideErr::Off, GlideErr::Race, GlideErr::Mounted, GlideErr::Flying, GlideErr::Water,
+             GlideErr::Rooted, GlideErr::Ground, RoyaleErr::GlideHere })
+    {
+        std::string const code = r.code;
+        bool good = !code.empty() && code.size() <= 24;
+        for (char c : code)
+            good = good && ((c >= 'a' && c <= 'z') || c == '_');
+        CHECK_MSG(good, "code [" + code + "]");
+        CHECK_MSG(doc.find("| `" + code + "` |") != std::string::npos, code + " is in an error table of the document");
+        CHECK_MSG(!std::string(r.text).empty() && std::string(r.text).size() <= 160, code + " has a sentence");
+    }
+    for (char const* code : { "glide_cooldown", "glide_ground", "glide_rooted", "glide_water" })
+        CHECK_MSG(doc.find("`" + std::string(code) + "`") != std::string::npos, std::string(code) + " is documented");
+}
+
+TEST("camping: Walk on Air in the spellbook: cast results, who knows it, its action bar slot, its rows")
+{
+    using namespace Bleakhold::CampRules;
+    CHECK(WalkOnAirCastSpell == 100801 && WalkOnAirCastSpell != WalkOnAirSpell);
+    // a refused cast shows the client's own cast result (3.3.5a SpellCastResult); the air is the spell's own need
+    CHECK(GlideCastResult(GlideRefusal::None) == CastResult::Ok && CastResult::Ok == 255);
+    CHECK(GlideCastResult(GlideRefusal::Ground) == 171);     // SPELL_FAILED_NOT_ON_GROUND
+    CHECK(GlideCastResult(GlideRefusal::Cooldown) == 67);    // SPELL_FAILED_NOT_READY
+    CHECK(GlideCastResult(GlideRefusal::Race) == 107);       // SPELL_FAILED_SPELL_UNAVAILABLE
+    CHECK(GlideCastResult(GlideRefusal::Here) == 60);        // SPELL_FAILED_NOT_HERE
+    CHECK(GlideCastResult(GlideRefusal::Dead) == 23);        // SPELL_FAILED_CASTER_DEAD
+    CHECK(GlideCastResult(GlideRefusal::Mounted) == 64);     // SPELL_FAILED_NOT_MOUNTED
+    CHECK(GlideCastResult(GlideRefusal::Flying) == 59);      // SPELL_FAILED_NOT_FLYING
+    CHECK(GlideCastResult(GlideRefusal::Water) == 88);       // SPELL_FAILED_ONLY_ABOVEWATER
+    CHECK(GlideCastResult(GlideRefusal::Held) == 103);       // SPELL_FAILED_ROOTED
+    std::set<uint32_t> seen;
+    for (GlideRefusal r : { GlideRefusal::Race, GlideRefusal::Here, GlideRefusal::Dead, GlideRefusal::Mounted,
+             GlideRefusal::Flying, GlideRefusal::Water, GlideRefusal::Held, GlideRefusal::Ground,
+             GlideRefusal::Cooldown })
+    {
+        uint32_t const result = GlideCastResult(r);
+        CHECK_MSG(result != CastResult::Ok && result < 255 && seen.insert(result).second, "one result per refusal");
+    }
+    // the spell needs the air: standing is refused, a jump or a fall goes on
+    GlideFacts f;
+    f.raceOk = true; f.alive = true; f.requireFalling = true;
+    CHECK(GlideCastResult(CheckGlide(f)) == CastResult::NotOnGround);
+    f.inAir = true;
+    CHECK(GlideCastResult(CheckGlide(f)) == CastResult::Ok);
+    f.cooldownLeft = 30;
+    CHECK(GlideCastResult(CheckGlide(f)) == CastResult::NotReady);
+    // who knows it
+    CHECK(GlideSpellbookChange(true, false) == SpellbookChange::Learn);
+    CHECK(GlideSpellbookChange(true, true) == SpellbookChange::None);
+    CHECK(GlideSpellbookChange(false, true) == SpellbookChange::Unlearn);
+    CHECK(GlideSpellbookChange(false, false) == SpellbookChange::None);
+    // where it goes when it is learned: the main bar first, then the bars the player sees, never page 2 or a stance bar
+    CHECK(FirstFreeBarSlot({}) == 0);
+    CHECK(FirstFreeBarSlot({ 0, 1, 2 }) == 3);
+    std::vector<uint8_t> full;
+    for (uint8_t s = 0; s < 12; ++s)
+        full.push_back(s);
+    CHECK(FirstFreeBarSlot(full) == 60);                       // bottom left bar
+    for (uint8_t s = 60; s < 72; ++s)
+        full.push_back(s);
+    CHECK(FirstFreeBarSlot(full) == 48);                       // bottom right bar
+    for (uint8_t s = 48; s < 60; ++s)
+        full.push_back(s);
+    CHECK(FirstFreeBarSlot(full) == 24);                       // right bar
+    for (uint8_t s = 24; s < 48; ++s)
+        full.push_back(s);
+    CHECK(FirstFreeBarSlot(full) == -1);                       // 12-23 and 72+ stay untouched
+    // its rows: the module's SQL (02_bleakhold_walk_on_air.sql) has both spells, the script name the module
+    // registers, the 90 s cooldown BleakholdUi.Glide.Cooldown starts at, the dummy on the caster and Slow Fall's look
+    std::string const sql =
+        bhtest::ReadFile(g_repo + "/Server/mod-bleakhold-ui/data/sql/db-world/02_bleakhold_walk_on_air.sql");
+    CHECK(sql.find("DELETE FROM `spell_dbc` WHERE `ID` IN (100800, 100801);") != std::string::npos);
+    CHECK(sql.find("(100801, 262160, 1, 90000, 101, 1, -1, 3, 1, 1, 505, 'Walk on Air'") != std::string::npos);
+    CHECK(sql.find("(100800, 262160, 1, 101, 1, 1, -1, 6, 1, 1, 105, 63, 1931, 'Walk on Air'") != std::string::npos);
+    CHECK(sql.find("VALUES (100801, 'spell_bleakhold_walk_on_air');") != std::string::npos);
+    std::string const scripts = bhtest::ReadFile(g_repo + "/Server/mod-bleakhold-ui/src/BleakholdScripts.cpp");
+    CHECK(scripts.find("RegisterSpellScript(spell_bleakhold_walk_on_air);") != std::string::npos);
+    std::string const conf = bhtest::ReadFile(g_repo + "/Server/mod-bleakhold-ui/conf/mod_bleakhold_ui.conf.dist");
+    CHECK(conf.find("\nBleakholdUi.Glide.CastSpell = 100801\n") != std::string::npos);
+    CHECK(conf.find("\nBleakholdUi.Glide.Cooldown = 90\n") != std::string::npos);
+}
+
+TEST("camping: a glide waits for a ledge, starts over a drop, steers by turning and ends on landing")
+{
+    using namespace Bleakhold::CampRules;
+    Glide g;
+    g.endMs = 10000;
+    auto move = [](uint64_t now, bool falling, float height, float facing) {
+        GlideMove m;
+        m.nowMs = now;
+        m.falling = falling;
+        m.height = height;
+        m.facing = facing;
+        m.canPush = true;
+        m.moved = true;
+        return m;
+    };
+    float const high = 30.0f;   // well above the ground
+    // GLIDE on the ground: standing, a small hop and its landing keep the glide waiting
+    CHECK(NextGlideStep(g, move(100, false, 0.0f, 0.0f), true, true) == GlideStep::None);
+    CHECK(NextGlideStep(g, move(200, true, 0.8f, 0.0f), true, true) == GlideStep::None);
+    GlideMove land = move(300, false, 0.0f, 0.0f);
+    land.landed = true;
+    CHECK(NextGlideStep(g, land, true, true) == GlideStep::None);
+    // a fall from a ledge becomes the glide (also with the push turned off: it still ends on landing)
+    CHECK(NextGlideStep(g, move(400, true, GlideMinHeight, 0.0f), true, true) == GlideStep::Start);
+    CHECK(NextGlideStep(g, move(400, true, 40.0f, 0.0f), false, false) == GlideStep::Start);
+    CHECK(NextGlideStep(g, move(400, true, 1.0e9f, 0.0f), true, true) == GlideStep::Start);   // nothing below
+    // water ends it, waiting or not
+    GlideMove swim = move(450, false, 0.0f, 0.0f);
+    swim.water = true;
+    CHECK(NextGlideStep(g, swim, true, true) == GlideStep::End);
+    // in the air
+    g.airborne = true;
+    g.pushes = 1;
+    g.acked = 1;
+    g.lastPushMs = 400;
+    g.pushFacing = 1.0f;
+    CHECK(NextGlideStep(g, move(700, true, high, 1.0f), true, true) == GlideStep::None);           // straight on
+    CHECK(NextGlideStep(g, move(700, true, high, 1.0f + 0.05f), true, true) == GlideStep::None);   // under 5 degrees
+    CHECK(NextGlideStep(g, move(700, true, high, 1.3f), true, true) == GlideStep::Push);           // a turn
+    CHECK(NextGlideStep(g, move(700, true, high, 0.7f), true, true) == GlideStep::Push);           // the other way
+    CHECK(NextGlideStep(g, move(599, true, high, 1.3f), true, true) == GlideStep::None);           // within 200 ms
+    CHECK(NextGlideStep(g, move(600, true, high, 1.3f), true, true) == GlideStep::Push);
+    CHECK(NextGlideStep(g, move(700, true, high, 1.3f), true, false) == GlideStep::None);          // steering off
+    CHECK(NextGlideStep(g, move(700, true, high, 1.3f), false, true) == GlideStep::None);          // ForwardSpeed 0
+    // no push close to the ground: it could reach the client after it lands
+    CHECK(NextGlideStep(g, move(700, true, GlideMinHeight - 0.1f, 1.3f), true, true) == GlideStep::None);
+    CHECK(NextGlideStep(g, move(700, true, 0.0f, 1.3f), true, true) == GlideStep::None);
+    CHECK(NextGlideStep(g, move(700, true, GlideMinHeight, 1.3f), true, true) == GlideStep::Push);
+    CHECK(NextGlideStep(g, move(700, true, 1.0e9f, 1.3f), true, true) == GlideStep::Push);        // nothing below
+    GlideMove held = move(700, true, high, 1.3f);
+    held.canPush = false;                                                                           // rooted, feared
+    CHECK(NextGlideStep(g, held, true, true) == GlideStep::None);
+    GlideMove stuck = move(700, true, high, 1.3f);
+    stuck.moved = false;                                                                            // against a wall
+    CHECK(NextGlideStep(g, stuck, true, true) == GlideStep::None);
+    Glide many = g;
+    many.pushes = GlideMaxPushes;
+    many.acked = GlideMaxPushes;
+    CHECK(NextGlideStep(many, move(700, true, high, 1.3f), true, true) == GlideStep::None);        // capped
+    // a glide that could not push at its start (held, on a transport) pushes once it can, whatever the facing
+    Glide late = g;
+    late.pushes = 0;
+    late.acked = 0;
+    late.lastPushMs = 0;
+    CHECK(NextGlideStep(late, move(410, true, high, 1.0f), true, true) == GlideStep::Push);
+    CHECK(NextGlideStep(late, held, true, true) == GlideStep::None);
+    CHECK(NextGlideStep(late, move(410, true, high, 1.0f), true, false) == GlideStep::Push);       // steering off
+    CHECK(NextGlideStep(late, move(410, true, 1.0f, 1.0f), true, true) == GlideStep::None);        // near the ground
+    // the end: landing (with or without MSG_MOVE_FALL_LAND), water, the aura gone, time up, a battleground
+    CHECK(NextGlideStep(g, land, true, true) == GlideStep::End);
+    CHECK(NextGlideStep(g, move(800, false, 0.0f, 1.0f), true, true) == GlideStep::End);
+    CHECK(NextGlideStep(g, swim, true, true) == GlideStep::End);
+    GlideMove cancelled = move(800, true, high, 1.0f);
+    cancelled.auraOn = false;
+    CHECK(NextGlideStep(g, cancelled, true, true) == GlideStep::End);
+    CHECK(NextGlideStep(g, move(10000, true, high, 1.0f), true, true) == GlideStep::End);
+    GlideMove pvp = move(800, true, high, 1.3f);
+    pvp.noGlideMap = true;                                   // a GLIDE just before the port to a battleground
+    CHECK(NextGlideStep(g, pvp, true, true) == GlideStep::End);
+    Glide waiting;
+    waiting.endMs = 10000;
+    CHECK(NextGlideStep(waiting, move(10000, false, 0.0f, 0.0f), true, true) == GlideStep::End);  // ran out unused
+    CHECK(NextGlideStep(waiting, cancelled, true, true) == GlideStep::End);
+    CHECK(NextGlideStep(waiting, pvp, true, true) == GlideStep::End);
+    GlideMove pvpGround = move(500, false, 0.0f, 0.0f);
+    pvpGround.noGlideMap = true;
+    CHECK(NextGlideStep(waiting, pvpGround, true, true) == GlideStep::End);
+}
+
+TEST("camping: no glide in battlegrounds and arenas, nor in dungeons and raids unless BleakholdUi.Glide.Instances")
+{
+    using namespace Bleakhold::CampRules;
+    // each map as the core tells it: a battleground or an arena (InBattleground, Map::IsBattlegroundOrArena; the
+    // Royale map is a battleground map), a dungeon or a raid (Map::IsDungeon holds for both)
+    struct Where
+    {
+        char const* name;
+        bool pvp, instance;
+        bool refused, refusedWithInstances;   // BleakholdUi.Glide.Instances 0, 1
+    };
+    Where const maps[] = {
+        { "the open world", false, false, false, false },
+        { "a dungeon", false, true, true, false },
+        { "a raid", false, true, true, false },
+        { "a battleground", true, false, true, true },
+        { "an arena", true, false, true, true },
+        { "Bleakhold Royale", true, false, true, true },
+    };
+    GlideFacts ok;
+    ok.raceOk = true;
+    ok.alive = true;
+    Glide running;   // in the air, its first push acked
+    running.endMs = 10000;
+    running.airborne = true;
+    running.pushes = 1;
+    running.acked = 1;
+    running.lastPushMs = 400;
+    running.pushFacing = 1.0f;
+    Glide waiting;   // a GLIDE on the ground, waiting for a ledge
+    waiting.endMs = 10000;
+    GlideMove turn;  // a turn in the air: a steering push where gliding is allowed
+    turn.nowMs = 700;
+    turn.falling = true;
+    turn.height = 30.0f;
+    turn.facing = 1.3f;
+    turn.canPush = true;
+    turn.moved = true;
+    GlideMove stand = turn;
+    stand.falling = false;
+    stand.height = 0.0f;
+    for (Where const& w : maps)
+        for (bool instancesOn : { false, true })
+        {
+            bool const refused = instancesOn ? w.refusedWithInstances : w.refused;
+            std::string const what = std::string(w.name) + (instancesOn ? ", Instances 1" : ", Instances 0");
+            bool const no = NoGlideMap(w.pvp, w.instance, instancesOn);
+            CHECK_MSG(no == refused, what);
+            GlideFacts f = ok;
+            f.noGlideMap = no;
+            CHECK_MSG(CheckGlide(f) == (refused ? GlideRefusal::Here : GlideRefusal::None), what + ": GLIDE");
+            // a glide carried in (a teleport, a summon, an instance portal) ends on arrival, running or waiting
+            GlideMove m = turn;
+            m.noGlideMap = no;
+            CHECK_MSG(NextGlideStep(running, m, true, true) == (refused ? GlideStep::End : GlideStep::Push),
+                what + ": a running glide");
+            m = stand;
+            m.noGlideMap = no;
+            CHECK_MSG(NextGlideStep(waiting, m, true, true) == (refused ? GlideStep::End : GlideStep::None),
+                what + ": a waiting glide");
+        }
+    // in a dungeon the refusal keeps its place: after the race, before death and the cooldown
+    GlideFacts dungeon = ok;
+    dungeon.noGlideMap = NoGlideMap(false, true, false);
+    dungeon.alive = false;
+    dungeon.cooldownLeft = 5;
+    CHECK(CheckGlide(dungeon) == GlideRefusal::Here);
+    dungeon.raceOk = false;
+    CHECK(CheckGlide(dungeon) == GlideRefusal::Race);
+    // allowed there (Instances 1), the other checks still hold
+    dungeon = ok;
+    dungeon.noGlideMap = NoGlideMap(false, true, true);
+    dungeon.cooldownLeft = 5;
+    CHECK(CheckGlide(dungeon) == GlideRefusal::Cooldown);
+}
+
+TEST("camping: a landing with a push on its way holds the glide until the push is acked")
+{
+    using namespace Bleakhold::CampRules;
+    Glide g;
+    g.endMs = 10000;
+    g.airborne = true;
+    g.pushes = 3;
+    g.acked = 2;           // the third push is still on its way
+    g.lastPushMs = 2000;
+    g.pushFacing = 1.0f;
+    auto move = [](uint64_t now, bool falling, bool landed, float facing) {
+        GlideMove m;
+        m.nowMs = now;
+        m.falling = falling;
+        m.landed = landed;
+        m.height = falling ? 30.0f : 0.0f;
+        m.facing = facing;
+        m.canPush = true;
+        m.moved = true;
+        return m;
+    };
+    // landed before the push arrived: it will throw the player off again, so the glide and its aura stay
+    CHECK(NextGlideStep(g, move(2100, false, true, 1.0f), true, true) == GlideStep::Hold);
+    CHECK(NextGlideStep(g, move(2150, false, false, 1.0f), true, true) == GlideStep::Hold);   // standing, no ack
+    g.closing = true;
+    // the ack: the client falls again from the push; no more pushes, whatever it turns
+    CountAck(g);
+    CHECK(g.acked == 3);
+    CHECK(NextGlideStep(g, move(2200, true, false, 1.0f), true, true) == GlideStep::None);
+    CHECK(NextGlideStep(g, move(2500, true, false, 2.5f), true, true) == GlideStep::None);
+    // the landing after it ends the glide
+    CHECK(NextGlideStep(g, move(2700, false, true, 2.5f), true, true) == GlideStep::End);
+    // a push that is never acked holds it GlideAckWaitMs at most
+    Glide lost = g;
+    lost.acked = 2;
+    lost.closing = false;
+    CHECK(NextGlideStep(lost, move(2000 + GlideAckWaitMs - 1, false, true, 1.0f), true, true) == GlideStep::Hold);
+    CHECK(NextGlideStep(lost, move(2000 + GlideAckWaitMs, false, true, 1.0f), true, true) == GlideStep::End);
+    // every push acked: a landing ends it at once; water and time end a held glide too
+    Glide acked = lost;
+    acked.acked = 3;
+    CHECK(NextGlideStep(acked, move(2100, false, true, 1.0f), true, true) == GlideStep::End);
+    GlideMove swim = move(2100, false, false, 1.0f);
+    swim.water = true;
+    CHECK(NextGlideStep(lost, swim, true, true) == GlideStep::End);
+    CHECK(NextGlideStep(lost, move(10000, false, true, 1.0f), true, true) == GlideStep::End);
+    // the start's own push (GLIDE in the air) is counted the same way
+    Glide start;
+    start.endMs = 10000;
+    start.airborne = true;
+    start.pushes = 1;
+    start.lastPushMs = 100;
+    CHECK(NextGlideStep(start, move(150, false, true, 0.0f), true, true) == GlideStep::Hold);
+    CountAck(start);
+    CHECK(NextGlideStep(start, move(300, false, true, 0.0f), true, true) == GlideStep::End);
+    // a waiting glide has sent nothing: a hop keeps it waiting as before
+    Glide waiting;
+    waiting.endMs = 10000;
+    CHECK(NextGlideStep(waiting, move(150, false, true, 0.0f), true, true) == GlideStep::None);
+    // an ack that is not the glide's (a spell's knockback) counts no further than the pushes sent
+    Glide none;
+    CountAck(none);
+    CHECK(none.acked == 0);
+    CountAck(start);
+    CHECK(start.acked == 1);
+}
+
+TEST("camping: a steering push keeps the descent the server counted, whatever the packet says")
+{
+    using namespace Bleakhold::CampRules;
+    Glide g;
+    g.airborne = true;
+    // a first push that comes late (the start could not push): the terminal speed, never slower
+    CHECK(PushFallSpeed(g, 5000) == SafeFallTerminal);
+    // after the start's push (no fall speed) the client falls from rest: gravity over the time since that push
+    g.pushes = 1;
+    g.lastPushMs = 1000;
+    g.pushDown = 0.0f;
+    CHECK(PushFallSpeed(g, 1000) == 0.0f);
+    CHECK(std::fabs(PushFallSpeed(g, 1200) - FallGravity * 0.2f) < 0.001f);
+    CHECK(PushFallSpeed(g, 1400) == SafeFallTerminal);                        // caught at the terminal speed
+    CHECK(PushFallSpeed(g, 900) == 0.0f);                                     // a clock that went back
+    // a later push starts from the descent the last one sent: turning every 200 ms never slows the fall
+    g.pushDown = FeatherFallSpeed(0.0f, 100);
+    g.lastPushMs = 1100;
+    float const second = PushFallSpeed(g, 1200);
+    CHECK(std::fabs(second - FallGravity * 0.2f) < 0.001f);
+    CHECK(std::fabs(second - FeatherFallSpeed(0.0f, 200)) < 0.001f);         // as if never pushed again
+    g.pushDown = SafeFallTerminal;
+    CHECK(PushFallSpeed(g, 1300) == SafeFallTerminal);
+    // a very long gap (a stalled server) stays in range
+    g.lastPushMs = 0;
+    g.pushDown = 0.0f;
+    CHECK(PushFallSpeed(g, 0xFFFFFFFFFFFFull) == SafeFallTerminal);
+    // a whole steered glide, pushed every 200 ms: the descent only grows, to the terminal speed, at any latency
+    Glide run;
+    run.pushes = 1;
+    run.lastPushMs = 0;
+    float last = 0.0f;
+    for (uint64_t t = 200; t <= 10000; t += 200)
+    {
+        float const v = PushFallSpeed(run, t);
+        CHECK_MSG(v >= last && v <= SafeFallTerminal, "descent never slows");
+        last = v;
+        ++run.pushes;
+        run.lastPushMs = t;
+        run.pushDown = v;
+    }
+    CHECK(last == SafeFallTerminal);
+}
+
+TEST("camping: Slow Fall (the fallback) stays when it is a mage's own")
+{
+    using namespace Bleakhold::CampRules;
+    int32_t const glide = 10000;
+    // GLIDE rides on a mage's own Slow Fall with more time left, and never on Walk on Air
+    CHECK(GlideRidesAura(SlowFallSpell, 25000, glide));
+    CHECK(!GlideRidesAura(SlowFallSpell, 10000, glide));    // a glide's own (a game master's reset): cast again
+    CHECK(!GlideRidesAura(SlowFallSpell, 4000, glide));
+    CHECK(!GlideRidesAura(SlowFallSpell, -1, glide));       // permanent
+    CHECK(!GlideRidesAura(WalkOnAirSpell, 25000, glide));
+    // the end takes Walk on Air off always, a Slow Fall only while it is still the glide's
+    CHECK(GlideTakesAura(WalkOnAirSpell, 0, 30000, 25000, 0));
+    CHECK(GlideTakesAura(SlowFallSpell, glide, glide, 6000, 6000));          // the glide's own, landed early
+    CHECK(GlideTakesAura(SlowFallSpell, glide, glide, 6800, 6000));          // the aura's clock a little behind
+    CHECK(GlideTakesAura(SlowFallSpell, glide, glide, 0, 0));
+    CHECK(!GlideTakesAura(SlowFallSpell, glide, 30000, 29000, 6000));        // recast by the mage mid-glide
+    CHECK(!GlideTakesAura(SlowFallSpell, 30000, 30000, 29000, 6000));        // Duration 30: the recast's time
+    CHECK(!GlideTakesAura(SlowFallSpell, 0, 30000, 20000, 0));               // the glide rode on the mage's
+    CHECK(!GlideTakesAura(SlowFallSpell, 0, 0, 0, 0));
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Bleakhold Royale (section 17): QUEUE kind B and the ROYS ROYM ROYO ROYK ROYV ROYE encoders
+// ---------------------------------------------------------------------------------------------------
+TEST("royale: QUEUE kind B appends its counts and never sends members; D and R never send the counts")
+{
+    QueueState q;
+    q.state = QueueStateId::Queued; q.kind = QueueKind::Royale; q.activityId = 901; q.tier = 0; q.size = 1;
+    q.queuedSec = 12; q.bandMin = 80; q.bandMax = 80; q.queued = 13; q.minPlayers = 20; q.maxPlayers = 40;
+    q.matchesRunning = 0;
+    QueueMember m; m.name = "Tester"; m.classId = 1;
+    q.members = { m };   // ignored for Royale
+    CHECK_EQ(EncodeQueue(4, q), "4,1,B,901,0,1,12,,,,80,80,13,20,40,,,0");
+    q.matchesRunning.reset();
+    q.queued.reset();
+    CHECK_EQ(EncodeQueue(4, q), "4,1,B,901,0,1,12,,,,80,80,,20,40");
+    q.state = QueueStateId::NotQueued;
+    q.activityId.reset(); q.tier.reset(); q.size.reset(); q.queuedSec.reset(); q.bandMin.reset(); q.bandMax.reset();
+    q.minPlayers.reset(); q.maxPlayers.reset();
+    CHECK_EQ(EncodeQueue(9, q), "9,0,B");
+    QueueState d;
+    d.state = QueueStateId::Proposal; d.kind = QueueKind::Dungeon; d.activityId = 389; d.bandMax = 18;
+    d.queued = 13; d.minPlayers = 20; d.accepted = 3;   // not part of kind D
+    d.members = { m };
+    CHECK_EQ(EncodeQueue(2, d), "2,2,D,389,,,,,,,,18;Tester,1,,0");
+}
+
+TEST("royale: the encoders keep to the document")
+{
+    RoyaleState st;
+    CHECK_EQ(EncodeRoyaleState(st), "0,0,0,0,0,0,0,,,,0,0,0,0,,,,,,0");   // empty fields in the middle stay
+    st.matchId = 7001; st.phase = RoyalePhase::Overtime; st.phaseMsLeft = 4294967295u; st.alive = 2; st.total = 40;
+    st.me = RoyaleMe::Spectating; st.kills = 3; st.placement = 7; st.pinX = -17067; st.pinY = 17067; st.stage = 6;
+    st.curX = -300; st.curY = -1; st.curR = 0; st.nextX = -301; st.nextY = 0; st.nextR = 0; st.shrinkStartMs = 0u;
+    st.shrinkEndMs = 45000u; st.dmgPermille = 160; st.watchName = "Br\xC3\xA9nna, the; long|name";
+    st.myX = 455; st.myY = -455;
+    CHECK_EQ(EncodeRoyaleState(st), "7001,4,4294967295,2,40,3,3,7,-17067,17067,6,-300,-1,0,-301,0,0,0,45000,160,"
+        "Br\xC3\xA9nna%2C the%3B long%7Cname,455,-455");
+    st.stages = 6;   // field 24: the stage count (stage 7 = overtime here)
+    CHECK_EQ(EncodeRoyaleState(st), "7001,4,4294967295,2,40,3,3,7,-17067,17067,6,-300,-1,0,-301,0,0,0,45000,160,"
+        "Br\xC3\xA9nna%2C the%3B long%7Cname,455,-455,6");
+    st.watchName = std::string(60, 'x');
+    CHECK(SplitStr(EncodeRoyaleState(st), ',')[20].size() == RoyaleNameBytes);   // names cut at 48 bytes
+    RoyaleState few;
+    few.stages = 16;   // the empty watchName, myX and myY before it stay
+    CHECK_EQ(EncodeRoyaleState(few), "0,0,0,0,0,0,0,,,,0,0,0,0,,,,,,0,,,,16");
+    // fields 25-27, the drop (me 1 only): until the parachute opens, until the planned touchdown, the free fall's
+    // length. As the fall starts: 8 s of free fall, then 12 s under the parachute.
+    RoyaleState fall;
+    fall.matchId = 7001; fall.phase = RoyalePhase::Drop; fall.phaseMsLeft = 20000; fall.alive = 24; fall.total = 24;
+    fall.me = RoyaleMe::Dropping; fall.pinX = 104; fall.pinY = 96; fall.stage = 1; fall.curX = -267; fall.curY = -267;
+    fall.curR = 1080; fall.nextX = -150; fall.nextY = -310; fall.nextR = 520; fall.shrinkStartMs = 119800u;
+    fall.shrinkEndMs = 289800u; fall.myX = 104; fall.myY = 96; fall.stages = 6;
+    fall.fallMsLeft = 8000u; fall.landMsLeft = 20000u; fall.fallMs = 8000u;
+    CHECK_EQ(EncodeRoyaleState(fall), "7001,2,20000,24,24,1,0,,104,96,1,-267,-267,1080,-150,-310,520,119800,289800,0,,"
+        "104,96,6,8000,20000,8000");
+    CHECK_EQN(SplitStr(EncodeRoyaleState(fall), ',').size(), 27u);
+    fall.phaseMsLeft = 12000; fall.shrinkStartMs = 111800u; fall.shrinkEndMs = 281800u;
+    fall.fallMsLeft = 0u; fall.landMsLeft = 12000u;   // the parachute is open: 0, not empty
+    CHECK_EQ(EncodeRoyaleState(fall), "7001,2,12000,24,24,1,0,,104,96,1,-267,-267,1080,-150,-310,520,111800,281800,0,,"
+        "104,96,6,0,12000,8000");
+    fall.fallMsLeft.reset(); fall.landMsLeft.reset(); fall.fallMs.reset();   // landed, or an older module: they go
+    CHECK_EQ(EncodeRoyaleState(fall), "7001,2,12000,24,24,1,0,,104,96,1,-267,-267,1080,-150,-310,520,111800,281800,0,,"
+        "104,96,6");
+    fall.stages.reset(); fall.fallMsLeft = 4294967295u; fall.landMsLeft = 0u; fall.fallMs = 0u;   // the full range
+    CHECK_EQ(EncodeRoyaleState(fall), "7001,2,12000,24,24,1,0,,104,96,1,-267,-267,1080,-150,-310,520,111800,281800,0,,"
+        "104,96,,4294967295,0,0");
+    RoyaleState last;
+    last.fallMs = 8000u;   // every empty field before the last one stays
+    CHECK_EQ(EncodeRoyaleState(last), "0,0,0,0,0,0,0,,,,0,0,0,0,,,,,,0,,,,,,,8000");
+
+    RoyaleMap mp;
+    mp.mapId = 566; mp.minX = 1500; mp.maxX = 2800; mp.minY = 900; mp.maxY = 2200; mp.lobbyX = 2166; mp.lobbyY = 1564;
+    mp.lobbyR = 20; mp.boundHalf = 400; mp.centerX = 2166; mp.centerY = 1564;
+    mp.pois = { { 1, RoyalePoiKind::Lobby, 2166, 1564, 20, "The Overlook" },
+        { 2, RoyalePoiKind::Crossing, -5, -6, 0, "Ford: east, west" } };
+    CHECK_EQ(EncodeRoyaleMap(mp), "566,1500,2800,900,2200,2166,1564,20,400,2166,1564;1,Y,2166,1564,20,The Overlook;"
+        "2,C,-5,-6,0,Ford%3A east%2C west");
+    mp.pois.clear();
+    for (uint32_t i = 0; i < 100; ++i)
+        mp.pois.push_back({ i + 1, RoyalePoiKind::Landmark, int32_t(i), -int32_t(i), 10, std::string(70, 'n') });
+    std::vector<std::string> recs = SplitStr(EncodeRoyaleMap(mp), ';');
+    CHECK_EQN(recs.size(), MaxRoyalePois + 1);
+    CHECK(SplitStr(recs[1], ',')[5].size() == 40);
+
+    RoyaleObjects ob;
+    ob.matchId = 7001; ob.full = false;
+    CHECK_EQ(EncodeRoyaleObjects(ob), "7001,0");
+    RoyaleObject supply; supply.objId = 9; supply.kind = RoyaleObjectKind::Supply; supply.x = -950; supply.y = -250;
+    supply.state = RoyaleObjectState::Incoming; supply.msLeft = 20000u;
+    RoyaleObject buff;
+    buff.objId = 4; buff.kind = RoyaleObjectKind::Buff; buff.subtype = static_cast<uint32_t>(RoyaleBuff::Berserk);
+    buff.x = 220; buff.y = -250; buff.state = RoyaleObjectState::Opened;
+    ob.objects = { supply, buff };
+    CHECK_EQ(EncodeRoyaleObjects(ob), "7001,0;9,D,0,-950,-250,3,20000;4,B,3,220,-250,4");
+    ob.objects.assign(80, buff);
+    CHECK_EQN(SplitStr(EncodeRoyaleObjects(ob), ';').size(), MaxRoyaleObjects + 1);
+
+    RoyaleKill k;
+    k.victimName = "Brenna"; k.victimClassId = 8; k.cause = RoyaleCause::Storm; k.aliveAfter = 22;
+    CHECK_EQ(EncodeRoyaleKill(k), ",,Brenna,8,S,22");   // nobody got the credit
+    k.killerName = "Aldric"; k.killerClassId = 1; k.killerKills = 5; k.cause = RoyaleCause::Afk;
+    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,A,22,5");
+
+    RoyaleEvent ev;
+    ev.kind = RoyaleEventKind::PlayersLeft; ev.value = 5;
+    CHECK_EQ(EncodeRoyaleEvent(ev), "N,5");
+    ev.kind = RoyaleEventKind::SupplyOpened; ev.value = 0; ev.x = -850; ev.y = -820; ev.name = "Aldric";
+    CHECK_EQ(EncodeRoyaleEvent(ev), "O,0,-850,-820,,Aldric");
+
+    RoyaleResult r;
+    r.matchId = 7001; r.placement = 1; r.total = 32; r.kills = 12; r.damage = 4000000000u; r.healing = 5;
+    r.survivedSec = 715; r.winnerName = "Dalia"; r.winnerClassId = 11; r.winnerKills = 12; r.rewarded = true;
+    Reward h; h.kind = RewardKind::Honor; h.amount = 400; h.text = "Victory";
+    Reward sh; sh.kind = RewardKind::Shards; sh.amount = 50;
+    r.rewards = { h, sh };
+    CHECK_EQ(EncodeRoyaleResult(r), "7001,1,32,12,4000000000,5,715,Dalia,11,12,1;H,400,,Victory;S,50");
+    r.rewarded = false; r.rewards.clear(); r.winnerName.clear(); r.winnerClassId.reset(); r.winnerKills.reset();
+    CHECK_EQ(EncodeRoyaleResult(r), "7001,1,32,12,4000000000,5,715,,,,0");
+    CHECK(static_cast<char>(RewardKind::Honor) == 'H');
+    CHECK(FeatureRoyale == 4096u && (FeatureRoyale & (FeatureFieldRepair * 2 - 1)) == 0);
+}
+
+TEST("royale: ROYK announce is superseded by BGANN: the field is never written, whatever the caller sets")
+{
+    RoyaleKill k;
+    k.killerName = "Aldric"; k.killerClassId = 1; k.victimName = "Brenna"; k.victimClassId = 8;
+    k.cause = RoyaleCause::Player; k.aliveAfter = 23; k.killerKills = 1; k.announce = RoyaleAnnounce::FirstBlood;
+    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,P,23,1");
+    for (int v = 0; v < 256; ++v)
+    {
+        k.announce = static_cast<RoyaleAnnounce>(static_cast<char>(v));
+        CHECK_EQ(EncodeRoyaleKill(k), std::string("Aldric,1,Brenna,8,P,23,1"));
+    }
+    k.killerKills.reset();
+    k.announce = RoyaleAnnounce::Godlike;
+    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,P,23");   // the empty fields at the end go
+}
+
+// One "### " block of the document: from its heading to the next heading of any level.
+static std::string DocBlock(std::string const& doc, std::string const& heading)
+{
+    std::size_t const at = doc.find("\n" + heading);
+    if (at == std::string::npos)
+        return std::string();
+    std::size_t const end = doc.find("\n#", at + 1);
+    return doc.substr(at, end == std::string::npos ? std::string::npos : end - at);
+}
+
+TEST("royale: the storm beast: ROYV B A K F, ROYO X with its health (0-100) and H, ROYK cause B")
+{
+    static_assert(BLEAKHOLD_UI_ROYALE_BOSS == 1, "a server module tests this macro before it sends the boss");
+    // ROYV: it stirs at a place (a place name, cut at 40 bytes like ROYM's), wakes, is slain (the name is who dealt it
+    // the most damage, a character: 48 bytes) or flees
+    RoyaleEvent ev;
+    ev.kind = RoyaleEventKind::BossIncoming; ev.x = -150; ev.y = -310; ev.msLeft = 30000u; ev.name = "Crow's Rise";
+    CHECK_EQ(EncodeRoyaleEvent(ev), "B,0,-150,-310,30000,Crow's Rise");
+    ev.name = std::string(60, 'p');
+    CHECK_EQN(SplitStr(EncodeRoyaleEvent(ev), ',')[5].size(), RoyalePlaceBytes);
+    ev.kind = RoyaleEventKind::BossAwake; ev.msLeft.reset(); ev.name.clear();
+    CHECK_EQ(EncodeRoyaleEvent(ev), "A,0,-150,-310");
+    ev.kind = RoyaleEventKind::BossSlain; ev.name = std::string(60, 'n');
+    CHECK_EQN(SplitStr(EncodeRoyaleEvent(ev), ',')[5].size(), RoyaleNameBytes);
+    ev.name = "Aldric Stormwind";
+    CHECK_EQ(EncodeRoyaleEvent(ev), "K,0,-150,-310,,Aldric Stormwind");
+    ev.kind = RoyaleEventKind::BossFled; ev.name.clear();
+    CHECK_EQ(EncodeRoyaleEvent(ev), "F,0,-150,-310");
+
+    // ROYO X: incoming (wakes in msLeft), awake, gone; its subtype is its health in percent. H: ready, opened.
+    RoyaleObjects ob;
+    ob.matchId = 7001; ob.full = false;
+    RoyaleObject boss;
+    boss.objId = 30; boss.kind = RoyaleObjectKind::Boss; boss.subtype = 100; boss.x = -150; boss.y = -310;
+    boss.state = RoyaleObjectState::Incoming; boss.msLeft = 30000u;
+    RoyaleObject hoard;
+    hoard.objId = 31; hoard.kind = RoyaleObjectKind::Hoard; hoard.x = -148; hoard.y = -305;
+    hoard.state = RoyaleObjectState::Ready;
+    ob.objects = { boss, hoard };
+    CHECK_EQ(EncodeRoyaleObjects(ob), "7001,0;30,X,100,-150,-310,3,30000;31,H,0,-148,-305,1");
+    // the health is clamped to 0-100 whatever the caller computed (a heal past the maximum, a wrapped subtraction)
+    struct { uint32_t in; char const* out; } const health[] = {
+        { 0u, "0" }, { 1u, "1" }, { 57u, "57" }, { 100u, "100" }, { 101u, "100" }, { 4294967295u, "100" } };
+    boss.state = RoyaleObjectState::Ready; boss.msLeft.reset();
+    for (auto const& h : health)
+    {
+        boss.subtype = h.in;
+        ob.objects = { boss };
+        CHECK_EQ(EncodeRoyaleObjects(ob), "7001,0;30,X," + std::string(h.out) + ",-150,-310,1");
+    }
+    boss.subtype = 0; boss.state = RoyaleObjectState::Hidden;   // slain or fled: gone from the map
+    hoard.state = RoyaleObjectState::Opened;
+    RoyaleObject buff;   // the other kinds' subtypes are as before
+    buff.objId = 4; buff.kind = RoyaleObjectKind::Buff; buff.subtype = static_cast<uint32_t>(RoyaleBuff::Berserk);
+    buff.x = 220; buff.y = -250; buff.state = RoyaleObjectState::Ready;
+    ob.objects = { boss, hoard, buff };
+    CHECK_EQ(EncodeRoyaleObjects(ob), "7001,0;30,X,0,-150,-310,0;31,H,0,-148,-305,4;4,B,3,220,-250,1");
+
+    // ROYK cause B: the beast itself (class 0, no tally), or the player credited for the elimination
+    RoyaleKill k;
+    k.killerName = "Thundermaw"; k.killerClassId = 0u; k.victimName = "Brenna"; k.victimClassId = 8;
+    k.cause = RoyaleCause::Boss; k.aliveAfter = 21;
+    CHECK_EQ(EncodeRoyaleKill(k), "Thundermaw,0,Brenna,8,B,21");
+    k.killerName = "Aldric"; k.killerClassId = 1u; k.killerKills = 4u;
+    CHECK_EQ(EncodeRoyaleKill(k), "Aldric,1,Brenna,8,B,21,4");
+
+    // the new letters are new in their message, and the document lists every one of them
+    auto L = [](auto e) { return static_cast<char>(e); };
+    using EK = RoyaleEventKind;
+    using OK = RoyaleObjectKind;
+    using RC = RoyaleCause;
+    std::string const events{ L(EK::Revealed), L(EK::StormMoving), L(EK::SupplyIncoming), L(EK::SupplyLanded),
+        L(EK::SupplyOpened), L(EK::PlayersLeft), L(EK::Winner), L(EK::BossIncoming), L(EK::BossAwake),
+        L(EK::BossSlain), L(EK::BossFled) };
+    std::string const objects{ L(OK::ShadowSight), L(OK::Buff), L(OK::Supply), L(OK::Boss), L(OK::Hoard) };
+    std::string const causes{ L(RC::Player), L(RC::Storm), L(RC::Fall), L(RC::Left), L(RC::Afk), L(RC::Boss) };
+    CHECK_EQ(events, "RSDLONWBAKF");
+    CHECK_EQ(objects, "SBDXH");
+    CHECK_EQ(causes, "PSFLAB");
+    for (std::string const* s : { &events, &objects, &causes })
+        CHECK_EQN(std::set<char>(s->begin(), s->end()).size(), s->size());
+    std::string const doc = bhtest::ReadFile(g_repo + "/docs/BleakholdProtocol.md");
+    std::string const royv = DocBlock(doc, "### ROYV");
+    std::string const royo = DocBlock(doc, "### ROYO");
+    std::string const royk = DocBlock(doc, "### ROYK");
+    CHECK(!royv.empty() && !royo.empty() && !royk.empty());
+    for (char c : events)
+        CHECK_MSG(royv.find("| `" + std::string(1, c) + "` |") != std::string::npos, std::string("ROYV ") + c);
+    for (char c : objects)
+        CHECK_MSG(royo.find("`" + std::string(1, c) + "` ") != std::string::npos, std::string("ROYO ") + c);
+    for (char c : causes)
+        CHECK_MSG(royk.find("`" + std::string(1, c) + "` ") != std::string::npos, std::string("ROYK ") + c);
+    // the health's range and the cadence, read as running text (the document wraps its lines)
+    std::string flat;
+    for (char c : royo)
+        if (!(c == '\n' || c == ' ') || (!flat.empty() && flat.back() != ' '))
+            flat += c == '\n' ? ' ' : c;
+    CHECK(flat.find("its health in percent, 0 to 100") != std::string::npos);
+    CHECK(flat.find("moved by 2 points or more") != std::string::npos);
+    CHECK(flat.find("at most once a second") != std::string::npos);
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The battleground kill announcer (section 18): BGANN
+// ---------------------------------------------------------------------------------------------------
+TEST("bgann: the encoder keeps to the document; multi first, then streak")
+{
+    BgAnnounce a;
+    a.killerName = "Aldric"; a.killerClassId = 1; a.victimName = "Brenna"; a.victimClassId = 8;
+    a.streak = BgStreak::FirstBlood;
+    CHECK_EQ(EncodeBgAnnounce(a), "Aldric,1,Brenna,8,,F");
+    a.multi = BgMultiKill::Double; a.streak = BgStreak::None;
+    CHECK_EQ(EncodeBgAnnounce(a), "Aldric,1,Brenna,8,D");   // an empty last field is left out
+    a.multi = BgMultiKill::Rampage; a.streak = BgStreak::HolyShit;
+    CHECK_EQ(EncodeBgAnnounce(a), "Aldric,1,Brenna,8,R,H");
+    a.killerName = "Br\xC3\xA9nna, the; long|name";
+    CHECK_EQ(EncodeBgAnnounce(a), "Br\xC3\xA9nna%2C the%3B long%7Cname,1,Brenna,8,R,H");
+    a.killerName = std::string(60, 'x');
+    CHECK(SplitStr(EncodeBgAnnounce(a), ',')[0].size() == BgNameBytes);   // names cut at 48 bytes
+    CHECK(FeatureBgAnnouncer == 8192u && FeatureBgAnnouncer == FeatureRoyale * 2);
+    CHECK(BgNameBytes == RoyaleNameBytes);
+}
+
+TEST("bgann: only the documented letters are written; nothing is sendable without a code and both names")
+{
+    std::string const multi = "DTUR";
+    std::string const streak = "FSOKNWMGH";
+    int multis = 0;
+    int streaks = 0;
+    for (int v = 0; v < 256; ++v)
+    {
+        char const c = static_cast<char>(v);
+        bool const m = v != 0 && multi.find(c) != std::string::npos;
+        bool const s = v != 0 && streak.find(c) != std::string::npos;
+        multis += m;
+        streaks += s;
+        CHECK_EQN(BgMultiLetter(static_cast<BgMultiKill>(c)), m ? c : '\0');
+        CHECK_EQN(BgStreakLetter(static_cast<BgStreak>(c)), s ? c : '\0');
+        BgAnnounce a;
+        a.killerName = "Aldric"; a.killerClassId = 1; a.victimName = "Brenna"; a.victimClassId = 8;
+        a.multi = static_cast<BgMultiKill>(c);
+        CHECK_EQ(EncodeBgAnnounce(a), m ? "Aldric,1,Brenna,8," + std::string(1, c) : std::string("Aldric,1,Brenna,8"));
+        CHECK(BgAnnounceSendable(a) == m);
+        a.multi = BgMultiKill::None;
+        a.streak = static_cast<BgStreak>(c);
+        CHECK_EQ(EncodeBgAnnounce(a), s ? "Aldric,1,Brenna,8,," + std::string(1, c) : std::string("Aldric,1,Brenna,8"));
+        CHECK(BgAnnounceSendable(a) == s);
+    }
+    CHECK_EQN(multis, 4);
+    CHECK_EQN(streaks, 9);
+    BgAnnounce a;
+    a.killerName = "Aldric"; a.victimName = "Brenna"; a.multi = BgMultiKill::Triple;
+    CHECK(BgAnnounceSendable(a));
+    a.killerName = std::string(3, '\0');   // cleans to nothing
+    CHECK(!BgAnnounceSendable(a));
+    a.killerName = "Aldric"; a.victimName.clear();
+    CHECK(!BgAnnounceSendable(a));
+    a.victimName = "Brenna"; a.multi = BgMultiKill::None; a.streak = BgStreak::None;
+    CHECK(!BgAnnounceSendable(a));
+}
+
+TEST("royale: the ERR codes of section 17 are short machine codes and documented")
+{
+    std::string const doc = bhtest::ReadFile(g_repo + "/docs/BleakholdProtocol.md");
+    for (Refusal const& r : { RoyaleErr::Off, RoyaleErr::Level, RoyaleErr::Grouped, RoyaleErr::Busy,
+             RoyaleErr::Deserter, RoyaleErr::Bags, RoyaleErr::Ip, RoyaleErr::Lockout, RoyaleErr::NoProposal,
+             RoyaleErr::Phase, RoyaleErr::Nobody, RoyaleErr::GlideHere })
+    {
+        std::string const code = r.code;
+        bool ok = !code.empty() && code.size() <= 24;
+        for (char c : code)
+            ok = ok && ((c >= 'a' && c <= 'z') || c == '_');
+        CHECK_MSG(ok, "code [" + code + "]");
+        CHECK_MSG(doc.find("| `" + code + "` |") != std::string::npos, code + " is in an error table of the document");
+        CHECK_MSG(std::string(r.text).size() <= 160 && !std::string(r.text).empty(), code + " has a sentence");
+    }
+}
+
+TEST("war mode: the ERR codes of section 19 are short machine codes and documented")
+{
+    std::string const doc = bhtest::ReadFile(g_repo + "/docs/BleakholdProtocol.md");
+    for (Refusal const& r : { WarModeErr::Off, WarModeErr::Level, WarModeErr::Hardcore, WarModeErr::Place,
+             WarModeErr::Cooldown, WarModeErr::Wanted, WarModeErr::Busy })
+    {
+        std::string const code = r.code;
+        bool ok = !code.empty() && code.size() <= WarBlockBytes;
+        for (char c : code)
+            ok = ok && ((c >= 'a' && c <= 'z') || c == '_');
+        CHECK_MSG(ok, "code [" + code + "]");
+        CHECK_MSG(doc.find("| `" + code + "` |") != std::string::npos, code + " is in an error table of the document");
+        CHECK_MSG(std::string(r.text).size() <= 160 && !std::string(r.text).empty(), code + " has a sentence");
+    }
+    CHECK_EQ(std::string(WarModeErr::Dead.code), "dead");
+    CHECK_EQ(std::string(WarModeErr::InCombat.code), "in_combat");
+    CHECK(doc.find("## 19. World PvP and War Mode") != std::string::npos);
+    CHECK(doc.find("16384 War Mode live") != std::string::npos && doc.find("32768 World PvP objectives live") != std::string::npos);
+    CHECK_EQN(static_cast<uint32_t>(FeatureWarMode), 16384u);
+    CHECK_EQN(static_cast<uint32_t>(FeatureWorldPvp), 32768u);
+}
+
+TEST("war mode: the encoders keep to the document")
+{
+    // WMST: 22 fields, the block is cut to a machine code, an unknown team letter is an empty field
+    WarModeState st;
+    st.on = true; st.block = "wm_wanted"; st.underdogTeam = static_cast<WarTeam>('Q');
+    st.wantedState = static_cast<WantedStateId>(7);
+    std::string p = EncodeWarModeState(st);
+    CHECK_EQ(p, "1,0,wm_wanted,0,0,0,0,0,,0,0,0,2,0,0,0,0,0,0,0,0,0");
+    st.deaths = 3;
+    CHECK_EQN(SplitStr(EncodeWarModeState(st), ',').size(), 22u);
+    st.block = std::string(40, 'x');
+    CHECK_EQN(SplitStr(EncodeWarModeState(st), ',')[2].size(), WarBlockBytes);
+
+    // WPZ: a zone without objectives is its id alone; records are capped and clamped
+    WarZone none;
+    none.zoneId = 4395;
+    CHECK_EQ(EncodeWarZone(none), "4395");
+    WarZone z;
+    z.zoneId = 616; z.kind = WarZoneKind::Front; z.state = static_cast<WarZoneState>(9); z.controlA = 4000u;
+    z.dominionStacks = 3;
+    for (uint32_t i = 0; i < 20; ++i)
+    {
+        WarObjective o;
+        o.objId = i + 1; o.name = "Shrine, " + std::to_string(i); o.slider = i % 2 ? 5000 : -5000;
+        o.owner = static_cast<WarTeam>(0); o.state = static_cast<WarObjectiveState>(9);
+        z.objectives.push_back(o);
+    }
+    std::vector<std::string> recs = SplitStr(EncodeWarZone(z), ';');
+    CHECK_EQN(recs.size(), 1 + MaxWarObjectives);
+    CHECK_EQ(recs[0], "616,F,2,0,1000,,,3");
+    CHECK_EQ(recs[1], "O,1,Shrine%2C 0,,,N,-1000,6");
+    CHECK_EQ(recs[2], "O,2,Shrine%2C 1,,,N,1000,6");
+
+    // WPCAP
+    WarCapture c;
+    c.objId = 0;
+    CHECK_EQ(EncodeWarCapture(c), "0,0,0,0,0,0,0");
+    c.objId = 2; c.slider = -2000; c.neutralPct = 250; c.state = WarObjectiveState::HordeAllianceChallenge;
+    c.countA = 2; c.countH = 3; c.maxNet = 5;
+    CHECK_EQ(EncodeWarCapture(c), "2,-1000,100,6,2,3,5");
+
+    // WPMAP: Z then P records, each capped
+    WarMap m;
+    for (uint32_t i = 0; i < 40; ++i)
+        m.zones.push_back({ i + 1, WarZoneKind::Stock, 1, 0, 2, std::nullopt, std::nullopt, WarZoneState::Active });
+    for (uint32_t i = 0; i < 120; ++i)
+        m.points.push_back({ 1, i + 1, WarTeam::Horde, WarObjectiveState::Horde });
+    recs = SplitStr(EncodeWarMap(m), ';');
+    CHECK_EQN(recs.size(), 1 + MaxWarZones + MaxWarPoints);
+    CHECK_EQ(recs[0], "0,0,0,0,0,0,0,0");
+    CHECK_EQ(recs[1], "Z,1,S,1,0,2,,,1");
+    CHECK_EQ(recs[1 + MaxWarZones], "P,1,1,H,2");
+
+    // WANTED: names are cut to 48 bytes; at most MaxWanted records; an empty list is the zone alone
+    WantedList w;
+    w.zoneId = 2817;
+    CHECK_EQ(EncodeWanted(w), "2817");
+    for (uint32_t i = 0; i < 12; ++i)
+    {
+        WantedEntry e;
+        e.name = std::string(60, 'a'); e.classId = 4; e.team = WarTeam::Horde; e.streak = 5 + i;
+        e.reason = i % 2 ? WantedReason::Bully : WantedReason::Streak; e.u = 1500u; e.ageSec = i;
+        w.entries.push_back(e);
+    }
+    recs = SplitStr(EncodeWanted(w), ';');
+    CHECK_EQN(recs.size(), 1 + MaxWanted);
+    std::vector<std::string> f = SplitStr(recs[2], ',');
+    CHECK_EQN(f.size(), 11u);
+    CHECK_EQN(f[1].size(), WarNameBytes);
+    CHECK_EQ(f[5], "B");
+    CHECK_EQ(f[8], "1000");
+    CHECK_EQ(f[9], "");
+
+    // WPEV: one field layout per kind
+    WarEvent ev;
+    ev.kind = WarEventKind::FrontEnd; ev.zoneId = 66; ev.team = WarTeam::Neutral; ev.controlA = 500; ev.controlH = 1500;
+    CHECK_EQ(EncodeWarEvent(ev), "E,66,,500,1000");   // a draw: no winner
+    ev.kind = WarEventKind::Reward; ev.why = static_cast<WarRewardWhy>('Z'); ev.honor = 1; ev.xp = 2; ev.shards = 3;
+    ev.drPermille = 1200;
+    CHECK_EQ(EncodeWarEvent(ev), "R,K,1,2,3,1000");
+    ev.kind = WarEventKind::Survived; ev.name = "Br\xC3\xA9nna";
+    CHECK_EQ(EncodeWarEvent(ev), "S,Br\xC3\xA9nna,1,3");
+    ev.kind = static_cast<WarEventKind>('Q');
+    CHECK_EQ(EncodeWarEvent(ev), "");
+    CHECK(WarTeamLetter(WarTeam::Neutral) == 'N' && WarTeamLetter(static_cast<WarTeam>('a')) == 0);
+    CHECK(WarZoneKindLetter(WarZoneKind::Wintergrasp) == 'W' && WarZoneKindLetter(WarZoneKind::None) == 0);
+}
+
+TEST("arena: QJOIN A, LBQ A and GET ARENA parse as section 20 says; everything else is dropped")
+{
+    Intent in;
+    CHECK(Parse("1 QJOIN 1b 1/1 A,1,1,4,1", &in) == DropReason::None);
+    CHECK(in.type == IntentType::QueueJoin && in.queueKind == QueueKind::Arena && in.activityId == ArenaActivityId &&
+        in.tier == 1 && in.groupSize == 1);
+    CHECK(Parse("1 QJOIN 1c 1/1 A,1,0,7,1", &in) == DropReason::None && in.tier == 0 && in.roles == 7);
+    CHECK_EQ(EncodeIntentBody(in), "1 QJOIN 1c 1/1 A,1,0,7,1");
+    CHECK(Parse("1 QJOIN 1 1/1 A,2,1,4,1") == DropReason::OutOfRange);   // only activity 1
+    CHECK(Parse("1 QJOIN 1 1/1 A,0,1,4,1") == DropReason::OutOfRange);
+    CHECK(Parse("1 QJOIN 1 1/1 A,1,2,4,1") == DropReason::OutOfRange);   // tier 0 or 1
+    CHECK(Parse("1 QJOIN 1 1/1 A,1,3,4,1") == DropReason::OutOfRange);
+    CHECK(Parse("1 QJOIN 1 1/1 A,1,1,4,2") == DropReason::OutOfRange);   // solo
+    CHECK(Parse("1 QJOIN 1 1/1 A,1,1,0,1") == DropReason::OutOfRange);   // roles 1..7 as for every kind
+    CHECK(Parse("1 QJOIN 1 1/1 A,1,1,4") == DropReason::FieldCount);
+    CHECK(Parse("1 QJOIN 1 1/1 a,1,1,4,1") == DropReason::BadField);
+    CHECK(Parse("1 LBQ 1d 1/1 A,0,3,0,1", &in) == DropReason::None);
+    CHECK(in.board == Board::Arena && in.seasonId == 0 && in.dungeonId == 3 && in.classId == 0 && in.page == 1);
+    for (char const* ok : { "1 LBQ 1 1/1 A,2,1,8,2", "1 LBQ 1 1/1 A,0,2,0,1", "1 LBQ 1 1/1 A,0,5,11,999" })
+        CHECK_MSG(Parse(ok) == DropReason::None, ok);
+    for (char const* bad : { "1 LBQ 1 1/1 A,0,0,0,1", "1 LBQ 1 1/1 A,0,4,0,1", "1 LBQ 1 1/1 A,0,6,0,1",
+             "1 LBQ 1 1/1 A,0,11,0,1" })
+        CHECK_MSG(Parse(bad) == DropReason::OutOfRange, bad);   // one bracket at a time, never "all"
+    CHECK(Parse("1 LBQ 1 1/1 A,0,3,0,0") == DropReason::OutOfRange);
+    CHECK(Parse("1 LBQ 1 1/1 K,0,0,0,1") == DropReason::None);     // the other boards keep 0 = all
+    CHECK(Parse("1 GET 1a 1/1 ARENA", &in) == DropReason::None);
+    CHECK(in.topics.size() == 1 && in.topics[0].topic == Topic::Arena);
+    CHECK(Parse("1 GET 1 1/1 ARENA,1") == DropReason::BadTopic);
+    CHECK(Parse("1 GET 1 1/1 ARENA;QUEUE;ROYS", &in) == DropReason::None && in.topics.size() == 3);
+    CHECK_EQ(TopicName(Topic::Arena), "ARENA");
+    CHECK(!IsRevisioned(Topic::Arena));
+    CHECK(static_cast<uint8_t>(Topic::Arena) == static_cast<uint8_t>(Topic::Wanted) + 1);   // appended after section 19
+    CHECK_EQN(RevisionedTopicCount, 9u);
+    CHECK(IsArenaBracket(1) && IsArenaBracket(2) && IsArenaBracket(3) && IsArenaBracket(5));
+    CHECK(!IsArenaBracket(0) && !IsArenaBracket(4) && !IsArenaBracket(6));
+}
+
+TEST("arena: the feature bit and the ERR codes of section 20")
+{
+    CHECK_EQN(static_cast<uint32_t>(FeatureArena), 65536u);
+    // 16384 and 32768 belong to World PvP (section 19): FeatureArena never overlaps a lower bit
+    CHECK_EQN(static_cast<uint32_t>(FeatureArena) & 0xFFFFu, 0u);
+    std::string const doc = bhtest::ReadFile(g_repo + "/docs/BleakholdProtocol.md");
+    CHECK(doc.find("65536 arena seasons") != std::string::npos);
+    for (Refusal const& r : { ArenaErr::Off, ArenaErr::Level, ArenaErr::Closed, ArenaErr::Busy, ArenaErr::Deserter,
+             ArenaErr::Talents, ArenaErr::Team, ArenaErr::Gold })
+    {
+        std::string const code = r.code;
+        bool ok = !code.empty() && code.size() <= 24 && code.compare(0, 6, "arena_") == 0;
+        for (char c : code)
+            ok = ok && ((c >= 'a' && c <= 'z') || c == '_');
+        CHECK_MSG(ok, "code [" + code + "]");
+        CHECK_MSG(doc.find("| `" + code + "` |") != std::string::npos, code + " is in an error table of the document");
+        CHECK_MSG(std::string(r.text).size() <= 160 && !std::string(r.text).empty(), code + " has a sentence");
+    }
+}
+
+TEST("arena: ARENA keeps every record's field order and caps")
+{
+    ArenaState a;
+    CHECK_EQ(EncodeArena(a), "0,0,,,,0");   // no arena season: an empty header
+    a.seasonId = 3; a.state = ArenaStateId::Upcoming; a.nextStartEpoch = 1800748800u; a.oneTeamCostCopper = 400000u;
+    a.seasonName = "Arena Season 3; the, long|one";
+    CHECK_EQ(EncodeArena(a), "3,6,,,1800748800,0,400000,Arena Season 3%3B the%2C long%7Cone");
+    ArenaBracketState b;
+    b.bracket = 2; b.hasTeam = false; b.missingMask = 0x1FF;   // bit 256 is not a protocol bit: cut to 8 bits
+    a.brackets = { b };
+    ArenaBracketState bad;
+    bad.bracket = 4;   // not a bracket: never written
+    a.brackets.push_back(bad);
+    ArenaCutoff c;
+    c.bracket = 5; c.tierId = 1; c.slots = 10; c.floor = 1300;   // nobody inside it yet: cutRank and cutRating empty
+    a.cutoffs = { c };
+    ArenaLadderInfo l;
+    l.bracket = 5; l.eligibleTeams = 7; l.rewardsOpen = false; l.titlesOpen = false;
+    a.ladders = { l };
+    ArenaFinal f;
+    f.bracket = 1; f.finalRank = 3; f.finalRating = 1990; f.grant = ArenaGrant::Delivered;   // no tier
+    a.finals = { f };
+    CHECK_EQ(EncodeArena(a), "3,6,,,1800748800,0,400000,Arena Season 3%3B the%2C long%7Cone;B,2,0,,,,,,,,,,,,,255;"
+        "T,5,1,10,,,1300;N,5,7,0,0;F,1,3,1990,,1");
+    ArenaState many;
+    for (uint32_t i = 0; i < 40; ++i)
+    {
+        many.seasons.push_back({ i + 1, "S", SeasonStateId::Past, 1u, 2u });
+        ArenaMatch m;
+        m.bracket = 1; m.opponent = "X"; m.endEpoch = i; m.reason = ArenaReason::Repeat; m.verdict = ArenaVerdict::Reduced;
+        many.matches.push_back(m);
+        many.cutoffs.push_back(c);
+    }
+    std::vector<std::string> recs = SplitStr(EncodeArena(many), ';');
+    std::size_t s = 0, m = 0, t = 0;
+    for (std::string const& r : recs)
+    {
+        s += r.compare(0, 2, "S,") == 0;
+        m += r.compare(0, 2, "M,") == 0;
+        t += r.compare(0, 2, "T,") == 0;
+    }
+    CHECK_EQN(s, MaxArenaSeasons);
+    CHECK_EQN(m, MaxArenaMatches);
+    CHECK_EQN(t, MaxArenaCutoffs);
+    CHECK(recs.back() == "M,1,0,0,X,4,1,R");
+}
+
+TEST("arena: LB and LBME carry the four and the two arena fields on board A only")
+{
+    Leaderboard lb;
+    lb.board = Board::Keys; lb.page = 1; lb.pages = 1;
+    LeaderboardRow r;
+    r.rank = 1; r.dungeonId = 602u; r.value = 15; r.label = "x";
+    r.seasonWins = 1u; r.seasonGames = 2u; r.tierId = 3u; r.flags = 4u;   // ignored on K
+    lb.rows = { r };
+    CHECK_EQ(EncodeLeaderboard(lb), "K,,,,1,1;1,602,15,,,,x");
+    lb.board = Board::Arena; lb.seasonId = 1u; lb.dungeonId = 3u; lb.classId = 0u;
+    r.dungeonId = 3u; r.value = 1912; r.dateEpoch = 1793896400u; r.members = { { "Ironvow", 1u }, { "Hale", 7u } };
+    r.label = "Ironvow Wardens";
+    lb.rows = { r };
+    CHECK_EQ(EncodeLeaderboard(lb), "A,1,3,0,1,1;1,3,1912,,1793896400,Ironvow~1:Hale~7,Ironvow Wardens,1,2,3,4");
+    r.flags.reset();
+    r.tierId.reset();
+    lb.rows = { r };
+    CHECK_EQ(EncodeLeaderboard(lb), "A,1,3,0,1,1;1,3,1912,,1793896400,Ironvow~1:Hale~7,Ironvow Wardens,1,2");
+    LeaderboardMe me;
+    me.board = Board::Rift; me.rank = 4u; me.topPermille = 182u; me.tierId = 4u;   // ignored on R
+    CHECK_EQ(EncodeLeaderboardMe(me), "R,4");
+    me.board = Board::Arena; me.topPercent = 19u; me.value = 1912; me.dungeonId = 3u; me.barPermille = 407u;
+    me.label = "Duelist";
+    CHECK_EQ(EncodeLeaderboardMe(me), "A,4,19,1912,3,,407,Duelist,182,4");
+    LeaderboardMe none;
+    none.board = Board::Arena;
+    CHECK_EQ(EncodeLeaderboardMe(none), "A");
+}
+
+TEST("arena: DEF V and Q follow the other kinds; QUEUE kind A has no member records")
+{
+    Definitions d;
+    d.riftBosses = { { 1, "Echo" } };
+    d.arenaTiers = { { 6, "Rank One", "E6CC80", "The best team of the bracket." } };
+    ArenaRewardDef q;
+    q.id = 105; q.seasonId = 1; q.bracket = 3; q.tierId = 5; q.kind = 'M'; q.entry = 30609; q.count = 1;
+    q.text = "Swift Nether Drake";
+    ArenaRewardDef bad = q;
+    bad.id = 1; bad.kind = 'm';   // only upper-case letters are kinds: written empty
+    d.arenaRewards = { q, bad };
+    std::vector<std::string> p = EncodeDefinitions(d, 9);
+    CHECK_EQN(p.size(), 4u);
+    CHECK_EQ(p[0], "R,9;1,Echo");
+    CHECK_EQ(p[1], "V,9;6,Rank One,E6CC80,The best team of the bracket.");
+    CHECK_EQ(p[2], "Q,9;105,1,3,5,M,30609,1,Swift Nether Drake;1,1,3,5,,30609,1,Swift Nether Drake");
+    CHECK_EQ(p[3], "Z,9");
+    Definitions e;
+    CHECK(DefinitionsHash(d) != DefinitionsHash(e));
+    QueueState qa;
+    qa.state = QueueStateId::Queued; qa.kind = QueueKind::Arena; qa.activityId = 1u; qa.tier = 1u; qa.size = 1u;
+    qa.queuedSec = 8u; qa.estWaitSec = 95u;
+    qa.queued = 3u;   // a Royale field: not part of kind A
+    QueueMember m; m.name = "Tester";
+    qa.members = { m };
+    CHECK_EQ(EncodeQueue(7, qa), "7,1,A,1,1,1,8,95");
+}
+
+// ---------------------------------------------------------------------------------------------------
+// The cafe (section 21): intents, topics, limits, the duplicate guard, the encoders and the ERR codes
+// ---------------------------------------------------------------------------------------------------
+TEST("cafe: the intents and topics of section 21 parse as documented; everything else is dropped")
+{
+    Intent in;
+    CHECK(Parse("1 CSHIFT 3b 1/1 1,1", &in) == DropReason::None);
+    CHECK(in.type == IntentType::CafeShift && in.cafeId == 1 && in.cafeOn && in.seq == 3 * 36 + 11);
+    CHECK(Parse("1 CSHIFT 1 1/1 255,0", &in) == DropReason::None && in.cafeId == 255 && !in.cafeOn);
+    CHECK_EQ(EncodeIntentBody(in), "1 CSHIFT 1 1/1 255,0");
+    CHECK(Parse("1 CTAKE 3c 1/1 1209", &in) == DropReason::None && in.type == IntentType::CafeTake && in.orderId == 1209);
+    CHECK(Parse("1 CTAKE 1 1/1 0", &in) == DropReason::None && in.orderId == 0);   // 0: the best order I can make
+    CHECK(Parse("1 CTAKE 1 1/1 2147483647", &in) == DropReason::None && in.orderId == 2147483647u);
+    CHECK(Parse("1 CSTEP 3e 1/1 41,1,1", &in) == DropReason::None);
+    CHECK(in.type == IntentType::CafeStep && in.ticketId == 41 && in.stepIndex == 1 && in.actionId == 1);
+    CHECK(Parse("1 CSTEP 1 1/1 2147483647,12,63", &in) == DropReason::None);
+    CHECK(in.ticketId == 2147483647u && in.stepIndex == MaxCafeStepIndex && in.actionId == MaxCafeActionId);
+    CHECK_EQ(EncodeIntentBody(in), "1 CSTEP 1 1/1 2147483647,12,63");
+    CHECK(Parse("1 CREL 3g 1/1 41,2,2380", &in) == DropReason::None);
+    CHECK(in.type == IntentType::CafeRelease && in.ticketId == 41 && in.stepIndex == 2 && in.clientMs == 2380);
+    CHECK(Parse("1 CREL 1 1/1 1,1,0", &in) == DropReason::None && in.clientMs == 0);
+    CHECK(Parse("1 CREL 1 1/1 1,12,60000", &in) == DropReason::None && in.clientMs == MaxCafeReleaseMs);
+    CHECK_EQ(EncodeIntentBody(in), "1 CREL 1 1/1 1,12,60000");
+    CHECK(Parse("1 CORDER 3q 1/1 1,103,10", &in) == DropReason::None);
+    CHECK(in.type == IntentType::CafeOrder && in.cafeId == 1 && in.recipeId == 103 && in.tipPct == 10);
+    for (char const* ok : { "1 CORDER 1 1/1 2,219,0", "1 CORDER 1 1/1 255,65535,25", "1 CORDER 1 1/1 1,1,50" })
+        CHECK_MSG(Parse(ok) == DropReason::None, ok);
+    CHECK(Parse("1 CCANCEL 3r 1/1 1210", &in) == DropReason::None && in.type == IntentType::CafeCancel && in.orderId == 1210);
+    CHECK(Parse("1 CSTAFF 3o 1/1 108", &in) == DropReason::None && in.type == IntentType::CafeStaff && in.recipeId == 108);
+    CHECK(Parse("1 CSTAFF 1 1/1 65535", &in) == DropReason::None && in.recipeId == 65535);
+    // out of range or malformed: dropped (section 1)
+    for (char const* bad : { "1 CSHIFT 1 1/1 0,1", "1 CSHIFT 1 1/1 256,1", "1 CSHIFT 1 1/1 1,2", "1 CTAKE 1 1/1 2147483648",
+             "1 CTAKE 1 1/1 -1", "1 CSTEP 1 1/1 0,1,1", "1 CSTEP 1 1/1 41,0,1", "1 CSTEP 1 1/1 41,13,1",
+             "1 CSTEP 1 1/1 41,1,0", "1 CSTEP 1 1/1 41,1,64", "1 CREL 1 1/1 41,1,60001", "1 CREL 1 1/1 41,1,-1",
+             "1 CREL 1 1/1 0,1,0", "1 CORDER 1 1/1 1,103,5", "1 CORDER 1 1/1 1,103,51", "1 CORDER 1 1/1 1,0,0",
+             "1 CORDER 1 1/1 1,65536,0", "1 CORDER 1 1/1 0,103,0", "1 CCANCEL 1 1/1 0", "1 CSTAFF 1 1/1 0",
+             "1 CSTAFF 1 1/1 65536" })
+        CHECK_MSG(Parse(bad) == DropReason::OutOfRange, bad);
+    for (char const* bad : { "1 CSHIFT 1 1/1 1", "1 CSHIFT 1 1/1 1,1,1", "1 CTAKE 1 1/1", "1 CSTEP 1 1/1 41,1",
+             "1 CREL 1 1/1 41,1", "1 CREL 1 1/1 41,1,5,5", "1 CORDER 1 1/1 1,103", "1 CCANCEL 1 1/1 1,2",
+             "1 CSTAFF 1 1/1" })
+        CHECK_MSG(Parse(bad) == DropReason::FieldCount, bad);
+    CHECK(Parse("1 CSTEP 1 1/1 41,a,1") == DropReason::BadField);
+    CHECK(Parse("1 CORDER 1 1/1 1,103,1e1") == DropReason::BadField);
+    // the board of section 21: one cafe at a time, never "all"
+    CHECK(Parse("1 LBQ 3s 1/1 C,0,1,0,1", &in) == DropReason::None);
+    CHECK(in.board == Board::Cafe && in.seasonId == 0 && in.dungeonId == 1 && in.page == 1);
+    CHECK(Parse("1 LBQ 1 1/1 C,2964,2,0,3", &in) == DropReason::None && in.seasonId == 2964 && in.dungeonId == 2);
+    for (char const* bad : { "1 LBQ 1 1/1 C,0,0,0,1", "1 LBQ 1 1/1 C,0,3,0,1", "1 LBQ 1 1/1 C,0,255,0,1" })
+        CHECK_MSG(Parse(bad) == DropReason::OutOfRange, bad);
+    CHECK(Parse("1 LBQ 1 1/1 c,0,1,0,1") == DropReason::BadField);
+    // GET: CAFM carries the cafe, the others nothing
+    CHECK(Parse("1 GET z 1/1 CAFE;CAFST;CAFQ;CAFT;CAFM,1;CAFO;CAFP;CAFBF", &in) == DropReason::None);
+    CHECK(in.topics.size() == 8 && in.topics[0].topic == Topic::CafeList && in.topics[4].topic == Topic::CafeMenu &&
+        in.topics[4].arg1 == 1 && in.topics[7].topic == Topic::CafeBuffs);
+    CHECK(Parse("1 GET 1 1/1 CAFM,255", &in) == DropReason::None && in.topics[0].arg1 == 255);
+    CHECK_EQ(EncodeIntentBody(in), "1 GET 1 1/1 CAFM,255");
+    CHECK(Parse("1 GET 1 1/1 CAFM") == DropReason::BadTopic);
+    CHECK(Parse("1 GET 1 1/1 CAFM,0") == DropReason::OutOfRange);
+    CHECK(Parse("1 GET 1 1/1 CAFM,256") == DropReason::OutOfRange);
+    CHECK(Parse("1 GET 1 1/1 CAFE,1") == DropReason::BadTopic);
+    CHECK(Parse("1 GET 1 1/1 CAFAT") == DropReason::BadTopic);   // CAFAT is pushed only
+    // appended after section 20, unrevisioned, action intents
+    CHECK(static_cast<uint8_t>(IntentType::CafeShift) == static_cast<uint8_t>(IntentType::WarMode) + 1);
+    CHECK(static_cast<uint8_t>(Topic::CafeList) == static_cast<uint8_t>(Topic::Arena) + 1);
+    CHECK(static_cast<uint8_t>(Topic::CafeBuffs) + 1 == static_cast<uint8_t>(Topic::Count));
+    CHECK_EQN(RevisionedTopicCount, 9u);
+    char const* const ops[] = { "CSHIFT", "CTAKE", "CSTEP", "CREL", "CORDER", "CCANCEL", "CSTAFF" };
+    for (uint8_t i = 0; i < 7; ++i)
+    {
+        IntentType const t = static_cast<IntentType>(static_cast<uint8_t>(IntentType::CafeShift) + i);
+        CHECK_EQ(IntentOpName(t), ops[i]);
+        CHECK(IsActionIntent(t));
+    }
+    char const* const topics[] = { "CAFE", "CAFST", "CAFQ", "CAFT", "CAFM", "CAFO", "CAFP", "CAFBF" };
+    for (uint8_t i = 0; i < 8; ++i)
+    {
+        Topic const t = static_cast<Topic>(static_cast<uint8_t>(Topic::CafeList) + i);
+        CHECK_EQ(TopicName(t), topics[i]);
+        CHECK(!IsRevisioned(t));
+    }
+    CHECK(IsCafeId(1) && IsCafeId(2) && !IsCafeId(0) && !IsCafeId(3));
+    CHECK(IsCafeTipPct(0) && IsCafeTipPct(10) && IsCafeTipPct(25) && IsCafeTipPct(50) && !IsCafeTipPct(5) &&
+        !IsCafeTipPct(100));
+}
+
+TEST("cafe: the limits come from Limits; CTAKE, CSTEP and CREL are never duplicates, the other cafe intents are")
+{
+    // the guard: only RSPEC and the three cafe steps are exempt
+    for (std::size_t i = 0; i < static_cast<std::size_t>(IntentType::Count); ++i)
+    {
+        IntentType const t = static_cast<IntentType>(i);
+        bool const exempt = t == IntentType::RoyaleSpectate || t == IntentType::CafeTake || t == IntentType::CafeStep ||
+            t == IntentType::CafeRelease;
+        CHECK_MSG(IsDuplicateGuarded(t) == (IsActionIntent(t) && !exempt), IntentOpName(t));
+    }
+    Limits d;
+    CHECK_EQN(d.cafeShiftIntervalMs, 2000u);
+    CHECK_EQN(d.cafeTakeIntervalMs, 500u);
+    CHECK_EQN(d.cafeStepIntervalMs, 200u);
+    CHECK_EQN(d.cafeReleaseIntervalMs, 100u);
+    CHECK_EQN(d.cafeOrderIntervalMs, 2000u);
+
+    Endpoint ep;   // the default limits and the 1 s duplicate window
+    Feed(ep, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    Intent in;
+    // CSHIFT and CSTAFF share one bucket, 1 per 2 s; the same CSHIFT again within 1 s is a duplicate
+    CHECK(Feed(ep, "1 CSHIFT 2 1/1 1,1", 1000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CSHIFT 3 1/1 1,1", 1500).reason == DropReason::Duplicate);
+    ReceiveResult r = Feed(ep, "1 CSTAFF 4 1/1 108", 1600, &in);
+    CHECK(r.verdict == Verdict::Refused && r.reason == DropReason::Throttled && in.type == IntentType::CafeStaff);
+    CHECK(Feed(ep, "1 CSTAFF 5 1/1 108", 3100).verdict == Verdict::Accepted);
+    // CTAKE 1 per 0.5 s, "next" twice is two takes
+    CHECK(Feed(ep, "1 CTAKE 6 1/1 0", 4000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CTAKE 7 1/1 0", 4300).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 CTAKE 8 1/1 0", 4600).verdict == Verdict::Accepted);
+    // CSTEP 1 per 0.2 s: the same press again after an ERR (same payload, within 1 s) arrives
+    CHECK(Feed(ep, "1 CSTEP 9 1/1 41,4,16", 5000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CSTEP a 1/1 41,4,16", 5100, &in).verdict == Verdict::Refused && in.type == IntentType::CafeStep);
+    CHECK(Feed(ep, "1 CSTEP b 1/1 41,4,16", 5250).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CSTEP c 1/1 41,4,16", 5500).verdict == Verdict::Accepted);
+    // CREL 1 per 0.1 s, its own bucket (a CSTEP just before does not slow it)
+    CHECK(Feed(ep, "1 CREL d 1/1 41,4,500", 5510).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CREL e 1/1 41,4,500", 5560).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 CREL f 1/1 41,4,500", 5620).verdict == Verdict::Accepted);
+    // CORDER and CCANCEL share one bucket, 1 per 2 s; the same CORDER within 1 s is a duplicate
+    CHECK(Feed(ep, "1 CORDER g 1/1 1,103,10", 8000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CORDER h 1/1 1,103,10", 8400).reason == DropReason::Duplicate);
+    CHECK(Feed(ep, "1 CCANCEL i 1/1 1210", 8500).verdict == Verdict::Refused);
+    CHECK(Feed(ep, "1 CCANCEL j 1/1 1210", 10100).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 CCANCEL k 1/1 1210", 10500).reason == DropReason::Duplicate);
+    // the cafe's buckets leave the others alone
+    CHECK(Feed(ep, "1 WARMODE l 1/1 1", 10600).verdict == Verdict::Accepted);
+    // GET: each cafe topic once per second; CAFM once per second per cafe
+    CHECK(Feed(ep, "1 GET m 1/1 CAFE;CAFST;CAFM,1", 12000, &in).verdict == Verdict::Accepted && in.topics.size() == 3);
+    CHECK(Feed(ep, "1 GET n 1/1 CAFM,2;CAFM,1;CAFE", 12500, &in).verdict == Verdict::Accepted);
+    CHECK(in.topics.size() == 1 && in.topics[0].topic == Topic::CafeMenu && in.topics[0].arg1 == 2);
+    CHECK(Feed(ep, "1 GET o 1/1 CAFE", 12600).reason == DropReason::Throttled);
+    CHECK(Feed(ep, "1 GET p 1/1 CAFE;CAFM,1", 13100, &in).verdict == Verdict::Accepted && in.topics.size() == 2);
+
+    Limits l;
+    l.cafeShiftIntervalMs = 5000; l.cafeTakeIntervalMs = 0; l.cafeStepIntervalMs = 1000; l.cafeReleaseIntervalMs = 0;
+    l.cafeOrderIntervalMs = 3000;   // 0: no limit of its own
+    Endpoint lim(l);
+    Feed(lim, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    CHECK(Feed(lim, "1 CSHIFT 2 1/1 1,1", 1000).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CSHIFT 3 1/1 1,0", 4000).verdict == Verdict::Refused);
+    CHECK(Feed(lim, "1 CSHIFT 4 1/1 1,0", 6100).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CTAKE 5 1/1 7", 7000).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CTAKE 6 1/1 7", 7001).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CSTEP 7 1/1 1,1,1", 8000).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CSTEP 8 1/1 1,2,3", 8900).verdict == Verdict::Refused);
+    CHECK(Feed(lim, "1 CSTEP 9 1/1 1,2,3", 9100).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CREL a 1/1 1,2,1", 9101).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CREL b 1/1 1,2,1", 9102).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CORDER c 1/1 2,201,0", 10000).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 CCANCEL d 1/1 5", 12000).verdict == Verdict::Refused);
+    CHECK(Feed(lim, "1 CCANCEL e 1/1 5", 13100).verdict == Verdict::Accepted);
+}
+
+TEST("cafe: the feature bit, the board, the macros and the ERR codes of section 21")
+{
+    CHECK_EQN(static_cast<uint32_t>(FeatureCafe), 131072u);
+    CHECK_EQN(static_cast<uint32_t>(FeatureCafe) & 0x1FFFFu, 0u);   // above every bit before it (arena is 65536)
+    CHECK(static_cast<char>(Board::Cafe) == 'C');
+    CHECK_EQN(BLEAKHOLD_UI_CAFE, 1);
+    CHECK_EQN(MaxCafeQueueRows, std::size_t(8));
+    CHECK_EQN(MaxCafeTickets, std::size_t(3));
+    CHECK_EQN(MaxCafeSteps, std::size_t(12));
+    CHECK_EQN(MaxCafeRecipes, std::size_t(40));
+    CHECK_EQN(MaxCafeAtRows, std::size_t(6));
+    CHECK_EQN(MaxCafeNameBytes, std::size_t(48));
+    CHECK_EQN(MaxCafeLineBytes, std::size_t(160));
+    CHECK(MaxCafeSteps == MaxCafeStepIndex);
+    std::string const doc = bhtest::ReadFile(g_repo + "/docs/BleakholdProtocol.md");
+    CHECK(doc.find("## 21. The caf\xC3\xA9") != std::string::npos);
+    CHECK(doc.find("131072 the caf\xC3\xA9 live") != std::string::npos);
+    CHECK(doc.find("| `[Caf\xC3\xA9] ` |") != std::string::npos);
+    for (Refusal const& r : { CafeErr::Off, CafeErr::Closed, CafeErr::Faction, CafeErr::Where, CafeErr::Level,
+             CafeErr::Combat, CafeErr::Mounted, CafeErr::Paused, CafeErr::Cap, CafeErr::BarFull, CafeErr::Afk,
+             CafeErr::Account, CafeErr::Shift, CafeErr::ShiftOrder, CafeErr::Busy, CafeErr::Station, CafeErr::Ticket,
+             CafeErr::Hands, CafeErr::Locked, CafeErr::Full, CafeErr::Taken, CafeErr::Self, CafeErr::Gold,
+             CafeErr::Order, CafeErr::Staff, CafeErr::Dead, CafeErr::Failed })
+    {
+        std::string const code = r.code;
+        bool ok = !code.empty() && code.size() <= CafeCodeBytes;
+        for (char c : code)
+            ok = ok && ((c >= 'a' && c <= 'z') || c == '_');
+        CHECK_MSG(ok, "code [" + code + "]");
+        CHECK_MSG(code.compare(0, 5, "cafe_") == 0 || code == "dead" || code == "failed", code);
+        CHECK_MSG(doc.find("| `" + code + "` |") != std::string::npos, code + " is in an error table of the document");
+        std::string const text = r.text;
+        CHECK_MSG(!text.empty() && text.size() <= MaxCafeLineBytes && CleanText(text) == text, code + " has a sentence");
+    }
+    // the generic "busy" (over a rate) is documented as everywhere
+    CHECK(doc.find("`busy` (over a caf\xC3\xA9 op's rate") != std::string::npos);
+}
+
+TEST("cafe: CAFST, CAFQ and CAFT keep their fields, caps and order")
+{
+    CafeState off;   // off shift: the shift fields are empty; the level and the day are always there
+    off.level = 10; off.xp = 5640; off.levelXp = 5640; off.flags = CafeFlagStaffDrink;
+    CHECK_EQ(EncodeCafeState(off), "0,0,10,5640,5640,,,,,,,,,,,,,16;D,0,0,0,0,0,0,0,0");
+    off.cafeId = 2;            // no cafe without a shift
+    off.rush = CafeRush{};     // no Rush record off shift
+    off.flags = 0xFFu;         // only the seven documented bits
+    off.warnSec = 4u;
+    CHECK_EQ(EncodeCafeState(off), "0,0,10,5640,5640,,,,,,,,,,,,,127,4;D,0,0,0,0,0,0,0,0");
+    CafeState on;
+    on.cafeId = 2; on.onShift = true; on.level = 3; on.xp = 400; on.levelXp = 320; on.nextLevelXp = 620u;
+    on.station = 'E'; on.nearStation = 0; on.nearDm = 40; on.maxTickets = 9;   // no nearest: no distance
+    CHECK_EQ(EncodeCafeState(on), "2,1,3,400,320,620,0,0,0,0,0,0,E,,,3;D,0,0,0,0,0,0,0,0");
+    on.station = 0; on.nearStation = 'G'; on.nearDm = 900; on.maxTickets = 0; on.flags = CafeFlagFacing;
+    CafeRush live;
+    live.rushState = CafeRushState::Live; live.rushSec = 600; live.rushServed = 31; live.rushGoal = 60;
+    live.myRushServed = 4;
+    on.rush = live;
+    CHECK_EQ(EncodeCafeState(on), "2,1,3,400,320,620,0,0,0,0,0,0,,G,255,1,,32;D,0,0,0,0,0,0,0,0;R,2,600,31,60,4");
+    on.rush = CafeRush{};      // no Rush now: rushSec is left empty
+    CHECK_EQ(Norm(EncodeCafeState(on)), "2,1,3,400,320,620,0,0,0,0,0,0,,G,255,1,,32;D,0,0,0,0,0,0,0,0;R,0,,0,0,0");
+
+    // CAFQ: waiting player orders, waiting NPC orders, the receiver's own, the rest; 8 rows at most, the rest counted
+    CafeQueue q;
+    q.cafeId = 1; q.count = 12; q.cap = 8; q.baristas = 3;
+    auto row = [](uint32_t id, CafeOrderKind kind, CafeQueueState state, char const* by) {
+        CafeQueueRow r;
+        r.orderId = id; r.kind = kind; r.recipeId = 101; r.customer = "C" + std::to_string(id); r.state = state;
+        r.takenBy = by; r.patienceMs = 1000; r.patienceMaxMs = 2000;
+        return r;
+    };
+    q.rows = { row(1, CafeOrderKind::Npc, CafeQueueState::Taken, "Brenna"), row(2, CafeOrderKind::Npc, CafeQueueState::Taken, "Aldric"),
+        row(3, CafeOrderKind::Group, CafeQueueState::Waiting, ""), row(4, CafeOrderKind::Player, CafeQueueState::House, ""),
+        row(5, CafeOrderKind::Npc, CafeQueueState::Waiting, ""), row(6, CafeOrderKind::Player, CafeQueueState::Waiting, ""),
+        row(7, CafeOrderKind::Npc, CafeQueueState::Waiting, ""), row(8, CafeOrderKind::Player, CafeQueueState::Taken, "Aldric"),
+        row(9, CafeOrderKind::Npc, CafeQueueState::Waiting, ""), row(10, CafeOrderKind::Player, CafeQueueState::Waiting, ""),
+        row(11, CafeOrderKind::Npc, CafeQueueState::Waiting, ""), row(12, CafeOrderKind::Npc, CafeQueueState::Taken, "Corwin") };
+    q.rows[2].group = 7u;
+    q.rows[4].needLevel = 4;
+    SortCafeQueueRows(q.rows, "Aldric");
+    std::string order;
+    for (CafeQueueRow const& r : q.rows)
+        order += std::to_string(r.orderId) + " ";
+    CHECK_EQ(order, "6 10 3 5 7 9 11 2 8 1 4 12 ");
+    std::vector<std::string> recs = SplitStr(EncodeCafeQueue(q), ';');
+    CHECK_EQN(recs.size(), MaxCafeQueueRows + 1);
+    CHECK_EQ(recs[0], "1,12,8,3,4");   // 4 rows not sent, none of them a waiting one
+    CHECK_EQ(recs[1], "6,P,101,C6,1000,2000,W,,0");
+    CHECK_EQ(recs[3], "3,G,101,C3,1000,2000,W,,0,7");
+    CHECK_EQ(recs[4], "5,N,101,C5,1000,2000,W,,4");
+    CHECK_EQ(recs[8], "2,N,101,C2,1000,2000,T,Aldric,0");
+    SortCafeQueueRows(q.rows, "Corwin");   // another receiver: his own row moves up
+    CHECK_EQN(q.rows[7].orderId, 12u);
+    q.rows.resize(8);
+    CHECK_EQ(SplitStr(EncodeCafeQueue(q), ';')[0], "1,12,8,3");   // nothing cut: `more` is left out
+    CafeQueueRow longName = row(13, CafeOrderKind::Npc, CafeQueueState::Waiting, "");
+    longName.customer = std::string(60, 'x') + ";";
+    q.rows = { longName };
+    CHECK_EQ(SplitStr(EncodeCafeQueue(q), ';')[1], "13,N,101," + std::string(MaxCafeNameBytes, 'x') + ",1000,2000,W,,0");
+
+    // CAFT: the single record 0 without tickets, at most 3 tickets of at most 12 steps
+    CHECK_EQ(EncodeCafeTickets(CafeTickets{}), "0");
+    CafeTickets tk;
+    for (uint32_t i = 1; i <= 5; ++i)
+    {
+        CafeTicket t;
+        t.ticketId = i; t.orderId = 100 + i; t.recipeId = 119; t.kind = CafeOrderKind::Npc; t.customer = "A,B";
+        t.nextStep = 2; t.inHand = true; t.orderLine = "One; two: three~";
+        for (uint32_t s = 1; s <= 14; ++s)
+            t.steps.push_back({ s, s == 1 ? CafeGrade::Perfect : (s == 2 ? CafeGrade::Off : CafeGrade::None) });
+        tk.tickets.push_back(t);
+    }
+    recs = SplitStr(EncodeCafeTickets(tk), ';');
+    CHECK_EQN(recs.size(), MaxCafeTickets);
+    std::vector<std::string> f = SplitStr(recs[0], ',');
+    CHECK_EQN(f.size(), std::size_t(12));
+    CHECK_EQ(f[4], "A%2CB");
+    CHECK_EQ(f[9], "One%3B two%3A three%7E");
+    CHECK_EQN(SplitStr(f[10], ':').size(), MaxCafeSteps);
+    CHECK(f[10].compare(0, 12, "1~P:2~O:3~N:") == 0);
+}
+
+TEST("cafe: CAFEV, CAFRES, CAFM, CAFO, CAFP, CAFBF, CAFSUM, CAFUI, CAFAT and CAFE keep to the document")
+{
+    CafeStepEvent ev;
+    ev.ticketId = 7; ev.stepIndex = 3; ev.actionId = 26; ev.event = CafeStepEventKind::Binned; ev.nextStep = 1;
+    CHECK_EQ(EncodeCafeStep(ev), "7,3,26,B,,,,,1");
+    ev.event = CafeStepEventKind::TutorialWrong; ev.nextStep = 3;
+    CHECK_EQ(EncodeCafeStep(ev), "7,3,26,W,,,,,3");
+    ev.event = CafeStepEventKind::Interrupted; ev.durMs = 2500u; ev.goldLoMs = 1500u; ev.goldHiMs = 1875u;
+    CHECK_EQ(EncodeCafeStep(ev), "7,3,26,I,2500,1500,1875,,3");
+    ev.event = CafeStepEventKind::Done; ev.grade = CafeGrade::Good; ev.nextStep = 4;
+    CHECK_EQ(EncodeCafeStep(ev), "7,3,26,D,2500,1500,1875,G,4");
+
+    CafeResult res;
+    res.ticketId = 9; res.recipeId = 219; res.quality = CafeQuality::Left; res.level = 10; res.customer = "Gorrak, the";
+    res.line = std::string(200, 'y');
+    std::vector<std::string> f = SplitStr(EncodeCafeResult(res), ',');
+    CHECK_EQN(f.size(), std::size_t(12));
+    CHECK_EQ(f[2], "L"); CHECK_EQ(f[9], "Gorrak%2C the"); CHECK_EQN(f[10].size(), MaxCafeLineBytes);
+    res.levelUp = true; res.quality = CafeQuality::Sloppy; res.line.clear(); res.xpCapped = 7;
+    CHECK_EQ(EncodeCafeResult(res), "9,219,S,0,0,0,0,1,10,Gorrak%2C the,,7");
+
+    CafeMenu menu;
+    menu.cafeId = 2; menu.open = CafeOpen::Paused; menu.ordersCap = 12; menu.reason = CafeErr::Paused.code;
+    for (uint32_t i = 0; i < 45; ++i)
+        menu.rows.push_back({ 201 + i, 200, false, i % 2 == 0 });
+    std::vector<std::string> recs = SplitStr(EncodeCafeMenu(menu), ';');
+    CHECK_EQN(recs.size(), MaxCafeRecipes + 1);
+    CHECK_EQ(recs[0], "2,2,0,0,0,0,12,0,cafe_paused");
+    CHECK_EQ(recs[1], "201,200,0,1");
+    CHECK_EQ(recs[2], "202,200,0,0");
+    menu.open = static_cast<CafeOpen>(9);   // not a state: the highest one
+    CHECK(EncodeCafeMenu(menu).compare(0, 4, "2,4,") == 0);
+
+    CHECK_EQ(EncodeCafeOrder(CafeOrderState{}), "0");
+    CafeOrderState o;
+    o.orderId = 5; o.cafeId = 2; o.recipeId = 207; o.state = CafeOrderStateId::Making; o.barista = "Morgra";
+    o.nextStep = 3; o.stepCount = 7; o.priceCopper = 18000; o.tipCopper = 9000;
+    CHECK_EQ(EncodeCafeOrder(o), "5,2,207,M,,Morgra,3,7,,18000,9000");
+    o.state = CafeOrderStateId::Finishing; o.barista.clear(); o.leftSec = 41u;
+    CHECK_EQ(EncodeCafeOrder(o), "5,2,207,F,,,3,7,41,18000,9000");
+    o.state = CafeOrderStateId::Expired; o.leftSec.reset();
+    CHECK_EQ(EncodeCafeOrder(o), "5,2,207,E,,,3,7,,18000,9000");
+
+    CafeProfile p;
+    p.rewards = 0xFFu;   // only the five documented bits
+    CHECK_EQ(EncodeCafeProfile(p), "1,0,0,,0,0,0,0,,0,31");
+    CafeWeek wk;
+    wk.weekId = 2964; wk.cafeId = 2; wk.points = 40; wk.drinks = 12; wk.perfectPermille = 1500; wk.days = 1;
+    p.week = wk;
+    for (uint32_t i = 0; i < 12; ++i)
+        p.lastWinners.push_back({ 2963, 1, "W~" + std::to_string(i), 100 });
+    recs = SplitStr(EncodeCafeProfile(p), ';');
+    CHECK_EQN(recs.size(), MaxCafes + 2);
+    CHECK_EQ(recs[1], "W,2964,2,,40,12,1000,1,0");   // not eligible: no rank; permille capped
+    CHECK_EQ(recs[2], "L,2963,1,W%7E0,100");
+
+    CafeBuffs b;
+    CHECK_EQ(EncodeCafeBuffs(b), ",,,0,1");
+    b.teaSec = 60u; b.shakeSec = 0u; b.shakeActive = true; b.coffeeCounts = false;
+    CHECK_EQ(EncodeCafeBuffs(b), ",60,0,1,0");
+
+    CafeSummary sum;
+    sum.cafeId = 2; sum.reason = CafeShiftEnd::FeatureOff; sum.staffDrink = true;
+    CHECK_EQ(EncodeCafeSummary(sum), "2,O,0,0,0,0,0,0,0,0,1");
+    for (CafeShiftEnd e : { CafeShiftEnd::Player, CafeShiftEnd::Combat, CafeShiftEnd::Afk, CafeShiftEnd::Idle,
+             CafeShiftEnd::Walked, CafeShiftEnd::Died, CafeShiftEnd::Mounted, CafeShiftEnd::Closed })
+    {
+        sum.reason = e;
+        CHECK(SplitStr(EncodeCafeSummary(sum), ',')[1] == std::string(1, static_cast<char>(e)));
+    }
+
+    for (char const* what : { "menu", "shift", "board", "help" })
+    {
+        CHECK(IsCafeUiTarget(what));
+        CHECK_EQ(EncodeCafeOpenUi(what, 2), std::string(what) + ",2");
+    }
+    CHECK(!IsCafeUiTarget("cafe") && !IsCafeUiTarget("") && !IsCafeUiTarget("MENU"));
+    CHECK_EQ(EncodeCafeOpenUi("menu;x", 1), ",1");   // never an unknown window
+
+    CafeAtBar bar;
+    bar.cafeId = 1;
+    CHECK_EQ(EncodeCafeAtBar(bar), "1,0");   // the last step ended: an empty list
+    for (uint32_t i = 0; i < 9; ++i)
+        bar.rows.push_back({ "Worker:" + std::to_string(i), 3, 10 * i, 3000, CafeStepKind::Timed, 2, 5 });
+    recs = SplitStr(EncodeCafeAtBar(bar), ';');
+    CHECK_EQN(recs.size(), MaxCafeAtRows + 1);
+    CHECK_EQ(recs[0], "1,6");   // count is the rows sent
+    CHECK_EQ(recs[6], "Worker%3A5,3,50,3000,H,2,5");
+
+    CafeList list;
+    list.rows.push_back({ 1, CafeOpen::Closed, 0, 0, CafeRushState::None, 99, 0 });   // no Rush: rushSec empty
+    list.rows.push_back({ 2, CafeOpen::NotOpen, 0, 3, CafeRushState::Live, 600, 75 });
+    CHECK_EQ(EncodeCafeList(list), "1,4,0,0,0,,0;2,3,0,3,2,600,75");
+    for (uint8_t i = 0; i < 12; ++i)
+        list.rows.push_back({ static_cast<uint8_t>(3 + i), CafeOpen::Off, 0, 0, CafeRushState::None, 0, 0 });
+    CHECK_EQN(SplitStr(EncodeCafeList(list), ';').size(), MaxCafes);
+}
+
+TEST("cafe: DEF H, G, F and U follow the arena kinds; LB and LBME board C use the common fields only")
+{
+    Definitions d;
+    d.arenaRewards = { ArenaRewardDef{} };
+    CafeDef h;
+    h.id = 2; h.name = "The Grinding Tusk"; h.cityKey = "org"; h.team = 'H'; h.zoneId = 1637; h.mapId = 1;
+    h.ownerName = "Grukka Steamtusk"; h.tagline = "Strong, brews; for: strong~backs."; h.colorHex = "B5402F";
+    d.cafes = { h };
+    CafeActionDef tap;
+    tap.id = 24; tap.station = 'V'; tap.key = 1; tap.kind = 'T'; tap.durMs = 500; tap.name = "Take Order"; tap.spellId = 100924;
+    CafeActionDef timed;
+    timed.id = 15; timed.station = 'B'; timed.key = 1; timed.kind = 'H'; timed.durMs = 2500; timed.goldLoPermille = 550u;
+    timed.goldHiPermille = 1200u; timed.name = "Blend"; timed.spellId = 100915;   // permille capped at 1000
+    d.cafeActions = { tap, timed };
+    CafeRecipeDef r;
+    r.id = 219; r.cafeId = 2; r.archetype = 19; r.family = 'M'; r.tier = 5; r.unlockLevel = 10; r.price80Copper = 18000;
+    r.buffMin = 50; r.name = "Valley of Honor Triple Scoop"; r.text = "Earned in the Ring, eaten in triumph.";
+    for (uint32_t i = 0; i < 14; ++i)
+        r.steps.push_back(i < 8 ? 11 : 25);
+    d.cafeRecipes = { r };
+    d.cafeLevels = { { 10, 5640, std::string(200, 'z') } };
+    std::vector<std::string> p = EncodeDefinitions(d, 8);
+    CHECK_EQN(p.size(), std::size_t(6));
+    CHECK(p[0].compare(0, 4, "Q,8;") == 0);
+    CHECK_EQ(p[1], "H,8;2,The Grinding Tusk,org,H,1637,1,Grukka Steamtusk,Strong%2C brews%3B for%3A strong%7Ebacks.,B5402F");
+    CHECK_EQ(p[2], "G,8;24,V,1,T,500,,,Take Order,,100924;15,B,1,H,2500,550,1000,Blend,,100915");
+    CHECK_EQ(p[3], "F,8;219,2,19,M,5,10,18000,50,11:11:11:11:11:11:11:11:25:25:25:25,Valley of Honor Triple Scoop,"
+        "Earned in the Ring%2C eaten in triumph.");
+    CHECK_EQ(p[4], "U,8;10,5640," + std::string(MaxCafeLineBytes, 'z'));
+    CHECK_EQ(p[5], "Z,8");
+    Definitions none;
+    none.arenaRewards = d.arenaRewards;
+    CHECK(DefinitionsHash(d) != DefinitionsHash(none));
+
+    Leaderboard lb;
+    lb.board = Board::Cafe; lb.seasonId = 2964u; lb.dungeonId = 2u; lb.classId = 0u; lb.page = 1; lb.pages = 1;
+    LeaderboardRow row;
+    row.rank = 1; row.dungeonId = 2u; row.value = 1990; row.timeSec = 801; row.dateEpoch = 1793900000u;
+    row.members = { { "Morgra", 3u } }; row.label = "131 drinks";
+    row.seasonWins = 1u; row.tierId = 2u;   // arena fields: never on board C
+    lb.rows = { row };
+    CHECK_EQ(EncodeLeaderboard(lb), "C,2964,2,0,1,1;1,2,1990,801,1793900000,Morgra~3,131 drinks");
+    LeaderboardMe me;
+    me.board = Board::Cafe; me.rank = 1u; me.topPercent = 1u; me.value = 1990; me.dungeonId = 2u; me.timeSec = 801;
+    me.barPermille = 1000u; me.label = "131 drinks"; me.topPermille = 5u;
+    CHECK_EQ(EncodeLeaderboardMe(me), "C,1,1,1990,2,801,1000,131 drinks");
+    LeaderboardMe nobody;
+    nobody.board = Board::Cafe;
+    CHECK_EQ(EncodeLeaderboardMe(nobody), "C");
+}
+
+TEST("endpoint: SEQ per message, revisions per topic, snapshots reset by HELLO")
+{
+    Endpoint ep;
+    CHECK(ep.Frame("WEEK", "1", 1000).size() == 1);   // framing itself does not need the handshake
+    std::string big;
+    for (int i = 0; i < 300; ++i)
+        big += "1234567890";
+    std::vector<std::string> frames = ep.Frame("BOARD", big, 251);
+    CHECK(frames.size() > 10);
+    for (std::string const& f : frames)
+    {
+        CHECK(f.compare(0, 4, "BHs\t") == 0);
+        CHECK(f.size() <= 255);
+        CHECK(f.compare(4, 9, "1 BOARD 2") == 0);   // all parts share SEQ 2
+    }
+    CHECK(ep.Frame("WEEK", "1", 1000)[0].compare(0, 13, "BHs\t1 WEEK 3 ") == 0);
+    CHECK(ep.Frame("WEEK", std::string(MaxAssembled + 1, 'x'), 1000).empty());
+    CHECK_EQN(ep.Seq(), 3u);   // a failed frame does not use a SEQ
+    std::vector<std::string> fallback = ep.Frame("LIDX", std::string(20000, '1'), 64);   // 99 parts of 64 are too few
+    CHECK(!fallback.empty() && fallback.size() <= 99);
+    for (std::string const& f : fallback)
+        CHECK(f.size() <= 4 + MaxServerBody && f.size() > 4 + 64);
+    CHECK_EQN(ep.Seq(), 4u);
+    CHECK_EQN(ep.NextRev(Topic::Tasks), 1u);
+    CHECK_EQN(ep.NextRev(Topic::Tasks), 2u);
+    CHECK_EQN(ep.NextRev(Topic::Week), 1u);
+    CHECK_EQN(ep.NextRev(Topic::Firsts), 0u);   // not revisioned
+    Feed(ep, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    ep.MarkSnapshot(Topic::Tasks);
+    CHECK(ep.HasSnapshot(Topic::Tasks));
+    Feed(ep, "1 HELLO 2 1/1 1,1.0.0,0,enUS", 6000);   // /reload
+    CHECK(!ep.HasSnapshot(Topic::Tasks));
+    CHECK_EQN(ep.NextRev(Topic::Tasks), 3u);   // revisions keep counting; a snapshot resets the client anyway
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Every S> example of the document, rebuilt from the C++ structs
+// ---------------------------------------------------------------------------------------------------
+static std::map<std::string, std::string> BuiltExamples()
+{
+    std::map<std::string, std::string> m;
+    {
+        HelloReply h;
+        h.proto = 1; h.minProto = 1; h.serverEpoch = 1792648725; h.utcOffsetMin = 60; h.dataVer = 7; h.featureBits = 58; h.seasonId = 1;
+        h.dailyResetEpoch = 1792674645; h.weeklyResetEpoch = 1792907925; h.realmName = "Bleakhold"; h.siteUrl = "bleakhold.com";
+        m["HELLO 1"] = EncodeHello(h);
+    }
+    m["PONG 2"] = EncodePong({ 12345, 1792648730 });
+    {
+        ErrorReply e;
+        e.op = IntentType::TaskClaim; e.seq = 4; e.code = "not_claimable"; e.text = "That task cannot be claimed yet.";
+        m["ERR 3"] = EncodeError(e);
+    }
+    {
+        Definitions a;
+        a.affixes = { { 1, "Fortified", "Non-boss enemies have more health and hit harder." },
+            { 3, "Bolstering", "When a non-boss enemy dies, its allies nearby grow stronger." } };
+        std::vector<std::string> p = EncodeDefinitions(a, 7);
+        m["DEF 4"] = p.at(0);
+        m["DEF 6"] = p.at(1);
+        Definitions d;
+        DungeonDef hol;
+        hol.id = 602; hol.name = "Halls of Lightning"; hol.chapter = 5; hol.lvlMin = 77; hol.lvlMax = 80;
+        hol.bosses = { "General Bjarngrim", "Volkhan", "Ionar", "Loken" }; hol.timeLimitSec = 1800;
+        d.dungeons = { hol };
+        m["DEF 5"] = EncodeDefinitions(d, 7).at(0);
+    }
+    {
+        WeekState w;
+        w.keysTimed = 4; w.raidEchoes = 1; w.riftBestFloor = 18; w.mythicCoins = 2140; w.mythicCoinsCap = 5500; w.shards = 1260;
+        m["WEEK 7"] = EncodeWeek(1, w);
+    }
+    {
+        EraState e;
+        e.eraId = 7; e.nextEraId = 3; e.affixIds = { 1, 3, 4 }; e.weeklyBonusId = 1; e.weeklyBonusDone = false;
+        m["ERA 8"] = EncodeEra(1, e);
+    }
+    {
+        TaskList t;
+        t.freeRerolls = 1; t.rerollCost = 500000; t.rerollCurrency = Currency::Copper;
+        auto task = [](uint32_t uid, TaskKind k, uint32_t tpl, uint32_t have, uint32_t need, RewardKind rk, uint32_t amount, Opt<uint32_t> item,
+                        TaskState st, std::string rt = {}) {
+            Task x;
+            x.uid = uid; x.kind = k; x.templateId = tpl; x.have = have; x.need = need; x.rewardKind = rk; x.rewardAmount = amount;
+            x.rewardItemId = item; x.state = st; x.rewardText = std::move(rt);
+            return x;
+        };
+        t.tasks = { task(101, TaskKind::Daily, 1, 0, 1, RewardKind::MythicCoins, 20, std::nullopt, TaskState::Open),
+            task(102, TaskKind::Daily, 2, 14, 20, RewardKind::Item, 1, 40752u, TaskState::Open, "1 Emblem of Heroism"),
+            task(103, TaskKind::Daily, 3, 5, 5, RewardKind::MythicCoins, 20, std::nullopt, TaskState::Claimable),
+            task(201, TaskKind::Weekly, 4, 1, 3, RewardKind::MythicCoins, 150, std::nullopt, TaskState::Open) };
+        m["TASKS 9"] = EncodeTasks(1, t);
+        m["TASK a"] = EncodeTaskDelta(2, 102, 20, TaskState::Claimable);
+    }
+    m["TOAST b"] = EncodeToast({ ToastKind::Record, "New record", "Halls of Lightning +8 in 24:13", "leaderboards" });
+    {
+        KeyState k;
+        k.dungeonId = 602; k.level = 8; k.affixIds = { 1, 3, 4 }; k.mode = 2; k.weeklyBestLevel = 9; k.weeklyBestDungeonId = 599;
+        k.cachesReady = 1; k.cachesBanked = 2; k.keystoneItemId = 900001; k.maxLevel = 15; k.eraId = 7; k.depleted = false;
+        m["KEY c"] = EncodeKey(1, k);
+    }
+    {
+        QueueState q;
+        q.state = QueueStateId::Queued; q.kind = QueueKind::Dungeon; q.activityId = 389; q.tier = 2; q.size = 3; q.queuedSec = 30;
+        q.estWaitSec = 300; q.bandMin = 13; q.bandMax = 18;
+        m["QUEUE d"] = EncodeQueue(2, q);
+        QueueState p;
+        p.state = QueueStateId::Proposal; p.kind = QueueKind::Dungeon; p.activityId = 389; p.tier = 2; p.size = 3; p.queuedSec = 40;
+        p.proposalId = 77; p.timeoutSec = 40; p.bandMin = 13; p.bandMax = 18;
+        QueueMember a; a.name = "Tester"; a.classId = 1; a.role = 4; a.accepted = ProposalAnswer::Accepted; a.level = 15;
+        QueueMember b; b.name = "Brenna"; b.classId = 2; b.role = 2; b.accepted = ProposalAnswer::Pending; b.level = 16;
+        p.members = { a, b };
+        m["QUEUE e"] = EncodeQueue(3, p);
+    }
+    {
+        KeyRunStart s;
+        s.runId = 7001; s.dungeonId = 602; s.level = 8; s.affixIds = { 1, 3, 4 }; s.eraId = 7; s.countdownMs = 10000; s.timeLimitSec = 1800;
+        m["MPS f"] = EncodeKeyRunStart(s);
+        KeyRunState r;
+        r.runId = 7001; r.elapsedMs = 1122000; r.timeLimitSec = 1800; r.deaths = 2; r.deathPenaltySec = 10; r.forcesCur = 64; r.forcesMax = 100;
+        r.bossBits = 1; r.bossKillSec = { 300 }; r.chestSec = { 1260, 1440 }; r.state = KeyRunStateId::Running;
+        m["MP g"] = EncodeKeyRunState(r);
+        KeyRunEnd e;
+        e.runId = 7001; e.result = KeyRunResultId::InTime; e.timeMs = 1453000; e.keyDelta = 1; e.newDungeonId = 599; e.newLevel = 9; e.score = 1840;
+        Reward chest; chest.kind = RewardKind::Text; chest.amount = 1; chest.text = "Spoils chest";
+        Reward coins; coins.kind = RewardKind::MythicCoins; coins.amount = 150;
+        e.rewards = { chest, coins };
+        m["MPE h"] = EncodeKeyRunEnd(e);
+    }
+    {
+        RiftState r;
+        r.runId = 8001; r.state = RiftStateId::Running; r.floor = 7; r.bossId = 3; r.bossName = "Echo of Nefarian"; r.elapsedMs = 120000;
+        r.bestFloor = 18; r.rank = 42; r.deaths = 1; r.groupSize = 1;
+        m["RIFT i"] = EncodeRift(r);
+        RiftEnd e;
+        e.runId = 8001; e.floorReached = 9; e.timeMs = 180000; e.newBest = false;
+        Reward coins; coins.kind = RewardKind::MythicCoins; coins.amount = 20;
+        e.rewards = { coins };
+        m["RIFTE j"] = EncodeRiftEnd(e);
+    }
+    {
+        CollectionState c;
+        c.transmogOwned = 412; c.laterAgesOwned = 0; c.laterAgesTotal = 3771; c.legacySetsOwned = 3; c.legacySetsTotal = 48;
+        c.tierHave = { 3, 0, 0, 0, 0, 0, 0 }; c.tierTotal = { 8, 8, 5, 9, 5, 5, 8 };
+        m["COLL k"] = EncodeCollections(1, c);
+    }
+    {
+        LegacySet s;
+        s.tier = 1; s.setId = 201; s.classId = 1; s.name = "Battlegear of Might"; s.collectedBits = 56; s.outfitUnlocked = false;
+        s.itemIds = { 16866, 16868, 16865, 16861, 16863, 16864, 16867, 16862 }; s.sourceDungeonIds = { 229, 329, 289, 429, 543 };
+        s.lvlMin = 58; s.lvlMax = 61; s.echoBoss = "Ragnaros";
+        m["SET l"] = EncodeLegacySet(s);
+    }
+    {
+        LegacyIndex idx;
+        LegacyIndexEntry a; a.itemId = 16864; a.tier = 1; a.setId = 201; a.collected = true;
+        LegacyIndexEntry b; b.itemId = 16866; b.tier = 1; b.setId = 201; b.collected = false;
+        idx.items = { a, b };
+        m["LIDX m"] = EncodeLegacyIndex(1, idx);
+        m["LCOL n"] = EncodeLegacyCollected(2, 16866, true);
+    }
+    {
+        SeasonState s;
+        s.seasonId = 1; s.warEffortPermille = 620; s.contributors = 1284; s.points = 1240; s.rankId = 2; s.nextRankId = 3; s.pointsToNextRank = 260;
+        s.warEffortTitle = "Breach the Greymane Wall"; s.warEffortText = "Fill the bar together."; s.spareTokens = 3;
+        s.parts = { { "Materials", 800u }, { "Bosses and Echoes", 550u } };
+        SeasonRewardState a; a.rewardId = 1; a.earned = true; a.stateText = "Earned";
+        SeasonRewardState b; b.rewardId = 2; b.earned = false; b.stateText = "7 / 20";
+        s.rewards = { a, b };
+        m["SEASON o"] = EncodeSeason(1, s);
+    }
+    {
+        Leaderboard lb;
+        lb.board = Board::Keys; lb.seasonId = 1; lb.dungeonId = 0; lb.classId = 0; lb.page = 1; lb.pages = 3;
+        LeaderboardRow r1;
+        r1.rank = 1; r1.dungeonId = 602; r1.value = 15; r1.timeSec = 300; r1.dateEpoch = 1792645125;
+        r1.members = { { "Aldric", 1u }, { "Brenna", 2u }, { "Corwin", 5u }, { "Dalia", 8u }, { "Eamon", 11u } };
+        LeaderboardRow r2;
+        r2.rank = 2; r2.dungeonId = 599; r2.value = 14; r2.timeSec = 200; r2.dateEpoch = 1792641525; r2.members = { { "Fenna", 3u } };
+        lb.rows = { r1, r2 };
+        m["LB p"] = EncodeLeaderboard(lb);
+        LeaderboardMe me;
+        me.board = Board::Keys; me.rank = 42; me.topPercent = 12; me.value = 9; me.dungeonId = 602; me.timeSec = 154; me.barPermille = 580;
+        m["LBME q"] = EncodeLeaderboardMe(me);
+        FirstsList f;
+        f.entries = { { "echo", "Echo of Ragnaros defeated", "Ironvow", 1792562325u }, { "key", "First timed +15", "Dalia's group", 1792216725u } };
+        m["FIRSTS r"] = EncodeFirsts(f);
+    }
+    {
+        BoardState b;
+        b.shards = 1260; b.bountyId = 55; b.bountyDungeonId = 189; b.bountyState = BountyState::Open; b.bountyRewardText = "50 Shards";
+        b.firstRunBonus = true;
+        BoardDungeon d1; d1.dungeonId = 389; d1.chapter = 1; d1.lvlMin = 13; d1.lvlMax = 18; d1.tierBits = 15; d1.bestScore = 900; d1.bestTier = 1;
+        d1.recordScore = 2400; d1.recordName = "Aldric"; d1.locked = false;
+        BoardDungeon d2; d2.dungeonId = 36; d2.chapter = 1; d2.lvlMin = 15; d2.lvlMax = 21; d2.tierBits = 3; d2.locked = false;
+        BoardDungeon d3; d3.dungeonId = 189; d3.chapter = 2; d3.lvlMin = 30; d3.lvlMax = 40; d3.tierBits = 1; d3.bestScore = 1500; d3.bestTier = 0;
+        d3.recordScore = 3100; d3.recordName = "Brenna"; d3.locked = false;
+        b.dungeons = { d1, d2, d3 };
+        m["BOARD 3k"] = EncodeBoard(4, b);
+    }
+    {
+        CaseList list;
+        list.caseItemIds = { 990001, 990002 };
+        m["CASES 4"] = EncodeCases(list);
+        CaseInfo c;
+        c.caseItemId = 990001; c.title = "Glaive Case"; c.text = "Unlock it to receive one of the items below.";
+        c.rewards = { { 32837, 1, 1200, 4 }, { 32838, 1, 400, 5 } };
+        m["CASE 5"] = EncodeCase(c);
+        Unbox u;
+        u.caseItemId = 990001; u.rewardIndex = 2; u.itemId = 32838; u.count = 1; u.nonce = 7;
+        m["UNBOX 6"] = EncodeUnbox(u);
+    }
+    {
+        CampState n;   // not at a fire: warmth and food on, the glide on cooldown
+        n.state = CampStateId::None; n.cooldownSec = 640; n.warmthSec = 1500; n.xpPct = 15; n.glideSec = 95u; n.repair = false; n.fed = true;
+        m["CAMPST 7"] = EncodeCampState(n);
+        CampState r;   // just made camp: resting at the own fire, may place two objects, a blacksmith
+        r.state = CampStateId::Resting; r.settleSec = 60; r.fireSec = 900; r.mine = true; r.cooldownSec = 900; r.xpPct = 5;
+        r.place = { { 164, 2 }, { 197, 3 } }; r.glideSec = 0u; r.repair = true; r.fed = true;
+        m["CAMPST 8"] = EncodeCampState(r);
+        CampState c;   // settled, after placing the anvil next to someone's alchemy object
+        c.state = CampStateId::Camping; c.fireSec = 700; c.mine = true; c.cooldownSec = 880; c.warmthSec = 1800; c.xpPct = 15;
+        c.objects = { { 164, 2, true }, { 171, 1, false } }; c.glideSec = 0u; c.repair = true; c.fed = true;
+        m["CAMPST 9"] = EncodeCampState(c);
+        ErrorReply g;
+        g.op = IntentType::Glide; g.seq = 26; g.code = "glide_cooldown"; g.text = "You can glide again in 95 s.";
+        m["ERR s"] = EncodeError(g);
+        ErrorReply rp;
+        rp.op = IntentType::Repair; rp.seq = 27; rp.code = "repair_gold"; rp.text = "You cannot pay for the repair (2g 10s 0c).";
+        m["ERR t"] = EncodeError(rp);
+        CampState gl = n;   // 95 s later: GLIDE accepted, the cooldown starts and the glide runs
+        gl.glideSec = 90u; gl.glidingSec = 10u;
+        m["CAMPST u"] = EncodeCampState(gl);
+    }
+    {
+        // Bleakhold Royale (section 17)
+        QueueState q;
+        q.state = QueueStateId::Queued; q.kind = QueueKind::Royale; q.activityId = 901; q.tier = 0; q.size = 1;
+        q.queuedSec = 12; q.bandMin = 80; q.bandMax = 80; q.queued = 13; q.minPlayers = 20; q.maxPlayers = 40;
+        q.matchesRunning = 1;
+        m["QUEUE f"] = EncodeQueue(4, q);
+        q.state = QueueStateId::Proposal; q.queuedSec = 95; q.proposalId = 412; q.timeoutSec = 15; q.queued = 24;
+        q.accepted = 0; q.proposalSize = 24;
+        m["QUEUE g"] = EncodeQueue(5, q);
+        QueueState in;
+        in.state = QueueStateId::InRun; in.kind = QueueKind::Royale; in.activityId = 901; in.tier = 0; in.size = 1;
+        in.bandMin = 80; in.bandMax = 80; in.minPlayers = 20; in.maxPlayers = 40; in.matchesRunning = 2;
+        m["QUEUE h"] = EncodeQueue(6, in);
+        RoyaleMap mp;
+        mp.mapId = 901; mp.minX = -1066; mp.maxX = 533; mp.minY = -1066; mp.maxY = 533;
+        mp.lobbyX = 455; mp.lobbyY = 455; mp.lobbyR = 32; mp.boundHalf = 750; mp.centerX = -267; mp.centerY = -267;
+        mp.pois = { { 1, RoyalePoiKind::Landmark, -266, -266, 88, "The Bleak Hold" },
+            { 2, RoyalePoiKind::Landmark, 120, 80, 62, "Harrow Farm" } };
+        m["ROYM i"] = EncodeRoyaleMap(mp);
+        RoyaleState st;
+        st.matchId = 7001; st.phase = RoyalePhase::Countdown; st.phaseMsLeft = 45000; st.alive = 24; st.total = 24;
+        st.me = RoyaleMe::Lobby; st.kills = 0; st.stage = 0; st.curX = -267; st.curY = -267; st.curR = 1080;
+        st.dmgPermille = 0; st.myX = 450; st.myY = 452; st.stages = 6;
+        m["ROYS j"] = EncodeRoyaleState(st);
+        st.phaseMsLeft = 41000; st.pinX = 104; st.pinY = 96;
+        m["ROYS k"] = EncodeRoyaleState(st);
+        RoyaleObjects ob;
+        ob.matchId = 7001; ob.full = true;
+        RoyaleObject s1;
+        s1.objId = 1; s1.kind = RoyaleObjectKind::ShadowSight; s1.x = -266; s1.y = -266; s1.msLeft = 90000u;
+        RoyaleObject s2;
+        s2.objId = 2; s2.kind = RoyaleObjectKind::ShadowSight; s2.x = -712; s2.y = 48; s2.msLeft = 90000u;
+        RoyaleObject b3;
+        b3.objId = 3; b3.kind = RoyaleObjectKind::Buff; b3.subtype = static_cast<uint32_t>(RoyaleBuff::Speed);
+        b3.x = 120; b3.y = 80; b3.state = RoyaleObjectState::Ready;
+        ob.objects = { s1, s2, b3 };
+        m["ROYO l"] = EncodeRoyaleObjects(ob);
+        RoyaleEvent d;
+        d.kind = RoyaleEventKind::SupplyIncoming; d.value = 0; d.x = -80; d.y = -180; d.msLeft = 20000u;
+        m["ROYV m"] = EncodeRoyaleEvent(d);
+        RoyaleKill k;
+        k.killerName = "Aldric"; k.killerClassId = 1; k.victimName = "Brenna"; k.victimClassId = 8;
+        k.cause = RoyaleCause::Player; k.aliveAfter = 23; k.killerKills = 1;
+        m["ROYK n"] = EncodeRoyaleKill(k);
+        RoyaleResult r;
+        r.matchId = 7001; r.placement = 12; r.total = 24; r.kills = 1; r.damage = 18400; r.healing = 0;
+        r.survivedSec = 214; r.rewarded = true;
+        Reward place; place.kind = RewardKind::Honor; place.amount = 70; place.text = "Placement";
+        Reward kill; kill.kind = RewardKind::Honor; kill.amount = 25; kill.text = "1 elimination";
+        Reward shards; shards.kind = RewardKind::Shards; shards.amount = 5; shards.text = "Placement";
+        r.rewards = { place, kill, shards };
+        m["ROYE o"] = EncodeRoyaleResult(r);
+        RoyaleEvent w;
+        w.kind = RoyaleEventKind::Winner; w.value = 7; w.name = "Dalia";
+        m["ROYV p"] = EncodeRoyaleEvent(w);
+        ErrorReply g;
+        g.op = IntentType::Glide; g.seq = 12; g.code = RoyaleErr::GlideHere.code; g.text = RoyaleErr::GlideHere.text;
+        m["ERR q"] = EncodeError(g);
+    }
+    {
+        // the battleground kill announcer (sections 17 and 18)
+        auto ann = [](char const* killer, uint32_t kc, char const* victim, uint32_t vc, BgMultiKill mk, BgStreak st) {
+            BgAnnounce a;
+            a.killerName = killer; a.killerClassId = kc; a.victimName = victim; a.victimClassId = vc;
+            a.multi = mk; a.streak = st;
+            return EncodeBgAnnounce(a);
+        };
+        m["BGANN u"] = ann("Aldric", 1, "Brenna", 8, BgMultiKill::None, BgStreak::FirstBlood);
+        m["BGANN v"] = ann("Aldric", 1, "Brenna", 8, BgMultiKill::None, BgStreak::FirstBlood);
+        m["BGANN w"] = ann("Aldric", 1, "Corwin", 5, BgMultiKill::Double, BgStreak::None);
+        m["BGANN x"] = ann("Aldric", 1, "Dalia", 11, BgMultiKill::Triple, BgStreak::KillingSpree);
+        m["BGANN y"] = ann("Garrick Stormwind", 4, "Aldric", 1, BgMultiKill::None, BgStreak::Dominating);
+        m["BGANN z"] = ann("Eamon", 9, "Fenna", 3, BgMultiKill::Rampage, BgStreak::HolyShit);
+    }
+    {
+        // World PvP and War Mode (section 19)
+        WarModeState st;
+        st.on = false; st.cooldownSec = 0; st.minLevel = 20; st.xpPct = 0; st.honorPct = 10; st.shardPct = 0;
+        st.underdogPct = 8; st.underdogTeam = WarTeam::Horde; st.wmAlliance = 31; st.wmHorde = 22;
+        st.bonusHonorCap = 3720; st.shardsCap = 60; st.bestStreak = 7; st.kills = 118; st.deaths = 96;
+        m["WMST 2b"] = EncodeWarModeState(st);
+        ErrorReply e;
+        e.op = IntentType::WarMode; e.seq = ParseBase36("2c").value(); e.code = WarModeErr::Place.code;
+        e.text = WarModeErr::Place.text;
+        m["ERR 2d"] = EncodeError(e);
+        st.on = true; st.cooldownSec = 900;
+        m["WMST 2f"] = EncodeWarModeState(st);
+        WarEvent x;
+        x.kind = WarEventKind::FrontWarning; x.zoneId = 2817; x.seconds = 900; x.name = "Crystalsong Forest";
+        m["WPEV 2g"] = EncodeWarEvent(x);
+        x.kind = WarEventKind::FrontStart; x.seconds = 7200;
+        m["WPEV 2h"] = EncodeWarEvent(x);
+        WarMap map;
+        map.frontZone = 2817; map.frontState = WarZoneState::Active; map.secondsLeft = 4320; map.nextZone = 66;
+        map.nextStartsSec = 4920; map.levelZone = 267; map.levelState = WarZoneState::Active; map.levelSecondsLeft = 4320;
+        map.zones = { { 2817, WarZoneKind::Front, 2, 0, 1, 80u, 80u, WarZoneState::Active },
+            { 267, WarZoneKind::Levelling, 1, 1, 1, 20u, 35u, WarZoneState::Active },
+            { 3483, WarZoneKind::Stock, 2, 1, 0, std::nullopt, std::nullopt, WarZoneState::Active },
+            { 4197, WarZoneKind::Wintergrasp, 0, 1, 0, std::nullopt, std::nullopt, WarZoneState::Dormant } };
+        map.points = { { 2817, 1, WarTeam::Alliance, WarObjectiveState::Alliance },
+            { 2817, 2, WarTeam::Neutral, WarObjectiveState::HordeAllianceChallenge },
+            { 2817, 3, WarTeam::Alliance, WarObjectiveState::Alliance },
+            { 267, 11, WarTeam::Alliance, WarObjectiveState::Alliance },
+            { 267, 12, WarTeam::Horde, WarObjectiveState::Horde },
+            { 267, 13, WarTeam::Neutral, WarObjectiveState::Neutral } };
+        m["WPMAP 2i"] = EncodeWarMap(map);
+        WarZone z;
+        z.zoneId = 2817; z.kind = WarZoneKind::Front; z.state = WarZoneState::Active; z.secondsLeft = 4320;
+        z.controlA = 620u; z.controlH = 380u; z.dominionTeam = WarTeam::Alliance; z.dominionStacks = 2;
+        z.levelMin = 80u; z.levelMax = 80u;
+        z.objectives = { { 1, "Violet Stand", 512u, 388u, WarTeam::Alliance, 1000, WarObjectiveState::Alliance },
+            { 2, "Forlorn Woods", 604u, 455u, WarTeam::Neutral, -120, WarObjectiveState::HordeAllianceChallenge },
+            { 3, "Sunreaver Rise", 701u, 512u, WarTeam::Alliance, 800, WarObjectiveState::Alliance } };
+        m["WPZ 2j"] = EncodeWarZone(z);
+        WarCapture cap;
+        cap.objId = 2; cap.slider = -120; cap.neutralPct = 20; cap.state = WarObjectiveState::HordeAllianceChallenge;
+        cap.countA = 2; cap.countH = 3; cap.maxNet = 5;
+        m["WPCAP 2k"] = EncodeWarCapture(cap);
+        WarEvent a;
+        a.kind = WarEventKind::UnderAttack; a.zoneId = 2817; a.objId = 3; a.team = WarTeam::Horde; a.name = "Sunreaver Rise";
+        m["WPEV 2l"] = EncodeWarEvent(a);
+        a.kind = WarEventKind::Captured; a.objId = 2; a.team = WarTeam::Alliance; a.name = "Forlorn Woods";
+        m["WPEV 2m"] = EncodeWarEvent(a);
+        WarEvent r;
+        r.kind = WarEventKind::Reward; r.why = WarRewardWhy::Capture; r.honor = 186; r.xp = 0; r.shards = 2;
+        r.drPermille = 1000;
+        m["WPEV 2n"] = EncodeWarEvent(r);
+        st.cooldownSec = 512; st.streak = 3; st.todayBonusHonor = 412; st.todayShards = 6; st.kills = 121;
+        m["WMST 2o"] = EncodeWarModeState(st);
+        WarEvent wanted;
+        wanted.kind = WarEventKind::Wanted; wanted.name = "Garrick Stormwind"; wanted.classId = 4;
+        wanted.team = WarTeam::Horde; wanted.streak = 5; wanted.reason = WantedReason::Streak;
+        m["WPEV 2p"] = EncodeWarEvent(wanted);
+        WantedList list;
+        list.zoneId = 2817;
+        WantedEntry we;
+        we.name = "Garrick Stormwind"; we.classId = 4; we.team = WarTeam::Horde; we.streak = 5;
+        we.reason = WantedReason::Streak; we.bountyHonor = 248; we.bountyShards = 5; we.u = 560u; we.v = 402u;
+        we.ageSec = 35;
+        list.entries = { we };
+        m["WANTED 2q"] = EncodeWanted(list);
+        WarEvent b;
+        b.kind = WarEventKind::BountyClaimed; b.name = "Aldric"; b.victim = "Garrick Stormwind"; b.honor = 248;
+        b.shards = 5;
+        m["WPEV 2r"] = EncodeWarEvent(b);
+        list.entries.clear();
+        m["WANTED 2s"] = EncodeWanted(list);
+        WarEvent sv;
+        sv.kind = WarEventKind::Survived; sv.name = "Brenna"; sv.honor = 248; sv.shards = 5;
+        m["WPEV 2t"] = EncodeWarEvent(sv);
+        WarEvent n;
+        n.kind = WarEventKind::Neutralised; n.zoneId = 2817; n.objId = 1; n.team = WarTeam::Horde; n.name = "Violet Stand";
+        m["WPEV 2u"] = EncodeWarEvent(n);
+        WarEvent end;
+        end.kind = WarEventKind::FrontEnd; end.zoneId = 2817; end.team = WarTeam::Alliance; end.controlA = 640;
+        end.controlH = 360;
+        m["WPEV 2v"] = EncodeWarEvent(end);
+        WarEvent chest;
+        chest.kind = WarEventKind::Reward; chest.why = WarRewardWhy::Victory; chest.honor = 496; chest.shards = 10;
+        m["WPEV 2w"] = EncodeWarEvent(chest);
+        WarZone dal;
+        dal.zoneId = 4395;
+        m["WPZ 2x"] = EncodeWarZone(dal);
+        ErrorReply cd;
+        cd.op = IntentType::WarMode; cd.seq = ParseBase36("2y").value(); cd.code = WarModeErr::Cooldown.code;
+        cd.text = "You can change War Mode again in 296 s.";
+        m["ERR 2z"] = EncodeError(cd);
+    }
+    {
+        // arena seasons and the 1v1 ladder (section 20)
+        ArenaState a;
+        a.seasonId = 1; a.state = ArenaStateId::Live; a.startEpoch = 1793318400u; a.endEpoch = 1800576000u;
+        a.nextStartEpoch = 1800748800u; a.ratedOpen = true; a.oneTeamCostCopper = 0u; a.seasonName = "Arena Season 1";
+        a.seasons = { { 1, "Arena Season 1", SeasonStateId::Current, 1793318400u, 1800576000u },
+            { 2, "Arena Season 2", SeasonStateId::Upcoming, 1800748800u, 1808006400u } };
+        auto bracket = [](uint32_t br, uint32_t rating, uint32_t rank, uint32_t size, uint32_t games, uint32_t wins,
+                           uint32_t wg, uint32_t ww, uint32_t personal, uint32_t recent, uint32_t tier, uint32_t next,
+                           uint32_t toNext, uint32_t missing, char const* team) {
+            ArenaBracketState b;
+            b.bracket = br; b.hasTeam = true; b.rating = rating; b.ladderRank = rank; b.ladderSize = size;
+            b.seasonGames = games; b.seasonWins = wins; b.weekGames = wg; b.weekWins = ww; b.personalRating = personal;
+            b.recentGames = recent; b.tierId = tier; b.nextTierId = next; b.ratingToNext = toNext;
+            b.missingMask = missing; b.teamName = team;
+            return b;
+        };
+        a.brackets = { bracket(1, 1734, 12, 48, 61, 38, 9, 6, 1734, 14, 3, 4, 66, 0, "Aldric"),
+            bracket(3, 1912, 4, 22, 44, 30, 12, 8, 1890, 12, 4, 5, 163, ArenaMissWins, "Ironvow Wardens") };
+        auto cut = [](uint32_t tier, uint32_t slots, uint32_t rank, uint32_t rating, uint32_t floor) {
+            ArenaCutoff c;
+            c.bracket = 3; c.tierId = tier; c.slots = slots; c.cutRank = rank; c.cutRating = rating; c.floor = floor;
+            return c;
+        };
+        a.cutoffs = { cut(6, 1, 1, 2140, 2000), cut(5, 2, 2, 2075, 2000), cut(4, 4, 4, 1912, 1800),
+            cut(3, 4, 4, 1912, 1650), cut(2, 8, 8, 1702, 1500), cut(1, 22, 22, 1310, 1300) };
+        a.ladders = { { 1, 48, true, true }, { 3, 22, true, true } };
+        auto match = [](bool won, int32_t change, char const* who, uint32_t at, ArenaVerdict v, ArenaReason why) {
+            ArenaMatch x;
+            x.bracket = 1; x.won = won; x.ratingChange = change; x.opponent = who; x.endEpoch = at; x.verdict = v;
+            x.reason = why;
+            return x;
+        };
+        a.matches = { match(true, 14, "Brenna", 1793900000u, ArenaVerdict::Normal, ArenaReason::None),
+            match(false, -11, "Corwin", 1793899000u, ArenaVerdict::Normal, ArenaReason::None),
+            match(true, 0, "Dalia", 1793898000u, ArenaVerdict::NotCounted, ArenaReason::Network),
+            match(true, 7, "Eamon", 1793897000u, ArenaVerdict::Reduced, ArenaReason::Repeat) };
+        m["ARENA 2a"] = EncodeArena(a);
+        ArenaState fin;
+        fin.seasonId = 1; fin.state = ArenaStateId::FinalStandings; fin.startEpoch = 1793318400u;
+        fin.endEpoch = 1800576000u; fin.nextStartEpoch = 1800748800u; fin.ratedOpen = false; fin.oneTeamCostCopper = 0u;
+        fin.seasonName = "Arena Season 1";
+        fin.brackets = { bracket(1, 1734, 12, 48, 61, 38, 0, 0, 1734, 14, 3, 4, 66, ArenaMissReview, "Aldric") };
+        ArenaFinal f;
+        f.bracket = 1; f.finalRank = 12; f.finalRating = 1734; f.finalTierId = 3u; f.grant = ArenaGrant::Held;
+        fin.finals = { f };
+        m["ARENA 2b"] = EncodeArena(fin);
+
+        Leaderboard lb;
+        lb.board = Board::Arena; lb.seasonId = 1u; lb.dungeonId = 3u; lb.classId = 0u; lb.page = 1; lb.pages = 3;
+        auto row = [](uint32_t rank, int64_t rating, uint32_t last, std::vector<LeaderboardMember> members,
+                       char const* team, uint32_t wins, uint32_t games, uint32_t tier, Opt<uint32_t> flags) {
+            LeaderboardRow r;
+            r.rank = rank; r.dungeonId = 3u; r.value = rating; r.dateEpoch = last; r.members = std::move(members);
+            r.label = team; r.seasonWins = wins; r.seasonGames = games; r.tierId = tier; r.flags = flags;
+            return r;
+        };
+        lb.rows = { row(1, 2140, 1793896400u, { { "Brenna", 2u }, { "Corwin", 5u }, { "Dalia", 8u } }, "Dawnbreakers", 61, 70,
+                        6, std::nullopt),
+            row(2, 2075, 1793890000u, { { "Eamon", 11u }, { "Fenna", 3u }, { "Garrick Stormwind", 4u } }, "The Unbowed", 55,
+                68, 5, std::nullopt),
+            row(3, 1990, 1793200000u, { { "Hale", 7u }, { "Isolde", 9u }, { "Jorund", 6u } }, "Ashen Pact", 40, 52, 4,
+                ArenaInactive) };
+        m["LB 2d"] = EncodeLeaderboard(lb);
+        LeaderboardMe me;
+        me.board = Board::Arena; me.rank = 4u; me.topPercent = 19u; me.value = 1912; me.dungeonId = 3u;
+        me.barPermille = 407u; me.label = "Duelist"; me.topPermille = 182u; me.tierId = 4u;
+        m["LBME 2e"] = EncodeLeaderboardMe(me);
+
+        Definitions v;
+        v.arenaTiers = { { 1, "Combatant", "9D9D9D", "Enough season games and 1300 rating." },
+            { 5, "Gladiator", "FF8000", "The top 0.5% of the ladder with 50 wins." } };
+        m["DEF 2f"] = EncodeDefinitions(v, 7).at(0);
+        Definitions q;
+        auto reward = [](uint32_t id, uint32_t season, uint32_t tier, char kind, uint32_t entry, uint32_t count,
+                          char const* text) {
+            ArenaRewardDef r;
+            r.id = id; r.seasonId = season; r.bracket = 3; r.tierId = tier; r.kind = kind; r.entry = entry; r.count = count;
+            r.text = text;
+            return r;
+        };
+        q.arenaRewards = { reward(101, 0, 2, 'T', 2090, 1, "Challenger"), reward(105, 1, 5, 'M', 30609, 1, "Swift Nether Drake"),
+            reward(110, 0, 1, 'C', 0, 150, "150 Dungeon Shards") };
+        m["DEF 2g"] = EncodeDefinitions(q, 7).at(0);
+
+        QueueState qa;
+        qa.state = QueueStateId::Queued; qa.kind = QueueKind::Arena; qa.activityId = 1u; qa.tier = 1u; qa.size = 1u;
+        qa.queuedSec = 8u; qa.estWaitSec = 95u;
+        m["QUEUE 2i"] = EncodeQueue(7, qa);
+        ErrorReply e;
+        e.op = IntentType::QueueJoin; e.seq = 91; e.code = ArenaErr::Closed.code;
+        e.text = "Rated arena opens again when Arena Season 2 starts.";
+        m["ERR 2k"] = EncodeError(e);
+    }
+    // the cafe (section 21): Aldric's shift, an order, the board, the definitions and a bystander
+    {
+        CafeList list;
+        list.rows = { { 1, CafeOpen::Open, 1, 2, CafeRushState::Soon, 180, 45 },
+            { 2, CafeOpen::Open, 0, 0, CafeRushState::Soon, 180, 60 } };
+        m["CAFE 4a"] = EncodeCafeList(list);
+        CafeDay day;
+        day.dayXp = 210; day.dayXpFull = 450; day.dayXpHalf = 450; day.dayTipsCopper = 30000; day.dayTipsCapCopper = 180000;
+        day.dayPoints = 180; day.dayPointsCap = 400; day.dayDrinks = 14;
+        CafeState off;
+        off.level = 6; off.xp = 1890; off.levelXp = 1600; off.nextLevelXp = 2320u; off.day = day;
+        m["CAFST 4b"] = EncodeCafeState(off);
+        CafeBuffs buffs;
+        buffs.coffeeSec = 1320u; buffs.shakeSec = 1800u; buffs.shakeActive = false; buffs.coffeeCounts = true;
+        m["CAFBF 4c"] = EncodeCafeBuffs(buffs);
+        CafeState on = off;
+        on.cafeId = 1; on.onShift = true; on.station = 'V'; on.nearStation = 'V'; on.nearDm = 3; on.maxTickets = 2;
+        on.tiredSec = 3600u; on.flags = CafeFlagMemory;
+        CafeRush rush;
+        rush.rushState = CafeRushState::Soon; rush.rushSec = 180; rush.rushGoal = 60;
+        on.rush = rush;
+        m["CAFST 4d"] = EncodeCafeState(on);
+
+        CafeQueueRow brenna;
+        brenna.orderId = 1209; brenna.kind = CafeOrderKind::Player; brenna.recipeId = 103; brenna.customer = "Brenna";
+        brenna.patienceMs = 25000; brenna.patienceMaxMs = 25000;
+        CafeQueueRow corwin;
+        corwin.orderId = 1207; corwin.kind = CafeOrderKind::Npc; corwin.recipeId = 101;
+        corwin.customer = "Sergeant Corwin Ashgrove"; corwin.patienceMs = 45000; corwin.patienceMaxMs = 48000;
+        CafeQueue q;
+        q.cafeId = 1; q.count = 2; q.cap = 6; q.baristas = 2;
+        q.rows = { corwin, brenna };
+        SortCafeQueueRows(q.rows, "Aldric");   // the waiting player's order first, as Ui::SendCafeQueue does
+        m["CAFQ 4e"] = EncodeCafeQueue(q);
+
+        auto steps = [](std::vector<uint32_t> const& ids) {
+            std::vector<CafeTicketStep> out;
+            for (uint32_t id : ids)
+                out.push_back({ id, CafeGrade::None });
+            return out;
+        };
+        CafeTicket t41;
+        t41.ticketId = 41; t41.orderId = 1209; t41.recipeId = 103; t41.kind = CafeOrderKind::Player; t41.customer = "Brenna";
+        t41.patienceMs = 57000; t41.patienceMaxMs = 60000; t41.nextStep = 1; t41.steps = steps({ 1, 3, 6, 16, 25 });
+        t41.tipHintCopper = 2100;
+        CafeTicket t42;
+        t42.ticketId = 42; t42.orderId = 1207; t42.recipeId = 101; t42.kind = CafeOrderKind::Npc;
+        t42.customer = "Sergeant Corwin Ashgrove"; t42.patienceMs = 43200; t42.patienceMaxMs = 43200; t42.nextStep = 1;
+        t42.orderLine = "Cathedral Black. No sugar, no chatter, no delay."; t42.steps = steps({ 1, 3, 4, 25 });
+        t42.tipHintCopper = 400;
+        m["CAFT 4f"] = EncodeCafeTickets(CafeTickets{ { t41, t42 } });
+
+        auto step = [](uint32_t ticket, uint32_t index, uint32_t action, CafeStepEventKind event, Opt<uint32_t> dur,
+                        Opt<uint32_t> lo, Opt<uint32_t> hi, CafeGrade grade, uint32_t next) {
+            CafeStepEvent e;
+            e.ticketId = ticket; e.stepIndex = index; e.actionId = action; e.event = event; e.durMs = dur; e.goldLoMs = lo;
+            e.goldHiMs = hi; e.grade = grade; e.nextStep = next;
+            return EncodeCafeStep(e);
+        };
+        auto const S = CafeStepEventKind::Started;
+        auto const D = CafeStepEventKind::Done;
+        m["CAFEV 4g"] = step(41, 1, 1, S, 1500u, std::nullopt, std::nullopt, CafeGrade::None, 1);
+        m["CAFEV 4h"] = step(41, 1, 1, D, 1500u, std::nullopt, std::nullopt, CafeGrade::Perfect, 2);
+        m["CAFEV 4i"] = step(41, 2, 3, S, 3000u, 2160u, 2610u, CafeGrade::None, 2);
+        m["CAFEV 4j"] = step(41, 2, 3, D, 3000u, 2160u, 2610u, CafeGrade::Perfect, 3);
+        m["CAFEV 4k"] = step(41, 3, 6, S, 2000u, 760u, 1160u, CafeGrade::None, 3);
+        m["CAFEV 4l"] = step(41, 3, 6, D, 2000u, 760u, 1160u, CafeGrade::Perfect, 4);
+        m["CAFEV 4o"] = step(41, 4, 16, S, 800u, std::nullopt, std::nullopt, CafeGrade::None, 4);
+        m["CAFEV 4q"] = step(42, 2, 5, CafeStepEventKind::Wrong, std::nullopt, std::nullopt, std::nullopt, CafeGrade::None, 1);
+        auto err = [](IntentType op, char const* seq, char const* code, char const* text) {
+            ErrorReply e;
+            e.op = op; e.seq = *ParseBase36(seq); e.code = code; e.text = text;
+            return EncodeError(e);
+        };
+        m["ERR 4m"] = err(IntentType::CafeStep, "3j", CafeErr::Station.code, "Walk to the Syrup Shelf first.");
+        m["ERR 4n"] = err(IntentType::CafeStep, "3k", CafeErr::Hands.code, CafeErr::Hands.text);
+        m["ERR 4s"] = err(IntentType::CafeStaff, "3o", CafeErr::Staff.code, CafeErr::Staff.text);
+        CafeResult res;
+        res.ticketId = 41; res.recipeId = 103; res.quality = CafeQuality::Perfect; res.xp = 32; res.tipCopper = 2100;
+        res.points = 22; res.streak = 1; res.levelUp = false; res.level = 6; res.customer = "Brenna";
+        m["CAFRES 4p"] = EncodeCafeResult(res);
+        CafeSummary sum;
+        sum.cafeId = 1; sum.reason = CafeShiftEnd::Player; sum.shiftSec = 1840; sum.drinks = 14; sum.perfects = 9;
+        sum.tipsCopper = 10600; sum.xp = 212; sum.xpLost = 0; sum.points = 190; sum.bestStreak = 4; sum.staffDrink = false;
+        m["CAFSUM 4r"] = EncodeCafeSummary(sum);
+
+        CafeMenu menu;
+        menu.cafeId = 1; menu.open = CafeOpen::Open; menu.baristas = 1; menu.houseEtaSec = 45; menu.ordersToday = 2;
+        menu.ordersCap = 12; menu.canOrder = true;
+        menu.rows = { { 101, 3500, true, true }, { 103, 5300, true, true }, { 119, 15800, false, true } };
+        m["CAFM 4t"] = EncodeCafeMenu(menu);
+        m["CAFO 4u"] = EncodeCafeOrder(CafeOrderState{});
+        CafeProfile prof;
+        prof.level = 6; prof.xp = 1890; prof.levelXp = 1600; prof.nextLevelXp = 2320u; prof.drinks = 412; prof.perfects = 301;
+        prof.bestStreak = 14; prof.fastestMs = 5120u; prof.rewards = CafeRewardApprentice;
+        CafeWeek week;
+        week.weekId = 2964; week.cafeId = 1; week.rank = 2u; week.points = 1830; week.drinks = 96; week.perfectPermille = 790;
+        week.days = 4; week.eligible = true;
+        prof.week = week;
+        prof.lastWinners = { { 2963, 1, "Brenna", 2480 }, { 2963, 2, "Morgra", 1990 } };
+        m["CAFP 4v"] = EncodeCafeProfile(prof);
+        CafeOrderState order;
+        order.orderId = 1210; order.cafeId = 1; order.recipeId = 103; order.state = CafeOrderStateId::Queued;
+        order.position = 1u; order.stepCount = 5; order.priceCopper = 5300; order.tipCopper = 530;
+        m["CAFO 4w"] = EncodeCafeOrder(order);
+        order.state = CafeOrderStateId::Cancelled; order.position.reset();
+        m["CAFO 4x"] = EncodeCafeOrder(order);
+
+        Leaderboard lb;
+        lb.board = Board::Cafe; lb.seasonId = 2964u; lb.dungeonId = 1u; lb.classId = 0u; lb.page = 1; lb.pages = 1;
+        auto row = [](uint32_t rank, int64_t points, int64_t perfect, uint32_t last, char const* who, uint32_t classId,
+                       char const* label) {
+            LeaderboardRow r;
+            r.rank = rank; r.dungeonId = 1u; r.value = points; r.timeSec = perfect; r.dateEpoch = last;
+            r.members = { { who, classId } }; r.label = label;
+            return r;
+        };
+        lb.rows = { row(1, 2310, 812, 1793900000u, "Brenna", 2, "142 drinks"),
+            row(2, 1830, 790, 1793890000u, "Aldric", 1, "96 drinks") };
+        m["LB 4y"] = EncodeLeaderboard(lb);
+        LeaderboardMe me;
+        me.board = Board::Cafe; me.rank = 2u; me.topPercent = 40u; me.value = 1830; me.dungeonId = 1u; me.timeSec = 790;
+        me.barPermille = 792u; me.label = "96 drinks";
+        m["LBME 4z"] = EncodeLeaderboardMe(me);
+
+        Definitions defs;
+        CafeDef sw;
+        sw.id = 1; sw.name = "The Lion's Roast"; sw.cityKey = "sw"; sw.team = 'A'; sw.zoneId = 1519; sw.mapId = 0;
+        sw.ownerName = "Rosalind Thornbury"; sw.tagline = "Coffee \xC2\xB7 Tea \xC2\xB7 Shakes, by the Cathedral steps";
+        sw.colorHex = "3F6FB5";
+        CafeDef org;
+        org.id = 2; org.name = "The Grinding Tusk"; org.cityKey = "org"; org.team = 'H'; org.zoneId = 1637; org.mapId = 1;
+        org.ownerName = "Grukka Steamtusk"; org.tagline = "Strong brews for strong backs."; org.colorHex = "B5402F";
+        defs.cafes = { sw, org };
+        auto action = [](uint32_t id, char station, uint32_t key, char kind, uint32_t dur, Opt<uint32_t> lo,
+                          Opt<uint32_t> hi, char const* name, char const* hordeName, uint32_t spell) {
+            CafeActionDef a;
+            a.id = id; a.station = station; a.key = key; a.kind = kind; a.durMs = dur; a.goldLoPermille = lo;
+            a.goldHiPermille = hi; a.name = name; a.hordeName = hordeName; a.spellId = spell;
+            return a;
+        };
+        defs.cafeActions = { action(1, 'G', 1, 'T', 1500, std::nullopt, std::nullopt, "Grind Beans", "", 100901),
+            action(3, 'E', 1, 'H', 3000, 700u, 850u, "Pull Shot", "", 100903),
+            action(21, 'S', 6, 'T', 800, std::nullopt, std::nullopt, "Elwynn Berry", "Cactus Apple", 100921) };
+        CafeRecipeDef black;
+        black.id = 101; black.cafeId = 1; black.archetype = 1; black.family = 'C'; black.tier = 1; black.unlockLevel = 1;
+        black.price80Copper = 4000; black.buffMin = 30; black.steps = { 1, 3, 4, 25 }; black.name = "Cathedral Black";
+        black.text = "Dark as the crypts beneath the Cathedral and twice as bracing.";
+        defs.cafeRecipes = { black };
+        defs.cafeLevels = { { 1, 0, "Black coffee, latte, green tea and black tea. One ticket at a time; the first drink is "
+                                    "forgiving." },
+            { 5, 1040, "Iced latte and mint tea. Apprentice's Apron." } };
+        std::vector<std::string> p = EncodeDefinitions(defs, 8);
+        m["DEF 50"] = p.at(0);
+        m["DEF 51"] = p.at(1);
+        m["DEF 52"] = p.at(2);
+        m["DEF 53"] = p.at(3);
+        Toast toast;
+        toast.kind = ToastKind::Info; toast.title = "Barista level 5"; toast.subtitle = "Apprentice's Apron unlocked";
+        toast.openTarget = "cafe";
+        m["TOAST 54"] = EncodeToast(toast);
+        m["CAFUI 55"] = EncodeCafeOpenUi(CafeUiMenu, 1);
+        CafeAtBar bar;
+        bar.cafeId = 1;
+        bar.rows = { { "Aldric", 3, 400, 3000, CafeStepKind::Timed, 2, 5 },
+            { "Rosalind Thornbury", 1, 900, 1500, CafeStepKind::Tap, 1, 4 } };
+        m["CAFAT 56"] = EncodeCafeAtBar(bar);
+    }
+    return m;
+}
+
+TEST("every S> example of the document is what the C++ encoders produce")
+{
+    std::vector<std::string> lines = DocLines("S>");
+    CHECK(lines.size() >= 25);
+    std::map<std::string, std::string> const built = BuiltExamples();
+    std::map<std::string, std::vector<std::string>> parts;   // "OP SEQ" -> payload parts in order
+    std::map<std::string, std::size_t> totals;
+    for (std::string const& body : lines)
+    {
+        CHECK_MSG(body.size() <= MaxServerBody, body);
+        CHECK_MSG(body.find('\0') == std::string::npos, body);
+        // header check, written independently of the client and server parsers
+        std::vector<std::string> sp = SplitStr(body, ' ');
+        CHECK_MSG(sp.size() >= 4 && sp[0] == "1" && IsOpName(sp[1]) && ParseBase36(sp[2]), body);
+        if (sp.size() < 4)
+            continue;
+        std::vector<std::string> pt = SplitStr(sp[3], '/');
+        CHECK_MSG(pt.size() == 2, body);
+        std::size_t const part = std::stoul(pt[0]);
+        std::size_t const total = std::stoul(pt[1]);
+        CHECK_MSG(part >= 1 && part <= total && total <= 99, body);
+        std::string const key = sp[1] + " " + sp[2];
+        std::size_t const head = sp[0].size() + sp[1].size() + sp[2].size() + sp[3].size() + 3;
+        std::string const payload = body.size() > head ? body.substr(head + 1) : std::string();
+        parts[key].resize(total);
+        parts[key][part - 1] = payload;
+        totals[key] = total;
+    }
+    for (auto const& [key, list] : parts)
+    {
+        std::string payload;
+        for (std::string const& p : list)
+            payload += p;
+        auto it = built.find(key);
+        CHECK_MSG(it != built.end(), "the test builds the example " + key);
+        if (it == built.end())
+            continue;
+        CHECK_MSG(Norm(it->second) == Norm(payload), key + "\n      doc:   " + payload + "\n      built: " + it->second);
+    }
+    for (auto const& [key, payload] : built)
+        CHECK_MSG(parts.count(key), "built example " + key + " is in the document");
+}
+
+int main(int argc, char** argv)
+{
+    if (argc < 2)
+    {
+        std::fprintf(stderr, "usage: bh_unit <repo root>\n");
+        return 2;
+    }
+    g_repo = argv[1];
+    return bhtest::RunAll();
+}

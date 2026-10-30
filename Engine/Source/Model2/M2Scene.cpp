@@ -6,10 +6,13 @@
 #include <xmmintrin.h>
 #include "Engine/Source/Model2/M2Scene.h"
 #include "Engine/Source/Base/ObjectAlloc.h"
+#include "Engine/Source/ConsoleBase/ConsoleVar.h"
 #include "Engine/Source/Gx/CGxDevice/CGxDevice.h"
 #include "Engine/Source/Model2/M2Cache.h"
+#include "Engine/Source/Model2/M2Glow.h"
 #include "Engine/Source/Model2/M2Light.h"
 #include "Engine/Source/Model2/M2Model.h"
+#include "Engine/Source/Model2/M2Modern.h"
 #include "Engine/Source/Model2/M2Shared.h"
 #include "Engine/Source/Model2/CM2SceneRender.h"
 #include "Engine/Source/Services/GfxSingletonManager.h"
@@ -36,6 +39,114 @@ static const float s_lightGridScale = 0.05f;
 
 // STATIC: 0x00D40DA0
 static uint32_t s_doodadHash[251];
+
+// BLEAKHOLD(glow): the fixed glow materials (M2Glow.h), one for each combination of the base flags they keep. The
+// renderer's state cache compares material pointers, so they live here for good.
+static M2Material s_glowMaterials[M2Glow::kMaterialCount] = {
+    { M2Glow::MaterialFlags(0), M2Glow::kBlendMode },
+    { M2Glow::MaterialFlags(1), M2Glow::kBlendMode },
+    { M2Glow::MaterialFlags(2), M2Glow::kBlendMode },
+    { M2Glow::MaterialFlags(3), M2Glow::kBlendMode },
+    { M2Glow::MaterialFlags(4), M2Glow::kBlendMode },
+    { M2Glow::MaterialFlags(5), M2Glow::kBlendMode },
+    { M2Glow::MaterialFlags(6), M2Glow::kBlendMode },
+    { M2Glow::MaterialFlags(7), M2Glow::kBlendMode },
+};
+
+// BLEAKHOLD(glow)
+M2Material* M2GlowMaterial(const M2Material* base) {
+    return &s_glowMaterials[M2Glow::MaterialSlot(base->m_flags)];
+}
+
+// BLEAKHOLD(glow): bleakGlow and bleakGlowStrength (registered with the character component's CVars), looked up each
+// time: a frame asks only once per scene, and only when one of its models has a glow texture.
+static float M2GlowStrength() {
+    CVar* enabled = CVar::Lookup("bleakGlow");
+    CVar* strength = CVar::Lookup("bleakGlowStrength");
+    float value = strength ? strength->m_floatValue : M2Glow::kDefaultStrength;
+    return M2Glow::Strength(enabled ? enabled->m_intValue : 1, value);
+}
+
+// BLEAKHOLD(glow): whether a batch of a glowing model is drawn again with the glow: a skin batch (M2Glow::IsGlowBatch)
+// whose texture coordinates touch a section that holds glow. An optimized batch stands for the run of batches it
+// merged (M2ModelOptGeo::m_batchRanges).
+static bool M2GlowBatchGlows(const CM2Model* model, const M2Batch* batch, const M2SkinSection* section,
+    const M2Material* baseMaterial, uint32_t glowSections, const uint16_t* batchSections, int32_t optimized,
+    uint32_t index) {
+    const M2Data* data = model->m_shared->m_data;
+    uint32_t texture = M2Glow::kNoTexture;
+
+    if (batch->m_textureComboIndex < data->m_textureCombos.m_count) {
+        texture = data->m_textureCombos[batch->m_textureComboIndex];
+    }
+
+    M2Glow::BatchInfo info;
+    info.textureType = texture < data->m_textures.m_count ? data->m_textures[texture].m_type : M2Glow::kNoTexture;
+    info.textureCount = batch->m_textureCount;
+    info.materialLayer = batch->m_materialLayer;
+    info.shader = batch->m_shader;
+    info.baseBlend = baseMaterial->m_blendMode;
+    info.projected = false;
+
+    if (!M2Glow::IsGlowBatch(info)) {
+        return false;
+    }
+
+    if (!batchSections) {
+        return true;
+    }
+
+    uint32_t sections = 0;
+    uint32_t count = model->m_shared->m_skinData->m_batches.m_count;
+
+    if (optimized) {
+        // As the optimized geometry's own lookups (BLEAKHOLD(modernassets)).
+        const M2BatchRange& range = model->m_optGeo->m_batchRanges[M2BuiltSectionId(*section)];
+
+        for (uint32_t i = range.m_first; i <= range.m_last && i < count; i++) {
+            sections |= batchSections[i];
+        }
+    } else if (index < count) {
+        sections = batchSections[index];
+    }
+
+    return (sections & glowSections) != 0;
+}
+
+// BLEAKHOLD(glow): adds the glow element of the skin element at baseIndex: a copy that draws with the glow material
+// (flag M2Glow::kElementFlag) in the transparent pass of each side of the water the model is on, after its base batch
+// when that one is transparent too (one priority plane up). Returns 0 when the element array cannot grow, as the
+// batch loop does.
+static int32_t M2GlowAddElement(CM2Scene* scene, uint32_t baseIndex, float alpha, int32_t above, int32_t below,
+    uint32_t& elementIndex) {
+    if (alpha < M2Glow::kMinAlpha || (!above && !below)) {
+        return 1;
+    }
+
+    M2Element* glow = scene->m_elements.New();
+
+    if (!glow) {
+        return 0;
+    }
+
+    *glow = scene->m_elements.m_data[baseIndex];
+    glow->m_type = 0;
+    glow->m_flags = (glow->m_flags & 4) | M2Glow::kElementFlag | ((above && below) ? 2 : 0);
+    glow->m_alpha = alpha;
+    glow->m_priorityPlane++;
+    CM2Scene::ComputeElementShaders(glow);
+
+    if (above) {
+        scene->m_passElements[1].New(elementIndex);
+    }
+
+    if (below) {
+        scene->m_passElements[2].New(elementIndex);
+    }
+
+    elementIndex++;
+    return 1;
+}
 
 // VERIFY: abe62346 auto
 // OFFSET: 0x0081C990
@@ -653,7 +764,7 @@ M2HitRec* CM2Scene::HitTestGeometry(const CM2Model* model, uint32_t pass, const 
             this->TransformHitTestVerticesBlend(model, skinData, section, pass, dir, d);
         }
 
-        const uint16_t* indices = &skinData->m_indices[section->m_indexStart];
+        const uint16_t* indices = &skinData->m_indices[M2SkinSectionIndexStart(*section, skinData->m_indices.m_count)]; // BLEAKHOLD(modernassets)
         best = this->IntersectHitTestTriangles(indices, indices + section->m_indexCount, section->m_vertexStart, start, pass, rec, t, best);
     }
 
@@ -1441,6 +1552,11 @@ int32_t CM2Scene::SortAdditiveParticles(uint32_t a, uint32_t b, const void* para
 // OFFSET: 0x0081F1D0
 void __stdcall CM2Scene::ComputeElementShaders(M2Element* element) {
     M2Material* material = &element->m_model->m_shared->m_data->m_materials[element->m_batch->m_materialIndex];
+
+    // BLEAKHOLD(glow): a glow element is shaded with its glow material: unlit, so without lights or shadow.
+    if (element->m_flags & M2Glow::kElementFlag) {
+        material = M2GlowMaterial(material);
+    }
     CM2Lighting* lighting = element->m_model->m_currentLighting;
     uint32_t specular;
     uint32_t lightCount;
@@ -1571,6 +1687,12 @@ void CM2Scene::SortAdditiveParticleElements(uint32_t pass) {
             case 1:
             case 2:
                 blend = data->m_materials[element->m_batch->m_materialIndex].m_blendMode;
+
+                // BLEAKHOLD(glow): glow elements are additive whatever their batch's material.
+                if (element->m_flags & M2Glow::kElementFlag) {
+                    blend = M2Glow::kBlendMode;
+                }
+
                 break;
             case 3:
                 blend = data->m_materials[data->m_ribbons[element->m_index].m_materialIndices[0]].m_blendMode;
@@ -1758,6 +1880,7 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
     this->m_elements.m_count = 0;
 
     uint32_t elementIndex = 0;
+    float glowStrength = -1.0f; // BLEAKHOLD(glow): read the first time a model of this frame glows
 
     while (this->m_drawList) {
         CM2Model* model = this->m_drawList;
@@ -1802,6 +1925,26 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
         int32_t optimized = optGeo != nullptr;
         int32_t depthSort = (this->m_cache->m_flags & 1) && !(model->m_flags & 1) && (model->m_fFlags & 0x40);
         uint32_t batchCount = optGeo ? optGeo->m_batchCount : skinData->m_batches.m_count;
+
+        // BLEAKHOLD(glow): a model with a glow texture draws its skin batches again (M2Glow.h); every other model
+        // costs this null check.
+        uint32_t glowSections = 0;
+        float glowAlpha = 0.0f;
+        const uint16_t* glowBatchSections = nullptr;
+
+        if (model->GetGlowTexture(&glowSections) && glowSections) {
+            if (glowStrength < 0.0f) {
+                glowStrength = M2GlowStrength();
+            }
+
+            glowAlpha = M2Glow::ModelAlpha(glowStrength, model->m_scaleSq);
+
+            if (glowAlpha < M2Glow::kMinAlpha) {
+                glowAlpha = 0.0f;
+            } else {
+                glowBatchSections = model->m_shared->GetGlowBatchSections();
+            }
+        }
 
         for (uint32_t i = 0; i < batchCount; i++) {
             M2Batch* batch;
@@ -1852,6 +1995,8 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
             if (!element) {
                 return 0;
             }
+
+            uint32_t glowBaseIndex = elementIndex; // BLEAKHOLD(glow)
 
             if (projected) {
                 element->m_type = 1;
@@ -1983,6 +2128,14 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
                 }
 
                 elementIndex++;
+            }
+
+            // BLEAKHOLD(glow)
+            if (glowAlpha > 0.0f && !projected &&
+                M2GlowBatchGlows(model, batch, section, baseMaterial, glowSections, glowBatchSections, optimized, i)) {
+                if (!M2GlowAddElement(this, glowBaseIndex, alpha * glowAlpha, above, below, elementIndex)) {
+                    return 0;
+                }
             }
         }
 

@@ -1,0 +1,62 @@
+## Interface: 30300
+## Title: Bleakhold
+## Notes: Bleakhold server interface: activities, dungeon board, keys, Eclipse Rift, Bleakhold Royale, arena seasons and the 1v1 ladder, the battleground kill announcer, War Mode and World PvP, collections, season and leaderboards.
+## Author: Bleakhold
+## Version: 1.0.0
+## OptionalDeps: AddicatUI, DragonUI, DBM-Core
+## SavedVariables: BleakholdDB
+## SavedVariablesPerCharacter: BleakholdCharDB
+
+Core.lua
+Data.lua
+EmojiData.lua
+DanceData.lua
+Comm.lua
+State.lua
+Widgets.lua
+Chat.lua
+Toast.lua
+Tooltip.lua
+MinimapOrbs.lua
+Legacy.lua
+JournalArt.lua
+OldAddons.lua
+Activities.lua
+Dungeons.lua
+Keys.lua
+Rift.lua
+Heroic.lua
+GroupFinder.lua
+KeyTracker.lua
+Countdown.lua
+Collections.lua
+Animations.lua
+Transmog.lua
+Cases.lua
+Camp.lua
+CafeData.lua
+Cafe.lua
+CafeBar.lua
+CafeHud.lua
+CafeWindow.lua
+CafeMenu.lua
+RoyaleArtData.lua
+RoyaleStyle.lua
+Royale.lua
+RoyaleMap.lua
+RoyaleCountdown.lua
+RoyaleDrop.lua
+RoyaleMinimap.lua
+RoyaleHud.lua
+Arena.lua
+AnnouncerData.lua
+Announcer.lua
+WarMode.lua
+WarFront.lua
+Season.lua
+Leaderboards.lua
+Graphics.lua
+BarberData.lua
+Barber.lua
+Demo.lua
+Integration.lua

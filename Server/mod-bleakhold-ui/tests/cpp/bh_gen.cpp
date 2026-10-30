@@ -1,0 +1,1029 @@
+// mod-bleakhold-ui tests: frames for every server message, produced by the module's own encoders and
+// Endpoint (handshake, revisions, SEQ, chunking), written as a Lua data file for the addon's parser.
+//
+//   bh_gen <maxBody> <out.lua>
+//
+// tests/lua/test_server_frames.lua feeds the frames through Comm.lua/State.lua and checks every
+// value below. Keep the two files in step.
+//
+// A second session, `royale`, holds a Bleakhold Royale match (section 17: QUEUE kind B, ROYS ROYM ROYO ROYK ROYV
+// ROYE, and the battleground kill announcer's BGANN of section 18) from its own Endpoint, so the main frames stay what
+// the existing checks expect. A third, `wpvp`, holds a World PvP Front with War Mode (section 19: WMST WPZ WPCAP
+// WPMAP WANTED WPEV and ERR wm_*), with names full of separators and UTF-8. A fourth, `arena`, holds an arena season
+// (section 20: HELLO bit 65536, ARENA, LB / LBME board A, DEF V and Q, QUEUE kind A, ERR arena_closed). A fifth, `cafe`,
+// holds a cafe shift and order (section 21: HELLO bit 131072, DEF H G F U, every cafe op, LB / LBME board C, ERR
+// cafe_hands).
+//
+// SPDX-License-Identifier: GPL-2.0-or-later
+
+#include "BleakholdCodec.h"
+#include "BleakholdEndpoint.h"
+#include "BleakholdMessages.h"
+
+#include <cstdio>
+#include <fstream>
+#include <string>
+#include <vector>
+
+using namespace Bleakhold;
+using namespace Bleakhold::Proto;
+
+namespace
+{
+    std::size_t g_maxBody = 1000;
+    Endpoint g_ep;
+    std::vector<std::string> g_frames;
+    Endpoint g_royaleEp;
+    std::vector<std::string> g_royaleFrames;
+    Endpoint g_wpvpEp;
+    std::vector<std::string> g_wpvpFrames;
+    Endpoint g_arenaEp;
+    std::vector<std::string> g_arenaFrames;
+    Endpoint g_cafeEp;
+    std::vector<std::string> g_cafeFrames;
+
+    void SendOn(Endpoint& ep, std::vector<std::string>& out, char const* op, std::string const& payload)
+    {
+        std::vector<std::string> f = ep.Frame(op, payload, g_maxBody);
+        if (f.empty())
+        {
+            std::fprintf(stderr, "bh_gen: %s could not be framed (%zu bytes)\n", op, payload.size());
+            std::exit(1);
+        }
+        for (std::string& s : f)
+        {
+            if (s.size() > 4 + MaxServerBody)
+            {
+                std::fprintf(stderr, "bh_gen: frame over the limit\n");
+                std::exit(1);
+            }
+            out.push_back(std::move(s));
+        }
+    }
+
+    void Send(char const* op, std::string const& payload)
+    {
+        std::vector<std::string> f = g_ep.Frame(op, payload, g_maxBody);
+        if (f.empty())
+        {
+            std::fprintf(stderr, "bh_gen: %s could not be framed (%zu bytes)\n", op, payload.size());
+            std::exit(1);
+        }
+        for (std::string& s : f)
+        {
+            if (s.size() > 4 + MaxServerBody)
+            {
+                std::fprintf(stderr, "bh_gen: frame over the limit\n");
+                std::exit(1);
+            }
+            g_frames.push_back(std::move(s));
+        }
+    }
+
+    // the module's Push(): next revision of the topic, then frame
+    template <typename F>
+    void SendRev(char const* op, Topic topic, F encode)
+    {
+        uint32_t const rev = g_ep.NextRev(topic);
+        Send(op, encode(rev));
+        if (std::string(op) != "TASK" && std::string(op) != "LCOL")
+            g_ep.MarkSnapshot(topic);
+    }
+
+    std::string LuaString(std::string const& s)
+    {
+        std::string out = "\"";
+        for (unsigned char c : s)
+        {
+            if (c == '\\' || c == '"')
+            {
+                out += '\\';
+                out += static_cast<char>(c);
+            }
+            else if (c < 0x20 || c >= 0x7F)
+            {
+                char buf[8];
+                std::snprintf(buf, sizeof(buf), "\\%03u", c);
+                out += buf;
+            }
+            else
+                out += static_cast<char>(c);
+        }
+        return out + "\"";
+    }
+
+    Definitions Defs()
+    {
+        Definitions d;
+        d.affixes = {
+            { 1, "Fortified", "Non-boss enemies have more health and hit harder." },
+            { 3, "Bolstering", "When a non-boss enemy dies, its allies nearby grow stronger." },
+            { 4, "Volcanic; 100% |cffff0000red|r", "Plumes: of flame~erupt, under %s players." },
+            { 9, "Br\xC3\xBBlant", "UTF-8 \xE2\x82\xAC text and a bad byte \xFF here." },
+        };
+        d.eras = { { 7, "The Black Temple", "Tier 6 tokens drop.", 7u }, { 3, "Ahn'Qiraj", "Tier 2.5 tokens drop.", 3u } };
+        d.taskTemplates = { { 1, "Heroic hero", "Clear any heroic dungeon." }, { 2, "Key sweeper", "Defeat 20 enemies, inside a key." } };
+        d.weeklyBonuses = { { 1, "First Raid Lord Echo", "Your first Raid Echo kill drops an era token." } };
+        d.chapters = { { 5, "Chapter V - Northrend", "The last road north." } };
+        for (uint32_t i = 0; i < 25; ++i)
+        {
+            DungeonDef x;
+            x.id = 1000 + i;
+            x.name = "Dungeon " + std::to_string(i) + ", the long name";
+            x.chapter = 1 + i % 5;
+            x.lvlMin = 10 + i;
+            x.lvlMax = 15 + i;
+            x.bosses = { "Boss: one", "Boss~two", "Boss;three", "Boss %four" };
+            x.timeLimitSec = 1800;
+            d.dungeons.push_back(x);
+        }
+        DungeonDef hol;
+        hol.id = 602; hol.name = "Halls of Lightning"; hol.chapter = 5; hol.lvlMin = 77; hol.lvlMax = 80;
+        hol.bosses = { "General Bjarngrim", "Volkhan", "Ionar", "Loken" }; hol.timeLimitSec = 1800;
+        d.dungeons.push_back(hol);
+        LegacyTierDef t1;
+        t1.id = 1; t1.label = "Tier 1"; t1.raids = "Molten Core, Zul'Gurub"; t1.eraId = 1; t1.sources = { 229, 329, 289, 429, 543 };
+        t1.lvlMin = 58; t1.lvlMax = 61; t1.echoBoss = "Ragnaros"; t1.pieceTotal = 8;
+        d.legacyTiers = { t1 };
+        d.seasons = { { 1, "Season 1 - Bleak Dawn", "Naxxramas, the Bleakhold raid", SeasonStateId::Current },
+            { 2, "Season 2", "Gilneas", SeasonStateId::Upcoming } };
+        d.ranks = { { 2, "Sergeant of the Wall" } };
+        d.seasonRewards = { { 1, "Title", "\"of the Bleak Dawn\" at 500 points" } };
+        d.mythicLevels = { { 0, "Where every keystone begins." }, { 15, "The highest keystone level." } };
+        d.extraClasses = { { 12, "Gravewarden", "GRAVEWARDEN", "7FBF7F", "GRV" } };
+        d.riftBosses = { { 3, "Echo of Nefarian" } };
+        return d;
+    }
+
+    // World PvP and War Mode (section 19): a Front as one level-80 Alliance player sees it. The last message of each op
+    // is the state test_server_frames.lua checks.
+    void WarSession()
+    {
+        Intent hello;
+        if (g_wpvpEp.Receive("BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUS", 1000, hello).verdict != Verdict::Accepted)
+        {
+            std::fprintf(stderr, "bh_gen: wpvp HELLO not accepted\n");
+            std::exit(1);
+        }
+        auto send = [](char const* op, std::string const& payload) { SendOn(g_wpvpEp, g_wpvpFrames, op, payload); };
+
+        HelloReply h;
+        h.proto = 1; h.minProto = 1; h.serverEpoch = 1792648725; h.dataVer = 4242;
+        h.featureBits = FeatureSeason | FeatureWarMode | FeatureWorldPvp; h.realmName = "Bleakhold";
+        send("HELLO", EncodeHello(h));
+
+        WarModeState st;
+        st.on = false; st.block = "wm_busy"; st.minLevel = 20; st.honorPct = 10; st.underdogPct = 8;
+        st.underdogTeam = WarTeam::Horde; st.wmAlliance = 31; st.wmHorde = 22; st.bonusHonorCap = 3720; st.shardsCap = 60;
+        st.bestStreak = 7; st.kills = 118; st.deaths = 96;
+        send("WMST", EncodeWarModeState(st));
+        ErrorReply e;
+        e.op = IntentType::WarMode; e.seq = 3; e.code = WarModeErr::Place.code; e.text = WarModeErr::Place.text;
+        send("ERR", EncodeError(e));
+        st.on = true; st.block.clear(); st.cooldownSec = 900;
+        send("WMST", EncodeWarModeState(st));
+
+        WarEvent x;
+        x.kind = WarEventKind::FrontWarning; x.zoneId = 2817; x.seconds = 900; x.name = "Crystalsong Forest";
+        send("WPEV", EncodeWarEvent(x));
+        x.kind = WarEventKind::FrontStart; x.seconds = 7200;
+        send("WPEV", EncodeWarEvent(x));
+
+        WarMap map;
+        map.frontZone = 2817; map.frontState = WarZoneState::Active; map.secondsLeft = 7200; map.nextZone = 66;
+        map.nextStartsSec = 7800; map.levelZone = 267; map.levelState = WarZoneState::Ceasefire; map.levelSecondsLeft = 300;
+        map.zones = { { 2817, WarZoneKind::Front, 2, 0, 1, 80u, 80u, WarZoneState::Active },
+            { 267, WarZoneKind::Levelling, 0, 0, 3, 20u, 35u, WarZoneState::Ceasefire },
+            { 3483, WarZoneKind::Stock, 2, 1, 0, std::nullopt, std::nullopt, WarZoneState::Active },
+            { 4197, WarZoneKind::Wintergrasp, 0, 1, 0, std::nullopt, std::nullopt, WarZoneState::Active } };
+        for (uint32_t i = 1; i <= 3; ++i)
+            map.points.push_back({ 2817, i, i == 2 ? WarTeam::Neutral : WarTeam::Alliance,
+                i == 2 ? WarObjectiveState::HordeAllianceChallenge : WarObjectiveState::Alliance });
+        for (uint32_t i = 1; i <= 3; ++i)
+            map.points.push_back({ 3483, 100 + i, i == 3 ? WarTeam::Horde : WarTeam::Alliance,
+                i == 3 ? WarObjectiveState::Horde : WarObjectiveState::Alliance });
+        send("WPMAP", EncodeWarMap(map));
+
+        WarZone z;
+        z.zoneId = 2817; z.kind = WarZoneKind::Front; z.state = WarZoneState::Active; z.secondsLeft = 4320;
+        z.controlA = 620u; z.controlH = 380u; z.dominionTeam = WarTeam::Alliance; z.dominionStacks = 2;
+        z.levelMin = 80u; z.levelMax = 80u;
+        z.objectives = { { 1, "Violet Stand", 512u, 388u, WarTeam::Alliance, 1000, WarObjectiveState::Alliance },
+            { 2, "Forlorn Woods; the \"old\" one, %20|cffff0000red|r", 604u, 455u, WarTeam::Neutral, -120,
+                WarObjectiveState::HordeAllianceChallenge },
+            { 3, "Sunreaver Rise", std::nullopt, std::nullopt, WarTeam::Alliance, 800, WarObjectiveState::Alliance } };
+        send("WPZ", EncodeWarZone(z));
+
+        WarCapture cap;
+        cap.objId = 2; cap.slider = -120; cap.neutralPct = 20; cap.state = WarObjectiveState::HordeAllianceChallenge;
+        cap.countA = 2; cap.countH = 3; cap.maxNet = 5;
+        send("WPCAP", EncodeWarCapture(cap));
+        cap.slider = 260; cap.state = WarObjectiveState::Alliance; cap.countA = 4; cap.countH = 1;
+        send("WPCAP", EncodeWarCapture(cap));
+
+        WarEvent a;
+        a.kind = WarEventKind::UnderAttack; a.zoneId = 2817; a.objId = 3; a.team = WarTeam::Horde; a.name = "Sunreaver Rise";
+        send("WPEV", EncodeWarEvent(a));
+        a.kind = WarEventKind::Captured; a.objId = 2; a.team = WarTeam::Alliance; a.name = "Forlorn Woods";
+        send("WPEV", EncodeWarEvent(a));
+        WarEvent r;
+        r.kind = WarEventKind::Reward; r.why = WarRewardWhy::Capture; r.honor = 186; r.shards = 2; r.drPermille = 1000;
+        send("WPEV", EncodeWarEvent(r));
+        z.controlA = 700u; z.controlH = 300u; z.dominionStacks = 3; z.secondsLeft = 4100;
+        z.objectives[1].owner = WarTeam::Alliance; z.objectives[1].slider = 260;
+        z.objectives[1].state = WarObjectiveState::Alliance;
+        send("WPZ", EncodeWarZone(z));
+
+        st.cooldownSec = 512; st.streak = 5; st.wantedState = WantedStateId::Streak; st.wantedSec = 900;
+        st.bountyHonor = 248; st.todayBonusHonor = 412; st.todayShards = 6; st.kills = 123;
+        send("WMST", EncodeWarModeState(st));
+        WarEvent wanted;
+        wanted.kind = WarEventKind::Wanted; wanted.name = "Garrick Stormwind, the; bold|one~of:many"; wanted.classId = 4;
+        wanted.team = WarTeam::Horde; wanted.streak = 5; wanted.reason = WantedReason::Bully;
+        send("WPEV", EncodeWarEvent(wanted));
+        WantedList list;
+        list.zoneId = 2817;
+        WantedEntry we;
+        we.name = "Garrick Stormwind, the; bold|one~of:many"; we.classId = 4; we.team = WarTeam::Horde; we.streak = 5;
+        we.reason = WantedReason::Bully; we.bountyHonor = 248; we.bountyShards = 5; we.u = 560u; we.v = 402u;
+        we.ageSec = 35;
+        WantedEntry we2 = we;
+        we2.name = "Br\xC3\xA9nna"; we2.classId = 8; we2.streak = 9; we2.reason = WantedReason::Streak; we2.u.reset();
+        we2.v.reset(); we2.bountyHonor = 446; we2.bountyShards = 9;
+        list.entries = { we, we2 };
+        send("WANTED", EncodeWanted(list));
+        WarEvent b;
+        b.kind = WarEventKind::BountyClaimed; b.name = "Aldric"; b.victim = we.name; b.honor = 248; b.shards = 5;
+        send("WPEV", EncodeWarEvent(b));
+        list.entries = { we2 };
+        send("WANTED", EncodeWanted(list));
+        WarEvent sv;
+        sv.kind = WarEventKind::Survived; sv.name = "Br\xC3\xA9nna"; sv.honor = 248; sv.shards = 5;
+        send("WPEV", EncodeWarEvent(sv));
+        list.entries.clear();
+        send("WANTED", EncodeWanted(list));
+
+        WarEvent end;
+        end.kind = WarEventKind::FrontEnd; end.zoneId = 2817; end.team = WarTeam::Alliance; end.controlA = 640;
+        end.controlH = 360;
+        send("WPEV", EncodeWarEvent(end));
+        WarEvent chest;
+        chest.kind = WarEventKind::Reward; chest.why = WarRewardWhy::Victory; chest.honor = 496; chest.shards = 10;
+        chest.drPermille = 1000;
+        send("WPEV", EncodeWarEvent(chest));
+        map.frontState = WarZoneState::Ceasefire; map.secondsLeft = 600; map.nextStartsSec = 600;
+        send("WPMAP", EncodeWarMap(map));
+        WarZone dal;
+        dal.zoneId = 4395;
+        send("WPZ", EncodeWarZone(dal));
+        WarCapture left;
+        send("WPCAP", EncodeWarCapture(left));
+    }
+
+    // Bleakhold Royale (section 17): a whole match as one player sees it
+    void RoyaleSession()
+    {
+        Intent hello;
+        if (g_royaleEp.Receive("BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUS", 1000, hello).verdict != Verdict::Accepted)
+        {
+            std::fprintf(stderr, "bh_gen: royale HELLO not accepted\n");
+            std::exit(1);
+        }
+        auto send = [](char const* op, std::string const& payload) { SendOn(g_royaleEp, g_royaleFrames, op, payload); };
+        auto queue = [&](QueueState const& q) { send("QUEUE", EncodeQueue(g_royaleEp.NextRev(Topic::Queue), q)); };
+
+        HelloReply h;
+        h.proto = 1; h.minProto = 1; h.serverEpoch = 1792648725; h.dataVer = 4242;
+        h.featureBits = FeatureSeason | FeatureRoyale | FeatureBgAnnouncer; h.realmName = "Bleakhold";
+        send("HELLO", EncodeHello(h));
+
+        QueueState q;
+        q.state = QueueStateId::Queued; q.kind = QueueKind::Royale; q.activityId = 901; q.tier = 0; q.size = 1;
+        q.queuedSec = 12; q.bandMin = 80; q.bandMax = 80; q.queued = 13; q.minPlayers = 20; q.maxPlayers = 40;
+        q.matchesRunning = 1;
+        queue(q);
+        q.state = QueueStateId::Proposal; q.queuedSec = 95; q.proposalId = 412; q.timeoutSec = 15; q.queued = 24;
+        q.accepted = 3; q.proposalSize = 24;
+        queue(q);
+        QueueState in;
+        in.state = QueueStateId::InRun; in.kind = QueueKind::Royale; in.activityId = 901; in.tier = 0; in.size = 1;
+        in.bandMin = 80; in.bandMax = 80; in.minPlayers = 20; in.maxPlayers = 40; in.matchesRunning = 2;
+        queue(in);
+
+        RoyaleMap mp;
+        mp.mapId = 901; mp.minX = -1066; mp.maxX = 533; mp.minY = -1066; mp.maxY = 533;
+        mp.lobbyX = 455; mp.lobbyY = 455; mp.lobbyR = 32; mp.boundHalf = 750; mp.centerX = -267; mp.centerY = -267;
+        auto poi = [](uint32_t id, RoyalePoiKind k, int32_t x, int32_t y, uint32_t r, char const* name) {
+            RoyalePoi p;
+            p.id = id; p.kind = k; p.x = x; p.y = y; p.r = r; p.name = name;
+            return p;
+        };
+        RoyalePoiKind const L = RoyalePoiKind::Landmark;
+        RoyalePoiKind const C = RoyalePoiKind::Crossing;
+        mp.pois = {
+            poi(1, L, -266, -266, 88, "The Bleak Hold"), poi(2, L, 120, 80, 62, "Harrow Farm"),
+            poi(3, L, 180, -760, 54, "Blackvein Pit"), poi(4, L, -620, -600, 40, "Gloomtimber Mill"),
+            poi(5, L, -700, 60, 26, "The Pale Shrine"), poi(6, L, 220, -250, 60, "Broken Siege"),
+            poi(7, L, 60, -420, 60, "Crow's Rise"), poi(8, L, -80, -120, 60, "Wrecked Caravan"),
+            poi(9, L, -520, -260, 70, "Mirefen Hollow"), poi(10, L, -480, 170, 60, "Forgotten Graves"),
+            poi(11, C, -80, -710, 16, "Old Ford"), poi(12, C, -560, -700, 18, "Covered Bridge"),
+            poi(13, C, 150, -665, 0, "Pit Bridge; the third, crossing: east~west|%"),
+            poi(14, RoyalePoiKind::Lobby, 455, 455, 32, "The Overlook"),
+        };
+        send("ROYM", EncodeRoyaleMap(mp));
+
+        RoyaleState st;
+        st.matchId = 7001; st.phase = RoyalePhase::Arriving; st.phaseMsLeft = 60000; st.alive = 24; st.total = 24;
+        st.curX = -267; st.curY = -267; st.curR = 1080; st.myX = 450; st.myY = 452; st.stages = 6;
+        send("ROYS", EncodeRoyaleState(st));
+        st.phase = RoyalePhase::Countdown; st.phaseMsLeft = 41000; st.pinX = 104; st.pinY = 96;
+        send("ROYS", EncodeRoyaleState(st));
+        RoyaleEvent ev;
+        ev.kind = RoyaleEventKind::Revealed; ev.value = 1; ev.x = -150; ev.y = -310;
+        send("ROYV", EncodeRoyaleEvent(ev));
+        // the drop (fields 25-27): as the fall starts, then as the parachute opens 8 s later
+        st.phase = RoyalePhase::Drop; st.phaseMsLeft = 20000; st.me = RoyaleMe::Dropping; st.stage = 1;
+        st.fallMsLeft = 8000u; st.landMsLeft = 20000u; st.fallMs = 8000u;
+        send("ROYS", EncodeRoyaleState(st));
+        st.phaseMsLeft = 12000; st.fallMsLeft = 0u; st.landMsLeft = 12000u;
+        send("ROYS", EncodeRoyaleState(st));
+        st.fallMsLeft.reset(); st.landMsLeft.reset(); st.fallMs.reset();
+        st.phase = RoyalePhase::Fight; st.phaseMsLeft = 0; st.me = RoyaleMe::Alive; st.stage = 1;
+        st.nextX = -150; st.nextY = -310; st.nextR = 520; st.shrinkStartMs = 0u; st.shrinkEndMs = 170000u;
+        st.dmgPermille = 10; st.myX = 104; st.myY = 96;
+        send("ROYS", EncodeRoyaleState(st));
+
+        auto obj = [](uint32_t id, RoyaleObjectKind k, uint32_t sub, int32_t x, int32_t y, RoyaleObjectState state,
+                       Opt<uint32_t> ms) {
+            RoyaleObject o;
+            o.objId = id; o.kind = k; o.subtype = sub; o.x = x; o.y = y; o.state = state; o.msLeft = ms;
+            return o;
+        };
+        RoyaleObjects ob;
+        ob.matchId = 7001; ob.full = true;
+        ob.objects = { obj(1, RoyaleObjectKind::ShadowSight, 0, -266, -266, RoyaleObjectState::Taken, 61000u),
+            obj(2, RoyaleObjectKind::ShadowSight, 0, -712, 48, RoyaleObjectState::Ready, std::nullopt) };
+        for (uint32_t i = 0; i < 8; ++i)
+        {
+            int32_t const k = static_cast<int32_t>(i);
+            ob.objects.push_back(obj(3 + i, RoyaleObjectKind::Buff, 1 + i % 3, -500 + k * 90, 300 - k * 80,
+                RoyaleObjectState::Ready, std::nullopt));
+        }
+        ob.objects.push_back(obj(20, RoyaleObjectKind::Supply, 0, -950, -250, RoyaleObjectState::Incoming, 20000u));
+        send("ROYO", EncodeRoyaleObjects(ob));
+        RoyaleObjects delta;
+        delta.matchId = 7001; delta.full = false;
+        delta.objects = { obj(20, RoyaleObjectKind::Supply, 0, -950, -250, RoyaleObjectState::Opened, std::nullopt) };
+        send("ROYO", EncodeRoyaleObjects(delta));
+
+        for (RoyaleEventKind k : { RoyaleEventKind::StormMoving, RoyaleEventKind::SupplyIncoming,
+                 RoyaleEventKind::SupplyLanded, RoyaleEventKind::SupplyOpened, RoyaleEventKind::PlayersLeft })
+        {
+            RoyaleEvent e;
+            e.kind = k;
+            e.value = k == RoyaleEventKind::PlayersLeft ? 10 : 2;
+            if (k != RoyaleEventKind::StormMoving && k != RoyaleEventKind::PlayersLeft)
+            {
+                e.x = -950; e.y = -250;
+            }
+            if (k == RoyaleEventKind::SupplyIncoming)
+                e.msLeft = 20000u;
+            if (k == RoyaleEventKind::SupplyOpened)
+                e.name = "Br\xC3\xA9nna";
+            send("ROYV", EncodeRoyaleEvent(e));
+        }
+
+        RoyaleKill k;
+        k.killerName = "Aldric Stormwind"; k.killerClassId = 1; k.victimName = "Br\xC3\xA9nna"; k.victimClassId = 8;
+        k.cause = RoyaleCause::Player; k.aliveAfter = 23; k.killerKills = 3;
+        k.announce = RoyaleAnnounce::TripleKill;   // superseded: never written
+        send("ROYK", EncodeRoyaleKill(k));
+        // the kill announcer for it (section 18): a triple kill that is also a killing spree, then a long name with
+        // separators and first blood only (the last one is checked)
+        BgAnnounce ann;
+        ann.killerName = k.killerName; ann.killerClassId = 1; ann.victimName = k.victimName; ann.victimClassId = 8;
+        ann.multi = BgMultiKill::Triple; ann.streak = BgStreak::KillingSpree;
+        send("BGANN", EncodeBgAnnounce(ann));
+        ann.multi = BgMultiKill::Ultra; ann.streak = BgStreak::None;
+        send("BGANN", EncodeBgAnnounce(ann));
+        ann.killerName = "Garrick Stormwind, the; bold|one~of:many and then some more text"; ann.killerClassId = 4;
+        ann.victimName = "Corwin"; ann.victimClassId = 12; ann.multi = BgMultiKill::None;
+        ann.streak = BgStreak::HolyShit;
+        send("BGANN", EncodeBgAnnounce(ann));
+        RoyaleKill storm;
+        storm.victimName = "Corwin"; storm.victimClassId = 12; storm.cause = RoyaleCause::Storm; storm.aliveAfter = 22;
+        send("ROYK", EncodeRoyaleKill(storm));
+
+        // the storm beast: it stirs at Crow's Rise, wakes, kills twice (once itself, once with a player's credit),
+        // loses health (an over-range value is clamped to 100), is slain and leaves its hoard, which is opened
+        RoyaleEvent stirs;
+        stirs.kind = RoyaleEventKind::BossIncoming; stirs.x = 60; stirs.y = -420; stirs.msLeft = 30000u;
+        stirs.name = "Crow's Rise";
+        send("ROYV", EncodeRoyaleEvent(stirs));
+        RoyaleObjects beast;
+        beast.matchId = 7001; beast.full = false;
+        beast.objects = { obj(30, RoyaleObjectKind::Boss, 100, 60, -420, RoyaleObjectState::Incoming, 30000u) };
+        send("ROYO", EncodeRoyaleObjects(beast));
+        RoyaleEvent awake;
+        awake.kind = RoyaleEventKind::BossAwake; awake.x = 60; awake.y = -420;
+        send("ROYV", EncodeRoyaleEvent(awake));
+        beast.objects = {
+            obj(30, RoyaleObjectKind::Boss, 4000000000u, 60, -420, RoyaleObjectState::Ready, std::nullopt) };
+        send("ROYO", EncodeRoyaleObjects(beast));
+        RoyaleKill byBeast;
+        byBeast.killerName = "Thundermaw"; byBeast.killerClassId = 0u; byBeast.victimName = "Ysolde";
+        byBeast.victimClassId = 5; byBeast.cause = RoyaleCause::Boss; byBeast.aliveAfter = 21;
+        send("ROYK", EncodeRoyaleKill(byBeast));
+        byBeast.killerName = "Aldric Stormwind"; byBeast.killerClassId = 1u; byBeast.killerKills = 4u;
+        byBeast.victimName = "Corin"; byBeast.victimClassId = 11; byBeast.aliveAfter = 20;
+        send("ROYK", EncodeRoyaleKill(byBeast));
+        beast.objects = { obj(30, RoyaleObjectKind::Boss, 57, 60, -420, RoyaleObjectState::Ready, std::nullopt) };
+        send("ROYO", EncodeRoyaleObjects(beast));
+        beast.objects = { obj(30, RoyaleObjectKind::Boss, 0, 60, -420, RoyaleObjectState::Hidden, std::nullopt),
+            obj(31, RoyaleObjectKind::Hoard, 0, 62, -418, RoyaleObjectState::Ready, std::nullopt) };
+        send("ROYO", EncodeRoyaleObjects(beast));
+        RoyaleEvent slain;
+        slain.kind = RoyaleEventKind::BossSlain; slain.x = 60; slain.y = -420; slain.name = "Aldric Stormwind";
+        send("ROYV", EncodeRoyaleEvent(slain));
+        beast.objects = { obj(31, RoyaleObjectKind::Hoard, 0, 62, -418, RoyaleObjectState::Opened, std::nullopt) };
+        send("ROYO", EncodeRoyaleObjects(beast));
+
+        RoyaleResult r;
+        r.matchId = 7001; r.placement = 12; r.total = 24; r.kills = 1; r.damage = 18400; r.healing = 2100;
+        r.survivedSec = 214; r.rewarded = true;
+        Reward place; place.kind = RewardKind::Honor; place.amount = 70; place.text = "Placement";
+        Reward kill; kill.kind = RewardKind::Honor; kill.amount = 25; kill.text = "1 elimination";
+        Reward shards; shards.kind = RewardKind::Shards; shards.amount = 5;
+        r.rewards = { place, kill, shards };
+        send("ROYE", EncodeRoyaleResult(r));
+        st.me = RoyaleMe::Spectating; st.placement = 12; st.alive = 11; st.watchName = "Aldric Stormwind";
+        st.myX.reset(); st.myY.reset();
+        send("ROYS", EncodeRoyaleState(st));
+
+        RoyaleEvent w;
+        w.kind = RoyaleEventKind::Winner; w.value = 7; w.name = "Dalia";
+        send("ROYV", EncodeRoyaleEvent(w));
+        st.phase = RoyalePhase::Victory; st.phaseMsLeft = 12000; st.alive = 1;
+        send("ROYS", EncodeRoyaleState(st));
+        r.winnerName = "Dalia"; r.winnerClassId = 11; r.winnerKills = 7;
+        send("ROYE", EncodeRoyaleResult(r));
+
+        ErrorReply g;
+        g.op = IntentType::Glide; g.seq = 12; g.code = RoyaleErr::GlideHere.code; g.text = RoyaleErr::GlideHere.text;
+        send("ERR", EncodeError(g));
+        send("TOAST", EncodeToast({ ToastKind::Queue, "Bleakhold Royale", "24 players are ready", "royale" }));
+        QueueState none;
+        none.kind = QueueKind::Royale;
+        queue(none);
+    }
+
+    // Arena seasons and the 1v1 ladder (section 20): a live season, the 3v3 ladder of 10 rows (chunked at small
+    // frame sizes), the 1v1 queue, then the season's end
+    void ArenaSession()
+    {
+        Intent hello;
+        if (g_arenaEp.Receive("BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUS", 1000, hello).verdict != Verdict::Accepted)
+        {
+            std::fprintf(stderr, "bh_gen: arena HELLO not accepted\n");
+            std::exit(1);
+        }
+        auto send = [](char const* op, std::string const& payload) { SendOn(g_arenaEp, g_arenaFrames, op, payload); };
+        auto queue = [&](QueueState const& q) { send("QUEUE", EncodeQueue(g_arenaEp.NextRev(Topic::Queue), q)); };
+
+        HelloReply h;
+        h.proto = 1; h.minProto = 1; h.serverEpoch = 1793900000; h.dataVer = 77;
+        h.featureBits = FeatureSeason | FeatureLeaderboards | FeatureArena; h.realmName = "Bleakhold";
+        send("HELLO", EncodeHello(h));
+
+        Definitions d;
+        d.arenaTiers = { { 1, "Combatant", "9D9D9D", "Season games, 1300 rating." },
+            { 2, "Challenger", "1EFF00", "Top 35%." }, { 3, "Rival", "0070DD", "Top 10%." },
+            { 4, "Duelist", "A335EE", "Top 3%, 10 games in the last 21 days." },
+            { 5, "Gladiator", "FF8000", "Top 0.5%, 50 wins." }, { 6, "Rank One", "E6CC80", "The best team, 50 wins." },
+            { 7, "Class Champion", "C41E3A", "The best 1v1 player of a class." } };
+        ArenaRewardDef r1; r1.id = 101; r1.bracket = 3; r1.tierId = 2; r1.kind = 'T'; r1.entry = 2090; r1.text = "Challenger";
+        ArenaRewardDef r2; r2.id = 105; r2.seasonId = 1; r2.bracket = 3; r2.tierId = 5; r2.kind = 'M'; r2.entry = 30609;
+        r2.text = "Swift Nether Drake";
+        ArenaRewardDef r3; r3.id = 110; r3.bracket = 3; r3.tierId = 1; r3.kind = 'C'; r3.count = 150;
+        r3.text = "150 Dungeon Shards";
+        d.arenaRewards = { r1, r2, r3 };
+        for (std::string const& p : EncodeDefinitions(d, 77))
+            send("DEF", p);
+
+        ArenaState a;
+        a.seasonId = 1; a.state = ArenaStateId::Live; a.startEpoch = 1793318400u; a.endEpoch = 1800576000u;
+        a.ratedOpen = true; a.oneTeamCostCopper = 0u; a.seasonName = "Arena Season 1, the; first|one";
+        a.seasons = { { 1, "Arena Season 1", SeasonStateId::Current, 1793318400u, 1800576000u } };
+        ArenaBracketState one;
+        one.bracket = 1; one.hasTeam = true; one.rating = 1734; one.ladderRank = 12; one.ladderSize = 48;
+        one.seasonGames = 61; one.seasonWins = 38; one.weekGames = 9; one.weekWins = 6; one.personalRating = 1734;
+        one.recentGames = 14; one.tierId = 3; one.nextTierId = 4; one.ratingToNext = 66; one.teamName = "Aldric";
+        ArenaBracketState two;
+        two.bracket = 2; two.hasTeam = true; two.rating = 1310; two.seasonGames = 4; two.seasonWins = 1;
+        two.missingMask = ArenaMissGames | ArenaMissLevel; two.teamName = "Br\xC3\xA9nna & Co";
+        a.brackets = { one, two };
+        ArenaCutoff c;
+        c.bracket = 1; c.tierId = 4; c.slots = 6; c.cutRank = 6; c.cutRating = 1801; c.floor = 1800;
+        ArenaCutoff empty;
+        empty.bracket = 5; empty.tierId = 6; empty.slots = 0; empty.floor = 1850;
+        a.cutoffs = { c, empty };
+        a.ladders = { { 1, 48, true, true }, { 5, 7, false, false } };
+        ArenaMatch m1; m1.bracket = 1; m1.won = true; m1.ratingChange = 14; m1.opponent = "Brenna"; m1.endEpoch = 1793899000;
+        ArenaMatch m2; m2.bracket = 1; m2.won = true; m2.ratingChange = 0; m2.opponent = "Dalia"; m2.endEpoch = 1793898000;
+        m2.verdict = ArenaVerdict::NotCounted; m2.reason = ArenaReason::Effort;
+        a.matches = { m1, m2 };
+        send("ARENA", EncodeArena(a));
+
+        Leaderboard lb;
+        lb.board = Board::Arena; lb.seasonId = 1u; lb.dungeonId = 3u; lb.classId = 0u; lb.page = 1; lb.pages = 3;
+        for (uint32_t i = 1; i <= 10; ++i)
+        {
+            LeaderboardRow row;
+            row.rank = i; row.dungeonId = 3u; row.value = int64_t(2200 - 40 * i); row.dateEpoch = 1793890000u + i;
+            row.members = { { "Member" + std::to_string(i) + "a", 1u }, { "Member" + std::to_string(i) + "b", 5u },
+                { "Garrick Stormwind", 4u } };
+            row.label = "Team number " + std::to_string(i); row.seasonWins = 60 - i; row.seasonGames = 70;
+            row.tierId = i == 1 ? 6u : i <= 3 ? 5u : 4u;
+            if (i == 10)
+                row.flags = ArenaInactive | ArenaProvisional;
+            lb.rows.push_back(row);
+        }
+        send("LB", EncodeLeaderboard(lb));
+        LeaderboardMe me;
+        me.board = Board::Arena; me.rank = 4u; me.topPercent = 19u; me.value = 1912; me.dungeonId = 3u;
+        me.barPermille = 407u; me.label = "Duelist"; me.topPermille = 182u; me.tierId = 4u;
+        send("LBME", EncodeLeaderboardMe(me));
+
+        QueueState q;
+        q.state = QueueStateId::Queued; q.kind = QueueKind::Arena; q.activityId = 1u; q.tier = 1u; q.size = 1u;
+        q.queuedSec = 8u; q.estWaitSec = 95u;
+        queue(q);
+        q.state = QueueStateId::InRun; q.queuedSec.reset(); q.estWaitSec.reset();
+        queue(q);
+        QueueState none;
+        none.kind = QueueKind::Arena;
+        queue(none);
+
+        ErrorReply e;
+        e.op = IntentType::QueueJoin; e.seq = 91; e.code = ArenaErr::Closed.code;
+        e.text = "Rated arena opens again when Arena Season 2 starts.";
+        send("ERR", EncodeError(e));
+        ArenaState fin;
+        fin.seasonId = 1; fin.state = ArenaStateId::FinalStandings; fin.startEpoch = 1793318400u;
+        fin.endEpoch = 1800576000u; fin.nextStartEpoch = 1800748800u; fin.ratedOpen = false;
+        fin.seasonName = "Arena Season 1";
+        one.missingMask = ArenaMissReview;
+        fin.brackets = { one };
+        ArenaFinal f;
+        f.bracket = 1; f.finalRank = 12; f.finalRating = 1734; f.finalTierId = 3u; f.grant = ArenaGrant::Held;
+        fin.finals = { f };
+        send("ARENA", EncodeArena(fin));
+    }
+
+    // The cafe (section 21): a barista's shift at The Grinding Tusk and a customer's order, every cafe op, from its own
+    // Endpoint. A long CAFQ (11 orders, 8 sent, names of 24 characters full of separators) and a CAFT of 3 tickets of 8
+    // steps make the small frame sizes cut them. The last message of each op is the one test_server_frames.lua checks.
+    void CafeSession()
+    {
+        Intent hello;
+        if (g_cafeEp.Receive("BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUS", 1000, hello).verdict != Verdict::Accepted)
+        {
+            std::fprintf(stderr, "bh_gen: cafe HELLO not accepted\n");
+            std::exit(1);
+        }
+        auto send = [](char const* op, std::string const& payload) { SendOn(g_cafeEp, g_cafeFrames, op, payload); };
+
+        HelloReply h;
+        h.proto = 1; h.minProto = 1; h.serverEpoch = 1793900000; h.dataVer = 88;
+        h.featureBits = FeatureLeaderboards | FeatureCafe; h.realmName = "Bleakhold";
+        send("HELLO", EncodeHello(h));
+
+        Definitions d;
+        CafeDef sw;
+        sw.id = 1; sw.name = "The Lion's Roast"; sw.cityKey = "sw"; sw.team = 'A'; sw.zoneId = 1519; sw.mapId = 0;
+        sw.ownerName = "Rosalind Thornbury"; sw.tagline = "Coffee \xC2\xB7 Tea \xC2\xB7 Shakes, by the Cathedral steps";
+        sw.colorHex = "3F6FB5";
+        CafeDef org;
+        org.id = 2; org.name = "The Grinding Tusk"; org.cityKey = "org"; org.team = 'H'; org.zoneId = 1637; org.mapId = 1;
+        org.ownerName = "Grukka Steamtusk"; org.tagline = "Strong brews; for: strong~backs | 100%"; org.colorHex = "B5402F";
+        d.cafes = { sw, org };
+        CafeActionDef grind;
+        grind.id = 1; grind.station = 'G'; grind.key = 1; grind.kind = 'T'; grind.durMs = 1500; grind.name = "Grind Beans";
+        grind.spellId = 100901;
+        CafeActionDef shot;
+        shot.id = 3; shot.station = 'E'; shot.key = 1; shot.kind = 'H'; shot.durMs = 3000; shot.goldLoPermille = 700u;
+        shot.goldHiPermille = 850u; shot.name = "Pull Shot"; shot.spellId = 100903;
+        CafeActionDef berry;
+        berry.id = 21; berry.station = 'S'; berry.key = 6; berry.kind = 'T'; berry.durMs = 800; berry.name = "Elwynn Berry";
+        berry.hordeName = "Cactus Apple"; berry.spellId = 100921;
+        d.cafeActions = { grind, shot, berry };
+        CafeRecipeDef scoop;
+        scoop.id = 219; scoop.cafeId = 2; scoop.archetype = 19; scoop.family = 'M'; scoop.tier = 5; scoop.unlockLevel = 10;
+        scoop.price80Copper = 18000; scoop.buffMin = 50; scoop.steps = { 11, 11, 11, 18, 20, 15, 23, 25 };
+        scoop.name = "Valley of Honor Triple Scoop"; scoop.text = "Earned in the Ring, eaten in triumph.";
+        CafeRecipeDef black;
+        black.id = 101; black.cafeId = 1; black.archetype = 1; black.family = 'C'; black.tier = 1; black.unlockLevel = 1;
+        black.price80Copper = 4000; black.buffMin = 30; black.steps = { 1, 3, 4, 25 }; black.name = "Cathedral Black";
+        black.text = "Dark as the crypts beneath the Cathedral and twice as bracing.";
+        d.cafeRecipes = { black, scoop };
+        d.cafeLevels = { { 1, 0, "Black coffee, latte, green tea and black tea." }, { 10, 5640, "Triple scoop; the title." } };
+        for (std::string const& p : EncodeDefinitions(d, 88))
+            send("DEF", p);
+
+        CafeList list;
+        list.rows = { { 1, CafeOpen::Paused, 2, 5, CafeRushState::Live, 640, 75 },
+            { 2, CafeOpen::Closed, 0, 0, CafeRushState::None, 0, 120 } };
+        send("CAFE", EncodeCafeList(list));
+
+        CafeDay day;
+        day.dayXp = 470; day.dayXpFull = 450; day.dayXpHalf = 450; day.dayTipsCopper = 51000; day.dayTipsCapCopper = 205000;
+        day.dayPoints = 400; day.dayPointsCap = 500; day.dayDrinks = 31;
+        CafeState off;
+        off.level = 9; off.xp = 5000; off.levelXp = 4320; off.nextLevelXp = 5640u; off.day = day;
+        off.flags = CafeFlagStaffDrink;
+        send("CAFST", EncodeCafeState(off));
+        CafeState on = off;
+        on.cafeId = 2; on.onShift = true; on.shiftSec = 1250; on.drinks = 12; on.perfects = 7; on.streak = 3;
+        on.tipsCopper = 9200; on.shiftXp = 230; on.station = 0; on.nearStation = 'G'; on.nearDm = 12; on.maxTickets = 3;
+        on.tiredSec = 120u; on.flags = CafeFlagTutorial | CafeFlagMemory | CafeFlagFacing | CafeFlagHidden;
+        on.warnSec = 4u;
+        CafeRush rush;
+        rush.rushState = CafeRushState::Live; rush.rushSec = 640; rush.rushServed = 31; rush.rushGoal = 60;
+        rush.myRushServed = 6;
+        on.rush = rush;
+        send("CAFST", EncodeCafeState(on));
+
+        // eleven orders, in queue order; the receiver (Morgra) is shown the waiting ones first
+        CafeQueue q;
+        q.cafeId = 2; q.count = 11; q.cap = 8; q.baristas = 2;
+        for (uint32_t i = 1; i <= 11; ++i)
+        {
+            CafeQueueRow r;
+            r.orderId = 1300 + i; r.recipeId = 200 + i;
+            r.kind = i % 4 == 0 ? CafeOrderKind::Player : (i % 4 == 1 ? CafeOrderKind::Group : CafeOrderKind::Npc);
+            r.customer = "Kor'kron;Guard,No:" + std::to_string(10 + i) + "~Org";   // 24 characters
+            r.patienceMs = 1000 * i; r.patienceMaxMs = 48000;
+            r.state = i % 3 == 0 ? CafeQueueState::Taken : (i == 11 ? CafeQueueState::House : CafeQueueState::Waiting);
+            if (r.state == CafeQueueState::Taken)
+                r.takenBy = i == 6 ? "Morgra" : "Br\xC3\xA9nna";
+            r.needLevel = i == 5 ? 7 : 0;
+            if (r.kind == CafeOrderKind::Group)
+                r.group = 3u;
+            q.rows.push_back(r);
+        }
+        SortCafeQueueRows(q.rows, "Morgra");
+        send("CAFQ", EncodeCafeQueue(q));
+
+        send("CAFT", EncodeCafeTickets(CafeTickets{}));   // no tickets yet: "0"
+        CafeTickets tk;
+        for (uint32_t i = 1; i <= 3; ++i)
+        {
+            CafeTicket t;
+            t.ticketId = 60 + i; t.orderId = 1300 + i; t.recipeId = 219; t.kind = i == 2 ? CafeOrderKind::Player : CafeOrderKind::Npc;
+            t.customer = i == 2 ? "Br\xC3\xA9nna" : "Kor'kron;Guard,No:" + std::to_string(10 + i) + "~Org";
+            t.patienceMs = 30000 + i; t.patienceMaxMs = 78000; t.nextStep = i == 1 ? 4 : 1; t.inHand = i == 1;
+            t.orderLine = i == 2 ? "" : "Three scoops, caramel; chocolate: and cream~now | please";
+            for (uint32_t s = 0; s < scoop.steps.size(); ++s)
+                t.steps.push_back({ scoop.steps[s], i == 1 && s < 3 ? (s == 1 ? CafeGrade::Off : CafeGrade::Perfect)
+                    : CafeGrade::None });
+            t.tipHintCopper = 1800 + i;
+            tk.tickets.push_back(t);
+        }
+        send("CAFT", EncodeCafeTickets(tk));
+
+        CafeStepEvent ev;
+        ev.ticketId = 61; ev.stepIndex = 4; ev.actionId = 18; ev.event = CafeStepEventKind::Started; ev.durMs = 800u;
+        ev.nextStep = 4;
+        send("CAFEV", EncodeCafeStep(ev));
+        ev.ticketId = 61; ev.stepIndex = 6; ev.actionId = 15; ev.event = CafeStepEventKind::Done; ev.durMs = 2500u;
+        ev.goldLoMs = 1500u; ev.goldHiMs = 2000u; ev.grade = CafeGrade::Good; ev.nextStep = 7;
+        send("CAFEV", EncodeCafeStep(ev));
+
+        CafeResult res;
+        res.ticketId = 61; res.recipeId = 219; res.quality = CafeQuality::Sloppy; res.xp = 21; res.tipCopper = 1080;
+        res.points = 18; res.streak = 0; res.levelUp = true; res.level = 10; res.customer = "Kor'kron;Guard,No:11~Org";
+        res.line = "Lok'tar! Caf\xC3\xA9 strong enough; for: a~grunt | 100%"; res.xpCapped = 9;
+        send("CAFRES", EncodeCafeResult(res));
+
+        CafeMenu menu;
+        menu.cafeId = 2; menu.open = CafeOpen::Open; menu.baristas = 2; menu.houseEtaSec = 75; menu.pendingOrderId = 1304;
+        menu.ordersToday = 3; menu.ordersCap = 12; menu.canOrder = false; menu.reason = CafeErr::Order.code;
+        for (uint32_t i = 1; i <= 19; ++i)
+            menu.rows.push_back({ 200 + i, 200 + 100 * i, i < 19, i != 3 });
+        send("CAFM", EncodeCafeMenu(menu));
+
+        send("CAFO", EncodeCafeOrder(CafeOrderState{}));   // no order: "0"
+        CafeOrderState o;
+        o.orderId = 1304; o.cafeId = 2; o.recipeId = 204; o.state = CafeOrderStateId::Making; o.barista = "Morgra";
+        o.nextStep = 2; o.stepCount = 6; o.priceCopper = 12000; o.tipCopper = 3000;
+        send("CAFO", EncodeCafeOrder(o));
+        o.state = CafeOrderStateId::Finishing; o.barista.clear(); o.leftSec = 41u;
+        send("CAFO", EncodeCafeOrder(o));
+
+        CafeProfile prof;
+        prof.level = 9; prof.xp = 5000; prof.levelXp = 4320; prof.nextLevelXp = 5640u; prof.drinks = 1210;
+        prof.perfects = 830; prof.memoryDrinks = 44; prof.bestStreak = 21; prof.fastestMs = 4870u; prof.weeklyWins = 2;
+        prof.rewards = CafeRewardApprentice | CafeRewardGolden;
+        CafeWeek week;
+        week.weekId = 2964; week.cafeId = 2; week.points = 310; week.drinks = 41; week.perfectPermille = 702; week.days = 2;
+        week.eligible = false;
+        prof.week = week;
+        prof.lastWinners = { { 2963, 1, "Br\xC3\xA9nna", 2480 }, { 2963, 2, "Morgra, the Swift", 1990 } };
+        send("CAFP", EncodeCafeProfile(prof));
+
+        CafeBuffs buffs;
+        buffs.teaSec = 2400u; buffs.shakeSec = 900u; buffs.shakeActive = true; buffs.coffeeCounts = false;
+        send("CAFBF", EncodeCafeBuffs(buffs));
+
+        CafeSummary sum;
+        sum.cafeId = 2; sum.reason = CafeShiftEnd::Mounted; sum.shiftSec = 1310; sum.drinks = 13; sum.perfects = 7;
+        sum.tipsCopper = 10280; sum.xp = 251; sum.xpLost = 9; sum.points = 248; sum.bestStreak = 3; sum.staffDrink = true;
+        send("CAFSUM", EncodeCafeSummary(sum));
+        send("CAFUI", EncodeCafeOpenUi(CafeUiBoard, 2));
+
+        CafeAtBar empty;
+        empty.cafeId = 2;
+        send("CAFAT", EncodeCafeAtBar(empty));
+        CafeAtBar bar;
+        bar.cafeId = 2;
+        for (uint32_t i = 1; i <= 6; ++i)
+            bar.rows.push_back({ i == 1 ? "Grukka Steamtusk" : "Worker;" + std::to_string(i), 2 + i, 100 * i, 3000,
+                i % 2 ? CafeStepKind::Timed : CafeStepKind::Tap, i, 8 });
+        send("CAFAT", EncodeCafeAtBar(bar));
+
+        Leaderboard lb;
+        lb.board = Board::Cafe; lb.seasonId = 2964u; lb.dungeonId = 2u; lb.classId = 0u; lb.page = 1; lb.pages = 2;
+        for (uint32_t i = 1; i <= 10; ++i)
+        {
+            LeaderboardRow row;
+            row.rank = i; row.dungeonId = 2u; row.value = int64_t(2500 - 100 * i); row.timeSec = int64_t(900 - 10 * i);
+            row.dateEpoch = 1793890000u + i; row.members = { { "Barista" + std::to_string(i), 1u + i % 9u } };
+            row.label = std::to_string(150 - i) + " drinks";
+            lb.rows.push_back(row);
+        }
+        send("LB", EncodeLeaderboard(lb));
+        LeaderboardMe me;
+        me.board = Board::Cafe; me.rank = 4u; me.topPercent = 12u; me.value = 2100; me.dungeonId = 2u; me.timeSec = 860;
+        me.barPermille = 875u; me.label = "146 drinks";
+        send("LBME", EncodeLeaderboardMe(me));
+
+        ErrorReply e;
+        e.op = IntentType::CafeStep; e.seq = 77; e.code = CafeErr::Hands.code; e.text = CafeErr::Hands.text;
+        send("ERR", EncodeError(e));
+    }
+}
+
+int main(int argc, char** argv)
+{
+    if (argc < 3)
+    {
+        std::fprintf(stderr, "usage: bh_gen <maxBody> <out.lua>\n");
+        return 2;
+    }
+    g_maxBody = static_cast<std::size_t>(std::stoul(argv[1]));
+
+    // the client's HELLO opens the session (nothing may be pushed before it)
+    Intent hello;
+    ReceiveResult r = g_ep.Receive("BHc\t1 HELLO 1 1/1 1,1.0.0,0,enUS", 1000, hello);
+    if (r.verdict != Verdict::Accepted || !g_ep.Ready())
+    {
+        std::fprintf(stderr, "bh_gen: HELLO not accepted\n");
+        return 1;
+    }
+
+    HelloReply h;
+    h.proto = 1; h.minProto = 1; h.serverEpoch = 1792648725; h.utcOffsetMin = -300; h.dataVer = 4242;
+    h.featureBits = FeatureSeason | FeatureLeaderboards | FeatureServerPullTimer; h.seasonId = 1;
+    h.dailyResetEpoch = 1792674645; h.weeklyResetEpoch = 1792907925; h.realmName = "Bleak;hold|Realm"; h.siteUrl = "bleakhold.com/a,b";
+    Send("HELLO", EncodeHello(h));
+
+    for (std::string const& p : EncodeDefinitions(Defs(), 4242))
+        Send("DEF", p);
+
+    {
+        WeekState w;
+        w.keysTimed = 1; w.mythicCoins = 10;
+        SendRev("WEEK", Topic::Week, [&](uint32_t rev) { return EncodeWeek(rev, w); });
+        w.keysTimed = 4; w.raidEchoes = 1; w.riftBestFloor = 18; w.mythicCoins = 2140; w.mythicCoinsCap = 5500; w.shards = 1260;
+        SendRev("WEEK", Topic::Week, [&](uint32_t rev) { return EncodeWeek(rev, w); });
+    }
+    {
+        EraState e;
+        e.eraId = 7; e.nextEraId = 3; e.affixIds = { 1, 3, 4 }; e.weeklyBonusId = 1; e.weeklyBonusDone = true;
+        SendRev("ERA", Topic::Era, [&](uint32_t rev) { return EncodeEra(rev, e); });
+    }
+    {
+        TaskList t;
+        t.freeRerolls = 1; t.rerollCost = 500000; t.rerollCurrency = Currency::MythicCoins;
+        auto task = [](uint32_t uid, TaskKind k, uint32_t tpl, uint32_t have, uint32_t need, RewardKind rk, uint32_t amount, Opt<uint32_t> item,
+                        TaskState st, std::string title = {}, std::string text = {}, std::string rt = {}) {
+            Task x;
+            x.uid = uid; x.kind = k; x.templateId = tpl; x.have = have; x.need = need; x.rewardKind = rk; x.rewardAmount = amount;
+            x.rewardItemId = item; x.state = st; x.title = std::move(title); x.text = std::move(text); x.rewardText = std::move(rt);
+            return x;
+        };
+        t.tasks = {
+            task(101, TaskKind::Daily, 1, 0, 1, RewardKind::MythicCoins, 20, std::nullopt, TaskState::Open),
+            task(102, TaskKind::Daily, 2, 14, 20, RewardKind::Item, 1, 40752u, TaskState::Open, "", "", "1 Emblem of Heroism"),
+            task(103, TaskKind::Daily, 3, 5, 5, RewardKind::Shards, 3, std::nullopt, TaskState::Claimable),
+            task(201, TaskKind::Weekly, 4, 1, 3, RewardKind::Copper, 1234567, std::nullopt, TaskState::Open,
+                "Echoes; of, the: era~", "Clear 3 keys | 100% in time", "Legacy Cache (Tier 6)"),
+            task(202, TaskKind::Weekly, 5, 2, 2, RewardKind::Text, 0, std::nullopt, TaskState::Claimed),
+        };
+        SendRev("TASKS", Topic::Tasks, [&](uint32_t rev) { return EncodeTasks(rev, t); });
+        // TaskProgress(): a delta with the next revision once the snapshot is out
+        SendRev("TASK", Topic::Tasks, [&](uint32_t rev) { return EncodeTaskDelta(rev, 102, 20, TaskState::Claimable); });
+    }
+    {
+        KeyState k;
+        k.dungeonId = 602; k.level = 8; k.affixIds = { 1, 3, 4 }; k.mode = 2; k.weeklyBestLevel = 9; k.weeklyBestDungeonId = 599;
+        k.cachesReady = 1; k.cachesBanked = 2; k.keystoneItemId = 900001; k.maxLevel = 20; k.eraId = 7; k.depleted = true;
+        SendRev("KEY", Topic::Key, [&](uint32_t rev) { return EncodeKey(rev, k); });
+    }
+    {
+        BoardState b;
+        b.shards = 1260; b.bountyId = 55; b.bountyDungeonId = 189; b.bountyState = BountyState::Claimable;
+        b.bountyRewardText = "50 Shards, doubled"; b.firstRunBonus = true;
+        for (uint32_t i = 0; i < 100; ++i)
+        {
+            BoardDungeon x;
+            x.dungeonId = 2000 + i; x.chapter = 1 + i % 5; x.lvlMin = 10 + i % 60; x.lvlMax = 15 + i % 60; x.tierBits = 15;
+            if (i % 3)
+            {
+                x.bestScore = i * 10; x.bestTier = i % 4;
+            }
+            x.recordScore = 9000 + i; x.recordName = (i % 2) ? "Br\xC3\xA9nna%" : "Aldric";
+            x.locked = i % 7 == 0;
+            b.dungeons.push_back(x);
+        }
+        SendRev("BOARD", Topic::Board, [&](uint32_t rev) { return EncodeBoard(rev, b); });
+    }
+    {
+        QueueState q;
+        q.state = QueueStateId::Proposal; q.kind = QueueKind::Rift; q.activityId = 0; q.tier = 0; q.size = 5; q.queuedSec = 40;
+        q.proposalId = 77; q.timeoutSec = 40; q.bandMin = 23; q.bandMax = 28;
+        QueueMember a; a.name = "Tester"; a.classId = 1; a.role = RoleTank; a.accepted = ProposalAnswer::Accepted; a.level = 25;
+        QueueMember b; b.name = "Br\xC3\xA9nna"; b.classId = 2; b.role = RoleHealer; b.accepted = ProposalAnswer::Declined; b.level = 26;
+        QueueMember c; c.name = "Corwin"; c.classId = 12; c.role = RoleDamage; c.level = 24;
+        q.members = { a, b, c };
+        SendRev("QUEUE", Topic::Queue, [&](uint32_t rev) { return EncodeQueue(rev, q); });
+    }
+    {
+        KeyRunStart s;
+        s.runId = 7001; s.dungeonId = 602; s.level = 8; s.affixIds = { 1, 3, 4 }; s.eraId = 7; s.countdownMs = 10000; s.timeLimitSec = 1800;
+        Send("MPS", EncodeKeyRunStart(s));
+        KeyRunState m;
+        m.runId = 7001; m.timeLimitSec = 1800; m.forcesMax = 100; m.chestSec = { 1260, 1440 }; m.state = KeyRunStateId::Countdown;
+        Send("MP", EncodeKeyRunState(m));
+        m.state = KeyRunStateId::Running; m.elapsedMs = 1122000; m.deaths = 2; m.deathPenaltySec = 10; m.forcesCur = 64;
+        m.bossBits = 1 | 4; m.bossKillSec = { 300, 0, 900 };
+        Send("MP", EncodeKeyRunState(m));
+        KeyRunEnd e;
+        e.runId = 7001; e.result = KeyRunResultId::InTime; e.timeMs = 1453000; e.keyDelta = -2; e.newDungeonId = 599; e.newLevel = 6; e.score = 1840;
+        Reward chest; chest.kind = RewardKind::Text; chest.amount = 1; chest.text = "Spoils chest, in your bags";
+        Reward coins; coins.kind = RewardKind::MythicCoins; coins.amount = 150;
+        Reward item; item.kind = RewardKind::Item; item.amount = 2; item.itemId = 40752;
+        e.rewards = { chest, coins, item };
+        Send("MPE", EncodeKeyRunEnd(e));
+    }
+    {
+        RiftState rf;
+        rf.runId = 8001; rf.state = RiftStateId::Running; rf.floor = 7; rf.bossId = 3; rf.bossName = "Echo of Nefarian"; rf.elapsedMs = 120000;
+        rf.bestFloor = 18; rf.rank = 42; rf.deaths = 1; rf.groupSize = 5;
+        Send("RIFT", EncodeRift(rf));
+        RiftEnd e;
+        e.runId = 8001; e.floorReached = 21; e.timeMs = 180000; e.score = 777; e.newBest = true; e.rank = 3;
+        Reward coins; coins.kind = RewardKind::MythicCoins; coins.amount = 20;
+        e.rewards = { coins };
+        Send("RIFTE", EncodeRiftEnd(e));
+    }
+    {
+        CollectionState c;
+        c.transmogOwned = 412; c.laterAgesOwned = 0; c.laterAgesTotal = 3771; c.legacySetsOwned = 3; c.legacySetsTotal = 48;
+        c.tierHave = { 3, 0, 0, 0, 0, 0, 0 }; c.tierTotal = { 8, 8, 5, 9, 5, 5, 8 };
+        SendRev("COLL", Topic::Coll, [&](uint32_t rev) { return EncodeCollections(rev, c); });
+    }
+    {
+        LegacySet s;
+        s.tier = 1; s.setId = 201; s.classId = 1; s.name = "Battlegear of Might"; s.collectedBits = 56; s.outfitUnlocked = false;
+        s.itemIds = { 16866, 16868, 16865, 16861, 16863, 16864, 16867, 16862 }; s.sourceDungeonIds = { 229, 329, 289, 429, 543 };
+        s.lvlMin = 58; s.lvlMax = 61; s.echoBoss = "Ragnaros"; s.note = "Drops in keys: and the Rift.";
+        Send("SET", EncodeLegacySet(s));
+    }
+    {
+        LegacyIndex idx;
+        for (uint32_t i = 0; i < 1500; ++i)
+        {
+            LegacyIndexEntry e;
+            e.itemId = 30000 + i; e.tier = 1 + i % 7; e.setId = 200 + i / 8; e.collected = i % 2 == 0;
+            idx.items.push_back(e);
+        }
+        SendRev("LIDX", Topic::Lidx, [&](uint32_t rev) { return EncodeLegacyIndex(rev, idx); });
+        SendRev("LCOL", Topic::Lidx, [&](uint32_t rev) { return EncodeLegacyCollected(rev, 30001, true); });
+    }
+    {
+        SeasonState s;
+        s.seasonId = 1; s.warEffortPermille = 620; s.contributors = 1284; s.points = 1240; s.rankId = 2; s.nextRankId = 3; s.pointsToNextRank = 260;
+        s.warEffortTitle = "Breach the Greymane Wall"; s.warEffortText = "Fill the bar together; 100% opens it."; s.spareTokens = 3;
+        s.parts = { { "Materials", 800u }, { "Bosses, Echoes", 550u }, { "Keys in time", 510u } };
+        SeasonRewardState a; a.rewardId = 1; a.earned = true; a.stateText = "Earned";
+        SeasonRewardState b; b.rewardId = 2; b.earned = false; b.stateText = "7 / 20";
+        s.rewards = { a, b };
+        SendRev("SEASON", Topic::Season, [&](uint32_t rev) { return EncodeSeason(rev, s); });
+    }
+    {
+        for (Board board : { Board::Keys, Board::Rift, Board::RaidEchoes })
+        {
+            Leaderboard lb;
+            lb.board = board; lb.seasonId = 1; lb.dungeonId = 0; lb.classId = 0; lb.page = 2; lb.pages = 7;
+            for (uint32_t i = 0; i < 10; ++i)
+            {
+                LeaderboardRow row;
+                row.rank = 11 + i;
+                if (board == Board::Keys)
+                {
+                    row.dungeonId = 602; row.value = 15 - i / 2; row.timeSec = 300 - int64_t(i) * 60;
+                }
+                else if (board == Board::Rift)
+                {
+                    row.value = 30 - i; row.timeSec = 1500 + i * 40;
+                }
+                else
+                {
+                    row.timeSec = 140 + i * 9; row.label = "Echo of Ragnaros";
+                }
+                row.dateEpoch = 1792645125 - i * 3600;
+                for (uint32_t k = 0; k < (i % 2 ? 1u : 5u); ++k)
+                    row.members.push_back({ k == 0 ? "Br\xC3\xA9nna" : "Member" + std::to_string(k), 1 + k });
+                lb.rows.push_back(row);
+            }
+            Send("LB", EncodeLeaderboard(lb));
+            LeaderboardMe me;
+            me.board = board; me.rank = 42; me.topPercent = 12; me.value = board == Board::RaidEchoes ? Opt<int64_t>() : Opt<int64_t>(9);
+            me.dungeonId = board == Board::Keys ? Opt<uint32_t>(602) : Opt<uint32_t>(); me.timeSec = -154; me.barPermille = 580;
+            me.label = board == Board::RaidEchoes ? "Echo of Ragnaros" : "";
+            Send("LBME", EncodeLeaderboardMe(me));
+        }
+        FirstsList f;
+        f.entries = { { "echo", "Echo of Ragnaros defeated", "Ironvow (Aldric, Br\xC3\xA9nna)", 1792562325u },
+            { "key", "First timed +15", "Dalia's group", 1792216725u } };
+        Send("FIRSTS", EncodeFirsts(f));
+    }
+    Send("TOAST", EncodeToast({ ToastKind::Record, "New record", "Halls of Lightning +8 in 24:13", "leaderboards" }));
+    {
+        ErrorReply e;
+        e.op = IntentType::TaskClaim; e.seq = 46; e.code = "not_claimable"; e.text = "That task cannot be claimed yet, sorry.";
+        Send("ERR", EncodeError(e));
+    }
+    Send("PONG", EncodePong({ 12345, 1792648790 }));
+    {
+        // CAMPST (section 16): resting with an empty glide field in the middle, then settled (the last one is checked)
+        CampState rest;
+        rest.state = CampStateId::Resting; rest.settleSec = 45; rest.fireSec = 870; rest.mine = false; rest.xpPct = 5;
+        rest.objects = { { 171, 1, false } }; rest.place = { { 164, 2 }, { 197, 3 } }; rest.repair = false; rest.fed = true;
+        Send("CAMPST", EncodeCampState(rest));
+        CampState c;
+        c.state = CampStateId::Camping; c.settleSec = 30; c.fireSec = 700; c.mine = true; c.cooldownSec = 880; c.warmthSec = 1800;
+        c.xpPct = 15; c.objects = { { 164, 2, true }, { 171, 1, false }, { 197, 3, false } }; c.glideSec = 95u; c.repair = true;
+        c.fed = true; c.glidingSec = 7u;   // and gliding (Walk on Air): the 13th field
+        Send("CAMPST", EncodeCampState(c));
+    }
+
+    RoyaleSession();
+    WarSession();
+    ArenaSession();
+    CafeSession();
+
+    std::ofstream out(argv[2], std::ios::binary);
+    out << "-- generated by Server/mod-bleakhold-ui/tests/cpp/bh_gen.cpp (maxBody " << g_maxBody << "). Do not edit.\n";
+    out << "return {\n  maxBody = " << g_maxBody << ",\n  revs = { WEEK = " << g_ep.Rev(Topic::Week) << ", ERA = " << g_ep.Rev(Topic::Era)
+        << ", TASKS = " << g_ep.Rev(Topic::Tasks) << ", KEY = " << g_ep.Rev(Topic::Key) << ", BOARD = " << g_ep.Rev(Topic::Board)
+        << ", QUEUE = " << g_ep.Rev(Topic::Queue) << ", COLL = " << g_ep.Rev(Topic::Coll) << ", LIDX = " << g_ep.Rev(Topic::Lidx)
+        << ", SEASON = " << g_ep.Rev(Topic::Season) << " },\n  messages = " << g_ep.Stats().messagesOut << ",\n  frames = {\n";
+    for (std::string const& f : g_frames)
+        out << "    " << LuaString(f) << ",\n";
+    out << "  },\n  royale = {\n    revs = { QUEUE = " << g_royaleEp.Rev(Topic::Queue) << " },\n    messages = "
+        << g_royaleEp.Stats().messagesOut << ",\n    frames = {\n";
+    for (std::string const& f : g_royaleFrames)
+        out << "      " << LuaString(f) << ",\n";
+    out << "    },\n  },\n  wpvp = {\n    messages = " << g_wpvpEp.Stats().messagesOut << ",\n    frames = {\n";
+    for (std::string const& f : g_wpvpFrames)
+        out << "      " << LuaString(f) << ",\n";
+    out << "    },\n  },\n  arena = {\n    revs = { QUEUE = " << g_arenaEp.Rev(Topic::Queue) << " },\n    messages = "
+        << g_arenaEp.Stats().messagesOut << ",\n    frames = {\n";
+    for (std::string const& f : g_arenaFrames)
+        out << "      " << LuaString(f) << ",\n";
+    out << "    },\n  },\n  cafe = {\n    messages = " << g_cafeEp.Stats().messagesOut << ",\n    frames = {\n";
+    for (std::string const& f : g_cafeFrames)
+        out << "      " << LuaString(f) << ",\n";
+    out << "    },\n  },\n}\n";
+    std::printf("bh_gen: %zu frames for %llu messages (max body %zu), Royale %zu frames for %llu messages, World PvP %zu "
+        "frames for %llu messages, Arena %zu frames for %llu messages, Cafe %zu frames for %llu messages -> %s\n",
+        g_frames.size(),
+        static_cast<unsigned long long>(g_ep.Stats().messagesOut), g_maxBody, g_royaleFrames.size(),
+        static_cast<unsigned long long>(g_royaleEp.Stats().messagesOut), g_wpvpFrames.size(),
+        static_cast<unsigned long long>(g_wpvpEp.Stats().messagesOut), g_arenaFrames.size(),
+        static_cast<unsigned long long>(g_arenaEp.Stats().messagesOut), g_cafeFrames.size(),
+        static_cast<unsigned long long>(g_cafeEp.Stats().messagesOut), argv[2]);
+    return 0;
+}

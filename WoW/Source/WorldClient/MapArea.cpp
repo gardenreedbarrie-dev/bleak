@@ -6,9 +6,11 @@
 #include "Engine/Source/Tempest/CImVector.h"
 #include "Engine/Source/Services/Texture.h"
 #include "Engine/Source/Gx/CGxDevice/CGxDevice.h"
+#include "Engine/Source/ModernAssets/ModernAssets.h"
 #include "WoW/Source/WorldClient/CMapBaseObjLink.h"
 #include "WoW/Source/WorldClient/Map.h"
 #include "WoW/Source/WorldClient/MapChunk.h"
+#include "WoW/Source/WorldClient/MapTerrainTiling.h"
 #include "WoW/Source/WorldClient/MapRenderChunk.h"
 #include "WoW/Source/WorldClient/Types.h"
 #include "WoW/Source/WorldClient/World.h"
@@ -43,6 +45,8 @@ void CMapArea::PurgeChunk(CMapChunk* chunk) {
 // VERIFY: 3489b6fa manual
 // OFFSET: 0x007C35F0
 void CMapArea::Purge() {
+    MapTerrainTiling::ForgetArea(this); // BLEAKHOLD(terraintiling)
+
     if (this->m_asyncObject) {
         if (!AsyncFile::Cancel(this->m_asyncObject, CMapArea::FreeAsyncObject)) {
             this->m_fileBuffer = nullptr;
@@ -178,6 +182,16 @@ void CMapArea::LoadTerrainTexture(CMapAreaTexture* areaTexture, int32_t textureI
             areaTexture->m_texture = TextureCreateSolid(color);
         }
     } else {
+        // BLEAKHOLD(modernassets): a modern tile that names its textures by FileDataID names the diffuse and
+        // specular "_s.blp" file already; another "_s" would ask for a file that does not exist.
+        const char* name = areaTexture->m_textureName;
+        size_t length = SStrLen(name);
+
+        if (length >= 6 && !SStrCmpI(name + length - 6, "_s.blp", STORM_MAX_STR) && ModernAssetsIsModernTexture(name)) {
+            areaTexture->m_texture = CMap::LoadTexture(name);
+            return;
+        }
+
         char fileName[256];
         SStrCopy(fileName, areaTexture->m_textureName, STORM_MAX_STR);
         char* ext = SStrChrR(fileName, '.');
@@ -597,6 +611,8 @@ void CMapArea::QueryLiquidSounds(C3Vector* pos, float radius, TSGrowableArray<Wo
 // VERIFY: e54d69d6 manual
 // OFFSET: [0x007D6E10, 0x007D7120]
 CMapArea::~CMapArea() {
+    MapTerrainTiling::ForgetArea(this); // BLEAKHOLD(terraintiling)
+
     if (this->m_liquid) {
         SMemFree(this->m_liquid, __FILE__, __LINE__, 0);
         this->m_liquid = nullptr;

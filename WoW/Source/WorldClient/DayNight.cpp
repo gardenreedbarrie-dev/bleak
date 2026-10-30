@@ -1865,6 +1865,29 @@ void DayNight::RenderSky(CPortalView* view) {
     GxXformSetViewport(minX, maxX, minY, maxY, minZ, maxZ);
 }
 
+// BLEAKHOLD(bleakfx): the conditions under which RenderSky draws the sun, stars, planets, sky and clouds.
+bool DayNight::BleakSunDrawn() {
+    DNInfo& info = DayNight::g_dnInfo;
+
+    if (!info.m_showSky) {
+        return false;
+    }
+
+    if (info.m_skybox && info.m_skybox->m_model && info.m_skybox->m_model->IsDrawable(0, 0) && info.m_skyboxWeight > 0.99000001f) {
+        return false;
+    }
+
+    for (int32_t i = 0; i < 3; i++) {
+        DNOverrideSky* sky = info.m_blendSkybox[i];
+
+        if (sky && sky->m_model && sky->m_model->IsDrawable(0, 0) && info.m_blendSkyboxWeight[i] > 0.99000001f && !info.m_blendSkyboxFlags[i]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 // VERIFY: 9ccd52e0 manual
 // OFFSET: 0x007F0D40
 DayNight::LightQueue::LightQueue(const uint32_t* params) : CMemBlock(sizeof(LightQE) * params[0], 0, typeid(LightQE).raw_name(), SLOG_OBJECT) {

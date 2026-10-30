@@ -1,0 +1,27 @@
+Bleakhold Royale art
+====================
+
+Every texture in this folder is original art drawn for Bleakhold by its own generators, from shapes, height fields,
+noise and the terrain of the Royale map; nothing is copied from any game or art library:
+
+  Tools/BlpConvert/make_royale_hud_art.py  plates, buttons, the banner, numerals, DROP!, titles, the ready check's
+                                           ring, the drop countdown's pull numerals, notches, gems, icons, markers, the
+                                           parachute, the altimeter, speed lines, the storm edge (and
+                                           Interface/AddOns/Bleakhold/RoyaleArtData.lua)
+  Tools/BlpConvert/make_royale_art.py      the island map (IslandMap, MapThumb) from
+                                           Tools/MapForge/specs/royale_v2.json, the storm rings and holes, the dashed
+                                           next-circle rings
+
+The numerals (NumeralsL/M/S), DROP! (DropWord), the drop countdown's pull numerals and DROP! (Pull) and the titles
+(Titles) are set in Cinzel Bold, Copyright 2020 The Cinzel Project Authors (https://github.com/NDISCOVER/Cinzel),
+licensed under the SIL Open Font License, Version 1.1 (LICENSE-OFL-Cinzel.txt next to this file). The font itself is
+used only when the art is drawn (Tools/BlpConvert/fonts/Cinzel-Bold.ttf, from the @fontsource/cinzel package of Google
+Fonts' ofl/cinzel, weight 700, Latin subset); its digits are aligned optically to one cap band by the generator. The art
+is not the font and is not sold by itself.
+
+The addon's live labels use Marcellus SC (Interface/AddOns/Bleakhold/Fonts, with its OFL.txt), Copyright (c) 2012
+Brian J. Bonislawsky DBA Astigmatic (AOETI), with Reserved Font Names "Marcellus", SIL Open Font License 1.1.
+
+To redraw: python3 -I Tools/BlpConvert/make_royale_hud_art.py [--preview DIR], then
+python3 -I Tools/BlpConvert/make_royale_art.py [--cache FILE] (two minutes each; --check DIR verifies the committed
+files against the generators with the same Pillow, FreeType and numpy builds).

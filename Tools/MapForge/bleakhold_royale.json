@@ -1,0 +1,104 @@
+{
+    "_comment": [
+        "Bleakhold Royale: a 20-40 player free-for-all battle royale on its own map. package.py build reads this.",
+        "Ids: stock 3.3.5a maps end at 724 and Bleakhold's Emberwing Hollow uses 740, so the map id sits in the",
+        "900 block. Stock areas end below 5000, and the realm's own patches add areas 5006-5018, 5100, 5101 and",
+        "more from 6001 on, so the zone is 5200 and its subzones 5201-5213 (5102-5999 hold nothing else).",
+        "`template` fields name existing rows whose values (sounds, music, liquid types, minimap scale) the new rows",
+        "copy; the realm's patches may have added rows, so the build checks every id against the input DBCs and the",
+        "server SQL and stops on a clash.",
+        "instance_type 3 (battleground): each match gets its own BattlegroundMap instance keyed by the player's",
+        "battleground id, players cannot walk in (TeleportTo refuses BG maps unless InBattleground()), and the",
+        "client shows the battleground score frame. 0 would be one shared world, 1/2 need instance_template +",
+        "group rules that fight a 40-player FFA, 4 (arena) blocks long-cooldown spells and caps arena sizes.",
+        "zone.set_flags ARENA (0x80) is what makes the whole zone free-for-all PvP: the server's",
+        "Player::UpdateArea sets IsInFFAPvPArea from it and the client's GetZonePVPInfo() shows 'arena'.",
+        "NO_FLY_ZONE with OUTLAND cleared keeps flying mounts out (the server reads 0x400 as flyable).",
+        "light.skybox binds a stock skybox M2 through Light -> LightParams -> LightSkybox (skyboxes never sit in",
+        "ADTs). WintergraspSmokySky is the smoky battlefield sky; other verified 3.3.5a choices: DeathSkybox,",
+        "DeathClouds, StratholmeSkybox, IceCrownDarkSky, IceCrownScourgeSky, DragonblightScarletSkyBox, Stars.",
+        "Alternatives: params_from_map <map id> copies an existing map's default light set (532 = Karazhan's dark",
+        "night), params_from_light / params pick exact rows; drop the section for the default sky (Light id 1).",
+        "Atmosphere (royale-spec.md 2.4): time_of_day_override 1050 (17:30 light; the client uses value/1440),",
+        "zone.template 10 (Duskwood) for its ambience and music. Subzones 5201-5213 copy the zone row, so they",
+        "inherit ARENA and NO_FLY_ZONE; the terrain spec (specs/royale_v1.json 'areas') assigns them to chunks.",
+        "clear_flags drops every template flag that changes the rules (duels, rest, sanctuary, cities, ghost",
+        "revival, indoor-only, outdoor PvP); package.py fails when anything but ARENA, NO_FLY_ZONE and harmless",
+        "bits (dbc/config.py HARMLESS_TEMPLATE_FLAGS) remains, and report.txt lists the final flags.",
+        "archives.marker_texture: a tiny generated BLP (no game data) packed into patch-Q; the Bleakhold addon",
+        "tests it with Texture:SetTexture to know the client has the map patch."
+    ],
+    "map": {
+        "id": 901,
+        "directory": "BleakholdRoyale",
+        "template": 489,
+        "name": "Bleakhold Royale",
+        "instance_type": 3,
+        "pvp": 1,
+        "flags": 0,
+        "description_horde": "Last one standing. The storm closes in; scavenge, fight, survive.",
+        "description_alliance": "Last one standing. The storm closes in; scavenge, fight, survive.",
+        "corpse_map": -1,
+        "corpse_x": 0,
+        "corpse_y": 0,
+        "time_of_day_override": 1050,
+        "expansion": 0,
+        "max_players": 40
+    },
+    "zone": {
+        "id": 5200,
+        "template": 10,
+        "name": "Bleakhold Royale",
+        "set_flags": ["ARENA", "NO_FLY_ZONE"],
+        "clear_flags": ["SANCTUARY", "OUTLAND", "OUTLAND2", "CAPITAL", "SLAVE_CAPITAL", "SLAVE_CAPITAL2", "CITY",
+                        "TOWN", "REST_ZONE_HORDE", "REST_ZONE_ALLIANCE", "CONTESTED_AREA", "WINTERGRASP",
+                        "WINTERGRASP_2", "ALLOW_DUELS", "NEED_FLY", "OUTDOOR_PVP", "ARENA_INSTANCE", "UNK4",
+                        "LOWLEVEL", "INSIDE"],
+        "exploration_level": 0,
+        "faction_group_mask": 0,
+        "subzones": [
+            { "id": 5201, "name": "The Bleak Hold" },
+            { "id": 5202, "name": "Harrow Farm" },
+            { "id": 5203, "name": "Blackvein Pit" },
+            { "id": 5204, "name": "Gloomtimber Mill" },
+            { "id": 5205, "name": "The Pale Shrine" },
+            { "id": 5206, "name": "Broken Siege" },
+            { "id": 5207, "name": "Crow's Rise" },
+            { "id": 5208, "name": "Wrecked Caravan" },
+            { "id": 5209, "name": "Mirefen Hollow" },
+            { "id": 5210, "name": "Forgotten Graves" },
+            { "id": 5211, "name": "Old Ford" },
+            { "id": 5212, "name": "Covered Bridge" },
+            { "id": 5213, "name": "The Overlook" }
+        ]
+    },
+    "loading_screen": null,
+    "light": {
+        "skybox": "Environments\\Stars\\WintergraspSmokySky.M2"
+    },
+    "world_map_area": {
+        "name": "BleakholdRoyale",
+        "bounds": "auto"
+    },
+    "battleground": {
+        "id": 12,
+        "template": 2,
+        "name": "Bleakhold Royale",
+        "groups_allowed": 0,
+        "max_group_size": 0,
+        "min_level": 80,
+        "max_level": 80,
+        "brackets": [
+            { "range_index": 7, "min_level": 80, "max_level": 80, "difficulty": 0 }
+        ]
+    },
+    "archives": {
+        "map": "patch-Q.MPQ",
+        "marker_texture": "Interface\\Bleakhold\\Royale\\Marker.blp",
+        "dbc": "auto",
+        "reserved_letters": "ABCDEGHIJLMNPRSTUVWXYZ",
+        "optional_packs": {
+            "hd": ["Data/patch-[ABCDEGIMNPSU].MPQ", "Data/Patch-Y.MPQ"]
+        }
+    }
+}

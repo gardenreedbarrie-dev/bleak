@@ -1,17 +1,7 @@
-add_library(XvidDecoder SHARED
+# BLEAKHOLD(nodll): the x64 movie decoder is linked into the executables, so the client ships no DLL.
+add_library(XvidDecoder STATIC
     XvidDecoder.cpp
-    XvidDecoder.def
 )
-
-set_target_properties(XvidDecoder PROPERTIES
-    OUTPUT_NAME XvidDecoder
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin/Win
-)
-
-foreach (config ${CMAKE_CONFIGURATION_TYPES} ${CMAKE_BUILD_TYPE})
-    string(TOUPPER ${config} config)
-    set_target_properties(XvidDecoder PROPERTIES RUNTIME_OUTPUT_DIRECTORY_${config} ${CMAKE_SOURCE_DIR}/bin/Win)
-endforeach ()
 
 target_include_directories(XvidDecoder
     PRIVATE
@@ -19,12 +9,11 @@ target_include_directories(XvidDecoder
         ${CMAKE_SOURCE_DIR}/ThirdParty/xvidcore/include
 )
 
+# libxvidcore.lib is built against the release C runtime DLL (MSVCRT); the executables link the runtime statically
+# (CMAKE_MSVC_RUNTIME_LIBRARY), so its default library is dropped and its runtime calls bind to the static one.
 target_link_libraries(XvidDecoder
     PRIVATE
         ${CMAKE_SOURCE_DIR}/ThirdParty/xvidcore/lib/x64/libxvidcore.lib
-)
-
-target_compile_options(XvidDecoder
-    PRIVATE
-        $<$<CONFIG:Debug>:/MD>
+    INTERFACE
+        -NODEFAULTLIB:MSVCRT
 )

@@ -17,6 +17,7 @@
 #include "Engine/Source/BlizzardCore/Source/System/String/String.h"
 #include "Engine/Source/BlizzardCore/Source/System/Thread/Thread.h"
 #include "Engine/Source/BlizzardCore/Source/Packages/Util/Hash.h"
+#include "Engine/Source/ModernAssets/ModernAssets.h"
 #include "Engine/Source/Storm/H/storm.h"
 #include "Engine/Source/Storm/Source/MD5.h"
 
@@ -1105,6 +1106,11 @@ int32_t STORMAPI SFile::OpenEx(SArchive* archive, const char* name, uint32_t fla
     }
 
     if (!(flags & 0x20000)) {
+        // BLEAKHOLD(modernassets): only a file that opened; the compressed and archive types leave a half-built object
+        if (opened) {
+            ModernAssetsFilterOpenedFile(name, *result);
+        }
+
         return opened;
     }
 
@@ -1117,6 +1123,8 @@ int32_t STORMAPI SFile::OpenEx(SArchive* archive, const char* name, uint32_t fla
 
     (*result)->m_type = SFILE_MEMORY;
     (*result)->m_position = 0;
+
+    ModernAssetsFilterOpenedFile(name, *result); // BLEAKHOLD(modernassets)
 
     return opened;
 
@@ -1265,6 +1273,11 @@ int32_t STORMAPI SFile::MakeFileLocal(const char* name, int32_t priority, bool w
 // VERIFY: f939f7d6 auto
 // OFFSET: 0x00421820
 int32_t STORMAPI SFile::MakeFileLocal(SFileImpl* file, int32_t priority, bool wait) {
+    // BLEAKHOLD(modernassets): a file served from memory has no archive file behind it and is local already
+    if (!file->m_file) {
+        return 1;
+    }
+
     return Blizzard::Mopaq::SFileMakeFileLocal(file->m_file->GetPath(), priority, wait);
 }
 

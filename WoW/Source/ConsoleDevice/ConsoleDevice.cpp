@@ -437,8 +437,7 @@ void ConsoleDeviceInitialize(const char* title, bool unused_a2, bool unused_a3) 
             if (desktopTried) {
                 GxLog("ConsoleDeviceInitialize(): no output device available!");
 
-                Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(1);
-                const char* caption = titleRec ? titleRec->m_message : "World of Warcraft";
+                const char* caption = "Bleakhold"; // BLEAKHOLD(branding)
                 const char* message;
 
                 if (api == GxApi_D3d9 || api == GxApi_D3d9Ex) {
@@ -519,8 +518,7 @@ void ConsoleDeviceInitialize(const char* title, bool unused_a2, bool unused_a3) 
         return;
     }
 
-    Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(1);
-    const char* caption = titleRec ? titleRec->m_message : "World of Warcraft";
+    const char* caption = "Bleakhold"; // BLEAKHOLD(branding)
     Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(4);
     const char* message = rec ? rec->m_message : "Your 3D accelerator card is not supported by World of Warcraft. Please install a 3D accelerator card with dual-TMU support.";
 

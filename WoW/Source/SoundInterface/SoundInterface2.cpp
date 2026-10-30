@@ -27,6 +27,7 @@
 #include "WoW/Source/SoundInterface/SoundInterface2ZoneSounds.h"
 #include "WoW/Source/Ui/ChatFrame.h"
 #include "WoW/Source/Ui/GameUI.h"
+#include "WoW/Common/BleakholdRaces.h"
 #include "WoW/Source/Ui/Types.h"
 #include "WoW/Source/WorldClient/AreaList.h"
 #include "WoW/Source/WorldClient/Map.h"
@@ -1492,7 +1493,20 @@ int32_t SI2::GetChunkLocation(int32_t* mapId, int32_t* chunkX, int32_t* chunkY, 
 // OFFSET: 0x004CDA20
 void SI2::DK_GetPlayerFilterName(CGUnit_C* unit, char* name, uint32_t size) {
     uint8_t race = unit->m_unit->m_unitFieldBytes0[0];
-    SStrPrintf(name, size, "Death Knight %s %s", s_raceFileNames[race], unit->m_unit->m_unitFieldBytes0[2] ? "Female" : "Male");
+
+    // BLEAKHOLD(races): the names stop at Draenei; a Bleakhold race uses its proxy race's filter, and any other id
+    // past the table gets no filter instead of a read past it
+    uint32_t fileRace = BleakholdProxyRace(race);
+
+    if (fileRace >= sizeof(s_raceFileNames) / sizeof(s_raceFileNames[0]) || !s_raceFileNames[fileRace]) {
+        if (size) {
+            name[0] = '\0';
+        }
+
+        return;
+    }
+
+    SStrPrintf(name, size, "Death Knight %s %s", s_raceFileNames[fileRace], unit->m_unit->m_unitFieldBytes0[2] ? "Female" : "Male");
 }
 
 // VERIFY: 8858e33e auto

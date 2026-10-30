@@ -1,0 +1,18 @@
+Bleakhold Royale sound effects
+==============================
+
+Every sound in this folder is synthesised for Bleakhold by Tools/Announcer/make_royale_sfx.py from sine partials,
+filtered noise and envelopes (fixed seeds, so the files are reproducible). No recording, sample or sound library is
+used, and nothing is copied from any game.
+
+  tick.wav               countdown 15..4: a soft forged tick over a low thump
+  tick3/tick2/tick1.wav  the last three seconds: hammer on anvil, rising in pitch
+  kill.wav               the player eliminates someone: a metallic clang and a thump
+  wind.wav               the freefall's air rush (7.5 s: it starts 0.5 s after the DROP! gong and fades as the
+                         parachute opens after the 8 s freefall)
+  canopy.wav             the parachute opening: a fabric snap
+  land.wav               the landing: a soft thud
+  *_quiet.wav            the same 9 dB quieter (3.3.5a's PlaySoundFile has no volume argument)
+
+Format: 22.05 kHz, mono, 16-bit PCM WAV, the loud part near -18 dBFS RMS, no peak over -1 dBFS.
+To regenerate: python3 -I Tools/Announcer/make_royale_sfx.py (--check verifies the committed files).

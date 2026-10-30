@@ -1,10 +1,13 @@
 #include "CharacterCreation.h"
 #include <cstdint>
 #include "Engine/Source/BlizzardCore/SFile2-Core.h"
+#include "Engine/Source/ConsoleBase/ConsoleVar.h"
+#include "Engine/Source/ConsoleBase/Types.h"
 #include "Engine/Source/Frame/CScriptObject.h"
 #include "Engine/Source/Frame/CSimpleModel.h"
 #include "Engine/Source/FrameScript/FrameScript.h"
 #include "Engine/Source/FrameScript/FrameScript_Object.h"
+#include "Engine/Source/Os/OsFile.h"
 #include "Engine/Source/lua-5.1/src/lauxlib.h"
 #include "Engine/Source/lua-5.1/src/lua.h"
 #include "Engine/Source/Storm/H/storm.h"
@@ -104,8 +107,9 @@ static int32_t Script_IsRaceClassRestricted(lua_State* L) {
         }
 
         default: {
+            // BLEAKHOLD(races): the server sends restrictions for the ten stock races only; any other race is
+            // unrestricted instead of raising a Lua error on the character screens
             restricted = false;
-            luaL_error(L, "Script_IsRaceClassRestricted: unsupported race ID(%d)", raceID);
             break;
         }
     }
@@ -202,6 +206,7 @@ static int32_t Script_GetFactionForRace(lua_State* L) {
 // OFFSET: 0x004E0830
 static int32_t Script_GetAvailableClasses(lua_State* L) {
     int32_t count = g_chrClassesDB.m_numRecords;
+    luaL_checkstack(L, 3 * count, "GetAvailableClasses"); // BLEAKHOLD(races): three values per class
 
     for (int32_t i = 0; i < count; i++) {
         ChrClassesRec* classRec = i >= 0 && i < g_chrClassesDB.m_numRecords ? &g_chrClassesDB.m_records[i] : nullptr;
@@ -408,6 +413,8 @@ static int32_t Script_GetCreateBackgroundModel(lua_State* L) {
             raceID = 2;
         }
 
+        raceID = BleakholdProxyRace(raceID); // BLEAKHOLD(races): Bleakhold races stand in their proxy race's scene
+
         ChrRacesRec* raceRec = g_chrRacesDB.GetRecord(raceID);
 
         if (raceRec) {
@@ -424,6 +431,7 @@ static int32_t Script_GetCreateBackgroundModel(lua_State* L) {
 // OFFSET: 0x004E1880
 static int32_t Script_GetAvailableRaces(lua_State* L) {
     uint32_t count = CCharacterCreation::m_races.Count();
+    luaL_checkstack(L, static_cast<int>(3 * count), "GetAvailableRaces"); // BLEAKHOLD(races): three values per race
 
     for (uint32_t i = 0; i < count; i++) {
         lua_pushstring(L, CGUnit_C::GetDisplayRaceNameFromRecord(g_chrRacesDB.GetRecord(CCharacterCreation::m_races.m_data[i]), CCharacterCreation::m_character->m_data.m_preferences.m_sexID, nullptr));
@@ -443,6 +451,7 @@ static int32_t Script_GetAvailableRaces(lua_State* L) {
 // OFFSET: 0x004E19A0
 static int32_t Script_GetClassesForRace(lua_State* L) {
     uint32_t count = CCharacterCreation::m_classes.Count();
+    luaL_checkstack(L, static_cast<int>(3 * count), "GetClassesForRace"); // BLEAKHOLD(races): three values per class
 
     for (uint32_t i = 0; i < count; i++) {
         ChrClassesRec* classRec = i < CCharacterCreation::m_classes.Count() ? CCharacterCreation::m_classes.m_data[i] : nullptr;
@@ -499,7 +508,87 @@ static int32_t Script_SetSelectedClass(lua_State* L) {
 // VERIFY: 19e1ce07 auto
 // OFFSET: 0x004E1B60
 static int32_t Script_RandomizeCharCustomization(lua_State* L) {
+    // BLEAKHOLD(customize): an optional keep mask (bit row - 1 keeps that row); without it, the stock Randomize
+    if (lua_isnumber(L, 1)) {
+        CCharacterCreation::RandomizeCharCustomization(static_cast<uint32_t>(lua_tointeger(L, 1)));
+        return 0;
+    }
+
     CCharacterCreation::RandomizeCharCustomization();
+    return 0;
+}
+
+// BLEAKHOLD(customize): position, count, raw = GetCharCustomizationInfo(row), row as CycleCharCustomization numbers
+// it (1 skin, 2 face, 3 hair style, 4 hair colour, 5 features): the 1-based position of the current value in the walk
+// the row's arrows make (0 when they cannot come back to it), how many values they reach, and the raw value the
+// server stores. Nothing for another row or before the screen has a character.
+static int32_t Script_GetCharCustomizationInfo(lua_State* L) {
+    if (!lua_isnumber(L, 1)) {
+        luaL_error(L, "Usage: GetCharCustomizationInfo(index)");
+        return 0;
+    }
+
+    int32_t row = static_cast<int32_t>(lua_tonumber(L, 1)) - 1;
+
+    if (row < CHAR_CUSTOMIZATION_SKIN || row > CHAR_CUSTOMIZATION_FACIAL_FEATURE) {
+        return 0;
+    }
+
+    CHAR_CUSTOMIZATION_TYPE type = static_cast<CHAR_CUSTOMIZATION_TYPE>(row);
+    int32_t position = 0;
+    int32_t count = 0;
+    int32_t raw = 0;
+
+    if (!CCharacterCreation::GetCharCustomizationInfo(type, &position, &count, &raw)) {
+        return 0;
+    }
+
+    lua_pushnumber(L, position);
+    lua_pushnumber(L, count);
+    lua_pushnumber(L, raw);
+    return 3;
+}
+
+// BLEAKHOLD(customize): ok = SetCharCustomizationRaw(row, raw): selects that raw value when the row's arrows reach it,
+// as one arrow press landing on it would; nil and nothing changed otherwise.
+static int32_t Script_SetCharCustomizationRaw(lua_State* L) {
+    if (!lua_isnumber(L, 1) || !lua_isnumber(L, 2)) {
+        luaL_error(L, "Usage: SetCharCustomizationRaw(index, value)");
+        return 0;
+    }
+
+    int32_t row = static_cast<int32_t>(lua_tonumber(L, 1)) - 1;
+    int32_t raw = static_cast<int32_t>(lua_tonumber(L, 2));
+
+    if (row >= CHAR_CUSTOMIZATION_SKIN && row <= CHAR_CUSTOMIZATION_FACIAL_FEATURE && CCharacterCreation::SetCharCustomizationRaw(static_cast<CHAR_CUSTOMIZATION_TYPE>(row), raw)) {
+        lua_pushnumber(L, 1.0);
+    } else {
+        lua_pushnil(L);
+    }
+
+    return 1;
+}
+
+// BLEAKHOLD(customize): BleakholdCustomize_Log(text) appends a line to Logs\BleakholdCustomize.log (the picker's
+// self-test, CVar bleakCustomizeSelfTest, writes its results there).
+static HSLOG s_customizeLog;
+
+static int32_t Script_BleakholdCustomize_Log(lua_State* L) {
+    if (!lua_isstring(L, 1)) {
+        luaL_error(L, "Usage: BleakholdCustomize_Log(\"text\")");
+        return 0;
+    }
+
+    if (!s_customizeLog) {
+        OsCreateDirectory("Logs", 0);
+        SLogCreate("Logs\\BleakholdCustomize.log", 0, &s_customizeLog);
+    }
+
+    if (s_customizeLog) {
+        SLogWrite(s_customizeLog, "%s", lua_tolstring(L, 1, nullptr));
+        SLogFlush(s_customizeLog);
+    }
+
     return 0;
 }
 
@@ -596,6 +685,10 @@ static FrameScript_Method s_scriptFunctions[] = {
     { "IsRaceClassValid", &Script_IsRaceClassValid },
     { "IsRaceClassRestricted", &Script_IsRaceClassRestricted },
     { "GetCreateBackgroundModel", &Script_GetCreateBackgroundModel },
+    // BLEAKHOLD(customize): the picker's natives
+    { "GetCharCustomizationInfo", &Script_GetCharCustomizationInfo },
+    { "SetCharCustomizationRaw", &Script_SetCharCustomizationRaw },
+    { "BleakholdCustomize_Log", &Script_BleakholdCustomize_Log },
 };
 
 // VERIFY: 88b9bf9d auto
@@ -604,6 +697,10 @@ void CharacterCreateRegisterScriptFunctions() {
     for (uint32_t i = 0; i < sizeof(s_scriptFunctions) / sizeof(s_scriptFunctions[0]); i++) {
         FrameScript_RegisterFunction(s_scriptFunctions[i].m_name, s_scriptFunctions[i].m_method);
     }
+
+    // BLEAKHOLD(customize): read by Interface/Bleakhold/Glue/BleakholdCustomize.lua when the creation screen shows
+    // (registering again keeps the value)
+    CVar::Register("bleakCustomizeSelfTest", "Bleakhold character customization self-test when the creation screen shows (0 off, 1 this race, sex and class, 2 every race, sex and class), logged to Logs\\BleakholdCustomize.log", 0, "0", nullptr, CATEGORY_DEBUG, false, nullptr, false);
 }
 
 // VERIFY: 50e76597 auto

@@ -44,6 +44,15 @@ struct CompSectionInfo {
     /* 0008 */ C2iVector m_size;
 };
 
+// BLEAKHOLD(glow): where a paste goes when it is not the character texture (the glow bake): the destination's section
+// rectangles and size, and a palette that replaces the source's own (black pastes "through its alpha"). The worker
+// thread runs the same paste functions, so this is always an argument, never a global.
+struct CompPasteTarget {
+    const CompSectionInfo* m_sections;
+    uint32_t m_size;
+    const BlpPalPixel* m_palette;
+};
+
 class CComponentMipBits {
     public:
     /* 0000 */ MipBits* m_mipBits;
@@ -53,14 +62,19 @@ class CComponentMipBits {
 
 class CComponentRequest {
     public:
+    // BLEAKHOLD(glow): a layer section with this bit is an atlas layer (a mark), pasted with PasteAtlasLayer.
+    static const uint8_t ATLAS_LAYER = 0x80;
+
     /* 0000 */ uint32_t m_flags;
     /* 0004 */ EGxTexFormat m_format;
     /* 0008 */ CComponentMipBits* m_mipBits;
     /* 000C */ void* m_baseTextures [10];
     /* 0034 */ uint32_t m_layerCount;
-    /* 0038 */ void* m_layerTextures [40];
-    /* 00D8 */ uint8_t m_layerSections [40];
-    /* 0100 */ TSLink<CComponentRequest> m_link;
+    // BLEAKHOLD(glow): 50 layers (40 in the original): a fully dressed character could already use all 40, and a mark
+    // adds one layer to each of the ten sections.
+    /* 0038 */ void* m_layerTextures [50];
+    /* 0100 */ uint8_t m_layerSections [50];
+    /* 0134 */ TSLink<CComponentRequest> m_link;
 
     void AddLayer(uint8_t section, void* texture);
     void DestroyCachedTextures();
@@ -88,6 +102,12 @@ class CCharacterComponent {
     static void (CCharacterComponent::*s_requestFunc[NUM_COMPONENT_SECTIONS])();
     static CompSectionInfo s_sectionInfoRaw[NUM_COMPONENT_SECTIONS];
     static MipBits* s_textureBuffer;
+    // BLEAKHOLD(glow): bleakGlow, bleakGlowStrength (read by the glow draw, Engine/Source/Model2/M2Glow.h) and
+    // bleakMarksDump; s_bleakGlowChanged is set when bleakGlow changes.
+    static CVar* s_bleakGlowVar;
+    static CVar* s_bleakGlowStrengthVar;
+    static CVar* s_bleakMarksDumpVar;
+    static int32_t s_bleakGlowChanged;
 
     static GEOCOMPONENTLINKS AddHandItem(CM2Model* model, const ItemDisplayInfoRec* displayRec, INVENTORY_SLOTS invSlot, SHEATHE_TYPE sheatheType, bool sheathed, bool shield, bool mainHand, int32_t itemVisual);
     static void AddLink(CM2Model* parent, GEOCOMPONENTLINKS link, const char* modelPath, const char* texturePath, int32_t itemVisual, const ItemDisplayInfoRec* displayRec);
@@ -118,19 +138,24 @@ class CCharacterComponent {
     static bool Initialize();
     static bool Initialize(EGxTexFormat format, uint32_t mipLevels, int32_t useThread, int32_t useCompression);
     static CM2Model* MakeAmmoModel(CM2Model* model, const ItemDisplayInfoRec* displayRec, uint32_t invType);
-    static void Paste(void* texture, MipBits* dstMips, const C2iVector& dstPos, const C2iVector& srcPos, const C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel);
-    static void PasteCrappyGreen(MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel, int32_t dstMipOffset);
+    // BLEAKHOLD(glow): `dstSize` (s_textureSize when 0), the palette overrides, the paste targets and `color` (the
+    // original's green when left out) are the glow bake's; every caller that leaves them out pastes as before.
+    static void Paste(void* texture, MipBits* dstMips, const C2iVector& dstPos, const C2iVector& srcPos, const C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel, uint32_t dstSize = 0, const BlpPalPixel* palOverride = nullptr);
+    static void PasteCrappyGreen(MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel, int32_t dstMipOffset, uint32_t color = 0xFF00FF00);
     static void PasteOpaque(void* texture, const BlpPalPixel* pal, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel, int32_t dstMipOffset);
-    static void PasteOpaqueScale(void* texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo);
-    static void PasteFromSkin(COMPONENT_SECTIONS section, void* texture, MipBits* dstMips);
-    static void PasteScale(void* texture, MipBits* dstMips, const C2iVector& dstPos, const C2iVector& srcPos, const C2iVector& srcSize, TCTEXTUREINFO& srcInfo);
-    static void PasteToSection(COMPONENT_SECTIONS section, void* texture, MipBits* dstMips);
+    static void PasteOpaqueScale(void* texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, const BlpPalPixel* palOverride = nullptr);
+    static void PasteFromSkin(COMPONENT_SECTIONS section, void* texture, MipBits* dstMips, const CompPasteTarget* target = nullptr);
+    static void PasteScale(void* texture, MipBits* dstMips, const C2iVector& dstPos, const C2iVector& srcPos, const C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t dstSize = 0, const BlpPalPixel* palOverride = nullptr);
+    static void PasteToSection(COMPONENT_SECTIONS section, void* texture, MipBits* dstMips, const CompPasteTarget* target = nullptr);
     static void PasteTransparent1Bit(void* texture, const BlpPalPixel* pal, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel, int32_t dstMipOffset);
-    static void PasteTransparent1BitScale(void* texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo);
+    static void PasteTransparent1BitScale(void* texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, const BlpPalPixel* palOverride = nullptr);
     static void PasteTransparent4Bit(void* texture, const BlpPalPixel* pal, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel, int32_t dstMipOffset);
-    static void PasteTransparent4BitScale(void* texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo);
+    static void PasteTransparent4BitScale(void* texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, const BlpPalPixel* palOverride = nullptr);
     static void PasteTransparent8Bit(void* texture, const BlpPalPixel* pal, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel, int32_t dstMipOffset);
-    static void PasteTransparent8BitScale(void* texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo);
+    static void PasteTransparent8BitScale(void* texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, const BlpPalPixel* palOverride = nullptr);
+    // BLEAKHOLD(glow): one section's rectangle of an atlas (a texture laid out like the whole character texture, as
+    // a mark and its `_Glow` are), with its alpha, at the section's own place.
+    static void PasteAtlasLayer(COMPONENT_SECTIONS section, void* texture, MipBits* dstMips, const CompPasteTarget* target = nullptr);
     static void ProcessComponentFinishedList(int32_t all);
     static void ProcessComponentRequest(CComponentRequest* request);
     static void RemoveHandItem(CM2Model* model, INVENTORY_SLOTS invSlot, SHEATHE_TYPE sheatheType, bool shield);
@@ -142,6 +167,10 @@ class CCharacterComponent {
     static uint32_t STORMAPI ThreadProc(void* param);
     static int32_t Update(const void* data, void* param);
     static void UpdateBaseTexture(EGxTexCommand command, uint32_t width, uint32_t height, uint32_t face, uint32_t level, void* userArg, uint32_t& texelStrideInBytes, const void*& texels);
+    // BLEAKHOLD(glow)
+    static void RegisterBleakGlowCVars();
+    static void UpdateGlowTexture(EGxTexCommand command, uint32_t width, uint32_t height, uint32_t face, uint32_t level, void* userArg, uint32_t& texelStrideInBytes, const void*& texels);
+    static void GlowSweep();
     static void ValidateComponentData(ComponentData* data, COMPONENT_CONTEXT context);
 
     /* 0000 */ TSLink<CCharacterComponent> m_link;
@@ -157,6 +186,17 @@ class CCharacterComponent {
     /* 0458 */ uint32_t m_handItemDisplayID [3];
     /* 0464 */ int32_t m_itemSlotForAttachSlot [50];
     /* 052C */ CComponentRequest* m_request;
+    // BLEAKHOLD(glow): the `_Glow` file of each m_baseVariation texture (a texture-cache handle, or null; the mark is
+    // m_baseVariation[VARIATION_FACIAL_HAIR].m_texture[2]), the glow texture and its state, the eye sprite shown on
+    // geoset 1703, and the links of the list of components with glow files (GlowSweep).
+    void* m_glowLayer [NUM_COMPONENT_VARIATIONS][3];
+    CTexture* m_glowTexture;
+    uint32_t m_glowTextureBytes;
+    uint32_t m_glowSections;
+    uint32_t m_glowState;
+    const char* m_eyeSprite;
+    CCharacterComponent* m_glowNext;
+    CCharacterComponent** m_glowPrev;
 
     CCharacterComponent();
     ~CCharacterComponent();
@@ -169,6 +209,20 @@ class CCharacterComponent {
     void AddQuiver(int32_t itemVisual);
     void AddShoulders(int32_t itemVisual);
     void ApplyGuildColor(int32_t emblem, int32_t emblemColor, int32_t border, int32_t borderColor, int32_t background);
+    // BLEAKHOLD(glow)
+    void BakeGlowSection(COMPONENT_SECTIONS section);
+    void BakeGlowTexture(uint32_t sections);
+    void BakeGlowForDevice();
+    uint32_t CountGlowLayers();
+    void CreateGlowTexture();
+    void DestroyGlowTexture();
+    void FreeGlowLayers();
+    void GlowRenderPrep(uint32_t sections);
+    void LoadGlowLayer(COMPONENT_VARIATIONS variation, int32_t textureIndex);
+    void LoadMarkLayer(const char* debug);
+    void MarkLayerRequest(COMPONENT_SECTIONS section);
+    void MarkLayerRenderPrep(COMPONENT_SECTIONS section);
+    void SetEyeSprite(const char* sprite);
     int32_t AreShoulderModelsCorrect();
     int32_t BuildShoulderItemPaths(ItemDisplayInfoRec& rec, const ItemDisplayInfoRec*& displayRec, char* leftModel, char* rightModel, char* leftTexture, char* rightTexture);
     void ClearGuildTexture(int32_t count);

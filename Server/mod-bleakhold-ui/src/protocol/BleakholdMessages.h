@@ -1,0 +1,1397 @@
+/*
+ * mod-bleakhold-ui: server side of the Bleakhold UI protocol (docs/BleakholdProtocol.md).
+ * SPDX-License-Identifier: GPL-2.0-or-later
+ *
+ * Data of every server-to-client message (section 7) and its payload encoder. No AzerothCore
+ * dependency: these are plain structs your systems fill in, and Encode*() turns them into payloads.
+ *
+ * Conventions:
+ *  - Fields are in the order of the document.
+ *  - An unset Opt<> field, an empty string or an empty list is sent as an empty field: "missing",
+ *    the client shows its default (or leaves the line out).
+ *  - Texts are cleaned (valid UTF-8, no NUL) and cut to the length the client keeps.
+ *  - Revisioned messages take their `rev` from the module; you never set it.
+ */
+
+#ifndef BLEAKHOLD_MESSAGES_H
+#define BLEAKHOLD_MESSAGES_H
+
+#include "BleakholdIntent.h"
+
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace Bleakhold
+{
+    template <typename T>
+    using Opt = std::optional<T>;
+
+    // ---------------------------------------------------------------------------------------------
+    // Shared enums
+    // ---------------------------------------------------------------------------------------------
+    // H honor: Bleakhold Royale results (ROYE, section 17) only
+    enum class RewardKind : char { MythicCoins = 'C', Shards = 'S', Item = 'I', Copper = 'G', Text = 'T', Honor = 'H' };
+    enum class Currency : char { Copper = 'G', MythicCoins = 'C' };
+    enum class TaskKind : char { Daily = 'D', Weekly = 'W' };
+    enum class TaskState : uint8_t { Open = 0, Claimable = 1, Claimed = 2 };
+    enum class ToastKind : char { Task = 'T', Queue = 'Q', Keystone = 'K', Record = 'R', Season = 'S', Info = 'I' };
+    enum class KeyModeId : uint8_t { Normal = 0, Heroic = 1, Mythic = 2 };
+    enum class QueueStateId : uint8_t { NotQueued = 0, Queued = 1, Proposal = 2, InRun = 3 };
+    enum class ProposalAnswer : uint8_t { Pending = 0, Accepted = 1, Declined = 2 };
+    enum class KeyRunStateId : uint8_t { Countdown = 0, Running = 1, FinishedInTime = 2, FinishedOverTime = 3, Abandoned = 4 };
+    enum class KeyRunResultId : uint8_t { OverTime = 0, InTime = 1, Abandoned = 2 };
+    enum class RiftStateId : uint8_t { NoRun = 0, Running = 1, Over = 2 };
+    enum class BountyState : uint8_t { None = 0, Open = 1, Claimable = 2, Claimed = 3 };
+    enum class SeasonStateId : uint8_t { Past = 0, Current = 1, Upcoming = 2 };
+
+    // HELLO feature bits.
+    enum FeatureBits : uint32_t
+    {
+        FeatureRiftScoring = 1,
+        FeatureShards = 2,
+        FeatureServerPullTimer = 4,   // the server sends the DBM pull timer itself (section 9)
+        FeatureSeason = 8,
+        FeatureLeaderboards = 16,
+        FeatureCollections = 32,
+        FeatureEmoji = 64,            // emoji bubbles (EMOJI, section 13)
+        FeatureDance = 128,           // Bleakhold dances (DANCE, section 14)
+        FeatureCases = 256,           // cases (CASEOPEN, section 15)
+        FeatureCamp = 512,            // camping: campfire, camp objects, warmth, food XP, repair at a camp anvil (section 16)
+        FeatureGlide = 1024,          // the High Elf glide (GLIDE, section 16)
+        FeatureFieldRepair = 2048,    // blacksmiths repair anywhere (REPAIR, section 16)
+        FeatureRoyale = 4096,         // Bleakhold Royale is live (section 17); set at runtime with Ui::SetFeature
+        FeatureBgAnnouncer = 8192,    // the battleground kill announcer is live (BGANN, section 18); Ui::SetFeature
+        FeatureWarMode = 16384,       // War Mode is live (WARMODE, WMST, WANTED, section 19); Ui::SetFeature
+        FeatureWorldPvp = 32768,      // World PvP objectives are live (WPZ, WPCAP, WPMAP, section 19); Ui::SetFeature
+        FeatureArena = 65536,         // arena seasons and the 1v1 ladder are live (ARENA, section 20); Ui::SetFeature
+        FeatureCafe = 131072,         // the cafe is live (section 21); Ui::SetFeature, sent per player (GmOnly)
+    };
+
+    // One reward line of MPE / RIFTE.
+    struct Reward
+    {
+        RewardKind kind = RewardKind::Text;
+        Opt<uint32_t> amount;
+        Opt<uint32_t> itemId;
+        std::string text;            // overrides the generated reward text when not empty
+    };
+
+    // ---------------------------------------------------------------------------------------------
+    // HELLO, PONG, ERR, TOAST
+    // ---------------------------------------------------------------------------------------------
+    struct HelloReply
+    {
+        uint32_t proto = 1;
+        uint32_t minProto = 1;
+        uint32_t serverEpoch = 0;
+        int32_t utcOffsetMin = 0;
+        uint32_t dataVer = 0;
+        uint32_t featureBits = 0;
+        Opt<uint32_t> seasonId;
+        Opt<uint32_t> dailyResetEpoch;
+        Opt<uint32_t> weeklyResetEpoch;
+        std::string realmName;
+        std::string siteUrl;
+    };
+
+    struct Pong
+    {
+        uint32_t nonce = 0;
+        uint32_t serverEpoch = 0;
+    };
+
+    struct ErrorReply
+    {
+        IntentType op = IntentType::Count;  // the refused op
+        uint32_t seq = 0;                   // its client SEQ
+        std::string code;                   // machine code, e.g. "not_claimable"
+        std::string text;                   // sentence for the player
+    };
+
+    struct Toast
+    {
+        ToastKind kind = ToastKind::Info;
+        std::string title;
+        std::string subtitle;
+        std::string openTarget;   // tasks, dungeons, keys, rift, collections, season, leaderboards, royale, arena, cafe
+                                  // or empty
+    };
+
+    // ---------------------------------------------------------------------------------------------
+    // DEF: definitions (names and texts). The module loads them from the world database; your code can
+    // add to them (Ui::OnDefinitionsLoaded).
+    // ---------------------------------------------------------------------------------------------
+    struct AffixDef { uint32_t id = 0; std::string name, text; };
+    struct EraDef { uint32_t id = 0; std::string name, text; Opt<uint32_t> legacyTier; };
+    struct TaskTemplateDef { uint32_t id = 0; std::string title, text; };
+    struct WeeklyBonusDef { uint32_t id = 0; std::string title, text; };
+    struct ChapterDef { uint32_t id = 0; std::string name, text; };
+    struct DungeonDef
+    {
+        uint32_t id = 0;                     // map id
+        std::string name;
+        Opt<uint32_t> chapter, lvlMin, lvlMax;
+        std::vector<std::string> bosses;     // kill order (bit i-1 of MP bossBits is boss i)
+        Opt<uint32_t> timeLimitSec;          // keystone timer
+    };
+    struct LegacyTierDef
+    {
+        uint32_t id = 0;
+        std::string label, raids;
+        Opt<uint32_t> eraId;
+        std::vector<uint32_t> sources;       // dungeon ids
+        Opt<uint32_t> lvlMin, lvlMax;
+        std::string echoBoss;
+        Opt<uint32_t> pieceTotal;
+    };
+    struct SeasonDef { uint32_t id = 0; std::string name, text; SeasonStateId state = SeasonStateId::Upcoming; };
+    struct RankDef { uint32_t id = 0; std::string name; };
+    struct SeasonRewardDef { uint32_t id = 0; std::string name, requirementText; };
+    struct MythicLevelDef { uint32_t level = 0; std::string text; };
+    struct ExtraClassDef { uint32_t id = 0; std::string name, token, colorHex, shortLabel; };
+    struct RiftBossDef { uint32_t id = 0; std::string name; };
+    // V arena tier (section 20): 1 Combatant .. 6 Rank One, 7 Class Champion
+    struct ArenaTierDef { uint32_t id = 0; std::string name, colorHex, text; };
+    // Q arena reward (section 20). kind: ArenaRewardKind; entry: the achievement (T), the item (M, I), the look pack
+    // (X), else 0; count: the amount (C Shards, H honor, A arena points, W war effort), else 1
+    struct ArenaRewardDef
+    {
+        uint32_t id = 0;
+        uint32_t seasonId = 0;               // 0: every arena season
+        uint32_t bracket = 0;                // 1, 2, 3 or 5
+        uint32_t tierId = 0;                 // DEF V
+        char kind = 'C';
+        uint32_t entry = 0;
+        uint32_t count = 1;
+        std::string text;
+    };
+
+    // The cafe (section 21). H a cafe, G a barista action, F a recipe, U a barista level.
+    struct CafeDef
+    {
+        uint32_t id = 0;
+        std::string name;
+        std::string cityKey;                 // sw, org
+        char team = 'A';                     // A Alliance, H Horde
+        uint32_t zoneId = 0, mapId = 0;
+        std::string ownerName, tagline;
+        std::string colorHex;                // the faction trim, RRGGBB
+    };
+    struct CafeActionDef
+    {
+        uint32_t id = 0;
+        char station = 'V';                  // G E K C B S V
+        uint32_t key = 1;                    // the barista bar slot at that station, 1..8
+        char kind = 'T';                     // T tap, H timed (hold and release)
+        uint32_t durMs = 0;
+        Opt<uint32_t> goldLoPermille, goldHiPermille;   // timed actions only
+        std::string name;
+        std::string hordeName;               // empty: the same at the Horde cafe
+        uint32_t spellId = 0;
+    };
+    struct CafeRecipeDef
+    {
+        uint32_t id = 0;                     // cafeId * 100 + archetype
+        uint32_t cafeId = 0;
+        uint32_t archetype = 0;              // 1..19: C1-C7 1-7, T1-T6 8-13, M1-M6 14-19
+        char family = 'C';                   // C coffee, T tea, M milkshake
+        uint32_t tier = 1, unlockLevel = 1, price80Copper = 0, buffMin = 0;
+        std::vector<uint32_t> steps;         // action ids, at most MaxCafeSteps
+        std::string name, text;
+    };
+    struct CafeLevelDef { uint32_t level = 0, totalXp = 0; std::string text; };
+
+    struct Definitions
+    {
+        std::vector<AffixDef> affixes;              // A
+        std::vector<EraDef> eras;                   // E
+        std::vector<TaskTemplateDef> taskTemplates; // T
+        std::vector<WeeklyBonusDef> weeklyBonuses;  // B
+        std::vector<ChapterDef> chapters;           // C
+        std::vector<DungeonDef> dungeons;           // D
+        std::vector<LegacyTierDef> legacyTiers;     // L
+        std::vector<SeasonDef> seasons;             // S
+        std::vector<RankDef> ranks;                 // K
+        std::vector<SeasonRewardDef> seasonRewards; // W
+        std::vector<MythicLevelDef> mythicLevels;   // M
+        std::vector<ExtraClassDef> extraClasses;    // X
+        std::vector<RiftBossDef> riftBosses;        // R
+        std::vector<ArenaTierDef> arenaTiers;       // V (section 20)
+        std::vector<ArenaRewardDef> arenaRewards;   // Q (section 20)
+        std::vector<CafeDef> cafes;                 // H (section 21)
+        std::vector<CafeActionDef> cafeActions;     // G
+        std::vector<CafeRecipeDef> cafeRecipes;     // F
+        std::vector<CafeLevelDef> cafeLevels;       // U
+    };
+
+    // ---------------------------------------------------------------------------------------------
+    // Revisioned snapshots
+    // ---------------------------------------------------------------------------------------------
+    struct WeekState
+    {
+        Opt<uint32_t> keysTimed, raidEchoes, riftBestFloor, mythicCoins, mythicCoinsCap, shards;
+    };
+
+    struct EraState
+    {
+        Opt<uint32_t> eraId, nextEraId;
+        std::vector<uint32_t> affixIds;
+        Opt<uint32_t> weeklyBonusId;
+        Opt<bool> weeklyBonusDone;
+    };
+
+    struct Task
+    {
+        uint32_t uid = 0;                    // your id; TCLAIM / TREROLL carry it back
+        TaskKind kind = TaskKind::Daily;
+        Opt<uint32_t> templateId;            // DEF T
+        uint32_t have = 0;
+        uint32_t need = 1;
+        RewardKind rewardKind = RewardKind::Text;
+        Opt<uint32_t> rewardAmount;
+        Opt<uint32_t> rewardItemId;
+        TaskState state = TaskState::Open;
+        std::string title, text, rewardText; // override the template / generated text when not empty
+    };
+
+    struct TaskList
+    {
+        Opt<uint32_t> freeRerolls;
+        Opt<uint32_t> rerollCost;
+        Currency rerollCurrency = Currency::Copper;
+        std::vector<Task> tasks;
+    };
+
+    struct KeyState
+    {
+        uint32_t dungeonId = 0;              // 0 = no keystone
+        Opt<uint32_t> level;
+        std::vector<uint32_t> affixIds;
+        Opt<uint32_t> mode;                  // KeyModeId
+        Opt<uint32_t> weeklyBestLevel, weeklyBestDungeonId, cachesReady, cachesBanked, keystoneItemId, maxLevel, eraId;
+        Opt<bool> depleted;
+    };
+
+    struct BoardDungeon
+    {
+        uint32_t dungeonId = 0;
+        Opt<uint32_t> chapter, lvlMin, lvlMax;
+        Opt<uint32_t> tierBits;              // 1 Normal, 2 Veteran, 4 Elite, 8 Nightmare
+        Opt<uint32_t> bestScore, bestTier, recordScore;
+        std::string recordName;
+        Opt<bool> locked;
+    };
+
+    struct BoardState
+    {
+        Opt<uint32_t> shards, bountyId, bountyDungeonId;
+        BountyState bountyState = BountyState::None;
+        std::string bountyRewardText;
+        Opt<bool> firstRunBonus;
+        std::vector<BoardDungeon> dungeons;
+    };
+
+    struct QueueMember
+    {
+        std::string name;
+        Opt<uint32_t> classId;
+        Opt<uint32_t> role;                  // RoleMask: 1, 2 or 4
+        ProposalAnswer accepted = ProposalAnswer::Pending;
+        Opt<uint32_t> level;
+    };
+
+    struct QueueState
+    {
+        QueueStateId state = QueueStateId::NotQueued;
+        QueueKind kind = QueueKind::Dungeon;
+        Opt<uint32_t> activityId, tier, size, queuedSec, estWaitSec, proposalId, timeoutSec, bandMin, bandMax;
+        // kind B (Bleakhold Royale, section 17) only, appended after bandMax: players in the queue, the players a
+        // match needs and takes, how many accepted the open ready check and how many it went to, matches running
+        Opt<uint32_t> queued, minPlayers, maxPlayers, accepted, proposalSize, matchesRunning;
+        std::vector<QueueMember> members;    // for proposals (never for Royale)
+    };
+
+    struct CollectionState
+    {
+        Opt<uint32_t> transmogOwned, transmogTotal, laterAgesOwned, laterAgesTotal, legacySetsOwned, legacySetsTotal;
+        std::vector<uint32_t> tierHave, tierTotal;
+    };
+
+    struct LegacyIndexEntry
+    {
+        uint32_t itemId = 0;
+        Opt<uint32_t> tier, setId;
+        Opt<bool> collected;
+    };
+
+    struct LegacyIndex
+    {
+        std::vector<LegacyIndexEntry> items;   // the client reads at most 499 (500 records per message)
+    };
+
+    struct SeasonPart { std::string name; Opt<uint32_t> permille; };
+    struct SeasonRewardState { uint32_t rewardId = 0; Opt<bool> earned; std::string stateText; };
+
+    struct SeasonState
+    {
+        Opt<uint32_t> seasonId, warEffortPermille, contributors, points, rankId, nextRankId, pointsToNextRank;
+        std::string warEffortTitle, warEffortText;
+        Opt<uint32_t> spareTokens;
+        std::vector<SeasonPart> parts;               // up to three are shown
+        std::vector<SeasonRewardState> rewards;
+    };
+
+    // ---------------------------------------------------------------------------------------------
+    // Unrevisioned states and events
+    // ---------------------------------------------------------------------------------------------
+    struct KeyRunStart   // MPS
+    {
+        uint32_t runId = 0;
+        uint32_t dungeonId = 0;
+        Opt<uint32_t> level;
+        std::vector<uint32_t> affixIds;
+        Opt<uint32_t> eraId;
+        Opt<uint32_t> countdownMs;
+        Opt<uint32_t> timeLimitSec;
+    };
+
+    struct KeyRunState   // MP
+    {
+        uint32_t runId = 0;
+        uint32_t elapsedMs = 0;
+        Opt<uint32_t> timeLimitSec;
+        uint32_t deaths = 0;
+        uint32_t deathPenaltySec = 0;
+        uint32_t forcesCur = 0;
+        uint32_t forcesMax = 0;
+        uint32_t bossBits = 0;
+        std::vector<uint32_t> bossKillSec;   // index i-1 = boss i
+        std::vector<uint32_t> chestSec;      // optional timer ticks
+        KeyRunStateId state = KeyRunStateId::Countdown;
+    };
+
+    struct KeyRunEnd     // MPE
+    {
+        uint32_t runId = 0;
+        KeyRunResultId result = KeyRunResultId::OverTime;
+        Opt<uint32_t> timeMs;
+        Opt<int32_t> keyDelta;
+        Opt<uint32_t> newDungeonId, newLevel, score;
+        std::vector<Reward> rewards;
+    };
+
+    struct RiftState     // RIFT
+    {
+        Opt<uint32_t> runId;
+        RiftStateId state = RiftStateId::NoRun;
+        Opt<uint32_t> floor, bossId;
+        std::string bossName;
+        Opt<uint32_t> elapsedMs, bestFloor, score, rank, deaths, groupSize;
+    };
+
+    struct RiftEnd       // RIFTE
+    {
+        Opt<uint32_t> runId, floorReached, timeMs, score;
+        Opt<bool> newBest;
+        Opt<uint32_t> rank;
+        std::vector<Reward> rewards;
+    };
+
+    struct LegacySet     // SET
+    {
+        uint32_t tier = 0;
+        Opt<uint32_t> setId;
+        uint32_t classId = 0;
+        std::string name;
+        Opt<uint32_t> collectedBits;         // bit i-1: look of item i collected
+        Opt<bool> outfitUnlocked;
+        std::vector<uint32_t> itemIds;
+        std::vector<uint32_t> sourceDungeonIds;
+        Opt<uint32_t> lvlMin, lvlMax;
+        std::string echoBoss, note;
+    };
+
+    struct LeaderboardMember { std::string name; Opt<uint32_t> classId; };
+
+    struct LeaderboardRow
+    {
+        uint32_t rank = 0;
+        Opt<uint32_t> dungeonId;             // A: the bracket; C: the cafe
+        Opt<int64_t> value;                  // K: key level, R: floor, E: empty, A: rating, C: points
+        Opt<int64_t> timeSec;                // K: time left (negative = over time), R: run time, E: kill time,
+                                             // A: empty, C: Perfect permille
+        Opt<uint32_t> dateEpoch;             // A: the team's last game; C: the barista's last drink
+        std::vector<LeaderboardMember> members;
+        std::string label;                   // E: boss name, A: the team's name, C: "142 drinks"
+        // board A only (section 20), after label: season wins and games, the projected (or final) tier (DEF V),
+        // flags (ArenaLadderFlags)
+        Opt<uint32_t> seasonWins, seasonGames, tierId, flags;
+    };
+
+    struct Leaderboard   // LB
+    {
+        Board board = Board::Keys;
+        Opt<uint32_t> seasonId, dungeonId, classId;
+        uint32_t page = 1;
+        uint32_t pages = 1;
+        std::vector<LeaderboardRow> rows;
+    };
+
+    struct LeaderboardMe // LBME
+    {
+        Board board = Board::Keys;
+        Opt<uint32_t> rank, topPercent;
+        Opt<int64_t> value;                  // A: rating; C: points
+        Opt<uint32_t> dungeonId;             // A: the bracket; C: the cafe
+        Opt<int64_t> timeSec;                // A: empty; C: Perfect permille
+        Opt<uint32_t> barPermille;           // A: progress toward the next tier's effective cutoff; C: points / #1's
+        std::string label;                   // A: the projected tier's name; C: "96 drinks"
+        // board A only (section 20), after label: the rank in permille of the ladder (for "top 0.4%"), the projected
+        // tier (DEF V)
+        Opt<uint32_t> topPermille, tierId;
+    };
+
+    struct ServerFirst { std::string kindKey, text, who; Opt<uint32_t> dateEpoch; };
+    struct FirstsList { std::vector<ServerFirst> entries; };  // newest first
+
+    // CASES, CASE, UNBOX (section 15)
+    inline constexpr std::size_t MaxCases = 200;
+    inline constexpr std::size_t MaxCaseRewards = 60;
+    struct CaseList { std::vector<uint32_t> caseItemIds; };
+    struct CaseReward
+    {
+        uint32_t itemId = 0;
+        uint32_t count = 1;
+        uint32_t chance = 0;                 // in 1/10000
+        uint8_t tier = 0;                    // card colour, 0 poor .. 6 artifact
+    };
+    struct CaseInfo
+    {
+        uint32_t caseItemId = 0;
+        std::string title, text;
+        uint32_t keyItemId = 0;              // 0: no key
+        uint32_t keyCount = 0;
+        std::vector<CaseReward> rewards;     // display order
+    };
+    struct Unbox { uint32_t caseItemId = 0, rewardIndex = 0, itemId = 0, count = 1, nonce = 0; };   // rewardIndex from 1
+
+    // CAMPST (section 16): the player's camping state. Timers are seconds left; the client counts them down.
+    enum class CampStateId : char { None = 'N', Resting = 'R', Camping = 'C' };
+    inline constexpr std::size_t MaxCampObjects = 8;   // list items sent (a fire holds at most 3)
+    inline constexpr std::size_t MaxCampPlaces = 16;
+    struct CampObjectInfo { uint32_t skill = 0; uint8_t tier = 1; bool mine = false; };   // tier 1..3
+    struct CampPlace { uint32_t skill = 0; uint8_t tier = 1; };
+    struct CampState
+    {
+        CampStateId state = CampStateId::None;   // N not at a fire, R resting there (settling), C camping (settled)
+        uint32_t settleSec = 0;                  // until settled; sent only with R
+        uint32_t fireSec = 0;                    // until the fire goes out (0: none, or a fire that never does)
+        bool mine = false;                       // the fire is the player's own
+        uint32_t cooldownSec = 0;                // until the player may make camp again
+        uint32_t warmthSec = 0;                  // Campfire Warmth left
+        uint32_t xpPct = 0;                      // the XP bonus now (warmth + Well Fed)
+        std::vector<CampObjectInfo> objects;     // at this fire
+        std::vector<CampPlace> place;            // what the player may place here now
+        Opt<uint32_t> glideSec;                  // glide cooldown; empty: the player cannot glide
+        bool repair = false;                     // REPAIR is allowed right now
+        bool fed = false;                        // a Well Fed buff (the food XP bonus) is active
+        Opt<uint32_t> glidingSec;                // the glide (Walk on Air) running now: seconds left; empty: none
+    };
+
+    // ---------------------------------------------------------------------------------------------
+    // Bleakhold Royale (section 17): ROYS ROYM ROYO ROYK ROYV ROYE, all unrevisioned. Positions are integer world
+    // yards; times (phaseMsLeft, shrinkStartMs, shrinkEndMs, msLeft) count from the moment the message arrives.
+    // ---------------------------------------------------------------------------------------------
+    enum class RoyalePhase : uint8_t
+    {
+        Arriving = 0, Countdown = 1, Drop = 2, Fight = 3, Overtime = 4, Victory = 5, Ended = 6, Cancelled = 7
+    };
+    enum class RoyaleMe : uint8_t { Lobby = 0, Dropping = 1, Alive = 2, Spectating = 3, Left = 4, Winner = 5 };
+    enum class RoyalePoiKind : char { Landmark = 'L', Crossing = 'C', Lobby = 'Y' };
+    // ROYO kind: Shadow Sight orb, buff orb, supply drop; the storm beast Thundermaw (subtype = its health in
+    // percent; Incoming until it wakes, Ready while awake, Hidden once slain or fled) and the hoard it leaves (Ready,
+    // Opened; Hidden once it is gone)
+    enum class RoyaleObjectKind : char { ShadowSight = 'S', Buff = 'B', Supply = 'D', Boss = 'X', Hoard = 'H' };
+    enum class RoyaleBuff : uint8_t { None = 0, Speed = 1, Restoration = 2, Berserk = 3 };   // ROYO subtype of a B
+    inline constexpr uint32_t MaxRoyaleBossHealthPct = 100;   // ROYO subtype of an X: EncodeRoyaleObjects clamps it
+    enum class RoyaleObjectState : uint8_t { Hidden = 0, Ready = 1, Taken = 2, Incoming = 3, Opened = 4 };
+    // ROYK cause: killed by a player, the storm (killer filled when credited), a fall or the environment, left
+    // the match, eliminated for being AFK, the storm beast (the credited player, else the beast itself: killerName
+    // "Thundermaw", killerClassId 0, no killerKills)
+    enum class RoyaleCause : char { Player = 'P', Storm = 'S', Fall = 'F', Left = 'L', Afk = 'A', Boss = 'B' };
+    // ROYK announce: superseded by BGANN (section 18). Kept so older callers still compile; EncodeRoyaleKill ignores it
+    // and always leaves the field empty, and the addon ignores the field, so no line plays twice.
+    enum class RoyaleAnnounce : char
+    {
+        None = 0, FirstBlood = 'F', DoubleKill = 'D', TripleKill = 'T', MonsterKill = 'M', Rampage = 'R', Godlike = 'G'
+    };
+    // ROYV kind: circle revealed (value = stage), storm moving (stage), supply incoming, landed, opened, players
+    // left (value 10, 5 or 2), winner (value = kills, name); the storm beast: stirs (x, y, msLeft until it wakes,
+    // name = the place, cut at 40 bytes like ROYM's), awake (x, y), slain (x, y, name = who dealt it the most
+    // damage), fled (x, y)
+    enum class RoyaleEventKind : char
+    {
+        Revealed = 'R', StormMoving = 'S', SupplyIncoming = 'D', SupplyLanded = 'L', SupplyOpened = 'O',
+        PlayersLeft = 'N', Winner = 'W', BossIncoming = 'B', BossAwake = 'A', BossSlain = 'K', BossFled = 'F'
+    };
+    // RoyaleObjectKind Boss and Hoard, RoyaleEventKind Boss*, RoyaleCause Boss (the storm beast) exist: a server
+    // module may send them. Clients without them ignore the kinds and show cause B as P.
+#define BLEAKHOLD_UI_ROYALE_BOSS 1
+    inline constexpr std::size_t MaxRoyalePois = 64;      // ROYM records after the header
+    inline constexpr std::size_t MaxRoyaleObjects = 64;   // ROYO records after the header
+    inline constexpr std::size_t RoyaleNameBytes = 48;    // character names (two-word names fit)
+    inline constexpr std::size_t RoyalePlaceBytes = 40;   // names of places (ROYM, ROYV B)
+
+    struct RoyaleState   // ROYS: the match as this player sees it
+    {
+        uint32_t matchId = 0;
+        RoyalePhase phase = RoyalePhase::Arriving;
+        uint32_t phaseMsLeft = 0;            // until the next phase (0: none planned)
+        uint32_t alive = 0;
+        uint32_t total = 0;                  // players who dropped (or are in the lobby before the drop)
+        RoyaleMe me = RoyaleMe::Lobby;
+        uint32_t kills = 0;
+        Opt<uint32_t> placement;             // once eliminated or the winner
+        Opt<int32_t> pinX, pinY;             // the snapped landing pin (empty: none set)
+        uint32_t stage = 0;                  // storm stage, 0 before stage 1
+        int32_t curX = 0, curY = 0;          // the storm circle now
+        uint32_t curR = 0;
+        Opt<int32_t> nextX, nextY;           // the next circle, once revealed
+        Opt<uint32_t> nextR;
+        // shrinkStartMs 0 and shrinkEndMs > 0: cur moves linearly to next over shrinkEndMs; both empty: no shrink
+        Opt<uint32_t> shrinkStartMs, shrinkEndMs;
+        uint32_t dmgPermille = 0;            // storm damage outside the circle now, permille of max health per second
+        std::string watchName;               // spectators: the player they watch
+        Opt<int32_t> myX, myY;               // the player's position (the client's map fallback)
+        Opt<uint32_t> stages;                // the storm's stage count (1..16); stage stages + 1 is overtime
+        // the drop (me Dropping only, else empty): until the parachute opens by itself (0 once it is open), until the
+        // planned touchdown, and the free fall's full length (the server's Drop.FreefallMs)
+        Opt<uint32_t> fallMsLeft, landMsLeft, fallMs;
+    };
+    // RoyaleState::stages (ROYS field 24) exists: a server module may fill it.
+#define BLEAKHOLD_UI_ROYALE_STAGES 1
+    // RoyaleState::fallMsLeft, landMsLeft and fallMs (ROYS fields 25-27) exist: a server module may fill them.
+#define BLEAKHOLD_UI_ROYALE_DROP 1
+
+    struct RoyalePoi
+    {
+        uint32_t id = 0;
+        RoyalePoiKind kind = RoyalePoiKind::Landmark;
+        int32_t x = 0, y = 0;
+        uint32_t r = 0;
+        std::string name;
+    };
+    struct RoyaleMap     // ROYM: the island map (crate spots and final sites are never sent)
+    {
+        uint32_t mapId = 0;
+        int32_t minX = 0, maxX = 0, minY = 0, maxY = 0;   // the map texture's frame
+        int32_t lobbyX = 0, lobbyY = 0;
+        uint32_t lobbyR = 0;
+        uint32_t boundHalf = 0;                            // half size of the playable square around the centre
+        int32_t centerX = 0, centerY = 0;
+        std::vector<RoyalePoi> pois;
+    };
+
+    struct RoyaleObject
+    {
+        uint32_t objId = 0;
+        RoyaleObjectKind kind = RoyaleObjectKind::ShadowSight;
+        uint32_t subtype = 0;                // RoyaleBuff for kind B, health in percent (0-100) for X, else 0
+        int32_t x = 0, y = 0;
+        RoyaleObjectState state = RoyaleObjectState::Hidden;
+        Opt<uint32_t> msLeft;                // Taken: respawn in; Incoming: lands in; Hidden: appears in
+    };
+    struct RoyaleObjects // ROYO: orbs, supply drops, the storm beast and its hoard
+    {
+        uint32_t matchId = 0;
+        bool full = false;                   // true: replaces every object the client knows
+        std::vector<RoyaleObject> objects;
+    };
+
+    struct RoyaleKill    // ROYK: one line of the kill feed
+    {
+        std::string killerName;              // empty: nobody (the storm, a fall, ...)
+        Opt<uint32_t> killerClassId;
+        std::string victimName;
+        uint32_t victimClassId = 0;
+        RoyaleCause cause = RoyaleCause::Player;
+        uint32_t aliveAfter = 0;
+        Opt<uint32_t> killerKills;           // the killer's eliminations in this match, this one included
+        // Superseded by BGANN (section 18): ignored, the field is always sent empty.
+        RoyaleAnnounce announce = RoyaleAnnounce::None;
+    };
+
+    struct RoyaleEvent   // ROYV
+    {
+        RoyaleEventKind kind = RoyaleEventKind::Revealed;
+        uint32_t value = 0;
+        Opt<int32_t> x, y;
+        Opt<uint32_t> msLeft;
+        std::string name;
+    };
+
+    struct RoyaleResult  // ROYE: the player's own result
+    {
+        uint32_t matchId = 0;
+        uint32_t placement = 0;
+        uint32_t total = 0;
+        uint32_t kills = 0;
+        uint32_t damage = 0;
+        uint32_t healing = 0;
+        uint32_t survivedSec = 0;
+        std::string winnerName;              // empty while the match goes on
+        Opt<uint32_t> winnerClassId, winnerKills;
+        bool rewarded = false;               // the player passed the reward rules
+        std::vector<Reward> rewards;         // kinds as for MPE, plus H honor
+    };
+
+    // ---------------------------------------------------------------------------------------------
+    // The battleground kill announcer (section 18): BGANN, unrevisioned, to every player of a battleground (Warsong
+    // Gulch to Isle of Conquest and Bleakhold Royale; never an arena or the open world). The server keeps the streaks
+    // and multi-kills; one kill may carry a multi-kill code and a streak (or first blood) code, and the client plays
+    // the multi-kill first. BLEAKHOLD_UI_BG_ANNOUNCE tells a server module that this API exists.
+    // ---------------------------------------------------------------------------------------------
+#define BLEAKHOLD_UI_BG_ANNOUNCE 1
+    // multi: kills by the same player with at most the server's window (18 s) between consecutive kills
+    enum class BgMultiKill : char { None = 0, Double = 'D', Triple = 'T', Ultra = 'U', Rampage = 'R' };
+    // streak: F the battleground's first credited kill, else the killer's kills since they last died (in Bleakhold
+    // Royale, one life: all of them) S 3, O 4, K 5, N 6, W 7, M 8, G 9, H 10 and every further kill
+    enum class BgStreak : char
+    {
+        None = 0, FirstBlood = 'F', KillingSpree = 'S', Dominating = 'O', MegaKill = 'K', Unstoppable = 'N',
+        WickedSick = 'W', MonsterKill = 'M', Godlike = 'G', HolyShit = 'H'
+    };
+    inline constexpr std::size_t BgNameBytes = 48;        // character names (two-word names fit)
+
+    struct BgAnnounce    // BGANN: one announced kill
+    {
+        std::string killerName;
+        uint32_t killerClassId = 0;
+        std::string victimName;
+        uint32_t victimClassId = 0;
+        BgMultiKill multi = BgMultiKill::None;
+        BgStreak streak = BgStreak::None;
+    };
+    // The codes as written: one of the letters above, else 0 (an empty field).
+    char BgMultiLetter(BgMultiKill multi);
+    char BgStreakLetter(BgStreak streak);
+    // Worth sending: both names clean to something and at least one valid code. Ui::SendBgAnnounce sends nothing
+    // otherwise.
+    bool BgAnnounceSendable(BgAnnounce const& m);
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // Arena seasons and the 1v1 ladder (section 20): ARENA, unrevisioned, the player's view of the arena season; board
+    // A of LB / LBME; DEF V and Q; QUEUE kind A for the 1v1 queue. BLEAKHOLD_UI_ARENA tells a server module that this
+    // API exists (Ui::SendArena, Ui::OnBoardQuery, FeatureArena, Definitions::arenaTiers / arenaRewards).
+    // ---------------------------------------------------------------------------------------------------------------
+#define BLEAKHOLD_UI_ARENA 1
+    // ARENA state: none (no arena season), live, final week, rated closed (locked), final standings (GM review),
+    // rewards delivered (the season is over), upcoming (the next season is scheduled, none is running)
+    enum class ArenaStateId : uint8_t
+    {
+        None = 0, Live = 1, FinalWeek = 2, Locked = 3, FinalStandings = 4, Rewarded = 5, Upcoming = 6
+    };
+    // M verdict: the match counted, the winner's gain was reduced (a repeated pairing), the win did not count
+    enum class ArenaVerdict : uint8_t { Normal = 0, Reduced = 1, NotCounted = 2 };
+    // M reason: R a repeated pairing, I the same network, E no effort (a match given away), S too short
+    enum class ArenaReason : char { None = 0, Repeat = 'R', Network = 'I', Effort = 'E', Short = 'S' };
+    // F grant: the end-of-season rewards are waiting, delivered, held for a game master's review
+    enum class ArenaGrant : uint8_t { Pending = 0, Delivered = 1, Held = 2 };
+    // DEF Q kind
+    enum class ArenaRewardKind : char
+    {
+        Title = 'T', Mount = 'M', Item = 'I', Looks = 'X', Shards = 'C', Honor = 'H', ArenaPoints = 'A',
+        WarEffort = 'W', ServerFirst = 'F'
+    };
+    // B missingMask: what keeps the player from the projected tier's rewards
+    enum ArenaMissingBits : uint32_t
+    {
+        ArenaMissGames = 1,       // too few season games
+        ArenaMissShare = 2,       // played too small a share of the team's games
+        ArenaMissGap = 4,         // personal rating too far below the team's
+        ArenaMissRecent = 8,      // too few games in the last days (Duelist and above)
+        ArenaMissWins = 16,       // too few season wins (Gladiator and Rank One)
+        ArenaMissLevel = 32,      // not at the level cap
+        ArenaMissReview = 64,     // the rewards are held for review
+        ArenaMissClosed = 128,    // the bracket gives no rewards this season (too small a ladder)
+    };
+    // LB board A row flags
+    enum ArenaLadderFlags : uint32_t
+    {
+        ArenaInactive = 1,        // no game for a week
+        ArenaProvisional = 2,     // below the games a team needs for rewards
+        ArenaFinalStandings = 4,  // the final standings of a past season (or of this one, states 4 and 5)
+    };
+    inline constexpr std::size_t MaxArenaSeasons = 24;    // ARENA S records
+    inline constexpr std::size_t MaxArenaCutoffs = 32;    // ARENA T records (4 brackets x 7 tiers)
+    inline constexpr std::size_t MaxArenaMatches = 5;     // ARENA M records
+    inline constexpr std::size_t ArenaNameBytes = 48;     // team and season names
+
+    struct ArenaSeasonInfo        // S: one arena season (the season list of the leaderboards)
+    {
+        uint32_t id = 0;
+        std::string name;
+        SeasonStateId state = SeasonStateId::Upcoming;   // 0 past, 1 current, 2 upcoming
+        Opt<uint32_t> startEpoch, endEpoch;
+    };
+    struct ArenaBracketState      // B: the player in one bracket (1v1 always, the others when they have a team)
+    {
+        uint32_t bracket = 1;
+        bool hasTeam = false;
+        Opt<uint32_t> rating, ladderRank, ladderSize, seasonGames, seasonWins, weekGames, weekWins, personalRating;
+        Opt<uint32_t> recentGames;           // games in the last Eligible.RecentDays days
+        Opt<uint32_t> tierId, nextTierId, ratingToNext;
+        uint32_t missingMask = 0;            // ArenaMissingBits
+        std::string teamName;
+    };
+    struct ArenaCutoff            // T: one tier of one bracket's live cutoffs
+    {
+        uint32_t bracket = 1;
+        uint32_t tierId = 0;
+        uint32_t slots = 0;                  // places of the tier (and the tiers above it)
+        Opt<uint32_t> cutRank;               // the lowest rank inside it now (empty: nobody)
+        Opt<uint32_t> cutRating;             // that team's rating
+        uint32_t floor = 0;                  // the rating the tier needs anyway
+    };
+    struct ArenaLadderInfo        // N: one bracket's ladder
+    {
+        uint32_t bracket = 1;
+        uint32_t eligibleTeams = 0;
+        bool rewardsOpen = true;             // false: too few teams, Combatant only (5v5)
+        bool titlesOpen = true;              // false: too few teams for titles (substitutes instead)
+    };
+    struct ArenaMatch             // M: one of the player's last rated matches
+    {
+        uint32_t bracket = 1;
+        bool won = false;
+        int32_t ratingChange = 0;
+        std::string opponent;                // the other team's name
+        uint32_t endEpoch = 0;
+        ArenaVerdict verdict = ArenaVerdict::Normal;
+        ArenaReason reason = ArenaReason::None;
+    };
+    struct ArenaFinal             // F: the player's final standing in one bracket (states 4 and 5)
+    {
+        uint32_t bracket = 1;
+        uint32_t finalRank = 0;
+        uint32_t finalRating = 0;
+        Opt<uint32_t> finalTierId;
+        ArenaGrant grant = ArenaGrant::Pending;
+    };
+    struct ArenaState             // ARENA
+    {
+        uint32_t seasonId = 0;               // 0: no arena season
+        ArenaStateId state = ArenaStateId::None;
+        Opt<uint32_t> startEpoch, endEpoch, nextStartEpoch;
+        bool ratedOpen = false;              // rated arena games count now
+        Opt<uint32_t> oneTeamCostCopper;     // what a 1v1 team costs (0: free); empty: the 1v1 queue is off
+        std::string seasonName;
+        std::vector<ArenaSeasonInfo> seasons;
+        std::vector<ArenaBracketState> brackets;
+        std::vector<ArenaCutoff> cutoffs;
+        std::vector<ArenaLadderInfo> ladders;
+        std::vector<ArenaMatch> matches;     // newest first, at most MaxArenaMatches
+        std::vector<ArenaFinal> finals;
+    };
+
+    // ERR codes of Bleakhold Royale (section 17) with a default sentence; Ui::Refuse(player, intent, refusal) sends
+    // one. `dead` and `in_combat` are the generic codes. royale_lockout should carry the seconds left: send it with
+    // Ui::Refuse(player, intent, RoyaleErr::Lockout.code, "<your sentence with the seconds>").
+    struct Refusal { char const* code; char const* text; };
+    namespace RoyaleErr
+    {
+        inline constexpr Refusal Off{ "royale_off", "Bleakhold Royale is not open right now." };
+        inline constexpr Refusal Level{ "royale_level", "You must be level 80 to join Bleakhold Royale." };
+        inline constexpr Refusal Grouped{ "royale_grouped", "Bleakhold Royale is solo: leave your group first." };
+        inline constexpr Refusal Busy{ "royale_busy", "You cannot join Bleakhold Royale from where you are now." };
+        inline constexpr Refusal Deserter{ "royale_deserter", "You cannot join while you are a deserter." };
+        inline constexpr Refusal Bags{ "royale_bags", "Make room in your bags first." };
+        inline constexpr Refusal Ip{ "royale_ip", "Too many players from your connection are in Bleakhold Royale." };
+        inline constexpr Refusal Lockout{ "royale_lockout", "You declined a match: you can queue again soon." };
+        inline constexpr Refusal NoProposal{ "no_proposal", "There is no match waiting for your answer." };
+        inline constexpr Refusal Phase{ "royale_phase", "You cannot do that now." };
+        inline constexpr Refusal Nobody{ "royale_nobody", "There is nobody left to watch." };
+        inline constexpr Refusal GlideHere{ "glide_here", "You cannot glide here." };
+    }
+
+    // ERR codes of GLIDE (section 16; glide_here is above, glide_cooldown carries the seconds left).
+    namespace GlideErr
+    {
+        inline constexpr Refusal Off{ "glide_off", "Gliding is turned off on this realm." };
+        inline constexpr Refusal Race{ "glide_race", "Your people cannot glide." };
+        inline constexpr Refusal Mounted{ "glide_mounted",
+            "You cannot glide while mounted, on a vehicle or on a flight path." };
+        inline constexpr Refusal Flying{ "glide_flying", "You are already flying." };
+        inline constexpr Refusal Water{ "glide_water", "You cannot glide in water." };
+        inline constexpr Refusal Rooted{ "glide_rooted", "You cannot glide while rooted, stunned or not in control." };
+        inline constexpr Refusal Ground{ "glide_ground", "You can only glide while falling." };
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // World PvP and War Mode (section 19): WMST WPZ WPCAP WPMAP WANTED WPEV, all unrevisioned. The server decides
+    // everything (who may toggle, every kill verdict, every capture and reward); these are views of its state.
+    // Permille values: control and slider shares are of 1000; u and v are the position on the zone's world map
+    // (0 left / top .. 1000 right / bottom), empty when the zone has no world map of its own. BLEAKHOLD_UI_WORLD_PVP
+    // tells a server module that this API exists.
+    // ---------------------------------------------------------------------------------------------
+#define BLEAKHOLD_UI_WORLD_PVP 1
+    // A faction letter: A Alliance, H Horde, N neutral (objectives only); None is an empty field.
+    enum class WarTeam : char { None = 0, Alliance = 'A', Horde = 'H', Neutral = 'N' };
+    // WMST wantedState and WANTED reason
+    enum class WantedStateId : uint8_t { None = 0, Streak = 1, Bully = 2 };
+    enum class WantedReason : char { Streak = 'S', Bully = 'B' };
+    // WPZ / WPMAP kind of a zone: F Bleak Front (endgame), L Levelling Front, S stock outdoor PvP, W Wintergrasp
+    enum class WarZoneKind : char { None = 0, Front = 'F', Levelling = 'L', Stock = 'S', Wintergrasp = 'W' };
+    // WPZ / WPMAP state of a zone or a Front: 0 dormant, 1 active, 2 ceasefire
+    enum class WarZoneState : uint8_t { Dormant = 0, Active = 1, Ceasefire = 2 };
+    // WPZ O / WPCAP / WPMAP P state of an objective: AzerothCore's ObjectiveStates (OutdoorPvP.h)
+    enum class WarObjectiveState : uint8_t
+    {
+        Neutral = 0, Alliance = 1, Horde = 2, NeutralAllianceChallenge = 3, NeutralHordeChallenge = 4,
+        AllianceHordeChallenge = 5, HordeAllianceChallenge = 6
+    };
+    // WPEV kind
+    enum class WarEventKind : char
+    {
+        Captured = 'C', Neutralised = 'N', UnderAttack = 'A', FrontStart = 'F', FrontEnd = 'E', FrontWarning = 'X',
+        Wanted = 'W', BountyClaimed = 'B', Survived = 'S', Reward = 'R'
+    };
+    // WPEV R why: a counted kill, a capture, a hold tick, a bounty claimed, survived while Wanted, the War Chest
+    enum class WarRewardWhy : char { Kill = 'K', Capture = 'C', Hold = 'H', Bounty = 'B', Survived = 'S', Victory = 'V' };
+    inline constexpr std::size_t WarNameBytes = 48;        // character names (two-word names fit)
+    inline constexpr std::size_t WarPlaceBytes = 40;       // objective and zone names
+    inline constexpr std::size_t MaxWarObjectives = 16;    // WPZ O records
+    inline constexpr std::size_t MaxWarZones = 32;         // WPMAP Z records
+    inline constexpr std::size_t MaxWarPoints = 96;        // WPMAP P records
+    inline constexpr std::size_t MaxWanted = 8;            // WANTED W records
+    inline constexpr std::size_t WarBlockBytes = 24;       // WMST block (a machine code)
+
+    struct WarModeState  // WMST: the player's War Mode
+    {
+        bool on = false;
+        uint32_t cooldownSec = 0;            // until War Mode may be changed again (0: now)
+        std::string block;                   // a server-side reason the toggle is refused now: wm_level, wm_hardcore,
+                                             // wm_wanted, wm_busy, or empty
+        uint32_t minLevel = 0;
+        uint32_t xpPct = 0;                  // the base War Mode bonuses (0 for XP at the level cap)
+        uint32_t honorPct = 0;
+        uint32_t shardPct = 0;
+        uint32_t underdogPct = 0;            // the underdog bonus now and the faction that gets it
+        WarTeam underdogTeam = WarTeam::None;
+        uint32_t wmAlliance = 0;             // War Mode players counted for the underdog bonus (blended)
+        uint32_t wmHorde = 0;
+        uint32_t streak = 0;                 // counted kills since the player's last death
+        WantedStateId wantedState = WantedStateId::None;
+        uint32_t wantedSec = 0;              // hunt time left while Wanted
+        uint32_t bountyHonor = 0;            // the bounty on the player's head
+        uint32_t todayBonusHonor = 0;        // today's War Mode bonus honor and its cap
+        uint32_t bonusHonorCap = 0;
+        uint32_t todayShards = 0;            // today's War Mode Shards and their cap
+        uint32_t shardsCap = 0;
+        uint32_t bestStreak = 0;
+        uint32_t kills = 0;                  // counted kills and War Mode deaths, all time
+        uint32_t deaths = 0;
+    };
+
+    struct WarObjective  // a WPZ O record
+    {
+        uint32_t objId = 0;
+        std::string name;                    // at most WarPlaceBytes
+        Opt<uint32_t> u, v;                  // permille on the zone's world map (empty: no map)
+        WarTeam owner = WarTeam::Neutral;    // A, H or N
+        int32_t slider = 0;                  // -1000 (Horde) .. 1000 (Alliance), permille of the bar
+        WarObjectiveState state = WarObjectiveState::Neutral;
+    };
+    struct WarZone       // WPZ: the zone the player is in
+    {
+        uint32_t zoneId = 0;
+        WarZoneKind kind = WarZoneKind::None;   // None: a zone without objectives (the HUD hides)
+        WarZoneState state = WarZoneState::Dormant;
+        uint32_t secondsLeft = 0;            // until the active phase or the ceasefire ends (Fronts)
+        Opt<uint32_t> controlA, controlH;    // the Front's time-weighted control, permille of the total so far
+        WarTeam dominionTeam = WarTeam::None;   // the player's faction while it holds Dominion here
+        uint32_t dominionStacks = 0;         // outposts the player's faction holds here (0..3)
+        Opt<uint32_t> levelMin, levelMax;    // who may capture here
+        std::vector<WarObjective> objectives;
+    };
+
+    struct WarCapture    // WPCAP: the capture bar of the objective the player stands at (objId 0: left it)
+    {
+        uint32_t objId = 0;
+        int32_t slider = 0;                  // -1000 .. 1000
+        uint32_t neutralPct = 0;             // the neutral band: |slider| below neutralPct * 10 is neutral
+        WarObjectiveState state = WarObjectiveState::Neutral;
+        uint32_t countA = 0, countH = 0;     // eligible capturers inside now
+        uint32_t maxNet = 0;                 // the speed cap (net capturers that still count)
+    };
+
+    struct WarMapZone    // a WPMAP Z record
+    {
+        uint32_t zoneId = 0;
+        WarZoneKind kind = WarZoneKind::Front;
+        uint32_t heldA = 0, heldH = 0, neutral = 0;
+        Opt<uint32_t> levelMin, levelMax;
+        WarZoneState state = WarZoneState::Dormant;
+    };
+    struct WarMapPoint   // a WPMAP P record
+    {
+        uint32_t zoneId = 0;
+        uint32_t objId = 0;
+        WarTeam owner = WarTeam::Neutral;
+        WarObjectiveState state = WarObjectiveState::Neutral;
+    };
+    struct WarMap        // WPMAP: every Front and objective of the realm
+    {
+        uint32_t frontZone = 0;              // the endgame Front now (0: none fits the level cap)
+        WarZoneState frontState = WarZoneState::Dormant;
+        uint32_t secondsLeft = 0;            // until its active phase or ceasefire ends
+        uint32_t nextZone = 0;               // the next endgame Front and when it starts
+        uint32_t nextStartsSec = 0;
+        uint32_t levelZone = 0;              // the Levelling Front now
+        WarZoneState levelState = WarZoneState::Dormant;
+        uint32_t levelSecondsLeft = 0;
+        std::vector<WarMapZone> zones;
+        std::vector<WarMapPoint> points;
+    };
+
+    struct WantedEntry   // a WANTED W record
+    {
+        std::string name;
+        uint32_t classId = 0;
+        WarTeam team = WarTeam::None;
+        uint32_t streak = 0;
+        WantedReason reason = WantedReason::Streak;
+        uint32_t bountyHonor = 0;
+        uint32_t bountyShards = 0;
+        Opt<uint32_t> u, v;                  // permille on the zone's world map
+        uint32_t ageSec = 0;                 // since the player became Wanted
+    };
+    struct WantedList    // WANTED: the Wanted players revealed in the zone (empty list: the last one cleared)
+    {
+        uint32_t zoneId = 0;
+        std::vector<WantedEntry> entries;
+    };
+
+    struct WarEvent      // WPEV: one event; the fields after the kind depend on it (section 19)
+    {
+        WarEventKind kind = WarEventKind::Captured;
+        uint32_t zoneId = 0;                 // C N A F E X
+        uint32_t objId = 0;                  // C N A
+        WarTeam team = WarTeam::None;        // C N A: the faction that did it; E: the winner (None: a draw); W
+        std::string name;                    // C N A: objective; F X: zone; W S: the player; B: the killer
+        std::string victim;                  // B: the Wanted player
+        uint32_t classId = 0;                // W
+        uint32_t seconds = 0;                // F: duration; X: starts in
+        uint32_t controlA = 0, controlH = 0; // E (permille)
+        uint32_t streak = 0;                 // W
+        WantedReason reason = WantedReason::Streak;   // W
+        uint32_t honor = 0, xp = 0, shards = 0;       // B S R (B S: honor and shards only)
+        WarRewardWhy why = WarRewardWhy::Kill;        // R
+        uint32_t drPermille = 1000;          // R: the diminishing-return factor applied
+    };
+
+    // The letters as written (0, an empty field, for None and anything undocumented).
+    char WarTeamLetter(WarTeam team);
+    char WarZoneKindLetter(WarZoneKind kind);
+
+    // ERR codes of War Mode (section 19) with a default sentence; Ui::Refuse(player, intent, refusal) sends one.
+    // wm_cooldown should carry the seconds left: Ui::Refuse(player, intent, WarModeErr::Cooldown.code, "<sentence>").
+    // `dead`, `in_combat` and `busy` are the generic codes.
+    namespace WarModeErr
+    {
+        inline constexpr Refusal Off{ "wm_off", "War Mode is not available on this realm right now." };
+        inline constexpr Refusal Level{ "wm_level", "You are not high enough level for War Mode yet." };
+        inline constexpr Refusal Hardcore{ "wm_hardcore", "Hardcore and Iron Man characters cannot use War Mode." };
+        inline constexpr Refusal Place{ "wm_place", "War Mode can only be changed in an inn or a city." };
+        inline constexpr Refusal Cooldown{ "wm_cooldown", "You changed War Mode recently: wait a little." };
+        inline constexpr Refusal Wanted{ "wm_wanted", "You are Wanted: War Mode stays on until the hunt ends." };
+        inline constexpr Refusal Busy{ "wm_busy", "You cannot change War Mode from where you are now." };
+        inline constexpr Refusal Dead{ "dead", "You cannot do that while dead." };
+        inline constexpr Refusal InCombat{ "in_combat", "You cannot do that while in combat." };
+    }
+
+    // ERR codes of QJOIN A, the 1v1 arena queue (section 20). arena_closed should say when rated games open again:
+    // send it with Ui::Refuse(player, intent, ArenaErr::Closed.code, "<your sentence with the date>").
+    namespace ArenaErr
+    {
+        inline constexpr Refusal Off{ "arena_off", "The 1v1 arena queue is not open right now." };
+        inline constexpr Refusal Level{ "arena_level", "You must be level 80 to queue for 1v1 arena." };
+        inline constexpr Refusal Closed{ "arena_closed", "Rated arena is closed between seasons." };
+        inline constexpr Refusal Busy{ "arena_busy", "You cannot queue for 1v1 arena from where you are now." };
+        inline constexpr Refusal Deserter{ "arena_deserter", "You cannot queue while you are a deserter." };
+        inline constexpr Refusal Talents{ "arena_talents", "Your talents are not allowed in 1v1 arena." };
+        inline constexpr Refusal Team{ "arena_team", "You have no 1v1 arena team, and it could not be made." };
+        inline constexpr Refusal Gold{ "arena_gold", "You cannot pay for a 1v1 arena team." };
+    }
+
+
+    // ---------------------------------------------------------------------------------------------------------------
+    // The cafe (section 21): CAFE CAFST CAFQ CAFT CAFEV CAFRES CAFM CAFO CAFP CAFBF CAFSUM CAFUI CAFAT, all
+    // unrevisioned ("the last one counts"); DEF H G F U; LB / LBME board C. The server decides everything (the station
+    // a barista is at, every timer and grade, prices, money, rewards); these are views of its state. Times in ms and
+    // sec count from the moment the message arrives. BLEAKHOLD_UI_CAFE tells a server module that this API exists
+    // (Ui::SendCafe*, FeatureCafe, Board::Cafe, Definitions::cafes / cafeActions / cafeRecipes / cafeLevels).
+    // ---------------------------------------------------------------------------------------------------------------
+#define BLEAKHOLD_UI_CAFE 1
+    inline constexpr std::size_t MaxCafes = 8;            // CAFE records, CAFP L records (two cafes today)
+    inline constexpr std::size_t MaxCafeQueueRows = 8;    // CAFQ order records (the rest is counted in `more`)
+    inline constexpr std::size_t MaxCafeTickets = 3;      // CAFT records
+    inline constexpr std::size_t MaxCafeSteps = 12;       // steps of a recipe (CAFT steps, DEF F steps)
+    inline constexpr std::size_t MaxCafeRecipes = 40;     // CAFM recipe records
+    inline constexpr std::size_t MaxCafeAtRows = 6;       // CAFAT worker records
+    inline constexpr std::size_t MaxCafeNameBytes = 48;   // character, customer, drink and cafe names
+    inline constexpr std::size_t MaxCafeLineBytes = 160;  // spoken lines and texts
+    inline constexpr std::size_t CafeCodeBytes = 24;      // an ERR code (CAFM reason)
+    inline constexpr uint32_t MaxCafeNearDm = 255;        // CAFST nearDm: decimetres, capped
+
+    // CAFE / CAFM open: feature off, open, paused (danger nearby), not open yet (disabled or not placed), closed for
+    // safety (a pause that lasted too long)
+    enum class CafeOpen : uint8_t { Off = 0, Open = 1, Paused = 2, NotOpen = 3, Closed = 4 };
+    // Morning Rush: none, soon (it starts in rushSec), live (it ends in rushSec)
+    enum class CafeRushState : uint8_t { None = 0, Soon = 1, Live = 2 };
+    // CAFST flags
+    enum CafeStateFlags : uint32_t
+    {
+        CafeFlagTutorial = 1,       // the tutorial drink is pending (a wrong step is "not that one", nothing lost)
+        CafeFlagMemory = 2,         // from-memory mode allowed (cosmetic)
+        CafeFlagTired = 4,          // Tired: rewards reduced
+        CafeFlagOutside = 8,        // outside the shift radius: the shift ends in warnSec
+        CafeFlagStaffDrink = 16,    // CSTAFF possible now
+        CafeFlagFacing = 32,        // at nearStation's spot but not facing it ("Turn to face the Grinder")
+        CafeFlagHidden = 64,        // mounted, shapeshifted, stealthed or invisible: the shift ends in warnSec
+    };
+    // CAFQ / CAFT kind: an NPC, a player, an NPC of a Rush group
+    enum class CafeOrderKind : char { Npc = 'N', Player = 'P', Group = 'G' };
+    // CAFQ state: waiting, taken by a barista, the house is making it
+    enum class CafeQueueState : char { Waiting = 'W', Taken = 'T', House = 'H' };
+    // a step's grade: not done yet, Perfect, Good, Off (taps are recorded as P)
+    enum class CafeGrade : char { None = 'N', Perfect = 'P', Good = 'G', Off = 'O' };
+    // CAFEV event: started, done (with its grade), interrupted (no penalty), wrong step (ruined, back to step 1), wrong
+    // step on the tutorial drink (nothing lost), binned by the player
+    enum class CafeStepEventKind : char
+    {
+        Started = 'S', Done = 'D', Interrupted = 'I', Wrong = 'X', TutorialWrong = 'W', Binned = 'B'
+    };
+    // CAFAT kind of the running step: a tap or a timed step
+    enum class CafeStepKind : char { Tap = 'T', Timed = 'H' };
+    // CAFRES quality: Perfect, Good, Sloppy, Ruined, Left (the customer's patience ran out, or the customer is gone)
+    enum class CafeQuality : char { Perfect = 'P', Good = 'G', Sloppy = 'S', Ruined = 'R', Left = 'L' };
+    // CAFO state: queued, being made by a barista, the house is making it, the house is finishing it after a barista's
+    // failure (CCANCEL allowed), ready at the counter, delivered, cancelled or refunded in full, pickup expired
+    enum class CafeOrderStateId : char
+    {
+        Queued = 'Q', Making = 'M', House = 'H', Finishing = 'F', Ready = 'R', Delivered = 'D', Cancelled = 'X',
+        Expired = 'E'
+    };
+    // CAFSUM reason: ended by the player, combat, AFK, idle, walked away, died / logged out / changed map, mounted or
+    // hidden too long, the cafe closed, the feature was turned off
+    enum class CafeShiftEnd : char
+    {
+        Player = 'E', Combat = 'C', Afk = 'A', Idle = 'I', Walked = 'W', Died = 'D', Mounted = 'M', Closed = 'X',
+        FeatureOff = 'O'
+    };
+    // CAFP rewards bits (the level rewards)
+    enum CafeRewardBits : uint32_t
+    {
+        CafeRewardApprentice = 1, CafeRewardMaster = 2, CafeRewardGolden = 4, CafeRewardTitle = 8, CafeRewardLegend = 16
+    };
+    // CAFUI what
+    inline constexpr std::string_view CafeUiMenu = "menu";
+    inline constexpr std::string_view CafeUiShift = "shift";
+    inline constexpr std::string_view CafeUiBoard = "board";
+    inline constexpr std::string_view CafeUiHelp = "help";
+    bool IsCafeUiTarget(std::string_view what);
+
+    struct CafeListRow       // a CAFE record: one cafe
+    {
+        uint8_t cafeId = 0;
+        CafeOpen open = CafeOpen::Off;
+        uint32_t baristas = 0;               // on shift there now
+        uint32_t queueLen = 0;
+        CafeRushState rushState = CafeRushState::None;
+        uint32_t rushSec = 0;                // to the Rush's start (Soon) or end (Live); not sent without a Rush
+        uint32_t houseEtaSec = 0;            // what a new order would wait for the house now
+    };
+    struct CafeList { std::vector<CafeListRow> rows; };   // CAFE
+
+    struct CafeDay           // CAFST D: today's progress and caps
+    {
+        uint32_t dayXp = 0, dayXpFull = 0, dayXpHalf = 0;              // XP today; the full-rate and half-rate caps
+        uint32_t dayTipsCopper = 0, dayTipsCapCopper = 0;
+        uint32_t dayPoints = 0, dayPointsCap = 0;
+        uint32_t dayDrinks = 0;
+    };
+    struct CafeRush          // CAFST R: the Rush at the barista's cafe (on shift only)
+    {
+        CafeRushState rushState = CafeRushState::None;
+        uint32_t rushSec = 0;
+        uint32_t rushServed = 0, rushGoal = 0, myRushServed = 0;
+    };
+    struct CafeState         // CAFST: the barista
+    {
+        uint8_t cafeId = 0;                  // 0 when not on shift
+        bool onShift = false;
+        uint32_t level = 1, xp = 0, levelXp = 0;      // the barista level and the total XP: always set
+        Opt<uint32_t> nextLevelXp;                    // the total XP of the next level (empty at the top level)
+        // on shift only (sent empty off shift)
+        uint32_t shiftSec = 0, drinks = 0, perfects = 0, streak = 0, tipsCopper = 0, shiftXp = 0;
+        char station = 0;                    // the station letter the barista is at (0: none)
+        char nearStation = 0;                // the nearest station letter (0: none)
+        uint32_t nearDm = 0;                 // its distance in decimetres (at most MaxCafeNearDm; with nearStation)
+        uint32_t maxTickets = 1;             // 1..MaxCafeTickets
+        Opt<uint32_t> tiredSec;              // until Tired (empty: no Tired timer)
+        uint32_t flags = 0;                  // CafeStateFlags (sent empty when 0)
+        Opt<uint32_t> warnSec;               // until a flag 8 or 64 warning ends the shift
+        CafeDay day;
+        std::optional<CafeRush> rush;        // sent on shift only
+    };
+
+    struct CafeQueueRow      // a CAFQ order record
+    {
+        uint32_t orderId = 0;
+        CafeOrderKind kind = CafeOrderKind::Npc;
+        uint32_t recipeId = 0;
+        std::string customer;
+        uint32_t patienceMs = 0, patienceMaxMs = 0;
+        CafeQueueState state = CafeQueueState::Waiting;
+        std::string takenBy;                 // the barista's name; empty while free
+        uint32_t needLevel = 0;              // 0: the receiver can make it, else the barista level it needs
+        Opt<uint32_t> group;                 // the Rush group id
+    };
+    struct CafeQueue         // CAFQ: the queue of one cafe
+    {
+        uint8_t cafeId = 0;
+        uint32_t count = 0;                  // orders in the queue
+        uint32_t cap = 0;
+        uint32_t baristas = 0;
+        // in queue order; Ui::SendCafeQueue puts them in the documented order for the receiver (SortCafeQueueRows) and
+        // the encoder sends the first MaxCafeQueueRows, counting the rest in `more`
+        std::vector<CafeQueueRow> rows;
+    };
+    // The order of CAFQ rows for `receiver` (a barista's name), keeping the queue order inside each group: waiting
+    // player orders, waiting NPC orders, the receiver's own taken orders, everyone else's taken and house orders.
+    void SortCafeQueueRows(std::vector<CafeQueueRow>& rows, std::string_view receiver);
+
+    struct CafeTicketStep { uint32_t actionId = 0; CafeGrade grade = CafeGrade::None; };
+    struct CafeTicket        // a CAFT record: one of the barista's open tickets
+    {
+        uint32_t ticketId = 0, orderId = 0, recipeId = 0;
+        CafeOrderKind kind = CafeOrderKind::Npc;
+        std::string customer;
+        uint32_t patienceMs = 0, patienceMaxMs = 0;
+        uint32_t nextStep = 1;               // from 1
+        bool inHand = false;                 // a step is done: the cup is in the barista's hands
+        std::string orderLine;               // what the customer said (empty for player orders)
+        std::vector<CafeTicketStep> steps;   // every step, at most MaxCafeSteps
+        uint32_t tipHintCopper = 0;
+    };
+    struct CafeTickets { std::vector<CafeTicket> tickets; };   // CAFT; no tickets: the single record "0"
+
+    struct CafeStepEvent     // CAFEV
+    {
+        uint32_t ticketId = 0, stepIndex = 0, actionId = 0;
+        CafeStepEventKind event = CafeStepEventKind::Started;
+        Opt<uint32_t> durMs;                 // S and D
+        Opt<uint32_t> goldLoMs, goldHiMs;    // timed steps, from the start
+        CafeGrade grade = CafeGrade::None;   // D (None is sent empty)
+        uint32_t nextStep = 1;               // the ticket's next step now, from 1
+    };
+
+    struct CafeResult        // CAFRES: a drink result
+    {
+        uint32_t ticketId = 0, recipeId = 0;
+        CafeQuality quality = CafeQuality::Good;
+        uint32_t xp = 0;
+        uint32_t tipCopper = 0;              // the barista's earnings: the NPC tip, or the wage plus the customer's tip
+        uint32_t points = 0, streak = 0;
+        bool levelUp = false;
+        uint32_t level = 1;
+        std::string customer;
+        std::string line;                    // the customer's thanks (the complaint for L)
+        uint32_t xpCapped = 0;               // the XP the daily cap cut from this drink
+    };
+
+    struct CafeMenuRow { uint32_t recipeId = 0, priceCopper = 0; bool byBarista = false, effective = true; };
+    struct CafeMenu          // CAFM: the menu of one cafe for the receiver
+    {
+        uint8_t cafeId = 0;
+        CafeOpen open = CafeOpen::Off;
+        uint32_t baristas = 0, houseEtaSec = 0;
+        uint32_t pendingOrderId = 0;         // the receiver's pending order (0: none)
+        uint32_t ordersToday = 0, ordersCap = 0;
+        bool canOrder = false;
+        std::string reason;                  // an ERR code when canOrder is false (cafe_cap, cafe_paused, ...)
+        std::vector<CafeMenuRow> rows;       // at most MaxCafeRecipes
+    };
+
+    struct CafeOrderState    // CAFO: the receiver's order (orderId 0: none, the single record "0")
+    {
+        uint32_t orderId = 0;
+        uint8_t cafeId = 0;
+        uint32_t recipeId = 0;
+        CafeOrderStateId state = CafeOrderStateId::Queued;
+        Opt<uint32_t> position;              // Q: the place in the queue, from 1
+        std::string barista;                 // M: who is making it
+        // the steps done, 0..stepCount (M, H, F: finished so far; R: stepCount; else 0). Not the next step's index
+        // from 1 of CSTEP, CAFT and CAFEV: CAFT's nextStep for the same ticket is this + 1.
+        uint32_t nextStep = 0, stepCount = 0;
+        Opt<uint32_t> leftSec;               // H, F: about the time left; R: to pick it up
+        uint32_t priceCopper = 0, tipCopper = 0;
+    };
+
+    struct CafeWeek          // CAFP W: the receiver this week
+    {
+        uint32_t weekId = 0;
+        uint8_t cafeId = 0;
+        Opt<uint32_t> rank;                  // empty when not eligible
+        uint32_t points = 0, drinks = 0, perfectPermille = 0, days = 0;
+        bool eligible = false;
+    };
+    struct CafeLastWinner { uint32_t weekId = 0; uint8_t cafeId = 0; std::string winnerName; uint32_t points = 0; };
+    struct CafeProfile       // CAFP: the receiver's barista profile
+    {
+        uint32_t level = 1, xp = 0, levelXp = 0;
+        Opt<uint32_t> nextLevelXp;           // empty at the top level
+        uint32_t drinks = 0, perfects = 0, memoryDrinks = 0, bestStreak = 0;
+        Opt<uint32_t> fastestMs;             // the fastest drink (empty: none yet)
+        uint32_t weeklyWins = 0;
+        uint32_t rewards = 0;                // CafeRewardBits
+        std::optional<CafeWeek> week;
+        std::vector<CafeLastWinner> lastWinners;   // last week's winner of each cafe, at most MaxCafes
+    };
+
+    struct CafeBuffs         // CAFBF: the receiver's cafe buffs (seconds left; empty: not active)
+    {
+        Opt<uint32_t> coffeeSec, teaSec, shakeSec;
+        bool shakeActive = false;            // the shake's speed works right now (resting in a city or inn, ...)
+        bool coffeeCounts = true;            // false at the level cap, with XP off, or with the cafe XP off
+    };
+
+    struct CafeSummary       // CAFSUM: a shift ended
+    {
+        uint8_t cafeId = 0;
+        CafeShiftEnd reason = CafeShiftEnd::Player;
+        uint32_t shiftSec = 0, drinks = 0, perfects = 0, tipsCopper = 0, xp = 0, xpLost = 0, points = 0, bestStreak = 0;
+        bool staffDrink = false;             // CSTAFF possible now
+    };
+
+    struct CafeAtBarRow      // a CAFAT record: one worker's running step
+    {
+        std::string name;
+        uint32_t actionId = 0;
+        uint32_t startedAgoMs = 0, durMs = 0;
+        CafeStepKind kind = CafeStepKind::Tap;
+        uint32_t stepIndex = 1, stepCount = 1;
+    };
+    struct CafeAtBar         // CAFAT: who works at the bar (an empty list: the last step ended)
+    {
+        uint8_t cafeId = 0;
+        std::vector<CafeAtBarRow> rows;      // at most MaxCafeAtRows (count is the rows sent)
+    };
+
+    // ERR codes of the cafe (section 21) with a default sentence. Codes that carry a name or a number get their own
+    // sentence: cafe_station (the station's name), cafe_locked (the level), cafe_level (BleakholdUi.Cafe.MinLevel) and
+    // the daily cap of cafe_order, as in Ui::Refuse(player, intent, CafeErr::Station.code, "Walk to the Espresso Machine
+    // first."). `dead`, `busy` and `failed` are the generic codes.
+    namespace CafeErr
+    {
+        inline constexpr Refusal Off{ "cafe_off", "The caf\xC3\xA9 is closed." };
+        inline constexpr Refusal Closed{ "cafe_closed", "The caf\xC3\xA9 has closed its doors for now." };
+        inline constexpr Refusal Faction{ "cafe_faction", "They don't serve your kind here." };
+        inline constexpr Refusal Where{ "cafe_where", "Go to the caf\xC3\xA9 first." };
+        inline constexpr Refusal Level{ "cafe_level", "You need level 10 to work a shift." };
+        inline constexpr Refusal Combat{ "cafe_combat", "Not while you are in combat." };
+        inline constexpr Refusal Mounted{ "cafe_mounted", "Get down and show yourself first." };
+        inline constexpr Refusal Paused{ "cafe_paused", "Danger nearby: the caf\xC3\xA9 has paused." };
+        inline constexpr Refusal Cap{ "cafe_cap", "The caf\xC3\xA9 is full right now; try again in a minute." };
+        inline constexpr Refusal BarFull{ "cafe_bar_full", "The bar is full right now." };
+        inline constexpr Refusal Afk{ "cafe_afk", "You can't work while away." };
+        inline constexpr Refusal Account{ "cafe_account",
+            "Someone on your account or network is already working a shift." };
+        inline constexpr Refusal Shift{ "cafe_shift", "You are not on shift." };
+        inline constexpr Refusal ShiftOrder{ "cafe_shift", "Finish your shift before ordering." };
+        inline constexpr Refusal Busy{ "cafe_busy", "Finish what you are doing first." };
+        inline constexpr Refusal Station{ "cafe_station", "Walk to the right station first." };
+        inline constexpr Refusal Ticket{ "cafe_ticket", "That ticket has changed." };
+        inline constexpr Refusal Hands{ "cafe_hands", "Finish or bin the drink in your hands first." };
+        inline constexpr Refusal Locked{ "cafe_locked", "You need a higher barista level for that drink." };
+        inline constexpr Refusal Full{ "cafe_full", "You can't hold more tickets." };
+        inline constexpr Refusal Taken{ "cafe_taken", "Someone else took that order." };
+        inline constexpr Refusal Self{ "cafe_self", "You cannot make drinks for your own characters." };
+        inline constexpr Refusal Gold{ "cafe_gold", "You can't afford that." };
+        inline constexpr Refusal Order{ "cafe_order", "You already have an order waiting." };
+        inline constexpr Refusal Staff{ "cafe_staff", "No staff drink for you today." };
+        inline constexpr Refusal Dead{ "dead", "You cannot do that while dead." };
+        inline constexpr Refusal Failed{ "failed", "That did not work; try again." };
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Encoders: payload of each op (without frame header). `rev` is the revision of the topic.
+    // ---------------------------------------------------------------------------------------------
+    std::string EncodeHello(HelloReply const& m);
+    std::string EncodePong(Pong const& m);
+    std::string EncodeError(ErrorReply const& m);
+    std::string EncodeToast(Toast const& m);
+    std::string EncodeWeek(uint32_t rev, WeekState const& m);
+    std::string EncodeEra(uint32_t rev, EraState const& m);
+    std::string EncodeTasks(uint32_t rev, TaskList const& m);
+    std::string EncodeTaskDelta(uint32_t rev, uint32_t uid, uint32_t have, TaskState state);
+    std::string EncodeKey(uint32_t rev, KeyState const& m);
+    std::string EncodeBoard(uint32_t rev, BoardState const& m);
+    std::string EncodeQueue(uint32_t rev, QueueState const& m);
+    std::string EncodeKeyRunStart(KeyRunStart const& m);
+    std::string EncodeKeyRunState(KeyRunState const& m);
+    std::string EncodeKeyRunEnd(KeyRunEnd const& m);
+    std::string EncodeRift(RiftState const& m);
+    std::string EncodeRiftEnd(RiftEnd const& m);
+    std::string EncodeCollections(uint32_t rev, CollectionState const& m);
+    std::string EncodeLegacySet(LegacySet const& m);
+    std::string EncodeLegacyIndex(uint32_t rev, LegacyIndex const& m);
+    std::string EncodeLegacyCollected(uint32_t rev, uint32_t itemId, bool collected);
+    std::string EncodeSeason(uint32_t rev, SeasonState const& m);
+    std::string EncodeLeaderboard(Leaderboard const& m);
+    std::string EncodeLeaderboardMe(LeaderboardMe const& m);
+    std::string EncodeFirsts(FirstsList const& m);
+    std::string EncodeCases(CaseList const& m);
+    std::string EncodeCase(CaseInfo const& m);
+    std::string EncodeUnbox(Unbox const& m);
+    std::string EncodeCampState(CampState const& m);
+    std::string EncodeRoyaleState(RoyaleState const& m);     // ROYS
+    std::string EncodeRoyaleMap(RoyaleMap const& m);         // ROYM
+    std::string EncodeRoyaleObjects(RoyaleObjects const& m); // ROYO
+    std::string EncodeRoyaleKill(RoyaleKill const& m);       // ROYK
+    std::string EncodeRoyaleEvent(RoyaleEvent const& m);     // ROYV
+    std::string EncodeRoyaleResult(RoyaleResult const& m);   // ROYE
+    std::string EncodeBgAnnounce(BgAnnounce const& m);       // BGANN
+    std::string EncodeWarModeState(WarModeState const& m);   // WMST
+    std::string EncodeWarZone(WarZone const& m);             // WPZ
+    std::string EncodeWarCapture(WarCapture const& m);       // WPCAP
+    std::string EncodeWarMap(WarMap const& m);               // WPMAP
+    std::string EncodeWanted(WantedList const& m);           // WANTED
+    std::string EncodeWarEvent(WarEvent const& m);           // WPEV
+    std::string EncodeArena(ArenaState const& m);            // ARENA
+    std::string EncodeCafeList(CafeList const& m);           // CAFE
+    std::string EncodeCafeState(CafeState const& m);         // CAFST
+    std::string EncodeCafeQueue(CafeQueue const& m);         // CAFQ
+    std::string EncodeCafeTickets(CafeTickets const& m);     // CAFT
+    std::string EncodeCafeStep(CafeStepEvent const& m);      // CAFEV
+    std::string EncodeCafeResult(CafeResult const& m);       // CAFRES
+    std::string EncodeCafeMenu(CafeMenu const& m);           // CAFM
+    std::string EncodeCafeOrder(CafeOrderState const& m);    // CAFO
+    std::string EncodeCafeProfile(CafeProfile const& m);     // CAFP
+    std::string EncodeCafeBuffs(CafeBuffs const& m);         // CAFBF
+    std::string EncodeCafeSummary(CafeSummary const& m);     // CAFSUM
+    std::string EncodeCafeOpenUi(std::string_view what, uint8_t cafeId);   // CAFUI (what: IsCafeUiTarget)
+    std::string EncodeCafeAtBar(CafeAtBar const& m);         // CAFAT
+
+    // DEF: one payload per non-empty kind, in a fixed order, followed by "Z,<dataVer>".
+    std::vector<std::string> EncodeDefinitions(Definitions const& d, uint32_t dataVer);
+
+    // A stable 31-bit, never-zero version of a definition set (used when BleakholdUi.DataVersion = 0).
+    uint32_t DefinitionsHash(Definitions const& d);
+}
+
+#endif

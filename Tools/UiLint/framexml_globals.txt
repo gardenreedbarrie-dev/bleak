@@ -1,0 +1,63 @@
+# Globals the Bleakhold addon may read that come from FrameXML (Lua/XML shipped in the game data, not
+# in this repository) or from optional addons. lint.py accepts reads of these names in addition to the
+# client's C functions (extracted from the source by extract_api.py), the Lua base library, the
+# client's compat aliases and the addon's own Bleakhold* globals. mock/wowmock.lua provides each one.
+#
+# FrameXML frames and tables (3.3.5a)
+UIParent
+Minimap
+MinimapCluster
+MinimapBackdrop
+GameTooltip
+ItemRefTooltip
+ShoppingTooltip1
+ShoppingTooltip2
+UIErrorsFrame
+WorldMapFrame
+# the world map's map area (FrameXML WorldMapFrame.xml): War Mode's pins sit on it (tests create it)
+WorldMapButton
+# the world map's own tooltip (FrameXML WorldMapFrame.xml, parent WorldMapFrame): it shows on the full-size map,
+# which hides UIParent and GameTooltip with it; War Mode's pins use it (tests create it)
+WorldMapTooltip
+WatchFrame
+DEFAULT_CHAT_FRAME
+NUM_CHAT_WINDOWS
+UISpecialFrames
+SlashCmdList
+RAID_CLASS_COLORS
+ITEM_QUALITY_COLORS
+# FrameXML functions (3.3.5a)
+ChatFrame_AddMessageEventFilter
+ChatEdit_InsertLink
+ChatFrame_SendTell
+DressUpItemLink
+GetMinimapShape
+ChatEdit_ExtractTellTarget
+ChatEdit_UpdateHeader
+StaticPopupDialogs
+# StaticPopup.lua (3.3.5a): show / hide a dialog of StaticPopupDialogs (the mock has StaticPopup1..4 and
+# M.StaticPopupClick)
+StaticPopup_Show
+StaticPopup_Hide
+SendMailNameEditBox
+TogglePVPFrame
+# the stock Dungeon Finder (LFDFrame.xml/.lua; UIParent.lua's ShowUIPanel): Activities > Dungeons opens it
+LFDParentFrame
+ToggleLFDParentFrame
+ShowUIPanel
+# Optional addons (always checked for nil before use)
+DragonUI
+DragonUI_QuestTrackerFrame
+AddicatUI_QuestTrackerFrame
+DragonUIObjectiveTracker
+DBM
+# Bleakhold Royale's island map and storm edge (FrameXML 3.3.5a): the M key's redirect hides the stock map out of
+# combat (UIParent.lua's HideUIPanel); the covers sit on the world map's detail frame (WorldMapFrame.xml) and on
+# Shift-M's battlefield minimap (Blizzard_BattlefieldMinimap, load-on-demand: always checked for nil); the storm edge
+# and the speed lines hang off WorldFrame (WorldFrame.xml), which Alt-Z does not hide. The mock creates the frames
+# when a test asks (M.LoadWorldFrame, M.LoadWorldMap, M.LoadBattlefieldMinimap)
+HideUIPanel
+WorldMapDetailFrame
+WorldFrame
+BattlefieldMinimap
+BattlefieldMinimap1
