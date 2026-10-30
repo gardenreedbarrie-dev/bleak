@@ -641,3 +641,223 @@ fallbacks) and how `package.py build` ships extra assets.
 - The water depth byte uses 8 steps per yard; the client's depth table units are not confirmed.
 - Nothing here was loaded in a real client: the format follows the decompiled readers and passes AzerothCore's
   extractors.
+
+## Fit check: new map files against the live world
+
+`fitcheck.py` answers one question before a map pack (WoW Forever's `Maps.7z`, say) replaces the look of the
+existing world: **did the ground move?** If it did, the creatures and objects of the server's world database would
+float or sink, and the server's own terrain files (maps, vmaps, mmaps) would no longer match what players see. It
+compares the new terrain with the server's current ground, and judges every spawn.
+
+On the VPS, `deploy/maps/fitcheck.sh` in the bleakserv repository does all of it in one command (it exports the
+spawns from the database and finds the server's maps); see its README section. By hand:
+
+```sh
+python3 -I Tools/MapForge/fitcheck.py --new /root/maps-incoming/Maps.7z \
+  --server /var/lib/docker/volumes/azerothcore-wotlk_ac-client-data/_data \
+  --spawns spawns.tsv --maps azeroth,kalimdor --out /root/fitcheck-report --work /root
+```
+
+- `--new`: a `.7z` archive or a folder with `world/maps/<map>/` somewhere below it (or a map folder itself). A
+  `.7z` is never unpacked whole: the system's `7z` lists it, and only one map's root ADTs and WDT are extracted at a
+  time, with an exact file list, into a temporary folder inside `--work`, in batches (`--batch-mb`, default 1500)
+  that leave `--min-free-mb` (default 2048) free; each batch is deleted before the next. Maps next to each other in
+  the list that fit one batch together (the dungeons) come out in one 7z pass, since each pass over a big solid
+  archive takes minutes; the DBCs it needs from the pack come out in one pass too. It refuses to start when less
+  than `--min-free-mb` is free. Both ADT layouts are read: 3.3.5 single files (`Maps.7z`, MCIN) and split modern
+  files (`Maps-WXL.7z`; only the root `<map>_<x>_<y>.adt` holds heights, so `_tex0`, `_obj0`, `_obj1` and `_lod` are
+  never extracted).
+- `--server`: the server's client-data folder (with `maps/` and `dbc/`) or its `maps/` folder. The map ids come from
+  the `.map` file names (`{map:03}{y:02}{x:02}.map`). `--old-adts FOLDER` uses old ADTs as the current ground instead.
+- `--spawns`: a TSV of `guid, entry, kind (creature or go), map, x, y, z [, name]`; a header line is skipped.
+- Map folder names become ids through Map.dbc: `--map-dbc`, else the server's `dbc/Map.dbc`, else the pack's
+  `DBFilesClient/Map.dbc`. The server's ids win, since the spawns use them. **The pack's Map.dbc decides the
+  folders**: `install-map.sh` stages the pack as the last MPQ, so `map_extractor` (and the client) read its Map.dbc,
+  and for each map id load `World\Maps\<its Directory>\`. So a server map whose id the pack's Map.dbc gives another
+  Directory is compared against that folder of the pack (a NOTE says so; server tiles it does not carry there are
+  lost, since the base client's tiles of that folder are not this map's ground), and a server map id the pack's
+  Map.dbc does not have at all gets no `.map` files: every tile of it is lost (spawns broken, with the reason).
+  Zone names come from AreaTable.dbc the same way (`--area-dbc`). The water's liquid types come from the pack's
+  `LiquidType.dbc` (the one a new extraction reads), else the server's `dbc/LiquidType.dbc` (`--liquid-dbc`).
+- `--maps`: folder names or ids, comma separated, or `all`; default every map of the server the pack carries (and
+  every one its Map.dbc drops). Map folders the server does not know are listed and skipped (they have no spawns);
+  a map asked for by name that the server does not know is **NOT CHECKED** (a typo must never pass as "the same").
+  When only some maps are asked for, the maps of the server the pack also carries are named **NOT ASKED FOR**
+  (summary, `report.json`), and the run cannot exit 0: a partial check never reads as "the pack is safe".
+- `--fine` (1.5), `--broken` (4), `--floor-margin` (3): the thresholds in yards. `--no-png`, `--worst N` (20).
+- `--quiet`: leaves out the long summary at the end (`fitcheck.sh` prints its own). The progress lines stay: one
+  per 7z pass (`Azeroth: extracting batch 2 of 5 (180 tiles, 1490 MB) ...`), one per batch read and one per map
+  (`Azeroth: done, changed; spawns ...`), so a slow run on a big solid archive can be told from a stuck one.
+
+**The new files are an overlay.** `Maps.7z` is a `patch-z.MPQ`: `map_extractor` and the client read every file
+through the MPQ chain, so a tile the pack does not carry keeps the base client's ADT. When the pack has the map's
+WDT, its MAIN flags say which tiles exist: a listed tile without a pack ADT keeps the base one (unchanged, "kept
+from the base client"), a server tile it does not list is lost, and a pack ADT it does not list is never loaded or
+extracted (skipped, with a NOTE). Without a WDT in the pack the base WDT stays, so every server tile without a pack
+ADT is unchanged; pack tiles the server does not have are counted as new ground, with a NOTE that they are used only
+if the base WDT lists them. An unreadable pack WDT counts the server tiles without a pack ADT as lost.
+
+Exit code 0: every map asked for was compared, every spawn is fine and the ground (heights, holes, area ids and
+water) is the same; 1: something moved (heights, holes, area ids, water, a tile lost or new, a tile
+`map_extractor` would refuse) or a spawn is shifted or broken; 2: it could not run (also any crash: a traceback is
+never exit code 1); 3: nothing moved, but not everything was checked: a map asked for is **NOT CHECKED** (not a map
+the server knows, no terrain on either side, nothing of it in the new files, the water of split ADTs), or the pack
+carries maps of the server that were **NOT ASKED FOR**. 1 wins over 3. 130 (Ctrl-C), 143 (SIGTERM), 129 (SIGHUP):
+stopped; it prints one line (`STOPPED (Ctrl-C): nothing was changed; its temporary files are deleted; no report was
+written.`), never a traceback, and its temporary folder is gone.
+
+### How the heights are read
+
+Every tile becomes the grid the world server holds: 129 x 129 outer and 128 x 128 inner heights
+(`GridTerrainData`). A `.map` file is read in every storage form `map_extractor` writes: flat (one height), uint8
+and uint16 (with the base and step of the header) and float, with the flight-bounds block skipped, the area ids and
+the holes. An ADT is turned into that grid the way `map_extractor`'s `ConvertADT` does: the MCNK's base height
+(position z) plus its 145 MCVT values, heights below -500 raised to -500, and a tile flatter than 0.005 yd stored
+flat. So "new ground" is what the server would read after extracting the new files. In detail, for 3.3.5 files:
+
+- First `map_extractor`'s own checks (`adt.cpp`, `prepareLoadedData`), in its order: MVER version 18, an MHDR of 64
+  bytes, the MCIN where `MHDR.offsMCIN` points, an `MCNK` at every MCIN slot (its offsets count from a file whose
+  MCIN is at 84, as `getMCNK` assumes), an `MCVT` of exactly 580 bytes where `offsMCVT` points, an `MCLQ` where
+  `offsMCLQ` points, an `MH2O` where `MHDR.offsMH2O` points and an `MFBO` where `offsMFBO` points when MHDR flag 0x1
+  is set. When one fails, `map_extractor` prints "Error loading" and writes no `.map` file, so the tile is **lost**
+  for the server (old ground only; its spawns are broken, "map_extractor would refuse the new tile"), never read as
+  ground. Files it would crash on (an empty MCIN slot, no MCIN offset, MH2O water of a liquid type LiquidType.dbc
+  lacks) are lost too, with a NOTE that the crash ends the whole extraction. The tests run the real
+  `map_extractor` on the same files when one is built.
+- MCIN slot `i` is chunk row `i / 16`, column `i % 16`; the header's IndexX/IndexY are not read (a mismatch, and a
+  chunk position that does not fit its place, is a NOTE).
+- The MCVT is where `offsMCVT` (0x14) points, and only there (it is never searched for). A chunk without one
+  (offset 0) is flat at its base height, as `ConvertADT` fills every cell with the base height first.
+- The holes are the 16-bit mask at 0x3C. MCNK flag 0x10000 (high-resolution holes) came after 3.3.5: the 3.3.5
+  client and `ConvertADT` ignore it, so it is ignored here too (a converter that copied the flags leaves it set; a
+  NOTE counts those chunks). A converter that also wrote the 64-bit hole mask over 0x14 has broken `offsMCVT`:
+  `map_extractor` refuses such a tile (or, when the mask's low half is 0, reads its chunks as flat), and so does
+  the fit check.
+- A tile flatter than 0.005 yd is stored flat, and its holes are kept (`ConvertADT` writes them for a flat tile
+  too, though the height lookup ignores them), so a flat holed tile that did not change is "the same".
+
+Split roots (`Maps-WXL.7z`) are read the way the Bleakhold client's merge (`ThirdParty/WarcraftXL/adt/AdtMerge.cpp`)
+turns them into 3.3.5 tiles: the n-th MCNK of the file is chunk n (the merge rewrites the header indices from that),
+the MCVT is found among the sub-chunks, and the holes are the low-res mask at 0x3C, because Bleakhold merges with
+`highResHoles` off (`Engine/Source/ModernAssets/ModernAssets.cpp`, `AdtOptions`); `read_adt(...,
+high_res_holes=True)` reads the 64-bit mask instead. A file cut short or damaged is never a traceback: the tile is a
+NOTE ("new tile x,y unreadable: ... cut short or damaged") and the run goes on.
+
+**Water.** The `.map` files hold the water too (the MLIQ section: a liquid entry and flags per chunk, a level per
+cell), so it is compared: the `.map`'s MLIQ as `GridTerrainData::LoadLiquidData` reads it, against what
+`ConvertADT` would write from the new ADT (its MCLQ chunks, then MH2O through LiquidType.dbc's sound bank, then the
+packing: dry cells of the liquid box at -500). Per cell the server's view (`GetLiquidData`: the chunk's entry and
+flags, the cell's level) must match, the level within 0.01 yd. Water that differs makes the map "changed" (new water,
+water gone, another liquid or level; the summary counts each and names the spawns at or in that water), and the
+heatmap marks those chunks with a teal dot. Without any LiquidType.dbc the new MH2O water is compared by liquid id
+and level only. The water of split roots is not read: such a map can at best be "the same" for heights, holes and
+area ids, and its water is **NOT CHECKED** (exit code 3). Spawns are still judged by the ground only.
+
+The height at a point is `GridTerrainData::getHeight`: the same cell, the same choice of the four triangles around
+the inner vertex, the same hole test (a flat tile ignores holes, as the server's does). World to tile: 64 x 64
+tiles of 533.3333 yd per map, the corner at 17066.666, `gx = int(32 - x / 533.3333)` as `Acore::ComputeGridCoord`.
+The tests check this against `map_extractor`'s real output: every height of the extracted `.map` files equals what
+`fitcheck_formats.py` reads from the ADTs they were made from.
+
+### How a spawn is judged
+
+`delta = new ground - old ground` under the spawn. Where the spawn stands is decided from its z against the old
+ground, with `--floor-margin` (3 yd):
+
+- **on the ground** (within 3 yd of it): it moves with the terrain, judged by `|delta|`;
+- **above** (more than 3 yd over it): it stands on a WMO floor, a bridge or a model, or swims or flies. The terrain
+  under it matters only if the new ground comes up through it: judged by `new - z` (a lower ground, or one that
+  stays under its feet, changes nothing for it);
+- **below** (more than 3 yd under it): it is in a cave or a building below ground; judged by `z - new` (it matters
+  only if the new ground drops below it);
+- **no old ground** (a hole or no tile today): judged like "above".
+
+The judged value is **fine** up to 1.5 yd, **shifted** up to 4 yd (looks off, may float or sink in a little),
+**broken** above that. New ground missing where the server has ground today: **broken** when the new files have no
+tile there (the WMOs placed in it go too) or when a new hole opens under a spawn on the ground; **fine** for a spawn
+above or below the terrain (on a WMO floor, a bridge, in a cave): a new hole usually is a new entrance, and the
+spawn stands on the model, which is not compared. Spawns on a tile kept from the base client are fine (nothing
+there changes). **no-ground**: no terrain there in either (WMO-only dungeons, places off the terrain); those are
+not judged.
+
+A ground point has moved when it is off by more than 0.01 yd **and** more than the rounding of the server's `.map`
+file: `map_extractor` stores a tile with less than 2048 yd of relief as uint16 (`int((h - min) * 65535 / relief +
+0.5)`), so a stored height is off by up to half a step, 0.0114 yd at 1500 yd of relief (the steep Hyjal tiles of map
+534 have up to 1519 yd). The limit per tile is `max(0.01, half the old step + half the new step + 0.002)`.
+
+### The report
+
+In `--out`:
+
+- `summary.txt`, in plain words: the "In short" block (a line per map, the totals, `compared:` the maps that were
+  compared and `NOT CHECKED:` the ones that were not, with why); NOTE lines; then for each map the tiles in both,
+  kept from the base client (not in the pack), only on the server (that ground would be gone) and only in the new
+  files; how far the ground moved over the shared tiles (mean, the largest change and where, the share of points
+  that moved more than 1.5 and 4 yd, tiles unchanged); chunks whose holes or area ids changed; the water (cells
+  that gain water, lose it or have another liquid or level, the largest level change and where; tiles whose water
+  was not read); the spawn counts and the spawns at or in water that differs; a **VERDICT**: the ground is the same
+  (heights, holes, area ids and water: the server's files still fit; with split ADTs it says the water was not
+  compared and does not say that), the ground changed (what: heights, tiles lost or new, holes, area ids, water,
+  the pack's Map.dbc dropping the map; the maps, vmaps and mmaps must be extracted again and the broken and shifted
+  spawns need a look), or **NOT CHECKED** (no terrain on either side, a WMO-only map whose buildings are not
+  compared; or no ADT of the map in the new files); a table by zone (the zone of the server's area ids, named from
+  AreaTable.dbc; by tile when there is none) and the worst 20 spawns with their names. Odd things in the new ADTs
+  (chunks without an MCVT, flag 0x10000, header indices that are not the chunk's place) are NOTE lines with a count
+  and some tiles; ADTs `map_extractor` would refuse are one NOTE with the reason per tile. `NOT ASKED FOR:` in the
+  "In short" block names the maps of the server the pack carries that were not asked for.
+- `nonfine_spawns.csv`: every spawn that is not fine (map, class, kind, guid, entry, name, x, y, z, old and new
+  ground, delta, where it stands, the judged value, zone, tile, why), the worst first.
+- `heatmap_<id>_<map>.png`: one block per chunk, north up and west left, coloured by the chunk's largest change
+  (red up, blue down; light under 1.5 yd, mid to 4, strong to 15, dark beyond), grey where nothing changed, dark grey
+  for tiles only the server has, violet for new tiles, grey as well for tiles kept from the base client; broken
+  spawns are yellow squares with a black ring. The PNG is written with the standard library; with PIL installed it
+  gets a legend.
+- `report.json`: the same numbers for scripts, with each map's `state` (`changed`, `same`, `not-checked`) and why,
+  its `water` and `tiles_refused`, `compared`, `not_checked`, `not_asked` and `exit_code`.
+
+Re-extraction: AzerothCore's `map_extractor` reads only the 3.3.5 single-file ADTs from MPQ archives, so the
+server's files would come from `Maps.7z`'s files packed into an MPQ (`Tools/MpqPack`), never from the split
+`Maps-WXL.7z` files.
+
+### Fit check tests
+
+```sh
+python3 -I Tools/MapForge/tests/test_fitcheck.py
+```
+
+ADTs from MapForge's own writer (checked against `validate.py`) and from small writers in the test (3.3.5 and split
+root files, a 3.3.5-style MCNR before the MCVT, high-resolution holes); `.map` files in all four storage forms with
+holes, area maps and flight bounds; a plane that the server's triangles must give back exactly; an ADT, a split ADT
+and a `.map` of the same ground agreeing to 0.01 yd; chunks placed by their MCIN slot (swapped header indices) and
+split chunks by their order; 3.3.5 tiles with flag 0x10000 set on every MCNK (read as without it); split roots'
+holes (low-res as the Bleakhold merge, high-res with the option); a chunk without an MCVT (flat at its base height)
+and a tile without any (flat); cut ADT, WDT, DBC and `.map` files (FormatError, never struct.error); the spawn
+verdicts, with new holes under spawns on the ground, on floors and in caves; whole runs (a hill, a rise and a pit in
+the new ground, a lost tile and a new one, a floor, a cave, a spawn off the terrain) from a folder, from split
+files, against old ADTs; the overlay (a tile the WDT lists without an ADT keeps the base ground, an ADT the WDT does
+not list is skipped, no WDT at all); a uint16 tile with 1500 yd of relief against the same ADT (exit code 0, while
+a 0.05 yd rise is still seen); a new hole under a floor; NOT CHECKED (a typo, a map id the server lacks, a WMO-only
+dungeon, a map the pack has nothing of; exit code 3, also next to a map that is the same); a cut ADT in a run (a
+NOTE, the run goes on) and a crash (exit code 2); a real `.7z` (when `7z` is installed) with a logging wrapper that
+shows only the map's root ADTs and WDT were extracted, in batches, inside the work folder, and nothing left, and the
+progress lines (also with `--quiet`); two small maps in one 7z pass with `--maps all`; SIGTERM while 7z works (exit
+code 143, one line, nothing left) and Ctrl-C (130); the disk refusals; cleanup after an error; the PNG without PIL;
+and the script run with `-I`. Also: every `map_extractor` refusal (an MCVT of 584 bytes, `offsMCVT` at the MCNR, a
+bad `offsMCLQ`, MVER 17, bad MH2O and MFBO offsets, an MCIN slot off its MCNK, an MHDR of 60 bytes; the crashes: an
+empty slot, no MCIN offset, an unknown liquid type; a converter's 64-bit hole mask over 0x14) and a whole run with
+such a tile (lost, spawns broken); MH2O and MCLQ water (the same lake both ways is the same), MLIQ read back, a lake
+one yard higher, gone, moved, turned to magma, split ADTs' water NOT CHECKED; a flat holed tile against its `.map`
+(the same); the pack's Map.dbc giving a map another folder, or dropping it; NOT ASKED FOR and `--maps all`. When real
+files are in the session scratchpad (`FITCHECK_REAL_DIR`), real AzerothCore `.map` files are read (their tile seams
+must agree) and `map_extractor`'s output is compared with the MapForge ADTs it was made from, height by height, area
+by area and water cell by water cell; with a built `map_extractor` there (`FITCHECK_MAP_EXTRACTOR`) the test runs it
+on its own ADTs: the files it refuses must be the ones `read_adt` refuses, and the heights, holes and water it
+writes (MH2O, MCLQ, both, a flat holed tile) must be what `read_adt` reads.
+
+### Not checked
+
+- Buildings and models (vmaps, mmaps): a WMO the pack moved or replaced (a new Deadmines, say) is not seen; spawns
+  on WMO-only maps are "no-ground". Comparing the WDT/ADT MODF placements with the server's vmaps would cover it.
+- The water of split ADTs (`Maps-WXL.7z`): NOT CHECKED. And spawns are judged by the ground only: a swimmer counts
+  as "above"; those at or in water that differs are only listed.
+- The "above" and "below" stances are a rule of thumb from z against the old ground, not a look at the real floor.
