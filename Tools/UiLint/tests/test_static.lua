@@ -6,6 +6,54 @@ local function fileExistsCI(path)
     return host_readfile(path) ~= nil
 end
 
+-- Stock 3.3.5a art the addon may use (the WoW look: dialog and tooltip frames, red panel buttons, the minimap ring,
+-- bars, LFG art, tabs, icons, ...). It is in every client's MPQs and never in this repository, so the path cannot be
+-- checked against a file here: only these folders of Interface\ are allowed, each named explicitly.
+local STOCK_PREFIXES = {
+    -- a subfolder before its parent (the first prefix that matches decides)
+    "Minimap\\Tracking",
+    "DialogFrame", "Tooltips", "Buttons", "Minimap", "TargetingFrame", "LFGFrame", "QuestFrame", "PaperDollInfoFrame",
+    "AchievementFrame", "Common", "Icons", "ChatFrame", "PVPFrame", "CharacterFrame", "OptionsFrame", "FriendsFrame",
+    "WorldStateFrame", "MoneyFrame", "Glues\\CharacterCreate", "CastingBar", "RaidFrame",
+}
+-- Interface\<prefix>\<file> with a plain file name (no extension, no deeper folder, no '/' or '..'), any case
+local function stockPath(path)
+    local low = path:lower()
+    for _, p in ipairs(STOCK_PREFIXES) do
+        local pre = "interface\\" .. p:lower() .. "\\"
+        if low:sub(1, #pre) == pre then
+            local name = path:sub(#pre + 1)
+            return name:match("^[%w_%-!]+$") ~= nil and not name:find("%.%a%a%a$")
+        end
+    end
+    return false
+end
+-- The dungeon pictures (the owner's Journal art, PLAN decision 4) reach players through the launcher's extra/ layer
+-- as Interface\AddOns\Bleakhold\Art\Journal\bg_<KEY> and btn_<KEY>; they are never in the repository, so the code
+-- probes them and falls back (see the test below).
+local JOURNAL = "^Interface\\AddOns\\Bleakhold\\Art\\Journal\\"
+local function journalPath(path)
+    local name = path:match(JOURNAL .. "(.+)$")
+    return name ~= nil and (name:match("^bg_[A-Z0-9]+$") or name:match("^btn_[A-Z0-9]+$")) ~= nil
+end
+
+test("the stock art allow-list accepts stock files only", function(M, ns)
+    H.ok(stockPath("Interface\\DialogFrame\\UI-DialogBox-Border"), "dialog border")
+    H.ok(stockPath("Interface\\Minimap\\MiniMap-TrackingBorder"), "minimap ring")
+    H.ok(stockPath("Interface\\MINIMAP\\MiniMap-TrackingBorder"), "any case, like the client")
+    H.ok(stockPath("Interface\\Icons\\INV_Misc_QuestionMark"), "icon")
+    H.ok(stockPath("Interface\\Glues\\CharacterCreate\\CharacterCreate-LabelFrame"), "dropdown label frame")
+    H.ok(not stockPath("Interface\\Glues\\LoadingScreens\\LoadScreenDeadmines"), "a folder not on the list")
+    H.ok(not stockPath("Interface\\Buttons\\Sub\\File"), "no deeper folder")
+    H.ok(stockPath("Interface\\Minimap\\Tracking\\None"), "a subfolder on the list (the tracking magnifier)")
+    H.ok(not stockPath("Interface\\Buttons\\UI-Panel-Button-Up.tga"), "no extension")
+    H.ok(not stockPath("Interface\\Buttons\\"), "a file, not the folder")
+    H.ok(not stockPath("Interface\\AddOns\\Other\\Art"), "another addon's art")
+    H.ok(journalPath("Interface\\AddOns\\Bleakhold\\Art\\Journal\\bg_SCHOLOMANCE"), "journal picture")
+    H.ok(journalPath("Interface\\AddOns\\Bleakhold\\Art\\Journal\\btn_UTGARDEPINNACLE"), "journal button")
+    H.ok(not journalPath("Interface\\AddOns\\Bleakhold\\Art\\Journal\\other"), "only bg_ and btn_ files")
+end)
+
 test("glyph names in Widgets.lua match the atlas order in make_art.py", function(M, ns)
     local py = host_readfile(repo .. "/Tools/UiLint/make_art.py")
     local block = py:match("GLYPHS = %[(.-)\n%]")
@@ -48,6 +96,9 @@ test("every texture the addon sets exists, and fonts are stock client fonts", fu
             -- Bleakhold Royale's patch gate: a marker MapForge packs into patch-Q (archives.marker_texture of
             -- bleakhold_royale_v2.json; v1's Marker would let a client with the old map patch queue)
             H.eq(path, "Interface\\Bleakhold\\Royale\\MarkerV2", "the patch marker MapForge packs")
+        elseif path:find(JOURNAL) then
+            -- the Journal art comes from the launcher, not the repo: only its file names are checked
+            H.ok(journalPath(path), "a Journal picture (bg_<KEY> or btn_<KEY>): " .. path)
         elseif sub then
             local file = addonDir .. "/" .. sub:gsub("\\", "/")
             H.ok(fileExistsCI(file .. ".tga") or fileExistsCI(file .. ".blp") or fileExistsCI(file), "texture file for " .. path)
@@ -57,7 +108,7 @@ test("every texture the addon sets exists, and fonts are stock client fonts", fu
             H.ok(fileExistsCI(repo .. "/" .. path:gsub("\\", "/") .. ".blp"), "emoji art for " .. path)
             emojis = emojis + 1
         else
-            H.ok(path:match("^Interface\\Icons\\"), "only stock icons outside the addon: " .. path)
+            H.ok(stockPath(path), "outside the addon only stock art of the allow-list: " .. path)
         end
     end
     H.ok(n >= 6, "addon textures used: " .. n)
@@ -69,6 +120,27 @@ test("every texture the addon sets exists, and fonts are stock client fonts", fu
         H.ok(stock[path] or (own and fileExistsCI(addonDir .. "/" .. own:gsub("\\", "/"))), "stock font: " .. path)
     end
 end)
+
+test("the Journal art is optional: without its files no shown texture is left on a missing Journal picture",
+    function(M, ns)
+    M.env.SlashCmdList.BLEAKHOLD("demo")
+    M.Advance(1)
+    FX.openEverything(M, ns)
+    M.Advance(1)
+    local left = {}
+    for _, o in ipairs(M.objects) do
+        -- the last file this texture asked for is a Journal picture that did not load: the code must fall back (stock
+        -- LFG art, or no art) or hide it, never keep showing what it had before
+        if o.__otype == "Texture" and type(o.__tried) == "string" and o.__tried:find(JOURNAL) and o:IsVisible() then
+            left[#left + 1] = o.__tried
+        end
+    end
+    H.ok(#left == 0, #left .. " textures kept a missing Journal picture: " .. table.concat(left, ", "))
+end, { before = function(M)
+    setmetatable(M.missingTextures, { __index = function(_, path)
+        return (type(path) == "string" and path:find(JOURNAL)) and true or nil
+    end })
+end })
 
 test("every emoji of the catalogue has its art in the repo", function(M, ns)
     H.ok(#ns.Data.emojis >= 1, "emoji catalogue loaded")
@@ -142,7 +214,8 @@ test("globals created at runtime are Bleakhold-prefixed (or required by FrameXML
     H.ok(#fresh > 10, "addon globals present")
     for k, v in pairs(M.env) do
         if type(k) == "string" and type(v) == "table" and v.__otype and v.__name == k then
-            if not (k:find("^Bleakhold") or k:find("^ChatFrame") or ({ UIParent = 1, Minimap = 1, MinimapCluster = 1, MinimapBackdrop = 1, GameTooltip = 1, ItemRefTooltip = 1, ShoppingTooltip1 = 1, ShoppingTooltip2 = 1, UIErrorsFrame = 1, WatchFrame = 1, SendMailNameEditBox = 1, LFDParentFrame = 1 })[k]) then
+            -- StaticPopup1..4 and their parts are FrameXML's dialogs (the mock builds them like StaticPopup.xml)
+            if not (k:find("^Bleakhold") or k:find("^ChatFrame") or k:find("^StaticPopup%d") or ({ UIParent = 1, Minimap = 1, MinimapCluster = 1, MinimapBackdrop = 1, GameTooltip = 1, ItemRefTooltip = 1, ShoppingTooltip1 = 1, ShoppingTooltip2 = 1, UIErrorsFrame = 1, WatchFrame = 1, SendMailNameEditBox = 1, LFDParentFrame = 1 })[k]) then
                 error("unexpected named frame " .. k)
             end
         end
@@ -156,11 +229,12 @@ test("demo fixtures parse cleanly through the real receive path", function(M, ns
     ns.UI.Open("keys")
     ns.Keys.start:Click()
     M.Advance(45)
+    -- the demo's queue and its group proposal (the Dungeon Journey page starts runs with the server's own commands
+    -- now, which the demo does not answer: these intents still exercise the demo's QUEUE frames)
     ns.UI.Open("dungeons")
-    ns.Dungeons.selected = 389
-    ns.Dungeons.queue.join:Click()
+    ns.Comm.Send("QJOIN", "D", 389, 0, 4, 3)
     M.Advance(5)
-    ns.Dungeons.queue.accept:Click()
+    ns.Comm.Send("QREPLY", 4242, 1)
     M.Advance(10)
     local dropped = 0
     for _, v in pairs(ns.Comm.stats.dropped) do dropped = dropped + v end
@@ -190,4 +264,100 @@ test("demo mode leaves the server and saved definitions alone", function(M, ns)
     -- a real server frame arriving during the demo is ignored
     H.deliver(M, "1 WEEK 9 1/1 50,1,1,1,1,1")
     H.ok(ns.S.week.coins ~= 1, "server frame ignored in demo")
+end)
+
+-- No all-caps captions or titles outside the Royale HUD kit: 3.3.5a writes window titles, headings and labels in Title
+-- Case ("Dungeon Finder", "This Week's Affixes"), so text is never upper-cased for show and never written in capitals.
+-- Checked in the source: string.upper / :upper() inside the arguments of a text setter, and a string literal there
+-- with a word of four or more capitals (compared values and table keys aside; PvP, XP, 1v1 and the like are short or
+-- mixed case anyway).
+local CAPS_ALLOW = { FXAA = true, SMAA = true, SSAO = true }
+local TEXT_SETTERS = { "SetText", "SetFormattedText", "SetLabel", "UI%.Heading", "UI%.Label" }
+local function callArgs(line, open)
+    local depth = 0
+    for i = open, #line do
+        local ch = line:sub(i, i)
+        if ch == "(" then
+            depth = depth + 1
+        elseif ch == ")" then
+            depth = depth - 1
+            if depth == 0 then
+                return line:sub(open + 1, i - 1)
+            end
+        end
+    end
+    return line:sub(open + 1)
+end
+local function capsProblems(file, src)
+    local out, n = {}, 0
+    for line in (src .. "\n"):gmatch("([^\n]*)\n") do
+        n = n + 1
+        local code = line:gsub("^%s*%-%-.*$", "")
+        for _, setter in ipairs(TEXT_SETTERS) do
+            local pos = 1
+            while true do
+                local _, e = code:find(setter .. "%(", pos)
+                if not e then
+                    break
+                end
+                local args = callArgs(code, e)
+                if args:find("string%.upper") or args:find("[:%.]upper%(") then
+                    out[#out + 1] = file .. ":" .. n .. ": upper-cased text"
+                end
+                local plain = args:gsub("\\\"", "")
+                for q1, lit, q2 in plain:gmatch("()\"([^\"]*)\"()") do
+                    local before, after = plain:sub(1, q1 - 1), plain:sub(q2)
+                    if not before:find("[=~]=%s*$") and not after:find("^%s*[=~]=") and not before:find("%[%s*$") then
+                        local text = lit:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|T.-|t", ""):gsub("|H.-|h", "")
+                        for word in text:gmatch("%u%u%u%u+") do
+                            if not CAPS_ALLOW[word] then
+                                out[#out + 1] = file .. ":" .. n .. ": all-caps \"" .. lit .. "\""
+                                break
+                            end
+                        end
+                    end
+                end
+                pos = e + 1
+            end
+        end
+    end
+    return out
+end
+
+test("no all-caps captions: never upper-cased or written in capitals (Royale HUD kit aside, its page in)",
+    function(M, ns)
+    -- the rule itself
+    H.eq(#capsProblems("x", 'fs:SetText(string.upper(name))'), 1, "string.upper")
+    H.eq(#capsProblems("x", 'UI.SetText(win.title, (c.title or name):upper())'), 1, ":upper()")
+    H.eq(#capsProblems("x", 'label:SetText("YOUR WEEK")'), 1, "a caption in capitals")
+    H.eq(#capsProblems("x", 'q:SetText(board == "A" and "YOUR STANDING" or "Your Best")'), 1, "after a comparison")
+    H.eq(#capsProblems("x", 'e:SetText(kind == "MOUNT" and "No mounts yet." or "No pets yet.")'), 0, "a compared value")
+    H.eq(#capsProblems("x", 'fs:SetText("|cffFFD100Your Week|r PvP 1v1 XP FXAA")'), 0, "colour codes, PvP, XP")
+    H.eq(#capsProblems("x", '-- fs:SetText("YOUR WEEK")'), 0, "a comment")
+    local toc = host_readfile(addonDir .. "/Bleakhold.toc")
+    local found, files = {}, 0
+    -- the Royale HUD kit (its own approved look) aside; Royale.lua holds the Bleakhold Royale page of Activities,
+    -- which is checked with the other windows
+    local KIT = { "RoyaleStyle", "RoyaleHud", "RoyaleCountdown", "RoyaleDrop", "RoyaleMap", "RoyaleMinimap",
+        "RoyaleArtData" }
+    local kit = {}
+    for _, n in ipairs(KIT) do
+        kit[n .. ".lua"] = true
+    end
+    H.ok(toc:find("Royale.lua", 1, true) ~= nil, "Royale.lua is in the toc")
+    local royaleChecked = false
+    for name in toc:gmatch("([%w_]+%.lua)") do
+        if name == "Royale.lua" then
+            royaleChecked = true
+        end
+        if not kit[name] then
+            files = files + 1
+            for _, p in ipairs(capsProblems(name, host_readfile(addonDir .. "/" .. name) or "")) do
+                found[#found + 1] = p
+            end
+        end
+    end
+    H.ok(files > 20, "files checked: " .. files)
+    H.ok(royaleChecked, "the Royale page (Royale.lua) is checked")
+    H.ok(#found == 0, #found .. " all-caps texts:\n    " .. table.concat(found, "\n    "))
 end)

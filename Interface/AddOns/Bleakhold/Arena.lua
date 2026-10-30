@@ -25,7 +25,6 @@ AR.ROLES = 4                      -- ignored by the server for the arena
 AR.ASK_EVERY = 30                 -- GET ARENA at most this often while the page shows the cutoffs (section 8)
 AR.GAP = { QJOIN = 1.1, QLEAVE = 1.1 }
 AR.NOTICE_TIME = 12               -- s an ERR of the 1v1 queue stays on the queue card
-AR.KICKER = "ARENA"
 
 AR.STATE = { NONE = 0, LIVE = 1, FINAL_WEEK = 2, CLOSED = 3, FINAL = 4, DELIVERED = 5, UPCOMING = 6 }
 AR.STATE_TEXT = {
@@ -510,10 +509,19 @@ function AR.ErrorNotice()
 end
 
 ------------------------------------------------------------------------------------------------------
--- Activities: the Arena page
+-- Activities: the Arena page, in the old window's page anatomy (Activities.lua A.Page): the season as the gold title,
+-- what the arena is, the season's state and clock under it, Arena teams and Leaderboard top right; a tooltip panel per
+-- bracket (a gold heading, the tier, the team, the rating, the next tier as the achievement progress bar), the chosen
+-- one lit as the nav rows are; the 1v1 queue and the last rated matches on the left; on the right one bracket in
+-- detail under the options frame's tabs (Cutoffs in a WhoFrame-headed table, the reward Checklist with the ready
+-- check's marks, the season's Rewards), the bracket chosen with red buttons, the chosen one held down. A dense page:
+-- its picture (Blackrock Depths, the nav entry's) shows at low alpha behind the panels.
 ------------------------------------------------------------------------------------------------------
-local P = A.NewPage()
-A.AddPage("arena", P)
+local P = A.Page("arena", {
+    title = "Arena",
+    desc = "Rated 2v2, 3v3 and 5v5 with your arena teams, and a 1v1 ladder of your own. Where you finish the season "
+        .. "decides your rewards.",
+})
 AR.page = P
 P.bracket = 1
 P.view = "cutoffs"
@@ -522,40 +530,63 @@ function P.Available()
     return AR.Live()
 end
 
-local PW, PH = A.PW, A.PH
-local HEAD_H = 64
-local CARD_Y = HEAD_H + 12
-local CARD_H = 150
+local PAD = A.PAD
+local PW = A.CW - 2 * PAD
+local CARD_Y = 110
+local CARD_H = 148
 local CARD_W = floor((PW - 30) / 4)
 local LOW_Y = CARD_Y + CARD_H + 12
-local LOW_H = PH - LOW_Y
+local LOW_H = A.CH - LOW_Y - 16
 local LEFT_W = 300
 local RIGHT_W = PW - LEFT_W - 12
-local QUEUE_H = 132
+local QUEUE_H = 128
 local MATCH_H = LOW_H - QUEUE_H - 10
+local TAB_H = 24
+local DETAIL_H = LOW_H - TAB_H
+local INNER_W = RIGHT_W - 24
 
--- Header: the season, its state and its clock
-local head = UI.Box(P, PW, HEAD_H, C.eraBg, C.eraBorder)
-head:SetPoint("TOPLEFT", P, "TOPLEFT", 0, 0)
-head.kicker = UI.Text(head, 11, C.purple)
-head.kicker:SetPoint("TOPLEFT", head, "TOPLEFT", 16, -12)
-head.kicker:SetText(AR.KICKER)
-head.title = UI.Text(head, 20, C.goldPale, "title")
-head.title:SetPoint("TOPLEFT", head.kicker, "BOTTOMLEFT", 0, -3)
-UI.OneLine(head.title, 300)
-head.state = UI.Pill(head, "", C.chip, C.chipBorder, C.text, 11)
-head.state:SetPoint("LEFT", head.kicker, "RIGHT", 10, 0)
-head.clock = UI.Text(head, 12, C.mid)
-head.clock:SetPoint("TOPLEFT", head, "TOPLEFT", 330, -36)
-UI.OneLine(head.clock, 220)
-head.board = UI.Button(head, 112, 28, "Leaderboard", "ghost", 12)
-head.board:SetPoint("RIGHT", head, "RIGHT", -14, 0)
+-- the ready check's marks for the checklist, the trophy for the final standing
+AR.MARKS = { ok = "Interface\\RaidFrame\\ReadyCheck-Ready", no = "Interface\\RaidFrame\\ReadyCheck-NotReady",
+    final = "Interface\\Icons\\INV_Misc_Trophy_Argent" }
+
+-- A tooltip panel with a gold heading.
+local function panel(w, h, title)
+    local c = UI.Box(P, w, h, C.panel, C.border, nil, "panel")
+    if title then
+        c.label = UI.Heading(c, title, 14)
+        c.label:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -12)
+    end
+    return c
+end
+
+local function tooltipScripts(f)
+    f:SetScript("OnEnter", function(self)
+        if self.tooltip then
+            UI.ShowTooltip(self, self.tooltip())
+        end
+    end)
+    f:SetScript("OnLeave", function()
+        if GameTooltip then
+            GameTooltip:Hide()
+        end
+    end)
+end
+
+-- Header: the season as the page's title, its state and its clock under the description, the buttons top right
+local head = { title = P.title, text = P.desc }
+head.state = UI.Pill(P, "", C.text, 12)
+head.state:SetPoint("TOPLEFT", P, "TOPLEFT", PAD, -86)
+head.clock = UI.Text(P, 12, C.text)
+head.clock:SetPoint("LEFT", head.state, "RIGHT", 14, 0)
+UI.OneLine(head.clock, 300)
+head.board = UI.Button(P, 120, 24, "Leaderboard", "red", 12)
+head.board:SetPoint("TOPRIGHT", P, "TOPRIGHT", -PAD, -20)
 head.board:SetScript("OnClick", function()
     if ns.Leaderboards then
         ns.Leaderboards.OpenArena(AR.page.bracket)
     end
 end)
-head.pvp = UI.Button(head, 112, 28, "Arena teams", "ghost", 12)
+head.pvp = UI.Button(P, 120, 24, "Arena teams", "red", 12)
 head.pvp:SetPoint("RIGHT", head.board, "LEFT", -8, 0)
 head.pvp.tooltip = function()
     return { "Arena teams", "The 2v2, 3v3 and 5v5 teams are made and managed in the game's PvP window." }
@@ -576,37 +607,38 @@ P.cards = {}
 for i, bracket in ipairs(AR.BRACKETS) do
     local c = CreateFrame("Button", nil, P)
     c:SetSize(CARD_W, CARD_H)
-    UI.Backdrop(c, C.card, C.border)
-    c:SetPoint("TOPLEFT", P, "TOPLEFT", (i - 1) * (CARD_W + 10), -CARD_Y)
+    UI.Backdrop(c, C.card, C.border, nil, "panel")
+    c:SetPoint("TOPLEFT", P, "TOPLEFT", PAD + (i - 1) * (CARD_W + 10), -CARD_Y)
     c:RegisterForClicks("LeftButtonUp")
     c.bracket = bracket
-    c.kicker = UI.Text(c, 11, C.dim)
-    c.kicker:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -10)
-    c.kicker:SetText(AR.BracketName(bracket):upper())
-    c.tier = UI.Text(c, 12, C.mid, "body", "RIGHT")
-    c.tier:SetPoint("TOPRIGHT", c, "TOPRIGHT", -10, -10)
+    c.kicker = UI.Heading(c, AR.BracketName(bracket), 14)
+    c.kicker:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -12)
+    c.tier = UI.Text(c, 12, C.text, "body", "RIGHT")
+    c.tier:SetPoint("TOPRIGHT", c, "TOPRIGHT", -12, -13)
     UI.OneLine(c.tier, CARD_W - 60)
-    c.team = UI.Text(c, 12, C.mid)
-    c.team:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -26)
+    c.team = UI.Text(c, 12, C.text)
+    c.team:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -32)
     UI.OneLine(c.team, CARD_W - 24)
-    c.rating = UI.Text(c, 22, C.goldPale, "title")
-    c.rating:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -44)
+    c.rating = UI.Text(c, 20, C.text)
+    c.rating:SetFont(UI.FONT_BODY, 20, "OUTLINE")
+    c.rating:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -50)
     c.rank = UI.Text(c, 11, C.dim)
-    c.rank:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -74)
+    c.rank:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -76)
     UI.OneLine(c.rank, CARD_W - 24)
-    c.record = UI.Text(c, 11, C.mid)
-    c.record:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -90)
+    c.record = UI.Text(c, 11, C.text)
+    c.record:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -91)
     UI.OneLine(c.record, CARD_W - 24)
-    c.bar = UI.Bar(c, CARD_W - 24, 5, C.gold, C.deep)
+    -- the next tier as the achievement progress bar, its text ("+66 to Duelist") inside the bar while it shows
+    c.bar = UI.Bar(c, CARD_W - 24, 14)
     c.bar:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -108)
     c.next = UI.Text(c, 11, C.text)
-    c.next:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -117)
+    c.next:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -109)
     UI.OneLine(c.next, CARD_W - 24)
-    c.status = UI.Text(c, 11, C.teal)
-    c.status:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -132)
+    c.status = UI.Text(c, 10, C.teal)
+    c.status:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -130)
     UI.OneLine(c.status, CARD_W - 24)
-    c.pvp = UI.Button(c, 110, 24, "PvP window", "ghost", 11)
-    c.pvp:SetPoint("BOTTOMLEFT", c, "BOTTOMLEFT", 12, 12)
+    c.pvp = UI.Button(c, 110, 20, "PvP window", "ghost", 10)
+    c.pvp:SetPoint("BOTTOMLEFT", c, "BOTTOMLEFT", 10, 10)
     c.pvp:SetScript("OnClick", AR.OpenPvpWindow)
     c.pvp:Hide()
     c:SetScript("OnClick", function(self)
@@ -614,42 +646,30 @@ for i, bracket in ipairs(AR.BRACKETS) do
         ns.cdb.arenaBracket = self.bracket
         P:Refresh()
     end)
-    c:SetScript("OnEnter", function(self)
-        if self.tooltip then
-            UI.ShowTooltip(self, self.tooltip())
-        end
-    end)
-    c:SetScript("OnLeave", function()
-        if GameTooltip then
-            GameTooltip:Hide()
-        end
-    end)
+    tooltipScripts(c)
     P.cards[i] = c
 end
 
 -- The 1v1 queue
-local queue = UI.Box(P, LEFT_W, QUEUE_H, C.card, C.border)
-queue:SetPoint("TOPLEFT", P, "TOPLEFT", 0, -LOW_Y)
-queue.label = UI.Text(queue, 11, C.dim)
-queue.label:SetPoint("TOPLEFT", queue, "TOPLEFT", 12, -12)
-queue.label:SetText("1V1 QUEUE")
+local queue = panel(LEFT_W, QUEUE_H, "1v1 Queue")
+queue:SetPoint("TOPLEFT", P, "TOPLEFT", PAD, -LOW_Y)
 queue.status = UI.Text(queue, 14, C.text)
-queue.status:SetPoint("TOPLEFT", queue, "TOPLEFT", 12, -30)
+queue.status:SetPoint("TOPLEFT", queue, "TOPLEFT", 12, -34)
 UI.OneLine(queue.status, LEFT_W - 24)
 queue.detail = UI.Text(queue, 11, C.dim)
-queue.detail:SetPoint("TOPLEFT", queue, "TOPLEFT", 12, -50)
+queue.detail:SetPoint("TOPLEFT", queue, "TOPLEFT", 12, -54)
 UI.OneLine(queue.detail, LEFT_W - 24)
 queue.notice = UI.Text(queue, 11, C.red)
-queue.notice:SetPoint("TOPLEFT", queue, "TOPLEFT", 12, -64)
+queue.notice:SetPoint("TOPLEFT", queue, "TOPLEFT", 12, -68)
 queue.notice:SetWidth(LEFT_W - 24)
 queue.notice:SetHeight(26)
 queue.notice:SetJustifyV("TOP")
-queue.rated = UI.Button(queue, 136, 30, "Rated 1v1", "gold", 13)
-queue.rated:SetPoint("BOTTOMLEFT", queue, "BOTTOMLEFT", 12, 12)
-queue.skirmish = UI.Button(queue, 128, 30, "Skirmish", "dark", 13)
-queue.skirmish:SetPoint("BOTTOMRIGHT", queue, "BOTTOMRIGHT", -12, 12)
-queue.leave = UI.Button(queue, LEFT_W - 24, 30, "Leave queue", "dark", 13)
-queue.leave:SetPoint("BOTTOMLEFT", queue, "BOTTOMLEFT", 12, 12)
+queue.rated = UI.Button(queue, 136, 26, "Rated 1v1", "red", 12)
+queue.rated:SetPoint("BOTTOMLEFT", queue, "BOTTOMLEFT", 12, 10)
+queue.skirmish = UI.Button(queue, 128, 26, "Skirmish", "red", 12)
+queue.skirmish:SetPoint("BOTTOMRIGHT", queue, "BOTTOMRIGHT", -12, 10)
+queue.leave = UI.Button(queue, LEFT_W - 24, 26, "Leave queue", "red", 12)
+queue.leave:SetPoint("BOTTOMLEFT", queue, "BOTTOMLEFT", 12, 10)
 queue.leave:Hide()
 queue.rated:SetScript("OnClick", function()
     AR.Join(true)
@@ -663,18 +683,16 @@ end)
 P.queue = queue
 
 -- The last rated matches
-local matches = UI.Box(P, LEFT_W, MATCH_H, C.card, C.border)
+local matches = panel(LEFT_W, MATCH_H, "Last Rated Matches")
 matches:SetPoint("TOPLEFT", queue, "BOTTOMLEFT", 0, -10)
-matches.label = UI.Text(matches, 11, C.dim)
-matches.label:SetPoint("TOPLEFT", matches, "TOPLEFT", 12, -12)
-matches.label:SetText("LAST RATED MATCHES")
-matches.empty = UI.Text(matches, 12, C.mute)
-matches.empty:SetPoint("TOPLEFT", matches, "TOPLEFT", 12, -36)
+matches.empty = UI.Text(matches, 12, C.dim)
+matches.empty:SetPoint("TOPLEFT", matches, "TOPLEFT", 12, -38)
+UI.OneLine(matches.empty, LEFT_W - 24)
 matches.rows = {}
 for i = 1, 5 do
     local r = CreateFrame("Frame", nil, matches)
     r:SetSize(LEFT_W - 24, 20)
-    r:SetPoint("TOPLEFT", matches, "TOPLEFT", 12, -32 - (i - 1) * 21)
+    r:SetPoint("TOPLEFT", matches, "TOPLEFT", 12, -36 - (i - 1) * 22)
     r:EnableMouse(true)
     r.left = UI.Text(r, 12, C.text)
     r.left:SetPoint("LEFT", r, "LEFT", 0, 0)
@@ -682,29 +700,39 @@ for i = 1, 5 do
     r.right = UI.Text(r, 11, C.dim, "body", "RIGHT")
     r.right:SetPoint("RIGHT", r, "RIGHT", 0, 0)
     UI.OneLine(r.right, LEFT_W - 24 - 122)
-    r:SetScript("OnEnter", function(self)
-        if self.tooltip then
-            UI.ShowTooltip(self, self.tooltip())
-        end
-    end)
-    r:SetScript("OnLeave", function()
-        if GameTooltip then
-            GameTooltip:Hide()
-        end
-    end)
+    tooltipScripts(r)
     r:Hide()
     matches.rows[i] = r
 end
 P.matches = matches
 
--- One bracket in detail: the live cutoffs, the reward checklist, the season's rewards
-local detail = UI.Box(P, RIGHT_W, LOW_H, C.panel, C.border)
-detail:SetPoint("TOPRIGHT", P, "TOPRIGHT", 0, -LOW_Y)
+-- One bracket in detail: the live cutoffs, the reward checklist, the season's rewards, under the options frame's tabs
+local detail = panel(RIGHT_W, DETAIL_H)
+detail:SetPoint("TOPRIGHT", P, "TOPRIGHT", -PAD, -(LOW_Y + TAB_H))
 P.detail = detail
+local VIEWS = { { key = "cutoffs", label = "Cutoffs" }, { key = "checklist", label = "Checklist" },
+    { key = "rewards", label = "Rewards" } }
+detail.views = {}
+for i, d in ipairs(VIEWS) do
+    local b = UI.Button(detail, 100, TAB_H, d.label, "strip")
+    -- the tabs overlap by their art's see-through flanks, as the Leaderboards' strip
+    b:SetPoint("BOTTOMLEFT", detail, "TOPLEFT", 10 + (i - 1) * 92, -2)
+    b:SetFrameLevel(detail:GetFrameLevel() + 5)
+    b.view = d.key
+    b:SetScript("OnClick", function(self)
+        if PlaySound then
+            PlaySound("igCharacterInfoTab")
+        end
+        P.view = self.view
+        P:Refresh()
+    end)
+    detail.views[i] = b
+end
+-- the bracket: red buttons, the chosen one held down
 detail.brackets = {}
 for i, bracket in ipairs(AR.BRACKETS) do
-    local b = UI.Button(detail, 48, 24, AR.BracketName(bracket), "tab", 12)
-    b:SetPoint("TOPLEFT", detail, "TOPLEFT", 12 + (i - 1) * 52, -10)
+    local b = UI.Button(detail, 52, 22, AR.BracketName(bracket), "tab", 12)
+    b:SetPoint("TOPLEFT", detail, "TOPLEFT", 12 + (i - 1) * 56, -12)
     b.bracket = bracket
     b:SetScript("OnClick", function(self)
         P.bracket = self.bracket
@@ -713,67 +741,63 @@ for i, bracket in ipairs(AR.BRACKETS) do
     end)
     detail.brackets[i] = b
 end
-local VIEWS = { { key = "cutoffs", label = "Cutoffs" }, { key = "checklist", label = "Checklist" },
-    { key = "rewards", label = "Rewards" } }
-detail.views = {}
-for i = #VIEWS, 1, -1 do
-    local d = VIEWS[i]
-    local b = UI.Button(detail, 80, 24, d.label, "tab", 12)
-    b:SetPoint("TOPRIGHT", detail, "TOPRIGHT", -12 - (#VIEWS - i) * 84, -10)
-    b.view = d.key
-    b:SetScript("OnClick", function(self)
-        P.view = self.view
-        P:Refresh()
-    end)
-    detail.views[i] = b
-end
-local INNER_W = RIGHT_W - 24
+detail.heading = UI.Heading(detail, "", 14)
+detail.heading:SetPoint("TOPRIGHT", detail, "TOPRIGHT", -14, -15)
+detail.heading:SetJustifyH("RIGHT")
 detail.body = CreateFrame("Frame", nil, detail)
 detail.body:SetPoint("TOPLEFT", detail, "TOPLEFT", 12, -44)
-detail.body:SetSize(INNER_W, LOW_H - 56)
-detail.empty = UI.Text(detail.body, 12, C.mute, "body", "CENTER")
+detail.body:SetSize(INNER_W, DETAIL_H - 56)
+detail.empty = UI.Text(detail.body, 12, C.dim, "body", "CENTER")
 detail.empty:SetPoint("TOP", detail.body, "TOP", 0, -60)
 detail.empty:SetWidth(INNER_W - 40)
 detail.foot = UI.Text(detail.body, 11, C.dim)
-detail.foot:SetPoint("BOTTOMLEFT", detail.body, "BOTTOMLEFT", 0, 4)
+detail.foot:SetPoint("BOTTOMLEFT", detail.body, "BOTTOMLEFT", 0, 2)
 detail.foot:SetWidth(INNER_W)
 detail.foot:SetJustifyV("BOTTOM")
 detail.foot:SetHeight(28)
 
--- cutoffs table: TIER, PLACES, LAST IN, RATING, FLOOR, TAKES NOW
-local CUT_COLS = { { "TIER", 140 }, { "PLACES", 64 }, { "LAST IN", 72 }, { "RATING", 64 }, { "FLOOR", 64 },
-    { "TAKES NOW", 72 } }
+-- cutoffs table: Tier, Places, Last In, Rating, Floor, Takes Now under WhoFrame's column headers, zebra rows
+local CUT_COLS = { { "Tier", 122 }, { "Places", 58 }, { "Last In", 62 }, { "Rating", 64 }, { "Floor", 60 },
+    { "Takes Now", 76 } }
+AR.CUT_COLS = CUT_COLS
 local cut = CreateFrame("Frame", nil, detail.body)
 cut:SetAllPoints(detail.body)
-cut.header = UI.Box(cut, INNER_W, 22, C.header)
+cut.header = CreateFrame("Frame", nil, cut)
+cut.header:SetSize(INNER_W, 24)
 cut.header:SetPoint("TOPLEFT", cut, "TOPLEFT", 0, 0)
+cut.header.cols = {}
+do
+    local x = 0
+    for i, col in ipairs(CUT_COLS) do
+        local h = UI.ColumnHeader(cut.header, col[2], col[1])
+        h:SetPoint("TOPLEFT", cut.header, "TOPLEFT", x, 0)
+        cut.header.cols[i] = h
+        x = x + col[2]
+    end
+end
 local function cells(parent, size, color)
     local list, x = {}, 8
     for i, col in ipairs(CUT_COLS) do
-        local t = UI.Text(parent, size, color, "body", i == 1 and "LEFT" or "RIGHT")
+        local t = UI.Text(parent, size, color)
         t:SetPoint("LEFT", parent, "LEFT", x, 0)
-        UI.OneLine(t, col[2] - 8)
+        UI.OneLine(t, col[2] - 12)
         list[i] = t
         x = x + col[2]
     end
     return list
 end
-cut.header.cells = cells(cut.header, 10, C.dim)
-for i, col in ipairs(CUT_COLS) do
-    cut.header.cells[i]:SetText(col[1])
-end
 cut.rows = {}
 for i = 1, 7 do
     local bg = i % 2 == 1 and C.zebra or C.panel
-    local r = UI.Box(cut, INNER_W, 24, bg, bg)
+    local r = UI.Box(cut, INNER_W, 22, bg, nil, 0.75, "fill")
     r.bg = bg
-    r:SetPoint("TOPLEFT", cut.header, "BOTTOMLEFT", 0, -(i - 1) * 24)
+    r:SetPoint("TOPLEFT", cut.header, "BOTTOMLEFT", 0, -2 - (i - 1) * 22)
     r.cells = cells(r, 12, C.text)
     cut.rows[i] = r
 end
 detail.cutoffs = cut
 
--- checklist and rewards: lines with a glyph
+-- checklist and rewards: lines with a mark (AR.MARKS) or none
 local function lineList(parent, n, height)
     local list = {}
     for i = 1, n do
@@ -781,24 +805,16 @@ local function lineList(parent, n, height)
         l:SetSize(INNER_W, height)
         l:SetPoint("TOPLEFT", parent, "TOPLEFT", 0, -(i - 1) * height)
         l:EnableMouse(true)
-        l.icon = UI.Glyph(l, "check", 12, C.teal)
+        l.icon = l:CreateTexture(nil, "ARTWORK")
+        l.icon:SetSize(16, 16)
         l.icon:SetPoint("LEFT", l, "LEFT", 2, 0)
         l.label = UI.Text(l, 12, C.text)
-        l.label:SetPoint("LEFT", l, "LEFT", 22, 0)
-        UI.OneLine(l.label, 116)
+        l.label:SetPoint("LEFT", l, "LEFT", 8, 0)
+        UI.OneLine(l.label, 124)
         l.text = UI.Text(l, 12, C.text)
-        l.text:SetPoint("LEFT", l, "LEFT", 22, 0)
-        UI.OneLine(l.text, INNER_W - 26)
-        l:SetScript("OnEnter", function(self)
-            if self.tooltip then
-                UI.ShowTooltip(self, self.tooltip())
-            end
-        end)
-        l:SetScript("OnLeave", function()
-            if GameTooltip then
-                GameTooltip:Hide()
-            end
-        end)
+        l.text:SetPoint("LEFT", l, "LEFT", 24, 0)
+        UI.OneLine(l.text, INNER_W - 28)
+        tooltipScripts(l)
         l:Hide()
         list[i] = l
     end
@@ -846,8 +862,20 @@ function P:RefreshHeader()
         head.clock:SetText(AR.Countdown(a))
     else
         head.title:SetText(Comm.ready and "Arena" or "Connecting to Bleakhold")
+        head.state:SetValue("")
         head.state:Hide()
         head.clock:SetText(Comm.ready and "Waiting for your arena season..." or "")
+    end
+end
+
+-- the next-tier line: written inside the progress bar while the bar shows, else on the bar's row
+local function placeNext(c)
+    if c.bar:IsShown() then
+        c.bar.text:SetText(c.next:GetText() or "")
+        c.next:Hide()
+    else
+        c.bar.text:SetText("")
+        c.next:Show()
     end
 end
 
@@ -858,6 +886,7 @@ local function setCard(c, a)
     UI.Colors(c, selected and C.active or C.card, selected and C.gold or C.border)
     c.pvp:Hide()
     c.bar:Hide()
+    c.next:Show()
     c.tooltip = nil
     UI.SetColor(c.status, C.teal)
     if not b or not b.hasTeam then
@@ -870,7 +899,7 @@ local function setCard(c, a)
         if bracket == 1 then
             c.team:SetText("No 1v1 team yet")
             if a and a.teamCost then
-                c.rank:SetText("A rated 1v1 queue makes your team")
+                c.rank:SetText("Rated 1v1 makes your team")
                 c.record:SetText(a.teamCost > 0 and ("It costs " .. ns.RewardText("G", a.teamCost)) or "It is free")
             end
         else
@@ -909,6 +938,7 @@ local function setCard(c, a)
             c.bar:Show()
         end
         c.next:SetText(AR.NextText(b))
+        placeNext(c)
         local missing = AR.MissingLines(bracket, b)
         if #missing > 0 then
             c.status:SetText(#missing == 1 and "1 thing keeps you from rewards"
@@ -948,7 +978,7 @@ function P:RefreshQueue()
     queue.skirmish:Show()
     if st == 1 or st == 2 then
         queue.status:SetText(q.tier == 1 and "In the rated 1v1 queue" or "In the 1v1 skirmish queue")
-        UI.SetColor(queue.status, C.goldLight)
+        UI.SetColor(queue.status, C.gold)
         queue.rated:Hide()
         queue.skirmish:Hide()
         queue.leave:Show()
@@ -1022,27 +1052,38 @@ function P:RefreshMatches()
     end
 end
 
+-- items: { label, text, color, mark (AR.MARKS key), chosen (the player's own: the selected row's look), tooltip }
 local function showLines(lines, items)
     for i, l in ipairs(lines) do
         local it = items[i]
         if it then
             l.label:SetText(it.label or "")
             l.text:ClearAllPoints()
-            l.text:SetPoint("LEFT", l, "LEFT", it.label and 140 or 22, 0)
-            UI.OneLine(l.text, INNER_W - (it.label and 144 or 26))
+            local x = it.label and 140 or (it.mark and 24 or 8)
+            l.text:SetPoint("LEFT", l, "LEFT", x, 0)
+            UI.OneLine(l.text, INNER_W - x - 4)
             l.text:SetText(it.text or "")
             UI.SetColor(l.text, it.color or C.text)
-            if it.glyph then
-                UI.SetGlyph(l.icon, it.glyph)
-                l.icon:SetVertexColor(UI.Rgb(it.glyphColor or C.teal))
+            local mark = it.mark and AR.MARKS[it.mark]
+            if mark then
+                l.icon:SetTexture(mark)
+                if it.mark == "final" then
+                    l.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+                else
+                    l.icon:SetTexCoord(0, 1, 0, 1)
+                end
                 l.icon:Show()
             else
                 l.icon:Hide()
             end
+            l.mark = it.mark
+            UI.Select(l, it.chosen and true or false)
             l.tooltip = it.tooltip
             l:Show()
         else
             l.tooltip = nil
+            l.mark = nil
+            UI.Select(l, false)
             l:Hide()
         end
     end
@@ -1055,13 +1096,13 @@ function P:RefreshCutoffs(a, bracket)
         local c = list[i]
         if c then
             local mine = b and b.hasTeam and b.tierId == c.tierId
-            UI.Colors(r, mine and C.active or r.bg, mine and C.gold or r.bg)
+            UI.Colors(r, mine and C.active or r.bg, mine and C.gold or r.bg, 0.75)
             r.cells[1]:SetText(AR.TierText(c.tierId))
             r.cells[2]:SetText(tostring(c.slots or 0))
             r.cells[3]:SetText(c.cutRank and ("#" .. c.cutRank) or "-")
             r.cells[4]:SetText(c.cutRating and tostring(c.cutRating) or "-")
             r.cells[5]:SetText(tostring(c.floor or 0))
-            r.cells[6]:SetText(U.Color(C.goldLight, tostring(AR.Takes(c))))
+            r.cells[6]:SetText(U.Color(C.gold, tostring(AR.Takes(c))))
             r:Show()
         else
             r:Hide()
@@ -1094,14 +1135,13 @@ function P:RefreshChecklist(a, bracket)
     local b = a and a.brackets[bracket]
     local items = {}
     for _, line in ipairs(AR.Checklist(bracket, b)) do
-        items[#items + 1] = { text = line.text, glyph = line.ok and "check" or "close",
-            glyphColor = line.ok and C.teal or C.red, color = line.ok and C.text or C.orange }
+        items[#items + 1] = { text = line.text, mark = line.ok and "ok" or "no", color = line.ok and C.text or C.orange }
     end
     local final = finalOf(a, bracket)
     if final then
         items[#items + 1] = { text = "Final standing: #" .. (final.rank or "-") .. "  -  " .. (final.rating or "-")
             .. "  -  " .. AR.TierText(final.tierId) .. "  -  " .. U.Color(AR.GRANT_COLOR[final.grant] or C.text,
-            AR.GRANT_TEXT[final.grant] or ""), glyph = "trophy", glyphColor = C.goldLight }
+            AR.GRANT_TEXT[final.grant] or ""), mark = "final" }
     end
     showLines(check.lines, items)
     if #items == 0 then
@@ -1140,8 +1180,8 @@ function P:RefreshRewards(a, bracket)
         local tierId = t.tierId
         items[#items + 1] = {
             label = AR.TierText(tierId), text = table.concat(parts, ", "),
-            color = ownedAny and C.mid or C.text,
-            glyph = (b and b.hasTeam and b.tierId == tierId) and "reward" or nil, glyphColor = C.goldLight,
+            color = ownedAny and C.dim or C.text,
+            chosen = (b and b.hasTeam and b.tierId == tierId) and true or false,
             tooltip = function()
                 local out = { U.Safe(AR.TierName(tierId)) }
                 local d = ns.Def("V", tierId)
@@ -1175,6 +1215,8 @@ function P:RefreshRewards(a, bracket)
     end
 end
 
+local VIEW_HEADINGS = { cutoffs = "Cutoffs", checklist = "Reward Checklist", rewards = "Season Rewards" }
+
 function P:RefreshDetail()
     local a = S.arena
     local bracket = P.bracket
@@ -1182,15 +1224,17 @@ function P:RefreshDetail()
         b:SetStyle(b.bracket == bracket and "tabOn" or "tab")
     end
     for _, b in ipairs(detail.views) do
-        b:SetStyle(b.view == P.view and "tabOn" or "tab")
+        b:SetStyle(b.view == P.view and "stripOn" or "strip")
     end
     cut:Hide()
     check:Hide()
     rew:Hide()
-    if P.view == "checklist" then
+    local view = (P.view == "checklist" or P.view == "rewards") and P.view or "cutoffs"
+    detail.heading:SetText(AR.BracketName(bracket) .. " " .. VIEW_HEADINGS[view])
+    if view == "checklist" then
         check:Show()
         P:RefreshChecklist(a, bracket)
-    elseif P.view == "rewards" then
+    elseif view == "rewards" then
         rew:Show()
         P:RefreshRewards(a, bracket)
     else

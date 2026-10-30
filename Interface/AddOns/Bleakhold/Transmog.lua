@@ -1059,11 +1059,20 @@ end
 -- The tab
 ------------------------------------------------------------------------------------------------------
 local BW, BH = CO.BW, CO.BH
+local PAD = 12                -- inside the tab's panel
 local LEFT_W = 300
-local RIGHT_X = LEFT_W + 12
-local RIGHT_W = BW - RIGHT_X - 14
-local TILE_W, TILE_H, TILE_GAP = 98, 122, 4
+local RIGHT_X = PAD + LEFT_W + 14
+local RIGHT_W = BW - RIGHT_X - PAD - 2
+local TILE_GAP = 4
+-- the tiles fill the right column: six across, three down above the page arrows
+local TILE_W = floor((RIGHT_W + TILE_GAP) / TM.COLS) - TILE_GAP
+local TILE_H = floor((BH - 2 * PAD - 34 - 32 - 38 + TILE_GAP) / TM.ROWS) - TILE_GAP
 local SLOT_SIZE, SLOT_GAP = 36, 44
+local WEAPON_Y = 96           -- the weapons' row, from the bottom of the left box
+local ILL_ROW = 18            -- an illusion's row (UIDropDownMenu's rows are 16)
+local PASS_MARK = "Interface\\Buttons\\UI-GroupLoot-Pass-Up"
+local LOCK_MARK = "Interface\\LFGFrame\\UI-LFG-ICON-LOCK"
+local COIN_ICON = "INV_Misc_Coin_02"
 
 local function hideTooltip()
     if GameTooltip then
@@ -1121,26 +1130,26 @@ local function build()
     frame:Hide()
     TM.frame = frame
 
-    -- Left: outfits, the model between the slots, price and Apply.
-    local left = UI.Box(frame, LEFT_W, BH, C.deep)
-    left:SetPoint("TOPLEFT", frame, "TOPLEFT", 0, 0)
+    -- Left: outfits, the model between the slots (the character frame's paper doll), the price and Apply, in a dark
+    -- row box (the old window's rows) inside the tab's panel.
+    local left = UI.Box(frame, LEFT_W, BH - 2 * PAD, C.card, C.border, nil, "edge")
+    left:SetPoint("TOPLEFT", frame, "TOPLEFT", PAD, -PAD)
     frame.left = left
 
-    frame.outfit = UI.Dropdown(left, 176, function(value)
+    -- the equipment manager's row: the outfit list, Save and Delete (GearManagerDialog's red buttons)
+    frame.outfit = UI.Dropdown(left, 150, function(value)
         if value and value ~= "" then
             TM.LoadOutfit(value)
         end
     end)
-    frame.outfit:SetPoint("TOPLEFT", left, "TOPLEFT", 12, -10)
-    frame.save = UI.Button(left, 60, 26, "Save", "dark", 12)
-    frame.save:SetPoint("LEFT", frame.outfit, "RIGHT", 6, 0)
+    frame.outfit:SetPoint("TOPLEFT", left, "TOPLEFT", 6, -10)
+    frame.save = UI.Button(left, 58, 22, "Save", "dark")
+    frame.save:SetPoint("LEFT", frame.outfit, "RIGHT", 4, 0)
     frame.save:SetScript("OnClick", function()
         TM.SaveOutfit()
     end)
-    frame.delete = UI.Button(left, 26, 26, "", "dark")
-    frame.delete.icon = UI.Glyph(frame.delete, "close", 12, C.text)
-    frame.delete.icon:SetPoint("CENTER")
-    frame.delete:SetPoint("LEFT", frame.save, "RIGHT", 6, 0)
+    frame.delete = UI.Button(left, 62, 22, "Delete", "dark")
+    frame.delete:SetPoint("LEFT", frame.save, "RIGHT", 4, 0)
     frame.delete.tooltip = function()
         return { "Delete outfit", "Deletes the outfit picked in the list." }
     end
@@ -1149,8 +1158,8 @@ local function build()
     end)
 
     local model = CreateFrame("DressUpModel", nil, left)
-    model:SetPoint("TOPLEFT", left, "TOPLEFT", 50, -44)
-    model:SetPoint("BOTTOMRIGHT", left, "BOTTOMRIGHT", -50, 70 + SLOT_GAP)
+    model:SetPoint("TOPLEFT", left, "TOPLEFT", 54, -46)
+    model:SetPoint("BOTTOMRIGHT", left, "BOTTOMRIGHT", -54, WEAPON_Y + SLOT_SIZE + 6)
     model:EnableMouse(true)
     model:SetScript("OnMouseDown", function(self)
         self.dragX = GetCursorPosition()
@@ -1167,29 +1176,38 @@ local function build()
     end)
     frame.model = model
 
+    -- The slots: item buttons (ItemButtonTemplate's art: the item's icon, or the paper doll's empty slot, in
+    -- UI-Quickslot2), the open one checked (CheckButtonHilight), a change not applied yet marked with the green
+    -- indicator ball, a hidden slot with the group loot's pass mark.
     frame.slots = {}
     local leftN, rightN, weaponN = 0, 0, 0
+    local weapons = 0
+    for _, s in ipairs(TM.SLOTS) do
+        weapons = weapons + (s.col == "weapon" and 1 or 0)
+    end
     for _, s in ipairs(TM.SLOTS) do
         local b = CreateFrame("Button", nil, left)
         b:SetSize(SLOT_SIZE, SLOT_SIZE)
         if s.col == "left" then
-            b:SetPoint("TOPLEFT", left, "TOPLEFT", 10, -52 - leftN * SLOT_GAP)
+            b:SetPoint("TOPLEFT", left, "TOPLEFT", 10, -48 - leftN * SLOT_GAP)
             leftN = leftN + 1
         elseif s.col == "right" then
-            b:SetPoint("TOPRIGHT", left, "TOPRIGHT", -10, -52 - rightN * SLOT_GAP)
+            b:SetPoint("TOPRIGHT", left, "TOPRIGHT", -10, -48 - rightN * SLOT_GAP)
             rightN = rightN + 1
         else
-            b:SetPoint("BOTTOMLEFT", left, "BOTTOMLEFT", LEFT_W / 2 - 64 + weaponN * SLOT_GAP, 74)
+            b:SetPoint("BOTTOMLEFT", left, "BOTTOMLEFT",
+                floor(LEFT_W / 2 - (weapons * SLOT_GAP - (SLOT_GAP - SLOT_SIZE)) / 2) + weaponN * SLOT_GAP, WEAPON_Y)
             weaponN = weaponN + 1
         end
-        UI.Backdrop(b, C.chip, C.border)
-        b.icon = b:CreateTexture(nil, "ARTWORK")
-        b.icon:SetPoint("TOPLEFT", b, "TOPLEFT", 3, -3)
-        b.icon:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -3, 3)
-        b.hidden = UI.Glyph(b, "close", 18, C.red, "OVERLAY")
+        UI.SlotArt(b, SLOT_SIZE)
+        b.icon:SetAllPoints(b)
+        b.hidden = b:CreateTexture(nil, "OVERLAY")
+        b.hidden:SetTexture(PASS_MARK)
+        b.hidden:SetSize(24, 24)
         b.hidden:SetPoint("CENTER")
-        b.dot = UI.Disc(b, 8, C.teal, "OVERLAY")
-        b.dot:SetPoint("TOPRIGHT", b, "TOPRIGHT", -2, -2)
+        -- on a child frame: the slot border (UI-Quickslot2) is OVERLAY too, and one layer is not drawn in order
+        b.dot = UI.StatusDot(UI.Marks(b), 14, "green", "OVERLAY")
+        b.dot:SetPoint("TOPRIGHT", b, "TOPRIGHT", 4, 4)
         b.slot = s
         b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         b:SetScript("OnClick", function(self, button)
@@ -1213,7 +1231,7 @@ local function build()
             elseif v == TM.HIDDEN then
                 lines[#lines + 1] = { "Hidden", C.red }
             elseif v and v ~= real then
-                lines[#lines + 1] = { "Looks like: " .. (GetItemInfo(v) or ("item " .. v)), C.goldLight }
+                lines[#lines + 1] = { "Looks like: " .. (GetItemInfo(v) or ("item " .. v)), C.gold }
             end
             if TM.pending[s.inv] ~= nil then
                 lines[#lines + 1] = { "Changed: Apply to keep it.", C.teal }
@@ -1225,76 +1243,76 @@ local function build()
         frame.slots[s.inv] = b
     end
 
-    frame.undo = UI.Button(left, SLOT_SIZE, 26, "", "dark")
-    frame.undo.icon = UI.Glyph(frame.undo, "left", 14, C.text)
-    frame.undo.icon:SetPoint("CENTER")
-    frame.undo:SetPoint("TOPRIGHT", left, "TOPRIGHT", -10, -52 - 4 * SLOT_GAP - 4)
+    -- Price and Apply: the status and the cost above a row of red buttons (Undo and Remove All are the small ones).
+    frame.status = UI.Text(left, 11, C.dim, "body", "CENTER")
+    frame.status:SetPoint("BOTTOMLEFT", left, "BOTTOMLEFT", 10, 64)
+    frame.status:SetPoint("BOTTOMRIGHT", left, "BOTTOMRIGHT", -10, 64)
+    frame.cost = UI.Text(left, 12, C.text)
+    frame.cost:SetPoint("BOTTOMLEFT", left, "BOTTOMLEFT", 10, 42)
+    frame.undo = UI.Button(left, 60, 22, "Undo", "ghost")
+    frame.undo:SetPoint("BOTTOMLEFT", left, "BOTTOMLEFT", 8, 10)
     frame.undo.tooltip = function()
         return { "Undo", "Drops every change you have not applied." }
     end
     frame.undo:SetScript("OnClick", function()
         TM.Undo()
     end)
-
-    frame.status = UI.Text(left, 11, C.dim, "body", "CENTER")
-    frame.status:SetPoint("BOTTOMLEFT", left, "BOTTOMLEFT", 10, 50)
-    frame.status:SetPoint("BOTTOMRIGHT", left, "BOTTOMRIGHT", -10, 50)
-    frame.cost = UI.Text(left, 13, C.text)
-    frame.cost:SetPoint("BOTTOMLEFT", left, "BOTTOMLEFT", 12, 20)
-    frame.apply = UI.Button(left, 120, 30, "Apply", "gold", 13)
-    frame.apply:SetPoint("BOTTOMRIGHT", left, "BOTTOMRIGHT", -12, 12)
-    frame.apply:SetScript("OnClick", function()
-        TM.Apply()
-    end)
-    frame.strip = UI.Button(left, 30, 30, "", "dark")
-    frame.strip.icon = UI.Glyph(frame.strip, "shirt", 16, C.text)
-    frame.strip.icon:SetPoint("CENTER")
-    frame.strip:SetPoint("RIGHT", frame.apply, "LEFT", -6, 0)
+    frame.strip = UI.Button(left, 92, 22, "Remove All", "ghost")
+    frame.strip:SetPoint("LEFT", frame.undo, "RIGHT", 4, 0)
     frame.strip.tooltip = function()
         return { "Take everything off", "Removes every transmog and illusion. It is free." }
     end
     frame.strip:SetScript("OnClick", function()
         TM.StripAll()
     end)
+    frame.apply = UI.Button(left, 100, 22, "Apply", "gold")
+    frame.apply:SetPoint("BOTTOMRIGHT", left, "BOTTOMRIGHT", -8, 10)
+    frame.apply:SetScript("OnClick", function()
+        TM.Apply()
+    end)
 
-    -- Right: Items / Illusions.
+    -- Right: Items / Illusions (red buttons, the open one held down), the balance and the count.
     local right = CreateFrame("Frame", nil, frame)
-    right:SetPoint("TOPLEFT", frame, "TOPLEFT", RIGHT_X, 0)
-    right:SetSize(RIGHT_W, BH)
+    right:SetPoint("TOPLEFT", frame, "TOPLEFT", RIGHT_X, -PAD)
+    right:SetSize(RIGHT_W, BH - 2 * PAD)
     frame.right = right
 
-    frame.itemsTab = UI.Button(right, 90, 26, "Items", "tab", 12)
-    frame.itemsTab:SetPoint("TOPLEFT", right, "TOPLEFT", 0, -12)
+    frame.itemsTab = UI.Button(right, 90, 22, "Items", "tab")
+    frame.itemsTab:SetPoint("TOPLEFT", right, "TOPLEFT", 0, -2)
     frame.itemsTab:SetScript("OnClick", function()
         TM.view = "items"
         TM.Refresh()
     end)
-    frame.illusionsTab = UI.Button(right, 90, 26, "Illusions", "tab", 12)
-    frame.illusionsTab:SetPoint("LEFT", frame.itemsTab, "RIGHT", 6, 0)
+    frame.illusionsTab = UI.Button(right, 90, 22, "Illusions", "tab")
+    frame.illusionsTab:SetPoint("LEFT", frame.itemsTab, "RIGHT", 4, 0)
     frame.illusionsTab:SetScript("OnClick", function()
         TM.view = "illusions"
         TM.Refresh()
     end)
-    frame.coins = UI.Pill(right, "", C.setBg, C.setBorder, C.epic, 11)
-    frame.coins:SetPoint("TOPRIGHT", right, "TOPRIGHT", 0, -13)
+    -- the Bleakhold Coins balance: its coin and the amount, as the money frame writes a sum
+    frame.coins = UI.Pill(right, "", C.text, 12)
+    frame.coins:SetPoint("TOPRIGHT", right, "TOPRIGHT", 0, -6)
+    frame.coins.icon = UI.Icon(frame.coins, 14, COIN_ICON)
+    frame.coins.icon:SetPoint("RIGHT", frame.coins, "LEFT", -4, 0)
     frame.coins.tooltip = function()
         local p = TM.prices or { 1, 3, 5 }
         return { "Bleakhold Coins", strformat("Unlock a look you have not collected: %d (uncommon or rare), %d (epic), "
             .. "%d (legendary or Bleakhold).", p[1], p[2], p[3]) }
     end
-    frame.collected = UI.Text(right, 12, C.dim, "body", "RIGHT")
-    frame.collected:SetPoint("TOPRIGHT", right, "TOPRIGHT", -150, -19)
+    frame.collected = UI.LabelValue(right, "Collected", "", 12)
+    frame.collected:SetJustifyH("RIGHT")
+    frame.collected:SetPoint("TOPRIGHT", right, "TOPRIGHT", -150, -7)
 
     -- Items view
     local items = CreateFrame("Frame", nil, right)
-    items:SetPoint("TOPLEFT", right, "TOPLEFT", 0, -44)
+    items:SetPoint("TOPLEFT", right, "TOPLEFT", 0, -34)
     items:SetPoint("BOTTOMRIGHT", right, "BOTTOMRIGHT", 0, 0)
     frame.items = items
-    frame.slotName = UI.Text(items, 16, C.goldLight, "title")
+    frame.slotName = UI.Heading(items, nil, 16)
     frame.slotName:SetPoint("TOPLEFT", items, "TOPLEFT", 0, -6)
     frame.count = UI.Text(items, 12, C.dim)
     frame.count:SetPoint("LEFT", frame.slotName, "RIGHT", 10, -1)
-    frame.hide = UI.Button(items, 70, 24, "Hide", "dark", 12)
+    frame.hide = UI.Button(items, 70, 22, "Hide", "dark")
     frame.hide:SetPoint("TOPRIGHT", items, "TOPRIGHT", 0, -2)
     frame.hide.tooltip = function()
         return { "Hide this slot", "Shows nothing in this slot. It is free." }
@@ -1302,8 +1320,8 @@ local function build()
     frame.hide:SetScript("OnClick", function()
         TM.SetPending(TM.slot, TM.HIDDEN)
     end)
-    frame.missing = UI.Button(items, 120, 24, "Not collected", "tab", 12)
-    frame.missing:SetPoint("RIGHT", frame.hide, "LEFT", -6, 0)
+    frame.missing = UI.Button(items, 116, 22, "Not Collected", "tab")
+    frame.missing:SetPoint("RIGHT", frame.hide, "LEFT", -4, 0)
     frame.missing.tooltip = function()
         return { "Not collected", "The looks this item could take that your account has not collected yet. "
             .. "Click one to try it on." }
@@ -1312,25 +1330,39 @@ local function build()
         TM.SetMissingMode(not TM.missingMode)
     end)
 
+    -- The tiles: the look on the player's model in a dark row box. Chosen: the nav row's blue (UI.Select); on now:
+    -- the check; under the cursor: the row highlight; not collected: shaded, with the LFG lock and its price.
     frame.tiles = {}
     for i = 1, TM.PAGE_SIZE do
         local t = CreateFrame("Button", nil, items)
         t:SetSize(TILE_W, TILE_H)
         local col, row = (i - 1) % TM.COLS, floor((i - 1) / TM.COLS)
-        t:SetPoint("TOPLEFT", items, "TOPLEFT", col * (TILE_W + TILE_GAP), -36 - row * (TILE_H + TILE_GAP))
-        UI.Backdrop(t, C.card, C.border)
+        t:SetPoint("TOPLEFT", items, "TOPLEFT", col * (TILE_W + TILE_GAP), -32 - row * (TILE_H + TILE_GAP))
+        UI.Backdrop(t, C.card, C.border, nil, "edge")
         t.model = CreateFrame("DressUpModel", nil, t)
-        t.model:SetPoint("TOPLEFT", t, "TOPLEFT", 2, -2)
-        t.model:SetPoint("BOTTOMRIGHT", t, "BOTTOMRIGHT", -2, 2)
-        -- the shade, padlock and price sit on a frame above the model (a model draws over its own regions)
+        t.model:SetPoint("TOPLEFT", t, "TOPLEFT", 1, -1)
+        t.model:SetPoint("BOTTOMRIGHT", t, "BOTTOMRIGHT", -1, 1)
+        -- the shade, marks and price sit on a frame above the model (a model draws over its own regions)
         t.over = CreateFrame("Frame", nil, t)
         t.over:SetAllPoints(t.model)
         t.over:SetFrameLevel(t.model:GetFrameLevel() + 1)
-        t.shade = UI.Solid(t.over, C.bg, "BACKGROUND", 0.45)
+        t.shade = UI.Solid(t.over, C.bg, "BACKGROUND", 0.5)
         t.shade:SetAllPoints(t.over)
-        t.lock = UI.Glyph(t.over, "key", 14, C.goldLight, "OVERLAY")
-        t.lock:SetPoint("TOPRIGHT", t, "TOPRIGHT", -5, -5)
-        t.price = UI.Text(t.over, 11, C.goldPale, "body", "CENTER", "OVERLAY")
+        -- under the cursor: the quest log's title highlight, added (as the rows of this window light up)
+        t.glow = t.over:CreateTexture(nil, "OVERLAY")
+        t.glow:SetTexture(UI.STOCK.rowHighlight)
+        t.glow:SetBlendMode("ADD")
+        t.glow:SetAllPoints(t.over)
+        t.glow:SetAlpha(0.3)
+        t.glow:Hide()
+        t.lock = t.over:CreateTexture(nil, "OVERLAY")
+        t.lock:SetTexture(LOCK_MARK)
+        t.lock:SetSize(20, 20)
+        t.lock:SetPoint("TOPRIGHT", t, "TOPRIGHT", -3, -3)
+        t.check = UI.Check(t.over, 18)
+        t.check:SetPoint("TOPLEFT", t, "TOPLEFT", 2, -2)
+        t.check:Hide()
+        t.price = UI.Text(t.over, 11, C.gold, "body", "CENTER", "OVERLAY")
         t.price:SetPoint("BOTTOM", t, "BOTTOM", 0, 6)
         t:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         t:SetScript("OnClick", function(self, button)
@@ -1353,26 +1385,23 @@ local function build()
     frame.empty:SetPoint("TOP", items, "TOP", 0, -150)
     frame.empty:SetWidth(RIGHT_W - 60)
 
-    frame.prev = UI.Button(items, 30, 26, "", "dark")
-    frame.prev.icon = UI.Glyph(frame.prev, "left", 12, C.text)
-    frame.prev.icon:SetPoint("CENTER")
-    frame.prev:SetPoint("BOTTOMRIGHT", items, "BOTTOMRIGHT", -36, 10)
+    -- the spellbook's page arrows, "Page 1 / 3" to their left
+    frame.prev = UI.PageButton(items, "Prev")
+    frame.prev:SetPoint("BOTTOMRIGHT", items, "BOTTOMRIGHT", -34, -2)
     frame.prev:SetScript("OnClick", function()
         TM.page = max(1, TM.page - 1)
         TM.Refresh()
     end)
-    frame.next = UI.Button(items, 30, 26, "", "dark")
-    frame.next.icon = UI.Glyph(frame.next, "right", 12, C.text)
-    frame.next.icon:SetPoint("CENTER")
-    frame.next:SetPoint("BOTTOMRIGHT", items, "BOTTOMRIGHT", 0, 10)
+    frame.next = UI.PageButton(items, "Next")
+    frame.next:SetPoint("BOTTOMRIGHT", items, "BOTTOMRIGHT", 0, -2)
     frame.next:SetScript("OnClick", function()
         TM.page = min(TM.Pages(), TM.page + 1)
         TM.Refresh()
     end)
-    frame.pageText = UI.Text(items, 12, C.dim, "body", "RIGHT")
-    frame.pageText:SetPoint("RIGHT", frame.prev, "LEFT", -10, 0)
-    frame.unlock = UI.Button(items, 240, 26, "", "gold", 12)
-    frame.unlock:SetPoint("BOTTOMLEFT", items, "BOTTOMLEFT", 0, 10)
+    frame.pageText = UI.Text(items, 12, C.text, "body", "RIGHT")
+    frame.pageText:SetPoint("RIGHT", frame.prev, "LEFT", -6, 0)
+    frame.unlock = UI.Button(items, 240, 22, "", "gold")
+    frame.unlock:SetPoint("BOTTOMLEFT", items, "BOTTOMLEFT", 0, 3)
     frame.unlock:SetScript("OnClick", function()
         if TM.selectedMissing then
             TM.Unlock(TM.selectedMissing)
@@ -1384,40 +1413,49 @@ local function build()
         TM.Refresh()
     end)
 
-    -- Illusions view
+    -- Illusions view: Main Hand / Off Hand (held down when open) over a list of rows, the illusion on the weapon
+    -- checked (the dropdown list's look).
     local ill = CreateFrame("Frame", nil, right)
-    ill:SetPoint("TOPLEFT", right, "TOPLEFT", 0, -44)
+    ill:SetPoint("TOPLEFT", right, "TOPLEFT", 0, -34)
     ill:SetPoint("BOTTOMRIGHT", right, "BOTTOMRIGHT", 0, 0)
     frame.ill = ill
-    frame.mainHand = UI.Button(ill, 110, 26, "Main Hand", "tab", 12)
-    frame.mainHand:SetPoint("TOPLEFT", ill, "TOPLEFT", 0, -2)
+    frame.mainHand = UI.Button(ill, 110, 22, "Main Hand", "tab")
+    frame.mainHand:SetPoint("TOPLEFT", ill, "TOPLEFT", 0, -4)
     frame.mainHand:SetScript("OnClick", function()
         TM.illusionSlot = 16
         TM.Refresh()
     end)
-    frame.offHand = UI.Button(ill, 110, 26, "Off Hand", "tab", 12)
-    frame.offHand:SetPoint("LEFT", frame.mainHand, "RIGHT", 6, 0)
+    frame.offHand = UI.Button(ill, 110, 22, "Off Hand", "tab")
+    frame.offHand:SetPoint("LEFT", frame.mainHand, "RIGHT", 4, 0)
     frame.offHand:SetScript("OnClick", function()
         TM.illusionSlot = 17
         TM.Refresh()
     end)
-    frame.illScroll = UI.Scroll(ill)
-    frame.illScroll:SetPoint("TOPLEFT", ill, "TOPLEFT", 0, -36)
-    frame.illScroll:SetPoint("BOTTOMRIGHT", ill, "BOTTOMRIGHT", 0, 10)
+    -- the list shows whole rows (UI.Scroll's SetStep), with a line under it kept for the note (frame.illEmpty)
+    local listRows = floor((BH - 2 * PAD - 34 - 36 - 34 - 12) / ILL_ROW)
+    local listBox = UI.Box(ill, RIGHT_W, listRows * ILL_ROW + 12, C.card, C.border, nil, "edge")
+    listBox:SetPoint("TOPLEFT", ill, "TOPLEFT", 0, -36)
+    frame.illScroll = UI.Scroll(listBox)
+    frame.illScroll:SetPoint("TOPLEFT", listBox, "TOPLEFT", 6, -6)
+    frame.illScroll:SetPoint("BOTTOMRIGHT", listBox, "BOTTOMRIGHT", -4, 6)
+    frame.illScroll:SetStep(ILL_ROW)
     frame.illRows = UI.Pool(function()
-        local r = UI.Button(frame.illScroll.child, RIGHT_W - 10, 28, "", "dark", 12)
+        local r = UI.Button(frame.illScroll.child, RIGHT_W - 34, ILL_ROW, "", "row", 12)
+        r.label:ClearAllPoints()
+        r.label:SetPoint("LEFT", r, "LEFT", 22, 0)
+        r.label:SetPoint("RIGHT", r, "RIGHT", -4, 0)
         r.label:SetJustifyH("LEFT")
         return r
     end)
-    frame.illEmpty = UI.Text(ill, 13, C.mute, "body", "CENTER")
-    frame.illEmpty:SetPoint("TOP", ill, "TOP", 0, -150)
-    frame.illEmpty:SetWidth(RIGHT_W - 60)
+    frame.illEmpty = UI.Text(ill, 12, C.dim, "body", "CENTER")
+    frame.illEmpty:SetPoint("TOP", listBox, "BOTTOM", 0, -10)
+    frame.illEmpty:SetWidth(RIGHT_W - 20)
 end
 
 ------------------------------------------------------------------------------------------------------
 -- Tiles
 ------------------------------------------------------------------------------------------------------
--- The tile's look is the slot's current or chosen look: teal for what is on now, gold for the choice.
+-- The tile's look is the slot's current or chosen look: the check for what is on now, the blue for the choice.
 function TM.TileState(look)
     local inv = TM.slot
     local chosen = TM.trying[inv] or TM.pending[inv]
@@ -1440,15 +1478,21 @@ function TM.PaintTile(t)
         return
     end
     local chosen, on = TM.TileState(look)
-    local border = C.border
-    if chosen then
-        border = C.gold
-    elseif on then
-        border = C.teal
-    elseif t.hovered then
-        border = C.goldLight
+    UI.Select(t, chosen)
+    if t.selectArt then
+        -- the edge over the model, the gradient behind it (a model has no background of its own)
+        t.selectArt.edge:SetFrameLevel(t.over:GetFrameLevel() + 1)
     end
-    UI.Colors(t, look.missing and C.deep or C.card, border)
+    if on then
+        t.check:Show()
+    else
+        t.check:Hide()
+    end
+    if t.hovered then
+        t.glow:Show()
+    else
+        t.glow:Hide()
+    end
 end
 
 local function showTile(t, look)
@@ -1620,7 +1664,7 @@ local function refreshSlots()
             tex = empty
         end
         b.icon:SetTexture(tex)
-        b.icon:SetVertexColor(1, 1, 1, real and 1 or 0.35)
+        b.icon:SetVertexColor(1, 1, 1, real and 1 or 0.6)
         if v == TM.HIDDEN then
             b.hidden:Show()
         else
@@ -1631,7 +1675,7 @@ local function refreshSlots()
         else
             b.dot:Hide()
         end
-        UI.Colors(b, C.chip, s.inv == TM.slot and C.gold or C.border)
+        b:SetSlotChecked(s.inv == TM.slot)
     end
 end
 
@@ -1731,12 +1775,12 @@ local function refreshIllusions()
         r:ClearAllPoints()
         r:SetPoint("TOPLEFT", frame.illScroll.child, "TOPLEFT", 0, -y)
         r:SetLabel(it.name)
-        r:SetStyle(it.id == current and "tabOn" or "dark")
+        r:SetStyle(it.id == current and "rowOn" or "row")
         r:SetActive(hasWeapon)
         r:SetScript("OnClick", function()
             TM.SetIllusion(inv, it.id)
         end)
-        y = y + 32
+        y = y + ILL_ROW
     end
     frame.illScroll:SetContentHeight(y)
     if not hasWeapon then
@@ -1775,21 +1819,23 @@ function TM.Refresh()
     if TM.applying then
         frame.cost:SetText("Applying...")
     elseif #changes == 0 then
-        frame.cost:SetText("|cff8C877DNo changes|r")
+        frame.cost:SetText("|cff808080No changes|r")
     elseif TM.costPending then
-        frame.cost:SetText("|cff8C877DCost: ...|r")
+        frame.cost:SetText("|cff808080Cost: ...|r")
     else
-        frame.cost:SetText("Cost: " .. TM.Money(TM.cost) .. (TM.canPay and "" or "  |cffE5604F(not enough)|r"))
+        frame.cost:SetText("Cost: " .. TM.Money(TM.cost) .. (TM.canPay and "" or "  |cffff2020(not enough)|r"))
     end
     frame.apply:SetActive(#changes > 0 and not TM.applying and TM.canPay and TM.CostKnown())
     frame.strip:SetActive(not TM.applying)
     frame.undo:SetActive(#changes > 0 or next(TM.trying) ~= nil)
     frame.status:SetText(TM.status or "")
 
-    -- header
+    -- header: the Items / Illusions choice only when there is a choice (one button held down alone reads as a stray)
     if TM.hasIllusions then
+        frame.itemsTab:Show()
         frame.illusionsTab:Show()
     else
+        frame.itemsTab:Hide()
         frame.illusionsTab:Hide()
     end
     if not TM.hasIllusions and TM.view == "illusions" then
@@ -1809,12 +1855,13 @@ function TM.Refresh()
     end
     local coll = ns.S and ns.S.coll
     total = (coll and coll.transmogOwned) or total
-    frame.collected:SetText(total > 0 and ("Collected: " .. U.Commas(total)) or "")
+    frame.collected:SetLabel(total > 0 and "Collected" or "")
+    frame.collected:SetValue(total > 0 and U.Commas(total) or "")
     frame.collected:ClearAllPoints()
     if TM.coins then
-        frame.collected:SetPoint("RIGHT", frame.coins, "LEFT", -12, 0)
+        frame.collected:SetPoint("RIGHT", frame.coins.icon, "LEFT", -14, 0)
     else
-        frame.collected:SetPoint("TOPRIGHT", frame.right, "TOPRIGHT", 0, -19)
+        frame.collected:SetPoint("TOPRIGHT", frame.right, "TOPRIGHT", 0, -7)
     end
 
     if TM.view == "illusions" then

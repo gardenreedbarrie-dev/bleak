@@ -149,9 +149,11 @@ local function pushBoard()
         local d = ns.Def("D", id) or {}
         local lvl = d.lvlMin or 0
         local bits = lvl <= 30 and 15 or (lvl <= 60 and 7 or 3)
-        local best = (i % 3 ~= 0) and (800 + i * 37) or ""
+        -- the Journey score, 0-100 (the bridge's BOARD best and record)
+        local best = (i % 3 ~= 0) and (50 + (i * 7) % 45) or ""
         local bestTier = best ~= "" and (i % 4) or ""
-        recs[#recs + 1] = { id, d.chapter or 1, d.lvlMin or "", d.lvlMax or "", bits, best, bestTier, 2400 + i * 53, NAMES[i % #NAMES + 1], (lvl > level) and 1 or 0 }
+        recs[#recs + 1] = { id, d.chapter or 1, d.lvlMin or "", d.lvlMax or "", bits, best, bestTier,
+            75 + (i * 11) % 26, NAMES[i % #NAMES + 1], (lvl > level) and 1 or 0 }
     end
     Demo.Push("BOARD", recs, 400)
 end

@@ -449,6 +449,9 @@ test("camp: the Glide button shows for gliders only, counts its cooldown and gli
     M.Advance(0.3)
     H.ok(gb:IsShown(), "a glider gets the button")
     H.eq(gb.icon:GetTexture(), "Interface\\Icons\\Spell_Magic_FeatherFall", "the spellbook racial's icon (races.json 100801)")
+    -- the icon below the pushed overlay (ARTWORK): one layer is drawn in texture order, so it may not share it
+    H.eq(gb.icon:GetDrawLayer(), "BACKGROUND", "icon in BACKGROUND, as ActionButtonTemplate's")
+    H.eq(gb:GetPushedTexture():GetDrawLayer(), "ARTWORK", "the Depress overlay above it")
     H.ok(gb.cd:IsShown(), "cooldown on the button")
     H.eq(gb.cd:GetText(), "01:30")
     M.Advance(40)

@@ -120,7 +120,7 @@ test("toast: a task becoming claimable shows the toast; click opens Tasks", func
     H.send(M, "TASK", { { 2, 102, 20, 1 } })
     local t = M.env.BleakholdToastFrame
     H.ok(t:IsShown())
-    H.eq(t.kicker:GetText(), "DAILY TASK DONE")
+    H.eq(t.kicker:GetText(), "Daily Task Complete")
     H.eq(t.title:GetText(), "Key sweeper")
     H.eq(t.sub:GetText(), "Claim 1 Emblem of Heroism in Activities")
     t:Click()
@@ -140,9 +140,18 @@ end)
 test("toast: server TOAST op", function(M, ns)
     FX.connect(M, H)
     H.send(M, "TOAST", { { "R", "New record", "Halls of Lightning +8", "leaderboards" } })
-    H.eq(M.env.BleakholdToastFrame.kicker:GetText(), "NEW RECORD")
+    H.eq(M.env.BleakholdToastFrame.kicker:GetText(), "New Record")
     M.env.BleakholdToastFrame:Click()
     H.ok(M.env.BleakholdLeaderboardsFrame:IsShown())
+end)
+
+test("toast: the server's 'Keys window' line names the Mythic+ Dungeons page", function(M, ns)
+    FX.connect(M, H)
+    -- bh_ui_bridge.cpp, the keystone used at its dungeon
+    H.send(M, "TOAST", { { "K", "Keystone ready", "Press Start keystone in the Keys window", "keys" } })
+    H.eq(M.env.BleakholdToastFrame.sub:GetText(), "Press Start keystone on the Mythic+ Dungeons page")
+    H.eq(ns.Toast.FixSub("Press Start keystone in the Keys window", "tasks"), "Press Start keystone in the Keys window",
+        "only for its own target")
 end)
 
 ------------------------------------------------------------------------------------------------------
@@ -215,6 +224,9 @@ test("orbs: click opens, badge shows claimable tasks, right-drag saves the angle
     M.Advance(0.2)
     M.Fire(orb, "OnDragStop")
     H.eq(type(M.env.BleakholdCharDB.orbs.season), "number", "angle saved")
+    -- the pressed shade over the picture: not in its ARTWORK layer (the client sorts one layer by texture)
+    H.eq(orb.pressed.__layer, "OVERLAY")
+    H.eq(orb.glyph.__layer, "ARTWORK")
 end)
 
 test("orbs: the War Mode orb only with HELLO bit 16384 (32768 alone is not War Mode)", function(M, ns)
@@ -248,17 +260,27 @@ local function startRun(M)
     H.send(M, "MPS", ex.MPS)
 end
 
-test("countdown: shown from MPS, numerals from the digit atlas, gone when the run starts", function(M, ns)
+test("countdown: shown from MPS, the pull bar counts, pull numerals for the last five seconds, gone at zero",
+    function(M, ns)
     FX.connect(M, H)
     startRun(M)
     local cd = M.env.BleakholdCountdown
     H.ok(cd:IsShown())
     H.eq(cd.title:GetText(), "Halls of Lightning +8")
-    H.ok(#M.FindText("The Black Temple era", true) > 0, "era pill")
-    H.ok(cd.digits[1]:IsShown() and cd.digits[2]:IsShown(), "two digits for 10")
+    H.ok(#M.FindText("The Black Temple era", true) > 0, "era")
+    H.ok(cd.bar:IsShown(), "our bar while DBM's does not show")
+    H.eq(cd.bar.name:GetText(), "Pull in"); H.eq(cd.bar.time:GetText(), "10.0")
+    H.ok(not cd.digits[1]:IsShown(), "no numeral above five seconds")
     M.Advance(6)
-    H.ok(cd.digits[1]:IsShown() and not cd.digits[2]:IsShown(), "one digit under 10")
-    M.Advance(4.2)
+    H.ok(cd.digits[1]:IsShown(), "a numeral under five seconds")
+    H.eq(cd.digits[1].glyph, "4", "the pull atlas's 4")
+    H.contains(cd.digits[1].tex:GetTexture(), "Art\\Royale\\Pull")
+    H.eq(cd.bar.time:GetText(), "4.0")
+    M.Advance(1.05)
+    H.eq(cd.digits[1].glyph, "3"); H.ok(cd.digits[2]:IsShown(), "the 4 fades out")
+    M.Advance(0.3)
+    H.ok(not cd.digits[2]:IsShown(), "faded")
+    M.Advance(2.85)
     H.ok(not cd:IsShown(), "hidden at zero")
 end)
 
@@ -295,6 +317,34 @@ test("countdown: raid leader uses RAID; solo with DBM whispers itself", function
     M.SetGroup("RAID", 10, true)
     startRun(M)
     H.eq(M.sent[#M.sent].channel, "RAID")
+end)
+
+-- DBM's bar module as DBM-Core has it (DBT: GetBar by the bar's name)
+local function fakeDbm(M)
+    local bars = {}
+    M.env.DBM = { Options = {}, Bars = { GetBar = function(_, name) return bars[name] end } }
+    return bars
+end
+
+test("countdown: ours hides only while DBM really shows its Pull in bar, and comes back if DBM's goes", function(M, ns)
+    FX.connect(M, H)
+    -- a member, not the leader: the leader turned the pull timer off (/bh dbm off), so no DBM bar comes
+    M.SetGroup("PARTY", 5, false)
+    local bars = fakeDbm(M)
+    startRun(M)
+    local cd = M.env.BleakholdCountdown
+    M.Advance(0.3)
+    H.ok(cd.bar:IsShown(), "no DBM bar: ours, not nothing")
+    bars["Pull in"] = {}
+    M.Advance(0.3)
+    H.ok(not cd.bar:IsShown(), "DBM shows its bar: ours hides")
+    bars["Pull in"] = nil
+    M.Advance(0.3)
+    H.ok(cd.bar:IsShown(), "DBM's went before zero: ours again")
+    -- a DBM that cannot be asked: only a pull timer that surely went out hides ours
+    M.env.DBM = { Options = {} }
+    M.Advance(0.3)
+    H.ok(cd.bar:IsShown(), "a member's DBM, nothing sent")
 end)
 
 test("countdown: solo with DBM loaded whispers the pull timer to itself", function(M, ns)

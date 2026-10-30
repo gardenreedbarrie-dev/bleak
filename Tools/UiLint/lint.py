@@ -44,6 +44,9 @@ CONTENT = re.compile(r"pandaren|\bmonk\b|\bMONK\b", re.I)
 EVENT_RE = re.compile(r"RegisterEvent\(\s*[\"']([A-Za-z0-9_]+)[\"']")
 TEX_RE = re.compile(r"[\"'](Interface\\\\AddOns\\\\Bleakhold\\\\[^\"']+)[\"']")
 ART_RE = re.compile(r"(?:UI\.)?ART\s*\.\.\s*[\"']([A-Za-z0-9_]+)[\"']")
+# The owner's dungeon pictures (Art\Journal\bg_<KEY>, btn_<KEY>) reach players through the launcher's extra/ layer and
+# are never in the repository; the addon probes them and falls back (tests/test_static.lua), so only the name is checked
+JOURNAL_RE = re.compile(r"^Art\\Journal\\(?:bg|btn)_[A-Z0-9]+$")
 
 
 # Lua functions Bleakhold.exe adds to the 3.3.5a API, read from the client's own registration table so the lint
@@ -236,6 +239,11 @@ def lint_addon(addon, api, wowlua, framexml, rep):
         for path in TEX_RE.findall(code):
             sub = path.replace("\\\\", "\\").split("\\", 3)[3]
             if sub.endswith("\\"):
+                continue
+            if sub.lower().startswith("art\\journal\\"):
+                if not JOURNAL_RE.match(sub):
+                    rep.err("art", "%s: a Journal picture is bg_<KEY> or btn_<KEY>: %s" % (rel(f), path))
+                rep.count("art")
                 continue
             if not (ci_resolve(addon, sub) or ci_resolve(addon, sub + ".tga") or ci_resolve(addon, sub + ".blp")):
                 rep.err("art", "%s: texture not found: %s" % (rel(f), path))

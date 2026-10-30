@@ -210,7 +210,7 @@ for _, size in ipairs({ 1000, 251, 64 }) do
         ns.Leaderboards.OpenArena(3)
         M.Advance(0.3)
         H.ok(texts(M, "Dawnbreakers") > 0, "podium team")
-        H.ok(texts(M, "YOUR STANDING") > 0)
+        H.ok(texts(M, "Your Standing") > 0)
         H.ok(texts(M, "Rank 4  -  top 19%") > 0, "your standing")
     end)
 end
@@ -249,16 +249,17 @@ test("arena: no page, no nav entry, no leaderboard tab and no QJOIN A without fe
     H.ok(#M.sent >= before)
 end)
 
-test("arena: the bit at runtime shows the nav entry after Rift and the Arena tab; off again goes back", function(M, ns)
+test("arena: the bit at runtime shows the nav entry after Group Finder and the Arena tab; off again goes back", function(M, ns)
     FX.connect(M, H)
     local nav = navEntry(ns, "arena")
     H.hello(M, ARENA)
     M.Advance(0.3)
     H.ok(nav:IsShown(), "Arena entry with the bit")
-    H.eq(select(5, nav:GetPoint(1)), -12 - 3 * 66, "after Rift (Royale off), before Tasks")
+    local A = ns.Activities
+    H.eq(select(5, nav:GetPoint(1)), -A.NAV_PAD - 5 * A.navPitch, "after Group Finder (Royale off), before Tasks")
     H.hello(M, { [6] = 65536 + 4096 })
     M.Advance(0.3)
-    H.eq(select(5, nav:GetPoint(1)), -12 - 4 * 66, "after Royale")
+    H.eq(select(5, nav:GetPoint(1)), -A.NAV_PAD - 6 * A.navPitch, "after Royale")
     arena(M)
     local P = openPage(M, ns)
     H.ok(P:IsVisible(), "Arena page")
@@ -454,7 +455,7 @@ test("arena: cutoffs, checklist and rewards of the selected bracket", function(M
     H.eq(cut.rows[3].cells[3]:GetText(), "#4")
     H.contains(cut.rows[3].cells[6]:GetText(), "1912")
     H.contains(cut.rows[6].cells[6]:GetText(), "1310")
-    H.eq(cut.rows[3].__bdcolor[1], select(1, ns.UI.Rgb(ns.UI.C.active)), "the player's tier is marked")
+    H.ok(cut.rows[3].selected and not cut.rows[2].selected, "the player's tier is marked (the selected row's look)")
     H.contains(P.detail.foot:GetText(), "22 teams count for rewards  -  too few for titles")
     -- checklist
     P.detail.views[2]:Click()
@@ -639,7 +640,7 @@ test("arena: a new match in ARENA toasts the change, rating, place and pace; cli
     H.ok(ns.Arena.page:IsVisible(), "opens the Arena page")
     -- the server's TOAST with target arena
     H.send(M, "TOAST", { { "S", "Arena Season 1", "The final week", "arena" } })
-    H.eq(t.kicker:GetText(), "SEASON")
+    H.eq(t.kicker:GetText(), "Season", "kickers in Title Case, as the stock alerts")
     H.eq(t.glyph, "shield")
 end)
 

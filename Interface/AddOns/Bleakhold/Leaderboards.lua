@@ -2,6 +2,9 @@
 -- season, dungeon (Arena: bracket) and class filters, top-three podium, ranked table with pages, your best (Arena:
 -- your standing) and the latest server firsts. The server ranks everything; the client only asks for pages (LBQ).
 -- The Arena tab (board A, section 20) is there only with HELLO feature bit 65536; its seasons come from ARENA S.
+-- Stock 3.3.5a look: the options frame's tabs on a tooltip panel, UIDropDownMenu-dressed filters, medals as icons
+-- (the arena achievements' axes), WhoFrame column headers over rows with the quest log highlight, the spellbook's
+-- page arrows, the achievement progress bar and the indicator balls.
 local ADDON, ns = ...
 local U, UI, Comm = ns.U, ns.UI, ns.Comm
 local C = UI.C
@@ -22,7 +25,8 @@ LB.bracket = 3          -- board A: 1, 2, 3 or 5
 LB.arenaSeason = 0      -- board A: an arena season id, 0 the current one
 LB.ROWS = 8
 
-local win = UI.Window("BleakholdLeaderboardsFrame", LB.W, LB.H, "LEADERBOARDS", "trophy")
+local win = UI.Window("BleakholdLeaderboardsFrame", LB.W, LB.H, "Leaderboards", "trophy")
+local CW, CH = UI.ContentSize(LB.W, LB.H)
 LB.frame = win
 
 ------------------------------------------------------------------------------------------------------
@@ -38,16 +42,24 @@ local seasonDD = UI.Dropdown(win.header, 190, function(value)
     LB.Query()
 end)
 seasonDD:SetPoint("RIGHT", win.close, "LEFT", -12, 0)
-local seasonLabel = UI.Text(win.header, 12, C.dim)
+local seasonLabel = UI.Text(win.header, 12, C.gold)
 seasonLabel:SetPoint("RIGHT", seasonDD, "LEFT", -6, 0)
 seasonLabel:SetText("Season")
 
 ------------------------------------------------------------------------------------------------------
--- Tabs and filters
+-- Tabs and filters: the options frame's top tabs standing on the body (a tooltip panel), the dungeon (Arena:
+-- bracket) and class dropdowns at the right of the strip
 ------------------------------------------------------------------------------------------------------
-local bar = UI.Box(win.content, 10, 44, C.rail)
+LB.STRIP_H = 28
+local body = UI.Box(win.content, CW, CH - LB.STRIP_H, C.panel, C.border, nil, "panel")
+body:SetPoint("TOPLEFT", win.content, "TOPLEFT", 0, -LB.STRIP_H)
+body:SetPoint("BOTTOMRIGHT", win.content, "BOTTOMRIGHT", 0, 0)
+LB.body = body
+-- above the body, so the open tab's legs cover the panel's top edge
+local bar = CreateFrame("Frame", nil, win.content)
 bar:SetPoint("TOPLEFT", win.content, "TOPLEFT", 0, 0)
-bar:SetPoint("TOPRIGHT", win.content, "TOPRIGHT", 0, 0)
+bar:SetPoint("BOTTOMRIGHT", body, "TOPRIGHT", 0, 0)
+bar:SetFrameLevel(body:GetFrameLevel() + 5)
 local tabDefs = {
     { key = "K", label = "Mythic Keys" },
     { key = "R", label = "Eclipse Rift" },
@@ -55,12 +67,20 @@ local tabDefs = {
     { key = "A", label = "Arena", available = function() return ns.Arena ~= nil and ns.Arena.Live() end },
     { key = "F", label = "Server Firsts" },
 }
-LB.TAB_W, LB.TAB_STEP = 100, 106
+-- the tabs overlap by their art's see-through flanks
+LB.TAB_W, LB.TAB_STEP = 100, 92
 LB.tabs = {}
+local function placeTab(b, n)
+    b:ClearAllPoints()
+    b:SetPoint("BOTTOMLEFT", body, "TOPLEFT", 16 + n * LB.TAB_STEP, -2)
+end
 for i, d in ipairs(tabDefs) do
-    local b = UI.Button(bar, LB.TAB_W, 30, d.label, "tab", 13)
-    b:SetPoint("LEFT", bar, "LEFT", 16 + (i - 1) * LB.TAB_STEP, 0)
+    local b = UI.Button(bar, LB.TAB_W, 24, d.label, "strip")
+    placeTab(b, i - 1)
     b:SetScript("OnClick", function()
+        if PlaySound then
+            PlaySound("igCharacterInfoTab")
+        end
         LB.board = d.key
         LB.page = 1
         LB.Query()
@@ -86,8 +106,7 @@ function LB.LayoutTabs()
     local n = 0
     for _, b in ipairs(LB.tabs) do
         if not b.available or b.available() then
-            b:ClearAllPoints()
-            b:SetPoint("LEFT", bar, "LEFT", 16 + n * LB.TAB_STEP, 0)
+            placeTab(b, n)
             b:Show()
             n = n + 1
         else
@@ -101,8 +120,8 @@ local classDD = UI.Dropdown(bar, 120, function(value)
     LB.page = 1
     LB.Query()
 end)
-classDD:SetPoint("RIGHT", bar, "RIGHT", -16, 0)
-local classLabel = UI.Text(bar, 12, C.dim)
+classDD:SetPoint("RIGHT", bar, "RIGHT", -10, 1)
+local classLabel = UI.Text(bar, 12, C.gold)
 classLabel:SetPoint("RIGHT", classDD, "LEFT", -6, 0)
 classLabel:SetText("Class")
 local dungeonDD = UI.Dropdown(bar, 120, function(value)
@@ -115,89 +134,113 @@ local dungeonDD = UI.Dropdown(bar, 120, function(value)
     LB.Query()
 end)
 dungeonDD:SetPoint("RIGHT", classLabel, "LEFT", -14, 0)
-local dungeonLabel = UI.Text(bar, 12, C.dim)
+local dungeonLabel = UI.Text(bar, 12, C.gold)
 dungeonLabel:SetPoint("RIGHT", dungeonDD, "LEFT", -6, 0)
 dungeonLabel:SetText("Dungeon")
 LB.filters = { season = seasonDD, class = classDD, dungeon = dungeonDD }
 
-local body = CreateFrame("Frame", nil, win.content)
-body:SetPoint("TOPLEFT", bar, "BOTTOMLEFT", 18, -16)
-body:SetPoint("BOTTOMRIGHT", win.content, "BOTTOMRIGHT", -18, 14)
-local ASIDE = 260
-local MW = LB.W - 2 - 36 - ASIDE - 16
-local BH = LB.H - 4 - 46 - 44 - 30
+local PAD = 14
+local ASIDE = 232
+local MW = CW - 2 * PAD - ASIDE - 14
+local BH = CH - LB.STRIP_H - 2 * PAD
+local inner = CreateFrame("Frame", nil, body)
+inner:SetPoint("TOPLEFT", body, "TOPLEFT", PAD, -PAD)
+inner:SetPoint("BOTTOMRIGHT", body, "BOTTOMRIGHT", -PAD, PAD)
 
 ------------------------------------------------------------------------------------------------------
--- Podium
+-- Podium: the first three on steps, each with its medal (the arena achievements' gold, silver and bronze axes)
 ------------------------------------------------------------------------------------------------------
-local podium = CreateFrame("Frame", nil, body)
-podium:SetSize(MW, 170)
-podium:SetPoint("TOPLEFT", body, "TOPLEFT", 0, 0)
+local PODIUM_H = 180
+local podium = CreateFrame("Frame", nil, inner)
+podium:SetSize(MW, PODIUM_H)
+podium:SetPoint("TOPLEFT", inner, "TOPLEFT", 0, 0)
 LB.podium = podium
-local MEDALS = { { C.goldLight, C.gold, 170 }, { C.silver, "6B7078", 146 }, { C.bronze, "7A5A3E", 128 } }
+LB.MEDAL_ICONS = { "Achievement_Arena_2v2_7", "Achievement_Arena_2v2_3", "Achievement_Arena_2v2_1" }
+local MEDALS = { { C.goldLight, PODIUM_H }, { C.silver, PODIUM_H - 24 }, { C.bronze, PODIUM_H - 44 } }
 local PW = floor((MW - 24) / 3)
 podium.boxes = {}
 for rank = 1, 3 do
     local m = MEDALS[rank]
-    local b = UI.Box(podium, PW, m[3], C.card, m[2])
+    local b = UI.Box(podium, PW, m[2], C.card, C.border, nil, "edge")
     local slot = ({ 2, 1, 3 })[rank]                 -- 2nd, 1st, 3rd from left
     local x = ({ 1, 0, 2 })[rank] * (PW + 12)
     b:SetPoint("BOTTOMLEFT", podium, "BOTTOMLEFT", x, 0)
-    b.medal = UI.Disc(b, 34, m[1], "ARTWORK")
-    b.medal:SetPoint("TOP", b, "TOP", 0, -12)
-    b.rank = UI.Text(b, 16, C.bg, "title", "CENTER")
-    b.rank:SetPoint("CENTER", b.medal, "CENTER", 0, 0)
-    b.rank:SetText(tostring(rank))
     b.group = UI.Text(b, 12, C.text, "body", "CENTER")
-    b.group:SetPoint("BOTTOMLEFT", b, "BOTTOMLEFT", 6, 70)
-    b.group:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -6, 70)
+    b.group:SetPoint("BOTTOMLEFT", b, "BOTTOMLEFT", 6, 72)
+    b.group:SetPoint("BOTTOMRIGHT", b, "BOTTOMRIGHT", -6, 72)
+    -- the medal as an icon with the place in its corner, as a stack count; it sits on the names, so every card has
+    -- the same medal-to-name gap and the podium's step shows as space above the medal
+    b.medal = UI.Icon(b, 38, LB.MEDAL_ICONS[rank])
+    b.medal:SetPoint("BOTTOM", b.group, "TOP", 0, 4)
+    b.rank = b.medal:CreateFontString(nil, "OVERLAY")
+    b.rank:SetFont(UI.FONT_BODY, 14, "OUTLINE")
+    b.rank:SetTextColor(1, 1, 1)
+    b.rank:SetPoint("BOTTOMRIGHT", b.medal, "BOTTOMRIGHT", -1, 2)
+    b.rank:SetText(tostring(rank))
     b.dungeon = UI.Text(b, 11, C.dim, "body", "CENTER")
-    b.dungeon:SetPoint("BOTTOM", b, "BOTTOM", 0, 52)
-    b.value = UI.Text(b, 22, m[1], "title", "CENTER")
-    b.value:SetPoint("BOTTOM", b, "BOTTOM", 0, 24)
-    b.time = UI.Text(b, 11, C.mid, "body", "CENTER")
-    b.time:SetPoint("BOTTOM", b, "BOTTOM", 0, 8)
+    b.dungeon:SetPoint("BOTTOM", b, "BOTTOM", 0, 54)
+    b.value = UI.Text(b, 22, m[1], "body", "CENTER")
+    b.value:SetPoint("BOTTOM", b, "BOTTOM", 0, 26)
+    b.time = UI.Text(b, 11, C.text, "body", "CENTER")
+    b.time:SetPoint("BOTTOM", b, "BOTTOM", 0, 9)
     b.slot = slot
     b.valueColor = m[1]
     podium.boxes[rank] = b
 end
 
 ------------------------------------------------------------------------------------------------------
--- Table
+-- Table: WhoFrame's column headers over rows with the quest log's highlight; a row's tooltip names the whole group
 ------------------------------------------------------------------------------------------------------
-local tbl = UI.Box(body, MW, BH - 170 - 12, C.panel, C.border)
-tbl:SetPoint("TOPLEFT", podium, "BOTTOMLEFT", 0, -12)
+local ROW_H, TABLE_GAP = 24, 10
+local tbl = UI.Box(inner, MW, BH - PODIUM_H - TABLE_GAP, C.card, C.border, nil, "edge")
+tbl:SetPoint("TOPLEFT", podium, "BOTTOMLEFT", 0, -TABLE_GAP)
 LB.table = tbl
-local headerRow = UI.Box(tbl, MW - 2, 26, C.header)
+local headerRow = CreateFrame("Frame", nil, tbl)
 headerRow:SetPoint("TOPLEFT", tbl, "TOPLEFT", 1, -1)
-headerRow.cells = {}
+headerRow:SetPoint("TOPRIGHT", tbl, "TOPRIGHT", -1, -1)
+headerRow:SetHeight(24)
+headerRow.cols, headerRow.cells = {}, {}
 for i = 1, 6 do
-    local t = UI.Text(headerRow, 10, C.dim)
-    headerRow.cells[i] = t
+    local h = UI.ColumnHeader(headerRow, 60, "")
+    headerRow.cols[i] = h
+    headerRow.cells[i] = h.label
 end
+LB.headerRow = headerRow
+
+local function hideTooltip()
+    if GameTooltip then
+        GameTooltip:Hide()
+    end
+end
+
 tbl.rows = {}
 for i = 1, LB.ROWS do
-    local r = UI.Box(tbl, MW - 2, 26, i % 2 == 1 and C.zebra or C.panel)
-    r:SetPoint("TOPLEFT", headerRow, "BOTTOMLEFT", 0, -(i - 1) * 26)
+    local r = CreateFrame("Button", nil, tbl)
+    r:SetSize(MW - 2, ROW_H)
+    r:SetPoint("TOPLEFT", headerRow, "BOTTOMLEFT", 0, -2 - (i - 1) * ROW_H)
+    r:SetHighlightTexture(UI.STOCK.rowHighlight, "ADD")
     r.cells = {}
     for c = 1, 6 do
-        r.cells[c] = UI.Text(r, 12, c == 1 and C.text or (c == 4 and C.goldLight or C.text))
+        r.cells[c] = UI.Text(r, 12, c == 4 and C.goldLight or C.text)
     end
+    r:SetScript("OnEnter", function(self)
+        if self.tip then
+            UI.ShowTooltip(self, self.tip)
+        end
+    end)
+    r:SetScript("OnLeave", hideTooltip)
     tbl.rows[i] = r
 end
 tbl.empty = UI.Text(tbl, 13, C.dim, "body", "CENTER")
 tbl.empty:SetPoint("CENTER")
-tbl.prev = UI.Button(tbl, 28, 22, "", "dark")
-tbl.prev.icon = UI.Glyph(tbl.prev, "left", 12, C.text)
-tbl.prev.icon:SetPoint("CENTER")
-tbl.prev:SetPoint("BOTTOMRIGHT", tbl, "BOTTOMRIGHT", -100, 6)
-tbl.next = UI.Button(tbl, 28, 22, "", "dark")
-tbl.next.icon = UI.Glyph(tbl.next, "right", 12, C.text)
-tbl.next.icon:SetPoint("CENTER")
-tbl.next:SetPoint("BOTTOMRIGHT", tbl, "BOTTOMRIGHT", -8, 6)
-tbl.pageText = UI.Text(tbl, 11, C.dim, "body", "CENTER")
-tbl.pageText:SetPoint("RIGHT", tbl.next, "LEFT", -6, 0)
-tbl.pageText:SetWidth(56)
+-- the spellbook's page arrows with "Page 1 / 3" between them
+tbl.next = UI.PageButton(tbl, "Next")
+tbl.next:SetPoint("BOTTOMRIGHT", tbl, "BOTTOMRIGHT", -6, 2)
+tbl.pageText = UI.Text(tbl, 12, C.text, "body", "CENTER")
+tbl.pageText:SetPoint("RIGHT", tbl.next, "LEFT", -4, 0)
+tbl.pageText:SetWidth(90)
+tbl.prev = UI.PageButton(tbl, "Prev")
+tbl.prev:SetPoint("RIGHT", tbl.pageText, "LEFT", -4, 0)
 tbl.prev:SetScript("OnClick", function()
     if LB.page > 1 then
         LB.page = LB.page - 1
@@ -212,17 +255,35 @@ tbl.next:SetScript("OnClick", function()
     end
 end)
 
+-- Columns from 10 px in: each header as wide as its column (the last one to the table's edge), its label over the
+-- column's text.
 local function layoutColumns(widths)
-    local x = 10
+    local x, last = 10, 0
+    for i = 1, 6 do
+        if (widths[i] or 0) > 0 then
+            last = i
+        end
+    end
     for i = 1, 6 do
         local w = widths[i] or 0
-        local cells = { headerRow.cells[i] }
-        for _, r in ipairs(tbl.rows) do cells[#cells + 1] = r.cells[i] end
-        for _, cell in ipairs(cells) do
+        local col = headerRow.cols[i]
+        col:ClearAllPoints()
+        if w > 0 then
+            local cw = i == last and (MW - 2 - (x - 9)) or w
+            col:SetWidth(cw)
+            col:SetPoint("TOPLEFT", headerRow, "TOPLEFT", x - 9, 0)
+            UI.OneLine(col.label, max(1, cw - 12))
+            col:Show()
+        else
+            col:Hide()
+        end
+        for _, r in ipairs(tbl.rows) do
+            local cell = r.cells[i]
             cell:ClearAllPoints()
             if w > 0 then
-                cell:SetPoint("LEFT", cell:GetParent(), "LEFT", x, 0)
-                cell:SetWidth(w - 6)
+                -- one line, cut with "..." (the row's tooltip has the whole text)
+                cell:SetPoint("LEFT", r, "LEFT", x, 0)
+                UI.OneLine(cell, w - 6)
                 cell:Show()
             else
                 cell:Hide()
@@ -235,34 +296,32 @@ end
 ------------------------------------------------------------------------------------------------------
 -- Aside
 ------------------------------------------------------------------------------------------------------
-local best = UI.Box(body, ASIDE, 150, C.eraBg, C.eraBorder)
-best:SetPoint("TOPRIGHT", body, "TOPRIGHT", 0, 0)
-best.label = UI.Text(best, 11, C.dim)
+local best = UI.Box(inner, ASIDE, 150, C.card, C.border, nil, "edge")
+best:SetPoint("TOPRIGHT", inner, "TOPRIGHT", 0, 0)
+best.label = UI.Label(best, "Your Best")
 best.label:SetPoint("TOPLEFT", best, "TOPLEFT", 14, -14)
-best.label:SetText("YOUR BEST")
-best.value = UI.Text(best, 24, C.goldPale, "title")
+best.value = UI.Text(best, 24, C.goldPale)
 best.value:SetPoint("TOPLEFT", best.label, "BOTTOMLEFT", 0, -6)
 best.detail = UI.Text(best, 12, C.text)
 best.detail:SetPoint("TOPLEFT", best.value, "BOTTOMLEFT", 0, -4)
 UI.OneLine(best.detail, ASIDE - 26)
-best.bar = UI.Bar(best, ASIDE - 28, 6, C.gold, C.bg)
-best.bar:SetPoint("TOPLEFT", best.detail, "BOTTOMLEFT", 0, -8)
+best.bar = UI.Bar(best, ASIDE - 38, 14)
+best.bar:SetPoint("TOPLEFT", best.detail, "BOTTOMLEFT", 5, -10)
 best.rank = UI.Text(best, 11, C.dim)
-best.rank:SetPoint("TOPLEFT", best.bar, "BOTTOMLEFT", 0, -5)
+best.rank:SetPoint("TOPLEFT", best.bar, "BOTTOMLEFT", -5, -9)
 LB.best = best
 
-local firsts = UI.Box(body, ASIDE, 200, C.card, C.border)
-firsts:SetPoint("TOPRIGHT", best, "BOTTOMRIGHT", 0, -12)
-firsts.label = UI.Text(firsts, 11, C.dim)
+local firsts = UI.Box(inner, ASIDE, 206, C.card, C.border, nil, "edge")
+firsts:SetPoint("TOPRIGHT", best, "BOTTOMRIGHT", 0, -10)
+firsts.label = UI.Label(firsts, "Latest Server Firsts")
 firsts.label:SetPoint("TOPLEFT", firsts, "TOPLEFT", 14, -14)
-firsts.label:SetText("LATEST SERVER FIRSTS")
 firsts.items = {}
 for i = 1, 3 do
     local it = CreateFrame("Frame", nil, firsts)
     it:SetSize(ASIDE - 28, 50)
-    it:SetPoint("TOPLEFT", firsts, "TOPLEFT", 14, -36 - (i - 1) * 54)
-    it.dot = UI.Disc(it, 8, C.orange)
-    it.dot:SetPoint("TOPLEFT", it, "TOPLEFT", 0, -5)
+    it:SetPoint("TOPLEFT", firsts, "TOPLEFT", 14, -38 - (i - 1) * 54)
+    it.dot = UI.StatusDot(it, 14, "yellow")
+    it.dot:SetPoint("TOPLEFT", it, "TOPLEFT", -2, -1)
     it.what = UI.Text(it, 12, C.text)
     it.what:SetPoint("TOPLEFT", it, "TOPLEFT", 16, 0)
     UI.OneLine(it.what, ASIDE - 44)
@@ -273,7 +332,7 @@ for i = 1, 3 do
 end
 LB.firsts = firsts
 
-local site = UI.Button(body, ASIDE, 38, "Full boards on bleakhold.com", "ghost", 13)
+local site = UI.Button(inner, ASIDE, 22, "Full boards on bleakhold.com", "red", 12)
 site:SetPoint("TOPRIGHT", firsts, "BOTTOMRIGHT", 0, -12)
 site:SetScript("OnClick", function()
     local url = Comm.server.site or "bleakhold.com"
@@ -358,6 +417,23 @@ local function timeText(board, row)
     return U.Clock(math.abs(row.timeSec))
 end
 
+-- A row's tooltip: the place and the whole group (the row cuts long groups to "+2"), then what it did.
+function LB.RowTip(board, row)
+    local lines = { "Rank " .. row.rank .. "  -  " .. valueText(board, row) }
+    if board == "A" and row.label and #row.members > 1 then
+        lines[#lines + 1] = { U.Safe(row.label), C.text }
+    end
+    if #row.members > 0 then
+        lines[#lines + 1] = { membersText(row.members, 1000), C.text, true }
+    end
+    if board == "K" and row.dungeonId and row.dungeonId > 0 then
+        lines[#lines + 1] = { U.Safe(ns.DungeonName(row.dungeonId)) .. "  -  " .. timeText(board, row) .. " left", C.dim }
+    elseif row.date then
+        lines[#lines + 1] = { dateText(row.date), C.dim }
+    end
+    return lines
+end
+
 function LB.Query()
     local season = LB.season or Comm.server.seasonId or 0
     if LB.board == "A" and not LB.Available("A") then
@@ -377,11 +453,11 @@ end
 
 -- column widths add up to at most MW - 20
 local HEADERS = {
-    K = { { "RANK", 44 }, { "GROUP", 230 }, { "DUNGEON", 140 }, { "KEY", 40 }, { "TIME LEFT", 72 }, { "DATE", 80 } },
-    R = { { "RANK", 44 }, { "GROUP", 230 }, { "FLOOR", 90 }, { "", 0 }, { "TIME", 72 }, { "DATE", 80 } },
-    E = { { "RANK", 44 }, { "GROUP", 230 }, { "BOSS", 140 }, { "", 0 }, { "KILL TIME", 72 }, { "DATE", 80 } },
-    F = { { "", 0 }, { "WHAT", 280 }, { "WHO", 220 }, { "", 0 }, { "", 0 }, { "DATE", 90 } },
-    A = { { "RANK", 44 }, { "PLAYER / TEAM", 230 }, { "RATING", 70 }, { "W-L", 80 }, { "TIER", 90 }, { "LAST", 70 } },
+    K = { { "Rank", 44 }, { "Group", 230 }, { "Dungeon", 140 }, { "Key", 40 }, { "Time Left", 72 }, { "Date", 80 } },
+    R = { { "Rank", 44 }, { "Group", 230 }, { "Floor", 90 }, { "", 0 }, { "Time", 72 }, { "Date", 80 } },
+    E = { { "Rank", 44 }, { "Group", 230 }, { "Boss", 140 }, { "", 0 }, { "Kill Time", 72 }, { "Date", 80 } },
+    F = { { "", 0 }, { "What", 280 }, { "Who", 220 }, { "", 0 }, { "", 0 }, { "Date", 90 } },
+    A = { { "Rank", 44 }, { "Player / Team", 230 }, { "Rating", 70 }, { "W-L", 80 }, { "Tier", 90 }, { "Last", 70 } },
 }
 LB.HEADERS = HEADERS
 LB.BRACKET_ITEMS = { { value = 1, text = "1v1" }, { value = 2, text = "2v2" }, { value = 3, text = "3v3" },
@@ -446,14 +522,14 @@ function LB.Refresh()
         LB.board = "K"
     end
     for _, b in ipairs(LB.tabs) do
-        b:SetStyle(b.key == LB.board and "tabOn" or "tab")
+        b:SetStyle(b.key == LB.board and "stripOn" or "strip")
     end
     LB.RefreshFilters()
     local board = LB.board
     local hdr = HEADERS[board]
     local widths = {}
     for i, h in ipairs(hdr) do
-        headerRow.cells[i]:SetText(h[1])
+        headerRow.cols[i]:SetLabel(h[1])
         widths[i] = h[2]
     end
     layoutColumns(widths)
@@ -463,10 +539,11 @@ function LB.Refresh()
     if board == "F" then
         podium:Hide()
         tbl:ClearAllPoints()
-        tbl:SetPoint("TOPLEFT", body, "TOPLEFT", 0, 0)
+        tbl:SetPoint("TOPLEFT", inner, "TOPLEFT", 0, 0)
         tbl:SetHeight(BH)
         for _, fst in ipairs(S.firsts or {}) do
-            rows[#rows + 1] = { "", U.Safe(fst.text), U.Safe(fst.who or "-"), "", "", dateText(fst.date) }
+            rows[#rows + 1] = { "", U.Safe(fst.text), U.Safe(fst.who or "-"), "", "", dateText(fst.date),
+                tip = { U.Safe(fst.text), { U.Safe(fst.who or "-"), C.text, true }, { dateText(fst.date), C.dim } } }
         end
         tbl.pageText:SetText("")
         tbl.prev:Hide()
@@ -474,8 +551,8 @@ function LB.Refresh()
     else
         podium:Show()
         tbl:ClearAllPoints()
-        tbl:SetPoint("TOPLEFT", podium, "BOTTOMLEFT", 0, -12)
-        tbl:SetHeight(BH - 170 - 12)
+        tbl:SetPoint("TOPLEFT", podium, "BOTTOMLEFT", 0, -TABLE_GAP)
+        tbl:SetHeight(BH - PODIUM_H - TABLE_GAP)
         local list = data and data.rows or {}
         for rank = 1, 3 do
             local b = podium.boxes[rank]
@@ -490,9 +567,15 @@ function LB.Refresh()
                 b.value:SetText(valueText(board, row))
                 UI.SetColor(b.value, row.tierId and ns.Arena.TierColor(row.tierId) or b.valueColor)
                 b.time:SetText(arenaTier(row) .. "  -  " .. winLoss(row))
+            elseif row and board == "E" then
+                -- Raid Echoes rank the kill time: the boss small, the time big in the medal's colour, then the date
+                b.group:SetText(membersText(row.members, 22))
+                b.dungeon:SetText(U.Safe(row.label))
+                b.value:SetText(timeText(board, row))
+                b.time:SetText(dateText(row.date))
             elseif row then
                 b.group:SetText(membersText(row.members, 22))
-                UI.SetText(b.dungeon, board == "K" and ns.DungeonName(row.dungeonId) or (board == "E" and (row.label or "") or ""))
+                UI.SetText(b.dungeon, board == "K" and ns.DungeonName(row.dungeonId) or "")
                 b.value:SetText(valueText(board, row))
                 b.time:SetText(board == "K" and (timeText(board, row) .. " left") or timeText(board, row))
             else
@@ -506,6 +589,7 @@ function LB.Refresh()
             if board == "A" and (r.rank > 3 or (data and data.page and data.page > 1)) then
                 rows[#rows + 1] = {
                     tostring(r.rank), arenaName(r, 34), valueText(board, r), winLoss(r), arenaTier(r), arenaLast(r),
+                    tip = LB.RowTip(board, r),
                 }
             elseif r.rank > 3 or (data and data.page and data.page > 1) then
                 rows[#rows + 1] = {
@@ -513,11 +597,12 @@ function LB.Refresh()
                     board == "K" and U.Safe(ns.DungeonName(r.dungeonId)) or valueText(board, r),
                     board == "K" and valueText(board, r) or "",
                     timeText(board, r), dateText(r.date),
+                    tip = LB.RowTip(board, r),
                 }
             end
         end
         local pages = data and data.pages or 1
-        tbl.pageText:SetText((data and data.page or 1) .. " / " .. pages)
+        tbl.pageText:SetText("Page " .. (data and data.page or 1) .. " / " .. pages)
         tbl.prev:Show()
         tbl.next:Show()
         tbl.prev:SetActive(LB.page > 1)
@@ -528,6 +613,7 @@ function LB.Refresh()
         for c = 1, 6 do
             r.cells[c]:SetText(row and row[c] or "")
         end
+        r.tip = row and row.tip or nil
         if row then r:Show() else r:Hide() end
     end
     if #rows == 0 then
@@ -539,7 +625,7 @@ function LB.Refresh()
 
     -- your best (Arena: your standing in the shown bracket)
     local me = S.lbme[board == "F" and "K" or board]
-    best.label:SetText(board == "A" and "YOUR STANDING" or "YOUR BEST")
+    best.label:SetLabel(board == "A" and "Your Standing" or "Your Best")
     UI.SetColor(best.value, C.goldPale)
     if board == "A" then
         LB.RefreshStanding(me, data)

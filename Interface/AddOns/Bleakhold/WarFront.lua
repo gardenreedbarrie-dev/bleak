@@ -40,7 +40,7 @@ WF.REWARD_TIME = 6                -- s the reward line stays
 WF.MAX_ARROWS = 3
 WF.MAP_ASPECT = 1002 / 668        -- a zone map's width in yards over its height (WorldMapArea frames match the map)
 WF.ARROW = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\SafeArrow"
-WF.KICKER = { F = "BLEAK FRONT", L = "LEVELLING FRONT" }
+WF.KICKER = { F = "Bleak Front", L = "Levelling Front" }
 WF.STATE_TEXT = {
     [0] = "Neutral", [1] = "Held by the Alliance", [2] = "Held by the Horde",
     [3] = "Neutral: the Alliance is taking it", [4] = "Neutral: the Horde is taking it",
@@ -102,56 +102,115 @@ local function positioning(f, defPoint, defX, defY)
 end
 
 ------------------------------------------------------------------------------------------------------
+-- The stock world-state capture bar (WorldStateFrame.xml's WorldStateCaptureBarTemplate) at any width
+------------------------------------------------------------------------------------------------------
+-- Its art, WorldState-CaptureBar (256 x 64): the frame (173 x 26 at the top left; the Alliance's icon in its left
+-- 26 px, the Horde's in its right 26, the 9 px track between), the fills (U 0.8203125-1: blue, red, the neutral grey),
+-- the marker and its arrows, the band's lines and the icons' light. Here the frame is cut in three (its icons keep
+-- their size, the track between them stretches): a bar of w px of track is w + 52 wide.
+WF.CAPTURE_ART = "Interface\\WorldStateFrame\\WorldState-CaptureBar"
+WF.CAP_END = 26
+local CAP_U = { 0, 30 / 256, 143 / 256, 173 / 256 }
+local CAP_FILL = { A = { 0, 0.140625 }, H = { 0.171875, 0.3125 }, N = { 0.34375, 0.484375 } }
+
+local function captureBar(parent, w)
+    local fr = CreateFrame("Frame", nil, parent)
+    fr:SetSize(w + 2 * WF.CAP_END, 26)
+    fr.track = CreateFrame("Frame", nil, fr)
+    fr.track:SetSize(w, 9)
+    fr.track:SetPoint("CENTER", fr, "CENTER", 0, 0)
+    fr.art = {}
+    for i = 1, 3 do
+        local t = fr:CreateTexture(nil, "ARTWORK")
+        t:SetTexture(WF.CAPTURE_ART)
+        t:SetTexCoord(CAP_U[i], CAP_U[i + 1], 0, 0.40625)
+        t:SetHeight(26)
+        fr.art[i] = t
+    end
+    local l, m, r = fr.art[1], fr.art[2], fr.art[3]
+    l:SetWidth(30)
+    l:SetPoint("TOPLEFT", fr, "TOPLEFT", 0, 0)
+    r:SetWidth(30)
+    r:SetPoint("TOPRIGHT", fr, "TOPRIGHT", 0, 0)
+    m:SetPoint("TOPLEFT", l, "TOPRIGHT", 0, 0)
+    m:SetPoint("TOPRIGHT", r, "TOPLEFT", 0, 0)
+    -- a fill of side "A", "H" or "N" under the frame (layer BACKGROUND or BORDER), 9 px tall; the caller places it
+    function fr:Fill(side, layer)
+        local t = self:CreateTexture(nil, layer or "BACKGROUND")
+        local v = CAP_FILL[side]
+        t:SetTexture(WF.CAPTURE_ART)
+        t:SetTexCoord(0.8203125, 1, v[1], v[2])
+        t:SetHeight(9)
+        return t
+    end
+    -- the light round a faction's icon (shown while the marker stands on its side)
+    function fr:IconLight(point, x)
+        local t = self:CreateTexture(nil, "OVERLAY")
+        t:SetTexture(WF.CAPTURE_ART)
+        t:SetTexCoord(0, 0.10546875, 0.4375, 0.875)
+        t:SetBlendMode("ADD")
+        t:SetSize(27, 28)
+        t:SetPoint(point, self, point, x, 0)
+        t:Hide()
+        return t
+    end
+    return fr
+end
+WF.CaptureBar = captureBar
+
+------------------------------------------------------------------------------------------------------
 -- The Front HUD
 ------------------------------------------------------------------------------------------------------
+-- The look: the tooltip frame, the zone in gold with its kind over it, the time on the right, one stock indicator ball
+-- per outpost tinted by its holder, the Front's points on the world-state capture bar (the Alliance's share in blue
+-- from its icon, the Horde's in red from its own, the rest neutral) with the shares beside it, the note under it.
+WF.HUD_W, WF.HUD_H = 420, 112
 local hud = CreateFrame("Frame", "BleakholdWarFront", UIParent)
-hud:SetSize(380, 90)
+hud:SetSize(WF.HUD_W, WF.HUD_H)
 hud:SetFrameStrata("MEDIUM")
-UI.Backdrop(hud, "101216", C.chipBorder, 0.9)
+UI.Backdrop(hud, C.panel, C.border, nil, "panel")
 hud:Hide()
 WF.hud = hud
 local hudPos = positioning(hud, "TOP", 0, -8)
 
-hud.line = UI.Solid(hud, WM.COLOR, "BORDER")
-hud.line:SetPoint("TOPLEFT", hud, "TOPLEFT", 1, -1)
-hud.line:SetPoint("TOPRIGHT", hud, "TOPRIGHT", -1, -1)
-hud.line:SetHeight(2)
-hud.kicker = UI.Text(hud, 10, WM.COLOR)
-hud.kicker:SetPoint("TOPLEFT", hud, "TOPLEFT", 12, -9)
-hud.zone = UI.Text(hud, 15, C.goldPale, "title")
-hud.zone:SetPoint("TOPLEFT", hud.kicker, "BOTTOMLEFT", 0, -2)
-UI.OneLine(hud.zone, 230)
-hud.time = UI.Text(hud, 15, C.text, "title", "RIGHT")
-hud.time:SetPoint("TOPRIGHT", hud, "TOPRIGHT", -12, -9)
+hud.kicker = UI.Text(hud, 10, C.dim)
+hud.kicker:SetPoint("TOPLEFT", hud, "TOPLEFT", 12, -10)
+UI.OneLine(hud.kicker, 240)
+hud.zone = UI.Text(hud, 14, C.gold)
+hud.zone:SetPoint("TOPLEFT", hud, "TOPLEFT", 12, -23)
+UI.OneLine(hud.zone, 260)
+hud.time = UI.Text(hud, 14, C.text, "body", "RIGHT")
+hud.time:SetPoint("TOPRIGHT", hud, "TOPRIGHT", -12, -10)
 UI.OneLine(hud.time, 120)
 hud.phase = UI.Text(hud, 10, C.dim, "body", "RIGHT")
-hud.phase:SetPoint("TOPRIGHT", hud.time, "BOTTOMRIGHT", 0, -1)
+hud.phase:SetPoint("TOPRIGHT", hud, "TOPRIGHT", -12, -27)
 UI.OneLine(hud.phase, 120)
 hud.pips = {}
+-- (the yellow ball greyed, so the holder's tint shows bright: the grey ball tinted blue goes nearly black)
 for i = 1, WF.MAX_PIPS do
-    local p = UI.Disc(hud, 12, C.track, "ARTWORK")
+    local p = UI.StatusDot(hud, 16, "yellow", "ARTWORK")
+    p:SetDesaturated(true)
     p:Hide()
     hud.pips[i] = p
 end
-hud.control = CreateFrame("Frame", nil, hud)
-hud.control:SetSize(WF.CONTROL_W, 6)
-hud.control:SetPoint("TOP", hud, "TOP", 0, -64)
-hud.control.bg = UI.Solid(hud.control, C.track, "BACKGROUND")
-hud.control.bg:SetAllPoints(hud.control)
-hud.control.a = UI.Solid(hud.control, WM.TEAM.A.color, "ARTWORK")
-hud.control.a:SetPoint("TOPLEFT", hud.control, "TOPLEFT", 0, 0)
-hud.control.a:SetPoint("BOTTOMLEFT", hud.control, "BOTTOMLEFT", 0, 0)
-hud.control.h = UI.Solid(hud.control, WM.TEAM.H.color, "ARTWORK")
-hud.control.h:SetPoint("TOPRIGHT", hud.control, "TOPRIGHT", 0, 0)
-hud.control.h:SetPoint("BOTTOMRIGHT", hud.control, "BOTTOMRIGHT", 0, 0)
-hud.aText = UI.Text(hud, 10, WM.TEAM.A.color, "body", "RIGHT")
-hud.aText:SetPoint("RIGHT", hud.control, "LEFT", -6, 0)
-hud.hText = UI.Text(hud, 10, WM.TEAM.H.color)
-hud.hText:SetPoint("LEFT", hud.control, "RIGHT", 6, 0)
-hud.note = UI.Text(hud, 11, C.mid, "body", "CENTER")
-hud.note:SetPoint("TOP", hud.control, "BOTTOM", 0, -5)
-UI.OneLine(hud.note, 356)
-hud.reward = UI.Text(hud, 12, C.goldLight, "body", "CENTER")
+hud.controlBar = captureBar(hud, WF.CONTROL_W)
+hud.controlBar:SetPoint("TOP", hud, "TOP", 0, -60)
+hud.control = hud.controlBar.track
+hud.control.bg = hud.controlBar:Fill("N", "BACKGROUND")
+hud.control.bg:SetPoint("LEFT", hud.control, "LEFT", 0, 0)
+hud.control.bg:SetPoint("RIGHT", hud.control, "RIGHT", 0, 0)
+hud.control.a = hud.controlBar:Fill("A", "BORDER")
+hud.control.a:SetPoint("LEFT", hud.control, "LEFT", 0, 0)
+hud.control.h = hud.controlBar:Fill("H", "BORDER")
+hud.control.h:SetPoint("RIGHT", hud.control, "RIGHT", 0, 0)
+hud.aText = UI.Text(hud, 12, WM.TEAM.A.color, "body", "RIGHT")
+hud.aText:SetPoint("RIGHT", hud.controlBar, "LEFT", -4, 0)
+hud.hText = UI.Text(hud, 12, WM.TEAM.H.color)
+hud.hText:SetPoint("LEFT", hud.controlBar, "RIGHT", 4, 0)
+hud.note = UI.Text(hud, 11, C.text, "body", "CENTER")
+hud.note:SetPoint("TOP", hud.controlBar, "BOTTOM", 0, -3)
+UI.OneLine(hud.note, WF.HUD_W - 24)
+hud.reward = UI.Text(hud, 12, C.gold, "body", "CENTER")
 hud.reward:SetPoint("TOP", hud, "BOTTOM", 0, -4)
 UI.OneLine(hud.reward, 420)
 
@@ -199,11 +258,11 @@ function WF.UpdateHud()
         end
         return
     end
-    hud.kicker:SetText(WF.KICKER[z.kind] or "WORLD PVP")
+    hud.kicker:SetText(WF.KICKER[z.kind] or "World PvP")
     UI.SetText(hud.zone, ns.WarZoneName(z.zoneId))
     local left = WF.preview and z.secondsLeft or (ns.WarLeft(z.secondsLeft, z.recvAt) or 0)
     hud.time:SetText(WM.Clock(left))
-    hud.phase:SetText(z.state == 2 and "CEASEFIRE" or "LEFT")
+    hud.phase:SetText(z.state == 2 and "Ceasefire" or "left")
     UI.SetColor(hud.time, z.state == 2 and C.mute or C.text)
     -- one pip per outpost, centred
     local n = min(#z.objectives, WF.MAX_PIPS)
@@ -212,7 +271,7 @@ function WF.UpdateHud()
         local o = z.objectives[i]
         if o and i <= n then
             p:ClearAllPoints()
-            p:SetPoint("TOP", hud, "TOP", (i - (n + 1) / 2) * WF.PIP_GAP, -44)
+            p:SetPoint("TOP", hud, "TOP", (i - (n + 1) / 2) * WF.PIP_GAP, -42)
             p:SetVertexColor(UI.Rgb(teamColor(o.owner)))
             p:SetAlpha(contested(o.state) and z.state ~= 2 and (0.35 + 0.65 * abs(sin(t * 4))) or 1)
             p:Show()
@@ -264,42 +323,59 @@ end
 ------------------------------------------------------------------------------------------------------
 -- The capture bar
 ------------------------------------------------------------------------------------------------------
+-- The stock capture bar, BAR_W of track (about twice the stock 121 px): blue on the Alliance's half, red on the
+-- Horde's, the neutral band in the middle between its two lines, the marker (the art's indicator) with the arrow of the
+-- way the bar moves, the icon of the side the marker stands on lit; the outpost's name over it in gold, its state under
+-- it, the players of each side beside it, in no panel (the stock bar has none).
 local cap = CreateFrame("Frame", "BleakholdWarCapture", UIParent)
-cap:SetSize(320, 58)
+cap:SetSize(WF.BAR_W + 2 * WF.CAP_END + 64, 64)
 cap:SetFrameStrata("MEDIUM")
-UI.Backdrop(cap, "101216", C.chipBorder, 0.9)
 cap:Hide()
 WF.cap = cap
-local capPos = positioning(cap, "TOP", 0, -104)
+local capPos = positioning(cap, "TOP", 0, -126)
 
-cap.name = UI.Text(cap, 12, C.goldPale, "body", "CENTER")
-cap.name:SetPoint("TOP", cap, "TOP", 0, -6)
+cap.name = UI.Text(cap, 12, C.gold, "body", "CENTER")
+cap.name:SetPoint("TOP", cap, "TOP", 0, -2)
 UI.OneLine(cap.name, 300)
-cap.bar = CreateFrame("Frame", nil, cap)
-cap.bar:SetSize(WF.BAR_W, 12)
-cap.bar:SetPoint("TOP", cap, "TOP", 0, -24)
-cap.bar.bg = UI.Solid(cap.bar, C.deep, "BACKGROUND")
-cap.bar.bg:SetAllPoints(cap.bar)
-cap.bar.a = UI.Solid(cap.bar, WM.TEAM.A.color, "BORDER", 0.85)
-cap.bar.a:SetPoint("TOPLEFT", cap.bar, "TOPLEFT", 0, 0)
-cap.bar.a:SetPoint("BOTTOMLEFT", cap.bar, "BOTTOMLEFT", 0, 0)
+cap.frame = captureBar(cap, WF.BAR_W)
+cap.frame:SetPoint("TOP", cap, "TOP", 0, -18)
+cap.bar = cap.frame.track
+cap.bar.a = cap.frame:Fill("A", "BACKGROUND")
+cap.bar.a:SetPoint("LEFT", cap.bar, "LEFT", 0, 0)
 cap.bar.a:SetWidth(WF.BAR_W / 2)
-cap.bar.h = UI.Solid(cap.bar, WM.TEAM.H.color, "BORDER", 0.85)
-cap.bar.h:SetPoint("TOPRIGHT", cap.bar, "TOPRIGHT", 0, 0)
-cap.bar.h:SetPoint("BOTTOMRIGHT", cap.bar, "BOTTOMRIGHT", 0, 0)
+cap.bar.h = cap.frame:Fill("H", "BACKGROUND")
+cap.bar.h:SetPoint("RIGHT", cap.bar, "RIGHT", 0, 0)
 cap.bar.h:SetWidth(WF.BAR_W / 2)
-cap.bar.n = UI.Solid(cap.bar, C.strong, "ARTWORK")
-cap.bar.n:SetHeight(12)
+cap.bar.n = cap.frame:Fill("N", "BORDER")
 cap.bar.n:SetPoint("CENTER", cap.bar, "CENTER", 0, 0)
-cap.bar.marker = UI.Solid(cap.bar, C.goldPale, "OVERLAY")
-cap.bar.marker:SetSize(3, 20)
-cap.arrow = UI.Glyph(cap.bar, "left", 14, C.text, "OVERLAY")
-cap.countA = UI.Text(cap, 14, WM.TEAM.A.color, "title", "RIGHT")
-cap.countA:SetPoint("RIGHT", cap.bar, "LEFT", -8, 0)
-cap.countH = UI.Text(cap, 14, WM.TEAM.H.color, "title")
-cap.countH:SetPoint("LEFT", cap.bar, "RIGHT", 8, 0)
+-- the band's lines (3 x 8 at its edges)
+cap.bar.lines = {}
+for i, side in ipairs({ "LEFT", "RIGHT" }) do
+    local t = cap.frame:CreateTexture(nil, "ARTWORK")
+    t:SetTexture(WF.CAPTURE_ART)
+    t:SetTexCoord(0.74609375, 0.7578125, 0, 0.125)
+    t:SetSize(3, 8)
+    t:SetPoint(side == "LEFT" and "RIGHT" or "LEFT", cap.bar.n, side, side == "LEFT" and 1 or -1, 0)
+    cap.bar.lines[i] = t
+end
+cap.lightA = cap.frame:IconLight("LEFT", -1)
+cap.lightH = cap.frame:IconLight("RIGHT", 1)
+-- the marker and its arrow, over the frame
+cap.ind = CreateFrame("Frame", nil, cap.frame)
+cap.ind:SetAllPoints(cap.frame)
+cap.bar.marker = cap.ind:CreateTexture(nil, "ARTWORK")
+cap.bar.marker:SetTexture(WF.CAPTURE_ART)
+cap.bar.marker:SetTexCoord(0.77734375, 0.796875, 0, 0.28125)
+cap.bar.marker:SetSize(5, 18)
+cap.arrow = cap.ind:CreateTexture(nil, "BACKGROUND")
+cap.arrow:SetTexture(WF.CAPTURE_ART)
+cap.arrow:SetSize(8, 15)
+cap.countA = UI.Text(cap, 14, WM.TEAM.A.color, "body", "RIGHT")
+cap.countA:SetPoint("RIGHT", cap.frame, "LEFT", -6, 0)
+cap.countH = UI.Text(cap, 14, WM.TEAM.H.color)
+cap.countH:SetPoint("LEFT", cap.frame, "RIGHT", 6, 0)
 cap.state = UI.Text(cap, 10, C.dim, "body", "CENTER")
-cap.state:SetPoint("TOP", cap.bar, "BOTTOM", 0, -5)
+cap.state:SetPoint("TOP", cap.frame, "BOTTOM", 0, -2)
 UI.OneLine(cap.state, 300)
 
 WF.CAP_SAMPLE = { objId = 2, slider = -120, neutralPct = 20, state = 6, countA = 2, countH = 3, maxNet = 5 }
@@ -346,25 +422,38 @@ function WF.UpdateCap()
     if band >= 1 then
         cap.bar.n:SetWidth(band)
         cap.bar.n:Show()
+        cap.bar.lines[1]:Show()
+        cap.bar.lines[2]:Show()
     else
         cap.bar.n:Hide()
+        cap.bar.lines[1]:Hide()
+        cap.bar.lines[2]:Hide()
     end
     local x = WF.MarkerX(c.slider)
     cap.markerX = x
     cap.bar.marker:ClearAllPoints()
     cap.bar.marker:SetPoint("CENTER", cap.bar, "CENTER", x, 0)
+    -- the side the marker stands on (outside the neutral band) has its icon lit
+    if x < -band / 2 then
+        cap.lightA:Show()
+        cap.lightH:Hide()
+    elseif x > band / 2 then
+        cap.lightA:Hide()
+        cap.lightH:Show()
+    else
+        cap.lightA:Hide()
+        cap.lightH:Hide()
+    end
     local net = WF.Net(c)
     cap.net = net
     cap.arrow:ClearAllPoints()
     if net > 0 then
-        UI.SetGlyph(cap.arrow, "left")
-        cap.arrow:SetVertexColor(UI.Rgb(WM.TEAM.A.color))
-        cap.arrow:SetPoint("RIGHT", cap.bar.marker, "LEFT", -2, 0)
+        cap.arrow:SetTexCoord(0.7265625, 0.76171875, 0.140625, 0.375)
+        cap.arrow:SetPoint("RIGHT", cap.bar.marker, "LEFT", 1, 0)
         cap.arrow:Show()
     elseif net < 0 then
-        UI.SetGlyph(cap.arrow, "right")
-        cap.arrow:SetVertexColor(UI.Rgb(WM.TEAM.H.color))
-        cap.arrow:SetPoint("LEFT", cap.bar.marker, "RIGHT", 2, 0)
+        cap.arrow:SetTexCoord(0.76171875, 0.7265625, 0.140625, 0.375)
+        cap.arrow:SetPoint("LEFT", cap.bar.marker, "RIGHT", -1, 0)
         cap.arrow:Show()
     else
         cap.arrow:Hide()

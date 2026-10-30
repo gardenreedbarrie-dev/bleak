@@ -138,11 +138,11 @@ end, { before = function(M)
     M.combat = true
 end })
 
-test("Dungeon Finder: Activities > Dungeons opens the game's own finder", function(M, ns)
+test("Dungeon Finder: Activities > Group Finder opens the game's own finder", function(M, ns)
     FX.connect(M, H)
-    M.env.SlashCmdList.BLEAKHOLD("dungeons")
-    local button = ns.Dungeons.finder
-    H.ok(button:IsVisible(), "the button shows on the Dungeons page")
+    M.env.SlashCmdList.BLEAKHOLD("group")
+    local button = ns.GroupFinder.finder
+    H.ok(button:IsVisible(), "the button shows on the Group Finder page (old :437)")
     H.contains(button.label:GetText(), "Dungeon Finder")
     local lines = button.tooltip()
     H.eq(lines[1], "Dungeon Finder")

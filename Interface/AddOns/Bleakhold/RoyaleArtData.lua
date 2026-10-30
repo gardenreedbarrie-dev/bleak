@@ -10,10 +10,12 @@
 --   cells at half resolution: the same texcoords and quad.
 -- titles: each fixed title's cell in the Titles atlas; w, h, inkW in caps. The cap's middle is the cell's
 --   middle, and the ink is centred in it. Tint with SetVertexColor (the art is neutral silver).
+-- atlases.Pull: the drop countdown's pull numerals 1-5 and DROP! (glyphs by text), each cell like a title's (w, h,
+--   inkW and the black stroke in caps of the glyph's own cap, in texels); the glow atlas has the same cells at half
+--   resolution. Baked bright gold: draw it untinted.
 -- icons.cells: { u0, u1, v0, v1 } (also by name) in both Icons (64-px cells) and IconsSmall (32-px cells).
 -- ring.sockets: angle in radians (0 = right, pi/2 = up: the first socket at the top, then clockwise every 24
 --   degrees) and r as a fraction of the ring's size; ring.disc: the dark centre disc's diameter, same fraction.
--- countdown.twoDigitCap: the cap (units) at which the widest of 10-15 fills at most 88 % of the inner disc.
 -- slices: 9-slice margins in texels (corners drawn at cornerUnits); edge = where the plate's shape starts, rim =
 --   its rim's width inside that, both in texels from the texture's edge / the shape's edge.
 -- altimeter.top/bottom: the scale's drop height and ground rows, as fractions of the texture's height.
@@ -407,6 +409,80 @@ ns.RoyaleArt = {
             stroke = 4,
             w = 1024,
         },
+        Pull = {
+            file = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\Pull",
+            glow = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\PullGlow",
+            glyphs = {
+                ["1"] = {
+                    cap = 176,
+                    h = 1.454545,
+                    inkW = 0.440341,
+                    stroke = 0.068182,
+                    u0 = 0,
+                    u1 = 0.25,
+                    v0 = 0,
+                    v1 = 0.5,
+                    w = 1.454545,
+                },
+                ["2"] = {
+                    cap = 176,
+                    h = 1.454545,
+                    inkW = 0.767045,
+                    stroke = 0.068182,
+                    u0 = 0.25,
+                    u1 = 0.5,
+                    v0 = 0,
+                    v1 = 0.5,
+                    w = 1.454545,
+                },
+                ["3"] = {
+                    cap = 176,
+                    h = 1.454545,
+                    inkW = 0.670455,
+                    stroke = 0.068182,
+                    u0 = 0.5,
+                    u1 = 0.75,
+                    v0 = 0,
+                    v1 = 0.5,
+                    w = 1.454545,
+                },
+                ["4"] = {
+                    cap = 176,
+                    h = 1.454545,
+                    inkW = 0.830966,
+                    stroke = 0.068182,
+                    u0 = 0.75,
+                    u1 = 1,
+                    v0 = 0,
+                    v1 = 0.5,
+                    w = 1.454545,
+                },
+                ["5"] = {
+                    cap = 176,
+                    h = 1.454545,
+                    inkW = 0.670455,
+                    stroke = 0.068182,
+                    u0 = 0,
+                    u1 = 0.25,
+                    v0 = 0.5,
+                    v1 = 1,
+                    w = 1.454545,
+                },
+                ["DROP!"] = {
+                    cap = 128,
+                    h = 2,
+                    inkW = 4.804688,
+                    stroke = 0.078125,
+                    u0 = 0.25,
+                    u1 = 1,
+                    v0 = 0.5,
+                    v1 = 1,
+                    w = 6,
+                },
+            },
+            h = 512,
+            w = 1024,
+        },
         Titles = {
             baseline = 96,
             cap = 64,
@@ -419,7 +495,6 @@ ns.RoyaleArt = {
             w = 2048,
         },
     },
-    countdown = { discUnits = 196, ringUnits = 280, twoDigitCap = 112, widestTwoDigit = 1.492947 },
     files = {
         AltMarker = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\AltMarker",
         Altimeter = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\Altimeter",
@@ -427,7 +502,6 @@ ns.RoyaleArt = {
         Banner = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\Banner",
         Button = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\Button",
         ButtonGlow = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\ButtonGlow",
-        CountRing = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\CountRing",
         CountRingSmall = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\CountRingSmall",
         DropWord = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\DropWord",
         DropWordGlow = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\DropWordGlow",
@@ -450,8 +524,9 @@ ns.RoyaleArt = {
         Pin = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\PinFlag",
         Plate = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\Plate",
         PlateTab = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\PlateTab",
+        Pull = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\Pull",
+        PullGlow = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\PullGlow",
         ShineStrip = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\ShineStrip",
-        Shock = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\Shock",
         ShockSmall = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\ShockSmall",
         SpeedLinesA = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\SpeedLinesA",
         SpeedLinesB = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\SpeedLinesB",
@@ -511,7 +586,6 @@ ns.RoyaleArt = {
     },
     ring = {
         disc = 0.7,
-        file = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\CountRing",
         small = "Interface\\AddOns\\Bleakhold\\Art\\Royale\\CountRingSmall",
         sockets = {
             { angle = 1.570796, r = 0.4165 },

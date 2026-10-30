@@ -36,13 +36,28 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
     FX.connect(M, H, { [6] = 512 + 1024 + 2048 + 4096 + 16384 + 32768 + 65536 })
     FX.all(M, H)
 
-    -- the windows' own buttons (the paths players use)
-    for _, k in ipairs({ "tasks", "dungeons", "keys", "rift" }) do
+    -- the windows' own buttons (the paths players use), as Tools/UiLint/tests/test_intents.lua drives them: every
+    -- Activities page; Start keystone (KSTART) only inside the keystone's dungeon with a group of 5, once the keystone
+    -- opened the start (BHMP O). The Journey board and the Rift say the old chat commands (no intent); the Journey's
+    -- custom run is QJOIN D; QREPLY comes from Bleakhold Royale's ready check below, QJOIN B and A from its page and
+    -- the Arena page
+    for _, k in ipairs({ "tasks", "dungeons", "keys", "rift", "heroic", "group" }) do
+        M.inInstance, M.instanceType = k == "keys" or nil, k == "keys" and "party" or nil
+        M.SetGroup(k == "keys" and "PARTY" or "NONE", k == "keys" and 5 or 1, k == "keys")
+        if k == "keys" then
+            M.zone = "Halls of Lightning"
+            ns.Legacy.Receive("O;602;8;1800;10;8;8;1,3,4;Halls of Lightning")
+        end
         ns.UI.Open(k)
         M.Advance(0.3)
+        if k == "keys" then
+            H.ok(ns.Keys.start:IsEnabled(), "Start keystone is live")
+        end
         clickAll(M, ns.Activities.pages[k])
     end
-    ns.Dungeons.selected = 389
+    M.inInstance, M.instanceType = nil, nil
+    H.ok(H.lastIntent(M, "KSTART"), "KSTART from the Start keystone button")
+    -- queued: the Dungeon Journey's queue panel has Leave queue (QLEAVE)
     ns.UI.Open("dungeons")
     clickAll(M, ns.Dungeons.queue)
     H.send(M, "QUEUE", FX.examples(M).QUEUE)

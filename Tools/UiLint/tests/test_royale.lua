@@ -243,7 +243,8 @@ test("royale: the nav entry and the orb follow feature bit 4096", function(M, ns
     M.Advance(0.3)
     H.ok(nav:IsShown(), "Royale entry with the bit")
     H.ok(M.env.BleakholdOrb_royale:IsShown(), "orb with the bit")
-    H.eq(select(5, nav:GetPoint(1)), -12 - 3 * 66, "after Rift, before Tasks")
+    local A = ns.Activities
+    H.eq(select(5, nav:GetPoint(1)), -A.NAV_PAD - 5 * A.navPitch, "after Group Finder, before Tasks")
 end)
 
 test("royale: without the patch marker the card is disabled and QJOIN is never sent", function(M, ns)
@@ -375,7 +376,7 @@ test("royale: the map turns a click into RDROP through ROYM's frame, negative ya
     H.eq(last[#last], "120,80", "the farm")
 end)
 
-test("royale: pins lock 3 s before the drop (3.6 s on the client); the last 15 s count down in the ring; DROP!",
+test("royale: pins lock 3 s before the drop (3.6 s on the client); the last 15 s count down on the bar; DROP!",
 function(M, ns)
     connect(M)
     H.send(M, "ROYM", MAP)
@@ -385,9 +386,9 @@ function(M, ns)
     local cd = M.env.BleakholdRoyaleCountdown
     H.ok(cd:IsShown(), "the drop countdown from 15 s")
     H.eq(ns.RoyaleCountdown.Shown(), 15)
-    H.eq(cd.kick.text:GetText(), "DROP IN")
+    H.eq(cd.bar.name:GetText(), "Drop in", "the countdown's DBM-style bar")
     H.eq(bar.cells[2].label:GetText(), "DROP IN")
-    H.eq(bar.main:GetText(), "", "one clock on screen: the ring's")
+    H.eq(bar.main:GetText(), "", "one clock on screen: the countdown bar's")
     H.ok(math.abs(bar.cells[2]:GetAlpha() - 0.35) < 1e-6, "the middle cell dimmed")
     M.Advance(2)
     H.eq(bar.sub:GetText(), "Press ALT-M to choose your landing", "no pin yet: the tab names the map's key")

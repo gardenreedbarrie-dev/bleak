@@ -163,7 +163,7 @@ test("announcer: the Tasks page holds the settings whenever bit 8192 is on, Roya
     M.Advance(0.3)
     local ann = ns.Activities.tasksPage.announcer
     H.ok(ann:IsVisible(), "the settings without Royale")
-    H.eq(ann.title:GetText(), "Kill announcer")
+    H.eq(ann.title:GetText(), "Kill Announcer", "a Title Case heading")
     H.eq(ann.voice.label:GetText(), "Voice: Male", "the default")
     H.eq(ann.volume.label:GetText(), "Volume: Normal")
     ann.voice:SetValue("female")
@@ -175,12 +175,22 @@ test("announcer: the Tasks page holds the settings whenever bit 8192 is on, Roya
     M.env.SlashCmdList.BLEAKHOLD("royale normal")
     ns.Activities.tasksPage:Refresh()
     H.eq(ann.voice.label:GetText(), "Voice: Off"); H.eq(ann.volume.label:GetText(), "Volume: Normal")
-    -- the box sits under the weekly tasks, as wide as the task column
+    -- no weekly task: the box takes the weekly tasks' place (their heading is hidden)
     local page = ns.Activities.tasksPage
     local _, rel, relPoint, _, y = ann:GetPoint(1)
-    H.ok(rel == page and relPoint == "TOPLEFT" and y == -472, "under the third weekly row (-422 - 44 - 6)")
+    local _, _, _, _, weeklyY = page.weeklyTitle:GetPoint(1)
+    H.ok(not page.weeklyTitle:IsShown() and rel == page and relPoint == "TOPLEFT" and y == weeklyY,
+        "in the weekly tasks' place: " .. tostring(y))
+    -- with weekly tasks it sits under them, as wide as the task column, above the page's bottom padding
+    H.send(M, "TASKS", { { 1, 0, 0, "G" }, { 201, "W", 4, 1, 3, "C", 150, "", 0 } })
+    M.Advance(0.3)
+    page:Refresh()
+    _, rel, relPoint, _, y = ann:GetPoint(1)
+    local _, _, _, _, row3 = page.rows[3]:GetPoint(1)
+    H.ok(page.weeklyTitle:IsShown() and rel == page and relPoint == "TOPLEFT"
+        and y == row3 - page.rows[3]:GetHeight() - 10, "10 px under the third weekly row: " .. tostring(y))
     H.eq(ann:GetWidth(), page.rows[1]:GetWidth())
-    H.ok(472 + ann:GetHeight() <= ns.Activities.PH, "inside the page")
+    H.ok(-y + ann:GetHeight() <= ns.Activities.CH - ns.Activities.PAD, "inside the page")
     -- the Royale page no longer carries them
     H.eq(ns.Royale.page.last.voice, nil)
     H.eq(ns.Royale.page.last.volume, nil)

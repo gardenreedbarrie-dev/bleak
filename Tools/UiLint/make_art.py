@@ -250,19 +250,6 @@ class Canvas:
                 if v > 0:
                     self.put(px, py, 1.0 if v > 1 else v)
 
-    def ring(self, cx, cy, rr, width):
-        for py in range(self.h):
-            for px in range(self.w):
-                d = abs(math.hypot(px + 0.5 - cx, py + 0.5 - cy) - (rr - width / 2.0))
-                v = width / 2.0 - d + 0.5
-                if v > 0:
-                    self.put(px, py, 1.0 if v > 1 else v)
-
-    def rect(self, x0, y0, x1, y1):
-        for py in range(max(0, y0), min(self.h, y1)):
-            for px in range(max(0, x0), min(self.w, x1)):
-                self.put(px, py, 1.0)
-
     def tga(self):
         # 32-bit BGRA, bottom-up rows, 8 alpha bits (descriptor 0x08)
         head = struct.pack("<BBBHHBHHHHBB", 0, 0, 2, 0, 0, 0, 0, 0, self.w, self.h, 32, 8)
@@ -371,19 +358,6 @@ EMOTE_GLYPHS = [
     ("shrug", figure((12, 5), "M12 8v7", "M12 10l-4-1-2-3M12 10l4-1 2-3", "M12 15l-2 6M12 15l2 6")),
 ]
 
-DIGITS = [
-    "M12 4C5 4 4 14 4 20s1 16 8 16 8-10 8-16-1-16-8-16z",
-    "M8 9l5-5v32M8 36h10",
-    "M5 10c1-5 4-6 7-6 4 0 7 3 7 7 0 6-6 10-14 25h15",
-    "M5 8c2-3 4-4 7-4 4 0 7 2.5 7 6.5 0 4.5-4 8.5-9 8.5 6 0 10 3 10 8.5S16 36 12 36c-4 0-6-1-8-4",
-    "M16 36V4L4 26h17",
-    "M19 4H7L6 18c2-1.5 4-2 6.5-2 4.5 0 7.5 3.5 7.5 9.5S16 36 11.5 36C8 36 6 35 4 33",
-    "M18 6c-2-1.5-4-2-6-2C6 4 4 12 4 22c0 9 3 14 8 14s8-4 8-9c0-5.5-3.5-8.5-8-8.5-4 0-7 2.5-8 5.5",
-    "M4 4h16L10 36",
-    "M12 19c-5 0-7-3-7-7.5S8 4 12 4s7 3 7 7.5-2 7.5-7 7.5c-5.5 0-8 3.5-8 8.5s3.5 8.5 8 8.5 8-3.5 8-8.5-2.5-8.5-8-8.5z",
-    "M20 16c-1 3-4 5.5-8 5.5-4.5 0-8-3-8-8.5C4 8 7 4 12 4c5 0 8 5 8 14 0 10-2 18-8 18-2 0-4-.5-6-2",
-]
-
 
 def make_glyphs():
     cols, rows, cell = 8, 4, 64
@@ -405,47 +379,9 @@ def make_emotes():
     return cv
 
 
-def make_digits():
-    cell_w, h = 96, 256
-    cv = Canvas(1024, h)
-    for i, d in enumerate(DIGITS):
-        scale = 4.0
-        ox = i * cell_w
-        oy = (h - 40 * scale) / 2.0
-        cv.stroke(parse_path(d), scale, ox, oy, 3.4 * scale)
-    return cv
-
-
 def make_disc():
     cv = Canvas(64, 64)
     cv.disc(32, 32, 31)
-    return cv
-
-
-def make_ring():
-    cv = Canvas(64, 64)
-    cv.ring(32, 32, 31.5, 3.5)
-    return cv
-
-
-def make_dashed():
-    cv = Canvas(64, 64)
-    t = 3
-    for start in range(2, 62, 10):
-        end = min(start + 6, 62)
-        cv.rect(start, 1, end, 1 + t)
-        cv.rect(start, 63 - t, end, 63)
-        cv.rect(1, start, 1 + t, end)
-        cv.rect(63 - t, start, 63, end)
-    return cv
-
-
-def make_gradient():
-    # vertical fade, opaque at the top: used for soft inner glows
-    cv = Canvas(8, 64)
-    for y in range(64):
-        for x in range(8):
-            cv.a[y * 8 + x] = (1.0 - y / 63.0) ** 2
     return cv
 
 
@@ -459,11 +395,7 @@ ART = {
     "White": make_white,
     "Glyphs": make_glyphs,
     "Emotes": make_emotes,
-    "Digits": make_digits,
     "Disc": make_disc,
-    "Ring": make_ring,
-    "Dashed": make_dashed,
-    "Fade": make_gradient,
 }
 
 

@@ -4,7 +4,8 @@ Interface/AddOns/Bleakhold/RoyaleArtData.lua, the table of every atlas cell the 
 
 Usage: python3 -I make_royale_hud_art.py [--out DIR] [--data FILE] [--preview DIR] [--stub] [--check DIR]
 
-  --preview DIR  also write every texture as PNG, a contact sheet and mock-ups of the countdown and the drop plate
+  --preview DIR  also write every texture as PNG, a contact sheet and mock-ups of the drop countdown (the DBM-style
+                 bar and the pull numerals) and the drop plate
   --stub         flat placeholder art in the same files, sizes and cells (seconds instead of two minutes), so the addon
                  can be built against the real table before the final art is drawn
   --check DIR    draw everything into DIR and fail when a committed file differs (art and RoyaleArtData.lua); the
@@ -25,8 +26,7 @@ DXT5 BLP. A .blp of the same name wins over a .tga (TextureCreate tries BLP firs
 
 The generator fails (exit 1) when a glyph's ink, stroke and shadow leave its cell, a glow cell lacks a 3-sigma
 gutter, a digit is not lining after alignment (ink bottom within 1.5 % of the cap from the baseline, top within 2 %),
-a cell edge is not a multiple of 4, an atlas is not a power of two, or the widest two-digit countdown number at
-countdown.twoDigitCap is wider than 88 % of the ring's inner disc.
+a cell edge is not a multiple of 4, or an atlas is not a power of two.
 """
 
 import argparse
@@ -215,13 +215,14 @@ def fit_rows(arr, top, bot, want_top, want_bot):
     return out
 
 
-def metal_glyph(glyph, cap, stroke, shadow_dy, shadow_blur, metal, bevel=0.085, emboss=True):
+def metal_glyph(glyph, cap, stroke, shadow_dy, shadow_blur, metal, bevel=0.085, emboss=True, ink=None):
     """Renders a coverage picture (supersampled) into the forged-metal look, still supersampled, straight alpha:
 
       fill    a vertical metal gradient over the cap height (draw_logo's five stops: cream, gold, a dark horizon at
               52 %, bronze, dark bronze), shaded by a chiselled bevel: an inner height ramp `bevel` caps wide, lit
               from the top left, so the top-left facets go pale and the bottom-right facets dark, like cast metal
-      stroke  `stroke` final pixels of ink (1B0E06) all round, from an exact distance field, so the corners stay round
+      stroke  `stroke` final pixels of ink (1B0E06, or `ink`) all round, from an exact distance field, so the corners
+              stay round
       shadow  the filled and stroked shape, moved down `shadow_dy` and blurred `shadow_blur` (final pixels), black 75 %
     """
     capS = cap * SS
@@ -244,7 +245,7 @@ def metal_glyph(glyph, cap, stroke, shadow_dy, shadow_blur, metal, bevel=0.085, 
     # the stroke: dark ink with a faint rim light on its outer top-left edge, so it reads as a cast lip
     rim_h = np.minimum(1.0, (stroke * SS + 1.0 - d_out) / (stroke * SS * 0.6 + 1.0)) * (stroke_a > 0)
     sd, _ = ak.shade(rim_h * stroke * SS * 0.35)
-    ink = np.broadcast_to(c3("ink"), fill.shape + (3,)).copy()
+    ink = np.broadcast_to(c3(ink or "ink"), fill.shape + (3,)).copy()
     ink = ak.lit(ink, sd, lift=0.10)
     rgba = ak.over(rgba, ak.layer(ink, stroke_a))
     # the fill
@@ -438,6 +439,55 @@ def build_dropword(face, stub=False):
                 advance=g.advance / SS / DROP_CAP, inkL=g.ink[0] / SS / DROP_CAP, inkR=g.ink[2] / SS / DROP_CAP,
                 ox=ox / DROP_CAP)
     return art, glow, word, baseline
+
+
+# The drop countdown in the DBM style (RoyaleCountdown.lua): the big numerals of the classic pull countdown for the
+# last five seconds, and DROP! as its special warning. Bright yellow gold without the bronze horizon, a black outline
+# and no bevel band, so they read like the pull countdown players know, still drawn here and set in Cinzel Bold.
+PULL_W, PULL_H, PULL_CELL = 1024, 512, 256
+PULL_DIGITS = "12345"
+PULL_CAP, PULL_STROKE, PULL_GLOW = 176, 12, 5.0          # cells of 256 x 256; glow sigma at half size
+PULL_WORD_CAP, PULL_WORD_STROKE, PULL_WORD_GLOW = 128, 10, 6.0   # DROP! in a 768 x 256 cell
+PULL_GOLD = [(0.0, ak.rgb("fffbe3")), (0.30, ak.rgb("ffe375")), (0.55, ak.rgb("ffc81e")), (0.80, ak.rgb("f7a00e")),
+             (1.0, ak.rgb("d76f08"))]
+PULL_INK = "040302"
+
+
+def build_pull(face, stub=False):
+    """The Pull atlas (1024x512) and its glow at half size: the numerals 1-5 (cells of 256, cap 176, lining) and
+    DROP! (cap 128, the 768x256 cell right of the 5), each like a title: the cap's middle on the cell's middle and the
+    ink centred in it. Returns the art, the glow and { text: cell }, the cell's u0..v1, its w and h and the ink's
+    width inkW in caps of its own `cap` (texels)."""
+    art = np.zeros((PULL_H, PULL_W, 4), dtype=np.float32)
+    glow = np.zeros((PULL_H // 2, PULL_W // 2), dtype=np.float32)
+    items = []
+    for i, ch in enumerate(PULL_DIGITS):
+        items.append((ch, (i % 4) * PULL_CELL, (i // 4) * PULL_CELL, PULL_CELL, PULL_CELL, PULL_CAP, PULL_STROKE,
+                      PULL_GLOW))
+    items.append(("DROP!", PULL_CELL, PULL_CELL, 3 * PULL_CELL, PULL_CELL, PULL_WORD_CAP, PULL_WORD_STROKE,
+                  PULL_WORD_GLOW))
+    cells = {}
+    for text, x, y, cw, chh, cap, stroke, sigma in items:
+        digit = text.isdigit()
+        g = draw_text(face, text, cap, tracking=0.0 if digit else DROP_TRACKING, align_digits=digit)
+        if digit:
+            b, t = g.ink[3] / SS, g.ink[1] / SS
+            check(abs(b) <= 0.015 * cap + 0.5, "Pull '%s': ink bottom %.1f px from the baseline (not lining)"
+                  % (text, b))
+            check(abs(-t - cap) <= 0.02 * cap + 0.5, "Pull '%s': ink top %.1f px from the cap line" % (text, -t - cap))
+        ink_w = (g.ink[2] - g.ink[0]) / SS
+        ox = round(((cw - ink_w) / 2.0 - g.ink[0] / SS) * SS) / SS
+        baseline = chh / 2.0 + cap / 2.0
+        if stub:
+            piece = stub_glyph(g, None)
+        else:
+            piece = metal_glyph(g, cap, stroke, cap * 0.025, cap * 0.02, PULL_GOLD, bevel=0.06, ink=PULL_INK)
+        art[y:y + chh, x:x + cw] = place(piece, g, cw, chh, ox, baseline, "Pull '%s'" % text)
+        glow[y // 2:(y + chh) // 2, x // 2:(x + cw) // 2] = place_glow(
+            g, cw // 2, chh // 2, ox / 2.0, baseline / 2.0, sigma, "PullGlow '%s'" % text)
+        cells[text] = dict(u0=x / PULL_W, u1=(x + cw) / PULL_W, v0=y / PULL_H, v1=(y + chh) / PULL_H, cap=cap,
+                           w=cw / cap, h=chh / cap, inkW=ink_w / cap, stroke=stroke / cap)
+    return art, glow, cells
 
 
 # ============================================================================================ shaded vector parts
@@ -1651,6 +1701,12 @@ def build_all(stub=False, log=print):
     data["atlases"]["DropWord"] = dict(file=GAME_DIR + "DropWord", w=1024, h=512, cap=DROP_CAP, baseline=baseline,
                                        cellW=1024, cellH=512, stroke=DROP_STROKE, glow=GAME_DIR + "DropWordGlow",
                                        glyphs={"DROP!": word})
+    log("drawing Pull")
+    art, glow, cells = build_pull(face, stub)
+    out.append(("Pull", art, "tga"))
+    out.append(("PullGlow", white(glow), "dxt5"))
+    data["atlases"]["Pull"] = dict(file=GAME_DIR + "Pull", glow=GAME_DIR + "PullGlow", w=PULL_W, h=PULL_H,
+                                   glyphs=cells)
     log("drawing Titles")
     art, glow, titles, rows = build_titles(face, stub)
     out.append(("Titles", art, "tga"))
@@ -1669,9 +1725,9 @@ def build_all(stub=False, log=print):
     piece("LabelHalo", build_label_halo, 64, 32)
     piece("FeedStrip", build_feed_strip, 256, 32)
     piece("Notch", build_notch, 64, 64)
-    piece("CountRing", lambda: build_count_ring(512), 512, 512)
+    # the small ring and shock only: the ready check's ring and the map's pulse (the drop countdown is DBM-style now,
+    # RoyaleCountdown.lua, and draws no ring)
     piece("CountRingSmall", lambda: build_count_ring(128, detail=False), 128, 128)
-    piece("Shock", lambda: build_shock(256), 256, 256)
     piece("ShockSmall", lambda: build_shock(128), 128, 128)
     piece("Gem", build_gem, 64, 32)
     piece("GemGlow", build_gem_glow, 32, 32)
@@ -1702,19 +1758,7 @@ def build_all(stub=False, log=print):
         img = dict((n, i) for n, i, _ in out)[file_name(name)]
         check_rotatable(name, img)
 
-    # the countdown's two-digit cap: the widest of 10..15 (NumeralsL metrics, stroke included) at most 88 % of the
-    # ring's inner disc (196 units across a 280-unit ring)
-    gl = data["atlases"]["NumeralsL"]["glyphs"]
-    stroke_caps = NUMERAL_ATLASES[0].stroke / float(NUMERAL_ATLASES[0].cap)
-
-    def width_caps(s):
-        return sum(gl[c]["advance"] for c in s[:-1]) + gl[s[-1]]["inkR"] - gl[s[0]]["inkL"] + 2 * stroke_caps
-    disc_units = 280.0 * 2 * RING_DISC
-    widest = max(width_caps(str(n)) for n in range(10, 16))
-    two_cap = min(112, int(math.floor(0.88 * disc_units / widest)))
-    check(widest * two_cap <= 0.88 * disc_units + 1e-6, "the widest two-digit number does not fit the ring")
-    data["countdown"] = dict(twoDigitCap=two_cap, ringUnits=280, discUnits=disc_units, widestTwoDigit=widest)
-    data["ring"] = dict(file=GAME_DIR + "CountRing", small=GAME_DIR + "CountRingSmall", disc=2 * RING_DISC,
+    data["ring"] = dict(small=GAME_DIR + "CountRingSmall", disc=2 * RING_DISC,
                         sockets=[dict(angle=a, r=RING_SOCKET_R) for a in socket_angles()])
     data["rotatable"] = {n: GAME_DIR + file_name(n) for n in ("Notch", "You", "Arrow", "EdgeTick")}
     data["slices"] = dict(
@@ -1842,10 +1886,12 @@ def lua_data(data):
 --   cells at half resolution: the same texcoords and quad.
 -- titles: each fixed title's cell in the Titles atlas; w, h, inkW in caps. The cap's middle is the cell's
 --   middle, and the ink is centred in it. Tint with SetVertexColor (the art is neutral silver).
+-- atlases.Pull: the drop countdown's pull numerals 1-5 and DROP! (glyphs by text), each cell like a title's (w, h,
+--   inkW and the black stroke in caps of the glyph's own cap, in texels); the glow atlas has the same cells at half
+--   resolution. Baked bright gold: draw it untinted.
 -- icons.cells: { u0, u1, v0, v1 } (also by name) in both Icons (64-px cells) and IconsSmall (32-px cells).
 -- ring.sockets: angle in radians (0 = right, pi/2 = up: the first socket at the top, then clockwise every 24
 --   degrees) and r as a fraction of the ring's size; ring.disc: the dark centre disc's diameter, same fraction.
--- countdown.twoDigitCap: the cap (units) at which the widest of 10-15 fills at most 88 % of the inner disc.
 -- slices: 9-slice margins in texels (corners drawn at cornerUnits); edge = where the plate's shape starts, rim =
 --   its rim's width inside that, both in texels from the texture's edge / the shape's edge.
 -- altimeter.top/bottom: the scale's drop height and ground rows, as fractions of the texture's height.
@@ -1924,59 +1970,18 @@ def write_previews(out, data, pdir, log=print):
         p = pics[n]
         tile = Image.new("RGBA", p.size, (24, 26, 31, 255))
         # a checker under soft art shows its alpha
-        if n.endswith("Glow") or n in ("SpeedLinesA", "SpeedLinesB", "Vignette", "ShineStrip", "Shock", "ShockSmall",
-                                        "Hatch", "LabelHalo"):
+        if n.endswith("Glow") or n in ("SpeedLinesA", "SpeedLinesB", "Vignette", "ShineStrip", "ShockSmall", "Hatch",
+                                        "LabelHalo"):
             ys, xs = np.mgrid[0:p.height, 0:p.width]
             chk = (((xs // 16) + (ys // 16)) % 2).astype(np.uint8) * 18 + 30
             tile = Image.fromarray(np.dstack([chk, chk, chk + 6, np.full_like(chk, 255)]).astype(np.uint8))
         tile.alpha_composite(p)
         sheet.alpha_composite(tile, (px, py + 24))
         d.text((px, py), "%s  %dx%d" % (n, p.width, p.height), font=label_font, fill=(243, 221, 164, 255))
-    # the countdown: the ring at 280 units on a 1080p screen (1.406 px per unit), with 15, 10, 4 and 1
-    ppu = 1080 / 768.0
-    ring_px = int(round(280 * ppu))
-    two = data["countdown"]["twoDigitCap"]
-    shots = []
-    for text, cap_u in (("15", two), ("10", two), ("4", 150), ("1", 172)):
-        canvas = Image.new("RGBA", (ring_px + 80, ring_px + 80), (52, 70, 58, 255))
-        ring = pics["CountRing"].resize((ring_px, ring_px), Image.BOX)
-        canvas.alpha_composite(ring, (40, 40))
-        notch = pics["Notch"]
-        n_lit = int(text)
-        for i, sock in enumerate(data["ring"]["sockets"]):
-            a = sock["angle"]
-            vis = 22 * ppu
-            reg = int(round(vis * math.sqrt(2)))
-            img = notch.resize((reg, reg), Image.BOX).rotate(math.degrees(a) - 90, resample=Image.BILINEAR)
-            lit = i < n_lit
-            tint = (243, 221, 164) if lit and n_lit > 3 else ((255, 122, 61) if lit else (59, 42, 20))
-            arr = np.asarray(img).astype(np.float32)
-            arr[..., :3] *= np.array(tint, dtype=np.float32) / 255.0
-            if not lit:
-                arr[..., 3] *= 0.9
-            img = Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8))
-            cx = 40 + ring_px / 2 + math.cos(a) * sock["r"] * ring_px
-            cy = 40 + ring_px / 2 - math.sin(a) * sock["r"] * ring_px
-            canvas.alpha_composite(img, (int(round(cx - reg / 2)), int(round(cy - reg / 2))))
-        cap_px = cap_u * ppu
-        at = "NumeralsL" if cap_px >= 144 else ("NumeralsM" if cap_px >= 72 else "NumeralsS")
-        numimg, base = compose_number(pics[at], data["atlases"][at], text, cap_px)
-        # the cap's middle on the ring's centre
-        ox = int(round(40 + ring_px / 2 - numimg.width / 2))
-        oy = int(round(40 + ring_px / 2 - (base - cap_px / 2)))
-        layer = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
-        layer.paste(numimg, (ox, oy))
-        canvas.alpha_composite(layer)
-        shots.append(canvas)
-    row = Image.new("RGBA", (sum(s.width for s in shots) + 16 * (len(shots) + 1), shots[0].height + 32),
-                    (34, 30, 27, 255))
-    xx = 16
-    for s_ in shots:
-        row.alpha_composite(s_, (xx, 16))
-        xx += s_.width + 16
-    row.save(os.path.join(pdir, "countdown_1080p.png"))
+    row = write_pull_preview(pics, data, pdir)
     plate_shot = write_drop_plate_preview(pics, data, pdir)
-    # the contact sheet ends with the two mock-ups: the countdown at 15, 10, 4 and 1, and the drop plate
+    # the contact sheet ends with the two mock-ups: the drop countdown (the bar at 12.4 and 4.2 s, the pull numerals 5,
+    # 3 and 1, DROP!) and the drop plate
     extra = [row, plate_shot]
     full = Image.new("RGBA", (W, H + sum(e.height + 16 for e in extra) + 16), (34, 30, 27, 255))
     full.alpha_composite(sheet, (0, 0))
@@ -1986,6 +1991,67 @@ def write_previews(out, data, pdir, log=print):
         yy += e.height + 16
     full.save(os.path.join(pdir, "contact_sheet.png"))
     log("wrote previews to %s" % pdir)
+
+
+def pull_glyph(pics, data, text, cap_px, glow_rgb=(255, 200, 60), glow_alpha=0.7):
+    """A glyph of the Pull atlas at cap_px as RoyaleCountdown.lua draws it: the cell's quad (w x h caps) with the
+    gold glow (the white glow atlas tinted, added) under it."""
+    at = data["atlases"]["Pull"]
+    g = at["glyphs"][text]
+    qw, qh = max(1, int(round(g["w"] * cap_px))), max(1, int(round(g["h"] * cap_px)))
+    out = Image.new("RGBA", (qw, qh), (0, 0, 0, 0))
+    glow = pics["PullGlow"]
+    box = (int(round(g["u0"] * glow.width)), int(round(g["v0"] * glow.height)), int(round(g["u1"] * glow.width)),
+           int(round(g["v1"] * glow.height)))
+    ga = np.asarray(glow.crop(box).resize((qw, qh), Image.BILINEAR)).astype(np.float32)
+    tint = np.zeros((qh, qw, 4), dtype=np.float32)
+    tint[..., :3] = np.array(glow_rgb, dtype=np.float32)
+    tint[..., 3] = ga[..., 3] * glow_alpha
+    out.alpha_composite(Image.fromarray(np.clip(tint, 0, 255).astype(np.uint8)))
+    art = pics["Pull"]
+    box = (int(round(g["u0"] * art.width)), int(round(g["v0"] * art.height)), int(round(g["u1"] * art.width)),
+           int(round(g["v1"] * art.height)))
+    out.alpha_composite(art.crop(box).resize((qw, qh), Image.BILINEAR if cap_px > g["cap"] * 0.5 else Image.BOX))
+    return out
+
+
+def write_pull_preview(pics, data, pdir):
+    """The drop countdown on a 1080p screen (1.406 px per unit), as RoyaleCountdown.lua lays it out: the DBM-style
+    timer bar (195x20 units, the icon left of it, "Drop in" and the seconds; orange to red as it runs out) at 12.4 and
+    4.2 s, the pull numerals 5, 3 and 1 at their 110-unit cap and DROP! at 80. The bar's stock art (UI-StatusBar, the
+    spell icon) is not in the repository: flat stand-ins here; FRIZQT is set in Marcellus."""
+    ppu = 1080 / 768.0
+    body = ImageFont.truetype(os.path.join(ADDON, "Fonts", "Marcellus-Regular.ttf"), int(round(10 * ppu)))
+    shots = []
+    for left, total in ((12.4, 15.0), (4.2, 15.0)):
+        bw, bh, icon = int(round(195 * ppu)), int(round(20 * ppu)), int(round(20 * ppu))
+        shot = Image.new("RGBA", (bw + icon + 48, bh + 40), (52, 70, 58, 255))
+        d = ImageDraw.Draw(shot)
+        x0, y0 = 24 + icon, 20
+        d.rectangle((24, y0, 24 + icon - 1, y0 + bh - 1), fill=(90, 120, 170, 255), outline=(0, 0, 0, 255))
+        d.rectangle((x0, y0, x0 + bw - 1, y0 + bh - 1), fill=(0, 0, 0, 128))
+        t = 1.0 - left / total
+        rgb = (255, int(round(0.7 * 255 * (1.0 - t))), 0)
+        fill_w = int(round(bw * left / total))
+        d.rectangle((x0, y0, x0 + fill_w - 1, y0 + bh - 1), fill=rgb + (255,))
+        d.rectangle((x0 + fill_w - 2, y0, x0 + fill_w + 1, y0 + bh - 1), fill=(255, 250, 220, 255))
+        d.text((x0 + 4, y0 + bh // 2), "Drop in", font=body, fill=(255, 255, 255, 255), anchor="lm")
+        d.text((x0 + bw - 4, y0 + bh // 2), ("%.1f" % left) if left < 10 else "%d" % math.ceil(left), font=body,
+               fill=(255, 255, 255, 255), anchor="rm")
+        shots.append(shot)
+    for text, cap_u in (("5", 110), ("3", 110), ("1", 110), ("DROP!", 80)):
+        g = pull_glyph(pics, data, text, cap_u * ppu)
+        shot = Image.new("RGBA", (g.width + 32, g.height + 32), (52, 70, 58, 255))
+        shot.alpha_composite(g, (16, 16))
+        shots.append(shot)
+    hh = max(s_.height for s_ in shots)
+    row = Image.new("RGBA", (sum(s_.width for s_ in shots) + 16 * (len(shots) + 1), hh + 32), (34, 30, 27, 255))
+    xx = 16
+    for s_ in shots:
+        row.alpha_composite(s_, (xx, 16 + (hh - s_.height) // 2))
+        xx += s_.width + 16
+    row.save(os.path.join(pdir, "countdown_1080p.png"))
+    return row
 
 
 def nine_slice(pic, w, h, margin, corner):

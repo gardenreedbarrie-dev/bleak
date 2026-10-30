@@ -1,9 +1,12 @@
--- Bleakhold Royale's drop countdown (RoyaleCountdown.lua): nothing before 15 s, one numeral a second in three tiers
--- with their sounds, caps and rings, one clock on screen, the client's pin lock at T-3.6 with the silent map close
--- and the glide to the centre, DROP! with the gong (or DROP! at once when the server drops first), a cancelled match,
--- corrections that jump without restarting, the circle banner folded into the countdown in the lobby, docking beside
--- the island map on 16:9, 4:3 and 5:4 (centred when it does not fit), reduced motion, late arrivals, and the texel
--- ratio of every texture the countdown shows.
+-- Bleakhold Royale's drop countdown (RoyaleCountdown.lua) in the DBM style: nothing before 15 s; a DBM-style timer bar
+-- (195x20, the icon left, "Drop in", the seconds with one decimal under 10 s, the spark, DBM's colours from orange to
+-- red, its flash); the classic pull countdown's big numerals for the last five seconds, popping in large and settling
+-- with their glow; the ticks; one clock on screen; the client's pin lock at T-3.6 with the silent map close and the
+-- glide to the centre; DROP! as a special warning with the gong (or at once when the server drops first); a cancelled
+-- match; corrections that jump without restarting; DBM's own bar when DBM is loaded (a local pizza timer, never a
+-- sync) with ours hidden; the circle banner folded into the countdown in the lobby; docking beside the island map on
+-- 16:9, 4:3 and 5:4 (centred when it does not fit); reduced motion; late arrivals; and the texel ratio of every
+-- texture the countdown shows.
 local MAP = {
     { 901, -1066, 533, -1066, 533, 455, 455, 32, 750, -267, -267 }, { 1, "L", -266, -266, 88, "The Bleak Hold" },
     { 2, "L", 120, 80, 62, "Harrow Farm" }, { 11, "C", -80, -710, 16, "Old Ford" },
@@ -95,36 +98,53 @@ local function mapRightEdge(M, w)
     return x * s + (1 - AX[p]) * w:GetWidth() * s
 end
 
--- Lit notches of the ring: { count, contiguous from the top clockwise, any ember }.
-local function notches(ns)
-    local RS = ns.RoyaleStyle
-    local lit, hot, firstDark, gap = 0, false, nil, false
-    local er, eg = RS.Rgb("ember")
-    for i, t in ipairs(ns.RoyaleCountdown.frame.stage.notches) do
-        local r, g, b, a = t:GetVertexColor()
-        local isLit = (a or 1) > 0.95 and r > 0.6
-        if isLit then
-            lit = lit + 1
-            if firstDark then gap = true end
-            if math.abs(r - er) < 0.02 and math.abs(g - eg) < 0.02 then hot = true end
-        elseif not firstDark then
-            firstDark = i
-        end
-    end
-    return lit, not gap, hot
+-- The bar's state: shown, its name, time, value and colour.
+local function barState(ns)
+    local bar = ns.RoyaleCountdown.frame.bar
+    local r, g, b = bar.sb:GetStatusBarColor()
+    return { shown = bar:IsVisible(), name = bar.name:GetText(), time = bar.time:GetText(), value = bar.sb:GetValue(),
+        r = r, g = g, b = b }
 end
 
-local function shownShocks(ns)
-    local f, n = ns.RoyaleCountdown.frame, 0
-    for _, t in ipairs({ f.shocks[1], f.shocks[2], f.dust }) do
-        if t:IsShown() and t:GetAlpha() > 0.01 then n = n + 1 end
+-- The big numeral shown (its glyph), or nil.
+local function bigShown(ns)
+    local num = ns.RoyaleCountdown.frame.num
+    return num:IsVisible() and num.glyph or nil
+end
+
+-- Advances in 0.05 s steps until the countdown shows the second n (at most `limit` s).
+local function untilShown(M, ns, n, limit)
+    local waited = 0
+    while ns.RoyaleCountdown.Shown() ~= n do
+        M.Advance(0.05, 0.05)
+        waited = waited + 0.05
+        assert(waited < (limit or 16), "never showed " .. n)
     end
-    return n
+end
+
+-- A stand-in for DBM-Core (3.3.5a): CreatePizzaTimer and DBM.Bars (DBT) GetBar/CancelBar, recording every call.
+local function fakeDbm(M, opts)
+    opts = opts or {}
+    local d = { calls = {}, cancels = {}, bars = {} }
+    function d:CreatePizzaTimer(t, text, broadcast, ...)
+        if opts.fail then error("DBM broke") end
+        self.calls[#self.calls + 1] = { t = t, text = text, broadcast = broadcast, n = select("#", ...) + 3,
+            at = M.now }
+        if not opts.noBar then self.bars[text] = { timer = t } end
+    end
+    d.Bars = {}
+    function d.Bars:GetBar(id) return d.bars[id] end
+    function d.Bars:CancelBar(id)
+        d.cancels[#d.cancels + 1] = id
+        d.bars[id] = nil
+    end
+    M.env.DBM = d
+    return d
 end
 
 ------------------------------------------------------------------------------------------------------
 
-test("royale countdown: nothing at 16 s; 15 at 15 s after the ring's entrance; one number a second in three tiers",
+test("royale countdown: nothing at 16 s; at 15 s a DBM-style bar counts down; the last five as big pull numerals",
 function(M, ns)
     connect(M)
     H.send(M, "ROYM", MAP)
@@ -139,51 +159,126 @@ function(M, ns)
     H.ok(cd:IsShown(), "the countdown at 15 s")
     H.eq(RC.Shown(), 15)
     H.eq(cd:GetFrameStrata(), "DIALOG")
-    H.eq(cd.num.cur:GetAlpha(), 0, "the 15 drops in after the ring")
     H.ok(cd:GetAlpha() < 0.5, "the frame fades in")
-    near(cd.stage:GetScale(), RC.STAGE_FROM, 1e-6, "the ring assembles from 0.92")
-    H.eq(#royaleSounds(M), 0, "the tick comes with the numeral")
+    H.eq(table.concat(royaleSounds(M), " "), "tick", "the first tick with the bar")
+    -- DBM's default bar: 195x20, the icon left of it, the stock bar fill, the name left, the time right
+    local bar = cd.bar
+    H.eq(bar.sb:GetWidth(), 195); H.eq(bar.sb:GetHeight(), 20)
+    H.eq(bar.icon:GetWidth(), 20); H.eq(bar.icon:GetHeight(), 20)
+    H.eq(bar.icon:GetTexture(), "Interface\\Icons\\Spell_Magic_FeatherFall")
+    near(select(1, bar.icon:GetTexCoord()), 0.07, 1e-6, "the icon's edge cut like an action button's")
+    local p1, rel1, rp1 = bar.icon:GetPoint(1)
+    H.ok(p1 == "LEFT" and rel1 == bar and rp1 == "LEFT", "the icon on the left")
+    H.eq(bar.sb:GetStatusBarTexture():GetTexture(), "Interface\\TargetingFrame\\UI-StatusBar")
+    H.eq(bar.spark:GetTexture(), "Interface\\CastingBar\\UI-CastingBar-Spark")
+    H.eq(bar.spark:GetBlendMode(), "ADD")
+    H.eq(bar.name:GetText(), "Drop in")
+    local pn, _, rpn = bar.name:GetPoint(1)
+    local pt, _, rpt = bar.time:GetPoint(1)
+    H.ok(pn == "LEFT" and rpn == "LEFT" and pt == "RIGHT" and rpt == "RIGHT", "the name left, the time right")
+    local st = barState(ns)
+    H.ok(st.shown, "our bar without DBM")
+    H.eq(st.time, "15")
+    near(st.value, 0, 1e-6, "an empty bar fills up")
+    near(st.r, 1); near(st.g, 0.7); near(st.b, 0)
+    H.ok(not bigShown(ns), "no big numeral at 15")
     M.Advance(0.4)
-    near(cd:GetAlpha(), 1); near(cd.stage:GetScale(), 1)
-    near(cd.num.cur:GetAlpha(), 1, 1e-6, "the 15 is in")
-    H.eq(cd.num:GetValue(), "15")
-    H.eq(cd.num.cap, ns.RoyaleArt.countdown.twoDigitCap)
-    local lit, run, hot = notches(ns)
-    H.eq(lit, 15, "every notch lit"); H.ok(run and not hot)
-    H.eq(shownShocks(ns), 0, "tier A: no ring")
-    H.eq(table.concat(royaleSounds(M), " "), "tick")
-    H.eq(cd.kick.text:GetText(), "DROP IN")
+    near(cd:GetAlpha(), 1)
     H.eq(cd.line1:GetText(), "Circle 1 of 6 is on your map.")
     H.eq(cd.line2:GetText(), "Landing at Harrow Farm")
     H.eq(#barClocks(M), 0, "one clock on screen")
     -- then every second, sampled 0.4 s after each change
     for k = 1, 14 do
         M.Advance(1)
-        local n = 15 - k
-        H.eq(RC.Shown(), n, "the number " .. k .. " s in")
-        H.eq(cd.num:GetValue(), tostring(n))
-        local cap = n >= 10 and ns.RoyaleArt.countdown.twoDigitCap or (n > 3 and 150 or 172)
-        H.eq(cd.num.cap, cap, "the cap of " .. n)
-        local shocks = n >= 11 and 0 or (n >= 4 and 1 or 2)
-        H.eq(shownShocks(ns), shocks, "the rings of " .. n)
-        lit, run, hot = notches(ns)
-        H.eq(lit, n, "lit notches at " .. n)
-        H.ok(run, "the lit notches run from the top at " .. n)
-        H.eq(hot, n <= 3, "ember notches at " .. n)
+        local n, left = 15 - k, 14.6 - k
+        H.eq(RC.Shown(), n, "the second " .. k .. " s in")
+        st = barState(ns)
+        H.eq(st.time, n >= 11 and tostring(n) or ("%.1f"):format(left), "the bar's time at " .. left)
+        local p = 1 - left / 15
+        near(st.value, p, 1e-3, "filled at " .. left)
+        near(st.g, 0.7 * (1 - p), 1e-3, "from orange towards red at " .. left)
+        near(st.r, 1); near(st.b, 0)
+        H.eq(bigShown(ns), n <= 5 and tostring(n) or nil, "the big numeral at " .. n)
+        if n <= 5 then
+            near(cd.num.rsZoom, 1, 1e-6, "settled at " .. n)
+            local g = ns.RoyaleArt.atlases.Pull.glyphs[tostring(n)]
+            near(cd.num.tex:GetHeight(), g.h * RC.BIG_CAP, 1e-6, "the numeral's size at " .. n)
+            local ga = cd.num.glow:GetAlpha()
+            H.ok(ga >= RC.GLOW_REST - 1e-6 and ga <= RC.GLOW_PEAK, "a gold glow at " .. n .. ": " .. ga)
+            H.ok(bar.spark:IsShown(), "the spark at the fill's end")
+        end
         H.eq(#barClocks(M), 0, "no second clock at " .. n)
     end
     local sounds = royaleSounds(M)
     H.eq(count(sounds, "tick"), 12, "tick.wav for 15-4")
     H.eq(table.concat(sounds, " ", 13), "tick3 tick2 tick1")
     H.eq(#sounds, 15)
-    local turned = 0
     for _, r in ipairs(M.rotations) do
-        if ns.RoyaleStyle.RootOf(r.texture) == cd then
-            turned = turned + 1
-            H.ok(r.path == ROYALE_ART .. "Notch" and math.abs(r.width - r.height) < 1e-6, "SetRotation on a notch only")
-        end
+        H.ok(ns.RoyaleStyle.RootOf(r.texture) ~= cd, "nothing of the countdown turned: " .. tostring(r.path))
     end
-    H.eq(turned, 15, "the 15 notches turned once each")
+end)
+
+test("royale countdown: each big numeral pops in large and settles with its gold glow; the one before fades",
+function(M, ns)
+    connect(M)
+    reveal(M)
+    local RC = ns.RoyaleCountdown
+    local cd = M.env.BleakholdRoyaleCountdown
+    untilShown(M, ns, 6)
+    H.ok(not bigShown(ns), "nothing big at 6")
+    untilShown(M, ns, 5)
+    H.eq(bigShown(ns), "5")
+    H.ok(cd.num.rsZoom >= 1.3, "pops in large: " .. cd.num.rsZoom)
+    H.ok(cd.num:GetAlpha() < 1, "and fades in")
+    H.ok(cd.num.glow:GetAlpha() > 0.8, "with a gold flare")
+    local g = ns.RoyaleArt.atlases.Pull.glyphs["5"]
+    local ulx, uly, llx, lly, urx = cd.num.tex:GetTexCoord()
+    near(ulx, g.u0); near(urx, g.u1); near(uly, g.v0); near(lly, g.v1)
+    H.eq(cd.num.tex:GetTexture(), ns.RoyaleArt.atlases.Pull.file)
+    H.eq(cd.num.glow:GetBlendMode(), "ADD")
+    M.Advance(0.35)
+    near(cd.num.rsZoom, 1, 1e-6, "settled")
+    near(cd.num:GetAlpha(), 1)
+    local ga = cd.num.glow:GetAlpha()
+    H.ok(ga < 0.9 and ga >= RC.GLOW_REST, "the glow settles: " .. ga)
+    -- the next second: 4 pops, 5 fades out behind it
+    untilShown(M, ns, 4)
+    H.eq(bigShown(ns), "4")
+    H.ok(cd.numOld:IsShown() and cd.numOld.glyph == "5", "the 5 fades")
+    M.Advance(0.03, 0.03)
+    H.ok(cd.numOld:GetAlpha() < 0.5, "mostly gone 30 ms after the pop (no doubled digit): " .. cd.numOld:GetAlpha())
+    M.Advance(0.3)
+    H.ok(not cd.numOld:IsShown(), "and is gone")
+    -- the art: 1-5 and DROP! in one atlas, bright gold with a black stroke
+    for _, k in ipairs({ "1", "2", "3", "4", "5", "DROP!" }) do
+        H.ok(ns.RoyaleArt.atlases.Pull.glyphs[k], "Pull has " .. k)
+    end
+end)
+
+test("royale countdown: the bar flashes like DBM's from 7.75 s; the time has one decimal from 10 s", function(M, ns)
+    local RC = ns.RoyaleCountdown
+    H.eq(RC.BarText(15.25), "15", "never 16"); H.eq(RC.BarText(10.4), "11"); H.eq(RC.BarText(10), "10.0")
+    H.eq(RC.BarText(9.95), "10.0"); H.eq(RC.BarText(9.91), "10.0"); H.eq(RC.BarText(9.9), "9.9")
+    H.eq(RC.BarText(5), "5.0"); H.eq(RC.BarText(0.04), "0.1")
+    near(RC.BarFlash(8), 1); near(RC.BarFlash(7.5), RC.BAR_FLASH_LOW, 1e-6, "down at 0.25 s")
+    near(RC.BarFlash(7.375), (1 + RC.BAR_FLASH_LOW) / 2, 1e-6, "half way")
+    near(RC.BarFlash(7.0), 1, 1e-6, "held from 0.5 s"); near(RC.BarFlash(6.25), RC.BAR_FLASH_LOW, 1e-6, "again")
+    local r, g, b = RC.BarColor(0.5)
+    near(r, 1); near(g, 0.35); near(b, 0)
+    connect(M)
+    reveal(M)
+    local cd = M.env.BleakholdRoyaleCountdown
+    local fill = cd.bar.sb:GetStatusBarTexture()
+    M.Advance(7.0)                     -- 8 s left
+    near(fill:GetAlpha(), 1)
+    M.Advance(0.5)                     -- 7.5 s left
+    near(fill:GetAlpha(), RC.BAR_FLASH_LOW, 0.02, "the fill dips")
+    near(cd.bar.time:GetAlpha(), 1, 1e-6, "the time stays")
+    M.Advance(0.5)
+    near(fill:GetAlpha(), 1, 1e-6, "and comes back")
+    ns.RoyaleStyle.SetMotion(false)
+    M.Advance(0.75)                    -- 6.25 s left: a dip with motion on
+    near(fill:GetAlpha(), 1, 1e-6, "steady with reduced motion")
 end)
 
 test("royale countdown: the circle banner is folded into the countdown in the lobby, and shown in the fight",
@@ -384,10 +479,11 @@ test("royale countdown: a server time more than 0.35 s off jumps to the right se
     near(cd:GetAlpha(), 1, 1e-6, "no new entrance")
     local sounds = royaleSounds(M)
     H.eq(#sounds, 4, "15, 14, 13 and 11 only: " .. table.concat(sounds, " "))
-    local lit = notches(ns)
     M.Advance(0.3)
-    lit = notches(ns)
-    H.eq(lit, 11, "the skipped notch is dark too")
+    local st = barState(ns)
+    H.eq(st.time, "11", "the bar jumped with it")
+    near(st.value, 1 - (RC.run.endsAt - M.now) / RC.run.total, 1e-6, "its fill from the server's time")
+    near(RC.run.total, 15, 1e-6, "the bar keeps its span")
     -- the server moves the drop back by more than a second: the countdown goes, and starts again at 15
     roys(M, { [3] = 25000 })
     M.Advance(0.5)
@@ -404,17 +500,122 @@ test("royale countdown: a late arrival (falling without the lobby) never sees it
     H.eq(count(M.sounds, "Gong (Non-Looping)"), 0)
 end)
 
+test("royale countdown: DROP! is a special warning: the word slams in, the screen's edge flashes, the rest goes",
+function(M, ns)
+    connect(M)
+    reveal(M)
+    local t0 = M.now
+    local RC = ns.RoyaleCountdown
+    local cd = M.env.BleakholdRoyaleCountdown
+    M.Advance(14.9)                    -- T-0.1: the 1
+    H.eq(bigShown(ns), "1")
+    local drop = cd.drop
+    while not drop:IsShown() do M.Advance(0.05, 0.05) end
+    H.ok(M.now - t0 - 15 < 0.06, "DROP! at the zero")
+    H.eq(drop.glyph, "DROP!")
+    H.ok(not cd.num:IsShown() and not cd.numOld:IsShown(), "the numerals go at once: no 1 behind DROP!")
+    H.eq(drop.cap, RC.DROP_CAP)
+    H.ok(drop.rsZoom >= 1.5, "slams in from large: " .. drop.rsZoom)
+    H.eq(drop.tex:GetTexture(), ns.RoyaleArt.atlases.Pull.file)
+    M.Advance(0.1, 0.05)
+    H.ok(cd.flash:IsShown() and cd.flash:GetAlpha() > 0.2, "the edge flashes: " .. cd.flash:GetAlpha())
+    H.eq(cd.flash:GetBlendMode(), "ADD")
+    local p, rel = cd.flash:GetPoint(1)
+    H.ok(rel == M.env.UIParent, "over the whole screen")
+    M.Advance(0.3)
+    near(drop.rsZoom, 1, 1e-6, "settled")
+    near(cd.bar:GetAlpha(), 0, 1e-6, "the bar went")
+    H.ok(not cd.num:IsShown(), "the numeral went")
+    M.Advance(0.3)
+    near(cd.flash:GetAlpha(), 0, 1e-6, "the flash is over in 0.6 s")
+    H.ok(cd:IsShown(), "DROP! holds")
+    M.Advance(0.6)
+    H.ok(not cd:IsShown(), "gone 1.1 s after it showed")
+end)
+
+test("royale countdown: with DBM loaded its own bar counts the drop (a local pizza timer) and ours hides",
+function(M, ns)
+    connect(M)
+    H.send(M, "ROYM", MAP)
+    local dbm = fakeDbm(M)
+    reveal(M)
+    local RC = ns.RoyaleCountdown
+    local cd = M.env.BleakholdRoyaleCountdown
+    H.eq(#dbm.calls, 1, "DBM:CreatePizzaTimer once")
+    near(dbm.calls[1].t, 15, 0.05)
+    H.eq(dbm.calls[1].text, "Drop in")
+    H.eq(dbm.calls[1].broadcast, false, "never broadcast: no sync to the group")
+    H.ok(cd:IsShown(), "the countdown runs")
+    H.ok(not cd.bar:IsShown(), "one bar on screen: DBM's")
+    local _, _, _, _, y = cd.lines:GetPoint(1)
+    near(y, 0, 1e-6, "the lines move up to the top")
+    H.eq(cd.line2:GetText(), "Landing at Harrow Farm")
+    H.eq(#barClocks(M), 0, "and no clock in the top bar")
+    -- a correction past 0.35 s restarts DBM's bar at the server's time
+    M.Advance(2.4)
+    roys(M, { [3] = 10600, [9] = 120, [10] = 80, [15] = -150, [16] = -310, [17] = 520 })
+    H.eq(dbm.cancels[1], "Drop in", "the old bar cancelled")
+    H.eq(#dbm.calls, 2)
+    near(dbm.calls[2].t, 10.6, 0.05, "the new one at the server's time")
+    -- a jitter within 0.35 s leaves it alone
+    roys(M, { [3] = 10400, [9] = 120, [10] = 80, [15] = -150, [16] = -310, [17] = 520 })
+    H.eq(#dbm.calls, 2)
+    -- the big numerals, the ticks and DROP! are ours as before
+    untilShown(M, ns, 5)
+    H.eq(bigShown(ns), "5")
+    M.Advance(5.2)
+    H.ok(cd.drop:IsShown(), "DROP!")
+    H.eq(count(M.sounds, "Gong (Non-Looping)"), 1)
+    H.eq(dbm.cancels[#dbm.cancels], "Drop in", "DBM's bar ends with DROP!")
+    for _, s in ipairs(M.sent) do
+        H.ok(not s.prefix:find("^DBM"), "no DBM message to anyone: " .. s.prefix)
+    end
+    H.eq(ns.errors, 0)
+end)
+
+test("royale countdown: a cancelled match or a left lobby cancels DBM's bar; a DBM that fails leaves ours",
+function(M, ns)
+    connect(M)
+    local dbm = fakeDbm(M)
+    reveal(M)
+    M.Advance(3)
+    roys(M, { [2] = 7, [3] = 0 })
+    M.Advance(0.3)
+    local cd = M.env.BleakholdRoyaleCountdown
+    H.ok(cd.cancel:IsShown(), "MATCH CANCELLED")
+    H.eq(#dbm.cancels, 1, "DBM's bar cancelled with it")
+    -- a DBM whose call errors: our bar shows, and nothing is counted as our error
+    local errors = ns.errors
+    fakeDbm(M, { fail = true })
+    roys(M, { [1] = 7002, [3] = 15000, [9] = 120, [10] = 80, [15] = -150, [16] = -310, [17] = 520 })
+    M.Advance(0.1)
+    H.ok(cd:IsShown() and cd.bar:IsShown(), "our bar when DBM fails")
+    H.eq(ns.errors, errors)
+    -- a DBM that takes the call but shows no bar: ours too
+    M.Advance(15.5)
+    local quiet = fakeDbm(M, { noBar = true })
+    roys(M, { [1] = 7003, [3] = 15000 })
+    M.Advance(0.1)
+    H.eq(#quiet.calls, 1)
+    H.ok(cd.bar:IsShown(), "our bar when DBM shows none")
+    M.env.DBM = nil
+end)
+
 test("royale countdown: with reduced motion the numbers, DROP! and its hold keep their timing", function(M, ns)
     connect(M)
     ns.RoyaleStyle.SetMotion(false)
     reveal(M)
     local cd = M.env.BleakholdRoyaleCountdown
     near(cd:GetAlpha(), 1, 1e-6, "no fade")
-    M.Advance(0.2)
-    near(cd.num.cur:GetAlpha(), 1)
-    M.Advance(14.9)                    -- T+0.1
+    M.Advance(10.1)                    -- 4.9 s left: the 5 in place at once
+    H.eq(bigShown(ns), "5")
+    near(cd.num.rsZoom, 1); near(cd.num:GetAlpha(), 1)
+    near(cd.num.glow:GetAlpha(), ns.RoyaleCountdown.GLOW_REST)
+    near(cd.bar.sb:GetStatusBarTexture():GetAlpha(), 1, 1e-6, "no flashing bar")
+    M.Advance(5.0)                     -- T+0.1
     H.ok(cd:IsShown() and cd.drop:IsShown(), "DROP! shows")
     near(cd.drop.rsZoom, 1)
+    near(cd.flash:GetAlpha(), 0, 1e-6, "no screen flash")
     M.Advance(0.6)
     H.ok(cd:IsShown(), "and holds")
     M.Advance(0.3)
@@ -595,7 +796,7 @@ local function worstRatio(M, ns)
 end
 
 for _, screen in ipairs({ { 1920, 1080 }, { 2560, 1440 } }) do
-    test(("royale countdown: no art minified past 2.2x at %dx%d, through every tier and DROP!"):format(screen[1],
+    test(("royale countdown: no art minified past 2.2x at %dx%d, through the numerals and DROP!"):format(screen[1],
         screen[2]), function(M, ns)
         M.SetScreen(screen[1], screen[2], 1)
         connect(M)
@@ -611,14 +812,16 @@ for _, screen in ipairs({ { 1920, 1080 }, { 2560, 1440 } }) do
     end)
 end
 
-test("royale countdown: its text fits the kicker tab and the frame at 1080p, 1440p and 2160p", function(M, ns)
+test("royale countdown: its text fits the bar and the frame at 1080p, 1440p and 2160p", function(M, ns)
     for _, screen in ipairs({ { 1920, 1080 }, { 2560, 1440 }, { 3840, 2160 } }) do
         M.SetScreen(screen[1], screen[2], 1)
         local cd = ns.RoyaleCountdown.frame
-        local kick = cd.kick.text
-        H.ok(kick:GetStringWidth() <= cd.kick:GetWidth() - 16, "DROP IN fits its tab")
-        local _, size = kick:GetFont()
-        H.ok(size * ns.RoyaleStyle.PxPerUnit(kick) <= 32 + 1e-6, "the label within the rasteriser's 32 px")
+        local name, time = cd.bar.name, cd.bar.time
+        H.ok(name:GetStringWidth() <= name:GetWidth(), "Drop in fits its bar")
+        time:SetText("10.0")
+        H.ok(name:GetStringWidth() + time:GetStringWidth() + 16 <= cd.bar.sb:GetWidth(), "the time beside it")
+        local _, size = time:GetFont()
+        H.ok(size * ns.RoyaleStyle.PxPerUnit(time) <= 32 + 1e-6, "the bar's text within the rasteriser's 32 px")
         for _, text in ipairs({ "Circle 12 of 16 is on your map.", "No landing chosen. You drop at random.",
             "Landing at Salvagers' Camp" }) do
             cd.line2:SetText(text)

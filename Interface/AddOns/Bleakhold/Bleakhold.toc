@@ -18,10 +18,15 @@ Chat.lua
 Toast.lua
 Tooltip.lua
 MinimapOrbs.lua
+Legacy.lua
+JournalArt.lua
+OldAddons.lua
 Activities.lua
 Dungeons.lua
 Keys.lua
 Rift.lua
+Heroic.lua
+GroupFinder.lua
 KeyTracker.lua
 Countdown.lua
 Collections.lua

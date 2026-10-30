@@ -16,8 +16,13 @@ ns.Orbs = Orbs
 
 local rad, cos, sin, atan2, deg = math.rad, math.cos, math.sin, math.atan2, math.deg
 
-Orbs.SIZE = 34
-Orbs.GAP = 6
+-- The stock minimap button (Minimap.xml's MiniMapTracking): 32 x 32, the dark disc (UI-Minimap-Background), the
+-- picture (here the glyph's icon, cut round), MiniMap-TrackingBorder round it, UI-Minimap-ZoomButton-Highlight under
+-- the cursor, the picture pressed in while the button is held (its dark overlay, as MiniMapTracking's). A badge (a
+-- task to claim) is the stock indicator ball at its top right.
+Orbs.SIZE = 32
+Orbs.GAP = 7
+Orbs.HIGHLIGHT = "Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight"
 Orbs.list = {
     { key = "activities", glyph = "star", title = "Activities", angle = 205 },
     { key = "collections", glyph = "layers", title = "Collections", angle = 245 },
@@ -156,21 +161,71 @@ local function orbAvailable(o)
     return not o.available or o.available() and true or false
 end
 
+-- The picture keeps its icon's colours (a caller's tint is for a glyph without an icon), as UI.Badge's does.
+local function keepColours(t)
+    local setColor = t.SetVertexColor
+    t.SetVertexColor = function(self, r, g, b, a)
+        if self.showsIcon then
+            setColor(self, 1, 1, 1, a)
+        else
+            setColor(self, r, g, b, a)
+        end
+    end
+end
+
+-- the picture's place (MiniMapTracking's: 20 px at 6, -6 of 32), pressed in 1 px while held, with its dark overlay
+local function placeGlyph(b, down)
+    local s, d = Orbs.SIZE, down and 1 or 0
+    b.glyph:ClearAllPoints()
+    b.glyph:SetPoint("TOPLEFT", b, "TOPLEFT", s * 0.19 + d, -s * 0.19 - d)
+    if down then
+        b.pressed:Show()
+    else
+        b.pressed:Hide()
+    end
+end
+
 local function makeOrb(o)
     local b = CreateFrame("Button", "BleakholdOrb_" .. o.key, holder)
-    b:SetSize(Orbs.SIZE, Orbs.SIZE)
+    local size = Orbs.SIZE
+    b:SetSize(size, size)
     b:SetFrameLevel(holder:GetFrameLevel() + 2)
-    b.fill = UI.Disc(b, Orbs.SIZE, C.panel, "BACKGROUND")
-    b.fill:SetPoint("CENTER")
-    b.ring = b:CreateTexture(nil, "BORDER")
-    b.ring:SetTexture(UI.ART .. "Ring")
-    b.ring:SetAllPoints(b)
-    b.ring:SetVertexColor(UI.Rgb(C.gold))
-    b.glyph = UI.Glyph(b, o.glyph, 18, C.goldLight, "ARTWORK")
-    b.glyph:SetPoint("CENTER")
-    b.dot = UI.Disc(b, 10, C.teal, "OVERLAY")
-    b.dot:SetPoint("TOPRIGHT", b, "TOPRIGHT", 1, 1)
+    b.fill = b:CreateTexture(nil, "BACKGROUND")
+    b.fill:SetTexture(UI.STOCK.ringBg)
+    b.fill:SetSize(size * 0.78, size * 0.78)
+    b.fill:SetPoint("TOPLEFT", b, "TOPLEFT", size * 0.06, -size * 0.125)
+    b.glyph = b:CreateTexture(nil, "ARTWORK")
+    b.glyph:SetSize(size * 0.625, size * 0.625)
+    b.glyph.isPortrait = true
+    keepColours(b.glyph)
+    UI.SetGlyph(b.glyph, o.glyph)
+    if not b.glyph.showsIcon then
+        b.glyph:SetVertexColor(UI.Rgb(C.gold))
+    end
+    -- OVERLAY, not the picture's ARTWORK: the client does not draw one layer in creation order (Widgets.lua), so in
+    -- ARTWORK the shade could go under the picture; the ring shares OVERLAY, and its hole is clear where they meet
+    b.pressed = b:CreateTexture(nil, "OVERLAY")
+    b.pressed:SetTexture(UI.STOCK.ringBg)
+    b.pressed:SetVertexColor(0, 0, 0, 0.5)
+    b.pressed:SetAllPoints(b.glyph)
+    b.ring = b:CreateTexture(nil, "OVERLAY")
+    b.ring:SetTexture(UI.STOCK.ring)
+    b.ring:SetSize(size * 54 / 32, size * 54 / 32)
+    b.ring:SetPoint("TOPLEFT", b, "TOPLEFT", 0, 0)
+    b:SetHighlightTexture(Orbs.HIGHLIGHT, "ADD")
+    placeGlyph(b, false)
+    -- on a child frame: the ring is OVERLAY too, and one layer is not drawn in creation order
+    b.dot = UI.StatusDot(UI.Marks(b), 12, "green", "OVERLAY")
+    b.dot:SetPoint("TOPRIGHT", b, "TOPRIGHT", 3, 3)
     b.dot:Hide()
+    b:SetScript("OnMouseDown", function(self, button)
+        if button ~= "RightButton" then
+            placeGlyph(self, true)
+        end
+    end)
+    b:SetScript("OnMouseUp", function(self)
+        placeGlyph(self, false)
+    end)
     b:RegisterForClicks("LeftButtonUp")
     b:RegisterForDrag("RightButton")
     b:SetScript("OnClick", function()
@@ -181,11 +236,10 @@ local function makeOrb(o)
         end
     end)
     b:SetScript("OnEnter", function(self)
-        self.ring:SetVertexColor(UI.Rgb(C.goldPale))
         UI.ShowTooltip(self, o.lines and o.lines(self) or statusLines(o.key))
     end)
     b:SetScript("OnLeave", function(self)
-        self.ring:SetVertexColor(UI.Rgb(C.gold))
+        placeGlyph(self, false)
         if GameTooltip then
             GameTooltip:Hide()
         end

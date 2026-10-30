@@ -352,24 +352,68 @@ return function(opts)
     function IMPL.SetLooping(self, l) self.__looping = l end
 
     -- Like Script_SetTexture: a file that cannot be loaded (M.missingTextures) returns nil and keeps the
-    -- old texture; nil clears it.
+    -- old texture; nil clears it. Numbers make a solid colour texture (CSimpleTexture::SetTexture(CImVector),
+    -- kept in __solid, alpha 1 when left out); the file's second argument turns on wrapping (tiling, __wrap).
+    -- __tried is the last file asked for, loaded or not (a missing file the code never replaced is visible to tests).
     M.missingTextures = {}
     function IMPL.SetTexture(self, a, g, b, al)
         if type(a) == "string" then
             M.textures[a] = true
+            self.__tried = a
             if M.missingTextures[a] then
                 return nil
             end
             self.__texture = a
-        elseif type(a) == "number" or a == nil then
-            self.__texture = nil
+            self.__solid, self.__portrait = nil, nil
+            self.__wrap = g and true or nil
+        elseif type(a) == "number" then
+            self.__texture, self.__portrait, self.__tried = nil, nil, nil
+            self.__solid = { a, tonumber(g) or 0, tonumber(b) or 0, tonumber(al) or 1 }
+        elseif a == nil then
+            self.__texture, self.__solid, self.__portrait, self.__tried = nil, nil, nil, nil
         else
             error("SetTexture: string or numbers expected")
         end
         return 1
     end
     function IMPL.GetTexture(self) return self.__texture end
-    function IMPL.SetVertexColor(self, r, g, b, a) self.__color = { num(r, "SetVertexColor"), num(g, "SetVertexColor"), num(b, "SetVertexColor"), a } end
+    -- One vertex colour replaces a gradient and a gradient replaces the vertex colour (CSimpleRegion.cpp: both set
+    -- m_colorCount; GetVertexColor answers white while a gradient is on).
+    function IMPL.SetVertexColor(self, r, g, b, a)
+        self.__color = { num(r, "SetVertexColor"), num(g, "SetVertexColor"), num(b, "SetVertexColor"), a }
+        self.__grad = nil
+    end
+    local ORIENTATIONS = { HORIZONTAL = true, VERTICAL = true }
+    local function orientation(o, usage)
+        local u = type(o) == "string" and o:upper()
+        assert(u and ORIENTATIONS[u], usage)
+        return u
+    end
+    -- Script_SetGradient / Script_SetGradientAlpha (CSimpleTexture_Scripts.cpp): HORIZONTAL runs min (left) to max
+    -- (right), VERTICAL min (bottom) to max (top); SetGradient keeps both alphas at 1.
+    function IMPL.SetGradient(self, o, r1, g1, b1, r2, g2, b2)
+        local u = orientation(o, "Usage: " .. tostring(self.__name or "<unnamed>")
+            .. ":SetGradient(\"orientation\", minR, minG, minB, maxR, maxG, maxB)")
+        self.__grad = { u, num(r1, "SetGradient"), num(g1, "SetGradient"), num(b1, "SetGradient"), 1,
+            num(r2, "SetGradient"), num(g2, "SetGradient"), num(b2, "SetGradient"), 1 }
+        self.__color = nil
+    end
+    function IMPL.SetGradientAlpha(self, o, r1, g1, b1, a1, r2, g2, b2, a2)
+        local u = orientation(o, "Usage: " .. tostring(self.__name or "<unnamed>")
+            .. ":SetGradientAlpha(\"orientation\", minR, minG, minB, minA, maxR, maxG, maxB, maxA)")
+        self.__grad = { u, num(r1, "SetGradientAlpha"), num(g1, "SetGradientAlpha"), num(b1, "SetGradientAlpha"),
+            num(a1, "SetGradientAlpha"), num(r2, "SetGradientAlpha"), num(g2, "SetGradientAlpha"),
+            num(b2, "SetGradientAlpha"), num(a2, "SetGradientAlpha") }
+        self.__color = nil
+    end
+    -- StringToBlendMode's names; the texture keeps the mode (__blend, BLEND until set)
+    local BLENDS = { DISABLE = true, BLEND = true, ALPHAKEY = true, ADD = true, MOD = true }
+    function IMPL.SetBlendMode(self, mode)
+        assert(type(mode) == "string" and BLENDS[mode:upper()], "Usage: " .. tostring(self.__name or "<unnamed>")
+            .. ":SetBlendMode(\"mode\")")
+        self.__blend = mode:upper()
+    end
+    function IMPL.GetBlendMode(self) return self.__blend or "BLEND" end
     function IMPL.GetVertexColor(self) local c = self.__color or { 1, 1, 1, 1 } return c[1], c[2], c[3], c[4] or 1 end
     function IMPL.SetTexCoord(self, ...)
         local n = select("#", ...)
@@ -407,6 +451,7 @@ return function(opts)
         }
     end
     function IMPL.SetDrawLayer(self, layer) assert(LAYERS[layer], "SetDrawLayer: invalid layer " .. tostring(layer)); self.__layer = layer end
+    function IMPL.GetDrawLayer(self) return self.__layer or "ARTWORK" end
     function IMPL.SetBackdrop(self, bd)
         if bd then
             assert(type(bd) == "table", "SetBackdrop: table expected")
@@ -448,15 +493,190 @@ return function(opts)
     function IMPL.SetTextColor(self, r, g, b, a) self.__tcolor = { num(r, "SetTextColor"), num(g, "x"), num(b, "x"), a } end
     function IMPL.GetTextColor(self) local c = self.__tcolor or { 1, 1, 1 } return c[1], c[2], c[3], c[4] or 1 end
     function IMPL.SetJustifyH(self, j) assert(j == "LEFT" or j == "CENTER" or j == "RIGHT", "SetJustifyH: bad value " .. tostring(j)); self.__jh = j end
-    function IMPL.SetJustifyV(self, j) assert(j == "TOP" or j == "MIDDLE" or j == "BOTTOM", "SetJustifyV: bad value " .. tostring(j)) end
+    function IMPL.SetJustifyV(self, j)
+        assert(j == "TOP" or j == "MIDDLE" or j == "BOTTOM", "SetJustifyV: bad value " .. tostring(j))
+        self.__jv = j
+    end
+    function IMPL.SetSpacing(self, s) self.__spacing = num(s, "SetSpacing") end
+    function IMPL.GetSpacing(self) return self.__spacing or 0 end
 
-    function IMPL.Enable(self) self.__enabled = true end
-    function IMPL.Disable(self) self.__enabled = false end
+    ------------------------------------------------------------------------------------------------
+    -- Button state textures (CSimpleButton.cpp). Set*Texture takes a file (a new texture of the button's ARTWORK
+    -- layer over all of it), a texture object (moved to the button's ARTWORK layer) or nil; only the texture of the
+    -- button's state shows, and a state without its own texture keeps the one showing (SetButtonState), except
+    -- NORMAL. The highlight texture sits in the HIGHLIGHT layer, ADD unless a blend mode is given.
+    ------------------------------------------------------------------------------------------------
+    local STATE_KEYS = { NORMAL = "__normalTex", PUSHED = "__pushedTex", DISABLED = "__disabledTex" }
+    local function dropRegion(t)
+        t.__shown, t.__dropped = false, true
+    end
+    local function setStateTexture(self, state, tex)
+        local key = STATE_KEYS[state]
+        local old = self[key]
+        if tex == old then return end
+        if self.__activeTex == old then self.__activeTex = nil end
+        if old then dropRegion(old) end
+        self[key] = tex
+        if tex then
+            tex.__parent, tex.__layer, tex.__shown, tex.__dropped = self, "ARTWORK", false, nil
+            if (self.__state or "NORMAL") == state then
+                self.__activeTex = tex
+                tex.__shown = true
+            end
+        end
+    end
+    local function stateTextureArg(self, state, arg, method)
+        if type(arg) == "table" then
+            assert(arg.__otype == "Texture", tostring(self.__name or "<unnamed>") .. ":" .. method
+                .. "(): Wrong object type, expected texture")
+            setStateTexture(self, state, arg)
+        elseif type(arg) == "string" then
+            local cur = self[STATE_KEYS[state]]
+            if cur then
+                IMPL.SetTexture(cur, arg)
+                return
+            end
+            local t = new("Texture", nil, self)
+            t.__layer = "ARTWORK"
+            if not IMPL.SetTexture(t, arg) then
+                dropRegion(t)
+                return
+            end
+            IMPL.SetAllPoints(t, self)
+            setStateTexture(self, state, t)
+        else
+            assert(arg == nil, "Usage: " .. tostring(self.__name or "<unnamed>") .. ":" .. method
+                .. "(texture or \"texture\" or nil)")
+            setStateTexture(self, state, nil)
+        end
+    end
+    function IMPL.SetNormalTexture(self, arg) stateTextureArg(self, "NORMAL", arg, "SetNormalTexture") end
+    function IMPL.SetPushedTexture(self, arg) stateTextureArg(self, "PUSHED", arg, "SetPushedTexture") end
+    function IMPL.SetDisabledTexture(self, arg) stateTextureArg(self, "DISABLED", arg, "SetDisabledTexture") end
+    function IMPL.GetNormalTexture(self) return self.__normalTex end
+    function IMPL.GetPushedTexture(self) return self.__pushedTex end
+    function IMPL.GetDisabledTexture(self) return self.__disabledTex end
+    function IMPL.SetHighlightTexture(self, arg, mode)
+        local blend = type(mode) == "string" and BLENDS[mode:upper()] and mode:upper() or "ADD"
+        local t
+        if type(arg) == "table" then
+            assert(arg.__otype == "Texture", tostring(self.__name or "<unnamed>")
+                .. ":SetHighlightTexture(): Wrong object type, expected texture")
+            if arg == self.__highlightTex then return end
+            if self.__highlightTex then dropRegion(self.__highlightTex) end
+            t = arg
+            t.__parent, t.__layer, t.__shown, t.__dropped = self, "HIGHLIGHT", true, nil
+        elseif type(arg) == "string" then
+            t = self.__highlightTex
+            if t then
+                IMPL.SetTexture(t, arg)
+            else
+                t = new("Texture", nil, self)
+                t.__layer = "HIGHLIGHT"
+                if not IMPL.SetTexture(t, arg) then
+                    dropRegion(t)
+                    return
+                end
+                IMPL.SetAllPoints(t, self)
+            end
+        else
+            return
+        end
+        t.__blend = blend
+        self.__highlightTex = t
+    end
+    function IMPL.GetHighlightTexture(self) return self.__highlightTex end
+    local BUTTON_STATES = { NORMAL = true, PUSHED = true, DISABLED = true }
+    local function setButtonState(self, state, locked)
+        self.__stateLocked = locked and true or nil
+        local cur = self.__state or "NORMAL"
+        if state == cur then return end
+        local tex = self[STATE_KEYS[state]]
+        if self.__activeTex and (tex or state == "NORMAL") then
+            self.__activeTex.__shown = false
+            self.__activeTex = nil
+        end
+        if tex then
+            self.__activeTex = tex
+            tex.__shown = true
+        end
+        self.__state = state
+        -- CSimpleCheckbox: the disabled checked texture stands in for the checked one while disabled
+        if self.__checkedTex or self.__disabledCheckedTex then IMPL.SetChecked(self, self.__checked) end
+    end
+    function IMPL.SetButtonState(self, state, locked)
+        assert(BUTTON_STATES[state], "Usage: " .. tostring(self.__name or "<unnamed>")
+            .. ":SetButtonState(\"state\" [, lock])")
+        setButtonState(self, state, locked)
+    end
+    function IMPL.GetButtonState(self) return self.__state or "NORMAL" end
+    function IMPL.LockHighlight(self) self.__hlLocked = true end
+    function IMPL.UnlockHighlight(self) self.__hlLocked = nil end
+    function IMPL.SetPushedTextOffset(self, x, y)
+        self.__pushedOffset = { num(x, "SetPushedTextOffset"), num(y, "SetPushedTextOffset") }
+    end
+    function IMPL.GetPushedTextOffset(self) local p = self.__pushedOffset or { 0, 0 } return p[1], p[2] end
+
+    function IMPL.Enable(self)
+        self.__enabled = true
+        if isA(self.__otype, "Button") and self.__state == "DISABLED" then setButtonState(self, "NORMAL") end
+    end
+    function IMPL.Disable(self)
+        self.__enabled = false
+        if isA(self.__otype, "Button") then setButtonState(self, "DISABLED") end
+    end
     function IMPL.IsEnabled(self) return self.__enabled and 1 or nil end
+    -- CSimpleButton: off by default (the constructor), so a disabled button runs no OnEnter / OnLeave (M.Hover)
+    function IMPL.SetMotionScriptsWhileDisabled(self, on) self.__motionWhileDisabled = on and true or nil end
+    function IMPL.GetMotionScriptsWhileDisabled(self) return self.__motionWhileDisabled and 1 or nil end
     function IMPL.Click(self, button)
         if self.__enabled then fire(self, "OnClick", button or "LeftButton", false) end
     end
-    function IMPL.SetChecked(self, c) self.__checked = c and true or false end
+    -- CSimpleCheckbox.cpp: the checked texture (OVERLAY, over all of the button) shows while checked; while disabled
+    -- the disabled checked texture replaces it when there is one
+    local function checkTextureArg(self, key, arg, method)
+        local old = self[key]
+        if type(arg) == "string" then
+            if old then
+                IMPL.SetTexture(old, arg)
+            else
+                local t = new("Texture", nil, self)
+                t.__layer = "OVERLAY"
+                if not IMPL.SetTexture(t, arg) then
+                    dropRegion(t)
+                    return
+                end
+                IMPL.SetAllPoints(t, self)
+                self[key] = t
+            end
+        elseif type(arg) == "table" then
+            assert(arg.__otype == "Texture", tostring(self.__name or "<unnamed>") .. ":" .. method
+                .. "(): Wrong object type, expected texture")
+            if old and old ~= arg then dropRegion(old) end
+            arg.__parent, arg.__layer, arg.__dropped = self, "OVERLAY", nil
+            self[key] = arg
+        else
+            if old then dropRegion(old) end
+            self[key] = nil
+        end
+        IMPL.SetChecked(self, self.__checked)
+    end
+    function IMPL.SetCheckedTexture(self, arg) checkTextureArg(self, "__checkedTex", arg, "SetCheckedTexture") end
+    function IMPL.SetDisabledCheckedTexture(self, arg)
+        checkTextureArg(self, "__disabledCheckedTex", arg, "SetDisabledCheckedTexture")
+    end
+    function IMPL.GetCheckedTexture(self) return self.__checkedTex end
+    function IMPL.GetDisabledCheckedTexture(self) return self.__disabledCheckedTex end
+    function IMPL.SetChecked(self, c)
+        self.__checked = c and true or false
+        local on, dis = self.__checkedTex, self.__disabledCheckedTex
+        if on then on.__shown = false end
+        if dis then dis.__shown = false end
+        if self.__checked then
+            local t = (dis and self.__state == "DISABLED") and dis or on
+            if t then t.__shown = true end
+        end
+    end
     function IMPL.GetChecked(self) return self.__checked and 1 or nil end
     function IMPL.SetFocus(self) self.__focus = true; fire(self, "OnEditFocusGained") end
     function IMPL.ClearFocus(self) self.__focus = false end
@@ -466,6 +686,86 @@ return function(opts)
     function IMPL.GetMinMaxValues(self) return self.__min or 0, self.__max or 1 end
     function IMPL.SetValue(self, v) self.__value = num(v, "SetValue") end
     function IMPL.GetValue(self) return self.__value or 0 end
+    function IMPL.SetOrientation(self, o)
+        self.__orient = orientation(o, "Usage: " .. tostring(self.__name or "<unnamed>")
+            .. ":SetOrientation(\"orientation\")")
+    end
+    function IMPL.GetOrientation(self) return self.__orient or "HORIZONTAL" end
+    -- CSimpleStatusBar.cpp: the bar texture (a file: a new texture, ARTWORK unless a layer is given; or a texture
+    -- object) covers the filled part (value between min and max, from the left, or from the bottom when VERTICAL;
+    -- hidden at 0); SetStatusBarColor is its vertex colour. The preview renderer draws the fill from __bar and the
+    -- values.
+    function IMPL.SetStatusBarTexture(self, arg, layer)
+        layer = (type(layer) == "string" and LAYERS[layer]) and layer or "ARTWORK"
+        local t
+        if type(arg) == "table" then
+            assert(arg.__otype == "Texture", tostring(self.__name or "<unnamed>")
+                .. ":SetStatusBarTexture(): Wrong object type, expected texture")
+            if self.__bar and self.__bar ~= arg then dropRegion(self.__bar) end
+            t = arg
+            t.__parent, t.__dropped = self, nil
+        elseif type(arg) == "string" then
+            t = self.__bar
+            if t then
+                IMPL.SetTexture(t, arg)
+            else
+                t = new("Texture", nil, self)
+                if not IMPL.SetTexture(t, arg) then
+                    dropRegion(t)
+                    return
+                end
+            end
+        else
+            return
+        end
+        t.__layer = layer
+        IMPL.SetAllPoints(t, self)
+        t.__fillOf = self
+        self.__bar = t
+        if self.__barColor then
+            local c = self.__barColor
+            IMPL.SetVertexColor(t, c[1], c[2], c[3], c[4])
+        end
+    end
+    function IMPL.GetStatusBarTexture(self) return self.__bar end
+    function IMPL.SetStatusBarColor(self, r, g, b, a)
+        self.__barColor = { num(r, "SetStatusBarColor"), num(g, "x"), num(b, "x"), a }
+        if self.__bar then IMPL.SetVertexColor(self.__bar, r, g, b, a) end
+    end
+    function IMPL.GetStatusBarColor(self)
+        local c = self.__barColor or { 1, 1, 1, 1 }
+        return c[1], c[2], c[3], c[4] or 1
+    end
+    -- CSimpleSlider.cpp: the thumb (a file: a new OVERLAY texture; or a texture object, its own anchors dropped) hangs
+    -- from the slider's TOP (VERTICAL) or LEFT, (length - thumb) * position along; the preview renderer places it.
+    function IMPL.SetThumbTexture(self, arg, layer)
+        local t
+        if type(arg) == "table" then
+            assert(arg.__otype == "Texture", tostring(self.__name or "<unnamed>")
+                .. ":SetThumbTexture(): Wrong object type, expected texture")
+            if self.__thumb and self.__thumb ~= arg then dropRegion(self.__thumb) end
+            t = arg
+            t.__parent, t.__dropped = self, nil
+            if type(layer) == "string" and LAYERS[layer] then t.__layer = layer end
+        elseif type(arg) == "string" then
+            t = self.__thumb
+            if t then
+                IMPL.SetTexture(t, arg)
+            else
+                t = new("Texture", nil, self)
+                t.__layer = "OVERLAY"
+                if not IMPL.SetTexture(t, arg) then
+                    dropRegion(t)
+                    return
+                end
+            end
+        else
+            return
+        end
+        t.__thumbOf = self
+        self.__thumb = t
+    end
+    function IMPL.GetThumbTexture(self) return self.__thumb end
 
     function IMPL.SetScrollChild(self, c) self.__scrollChild = c end
     function IMPL.GetScrollChild(self) return self.__scrollChild end
@@ -600,12 +900,33 @@ return function(opts)
         M.cvars[name] = tostring(value)
     end
     env.IsAddOnLoaded = function(n) return M.addons[n] and 1 or nil end
+    -- DisableAddOn / ReloadUI (GameUI_Scripts.cpp): the addon is off for this character from the next UI load;
+    -- M.disabledAddons keeps the names, M.reloads counts ReloadUI calls
+    M.disabledAddons, M.reloads = {}, 0
+    env.DisableAddOn = function(n)
+        assert(type(n) == "string" or type(n) == "number", "Usage: DisableAddOn(index or \"name\")")
+        M.disabledAddons[#M.disabledAddons + 1] = n
+    end
+    env.ReloadUI = function() M.reloads = M.reloads + 1 end
     env.GetItemInfo = function(id)
         if type(id) == "string" then id = tonumber(id:match("item:(%d+)")) end
         local i = id and M.items[id]
         if i then return i.name, "|cffa335ee|Hitem:" .. id .. "|h[" .. i.name .. "]|h|r", 4, 60, 60, "Armor", "Plate", 1, "INVTYPE_CHEST", "Interface\\Icons\\INV_Misc_QuestionMark" end
     end
     env.GetItemIcon = function() return "Interface\\Icons\\INV_Misc_QuestionMark" end
+    -- Script_SetPortraitToTexture (GameUI_Scripts.cpp, PortraitButton.cpp): the texture (object or name) shows the file
+    -- as a 64x64 circle (TempPortraitAlphaMaskSmall); a file that does not load leaves it as it was. __texture keeps
+    -- the file and __portrait the circle, for tests and the preview renderer.
+    env.SetPortraitToTexture = function(tex, path)
+        if type(tex) == "string" then tex = env[tex] end
+        assert(type(tex) == "table" and tex.__otype == "Texture",
+            "SetPortraitToTexture(): Wrong object type, expected texture")
+        if type(path) ~= "string" or path == "" then return end
+        M.textures[path] = true
+        tex.__tried = path
+        if M.missingTextures[path] then return end
+        tex.__texture, tex.__solid, tex.__portrait = path, nil, true
+    end
     env.GetNumCompanions = function(kind) return #(M.companions[kind] or {}) end
     env.GetCompanionInfo = function(kind, i)
         local c = (M.companions[kind] or {})[i]
@@ -757,6 +1078,111 @@ return function(opts)
         ADD_GUILDMEMBER = { maxLetters = 12 }, ADD_TEAMMEMBER = { maxLetters = 12 },
         ADD_RAIDMEMBER = { maxLetters = 12 }, ADD_MUTE = { maxLetters = 12 }, ADD_FRIEND = { maxLetters = 77 },
     }
+    -- StaticPopup.lua / StaticPopup.xml (3.3.5a): four dialogs StaticPopup1..4 (DIALOG strata, 320 wide, DialogBox
+    -- backdrop, white text, two StaticPopupButtonTemplate buttons). StaticPopup_Show(which, arg1, arg2, data) finds
+    -- StaticPopupDialogs[which] (nil when there is none), reuses the dialog already showing it or takes the first free
+    -- one, formats the text, runs OnShow and returns the dialog; StaticPopup_Hide(which [, data]) hides it. Every show
+    -- is in M.popups; M.StaticPopupClick(which, 1 or 2) presses a button like a player (OnAccept / OnCancel, then
+    -- hide).
+    M.popups = {}
+    local function popupButton(dialog, i)
+        local b = new("Button", dialog.__name .. "Button" .. i, dialog)
+        b:SetSize(128, 21)
+        local tc = { 0, 1, 0, 0.71875 }
+        for _, s in ipairs({ { "SetNormalTexture", "Up" }, { "SetPushedTexture", "Down" },
+            { "SetDisabledTexture", "Disabled" }, { "SetHighlightTexture", "Highlight" } }) do
+            IMPL[s[1]](b, "Interface\\Buttons\\UI-DialogBox-Button-" .. s[2])
+        end
+        for _, t in ipairs({ b.__normalTex, b.__pushedTex, b.__disabledTex, b.__highlightTex }) do
+            IMPL.SetTexCoord(t, unpack(tc))
+        end
+        local fs = IMPL.CreateFontString(b, b.__name .. "Text", "OVERLAY")
+        IMPL.SetFont(fs, "Fonts\\FRIZQT__.TTF", 12)
+        IMPL.SetTextColor(fs, 1, 0.82, 0)
+        IMPL.SetPoint(fs, "CENTER", b, "CENTER", 0, 1)
+        b.text = fs
+        b:SetScript("OnClick", function(self) M.StaticPopupClick(dialog.which, i, dialog) end)
+        return b
+    end
+    local popupDialogs = {}
+    for i = 1, 4 do
+        local d = new("Frame", "StaticPopup" .. i, env.UIParent)
+        d.__shown = false
+        d:SetFrameStrata("DIALOG")
+        d:SetSize(320, 72)
+        d:SetPoint("TOP", env.UIParent, "TOP", 0, -135 - (i - 1) * 100)
+        IMPL.SetBackdrop(d, { bgFile = "Interface\\DialogFrame\\UI-DialogBox-Background",
+            edgeFile = "Interface\\DialogFrame\\UI-DialogBox-Border", tile = true, tileSize = 32, edgeSize = 32,
+            insets = { left = 11, right = 12, top = 12, bottom = 11 } })
+        d.text = IMPL.CreateFontString(d, d.__name .. "Text", "ARTWORK")
+        IMPL.SetFont(d.text, "Fonts\\FRIZQT__.TTF", 12)
+        d.text:SetWidth(290)
+        d.text:SetPoint("TOP", d, "TOP", 0, -16)
+        d.button1, d.button2 = popupButton(d, 1), popupButton(d, 2)
+        d.button1:SetPoint("BOTTOMRIGHT", d, "BOTTOM", -6, 16)
+        d.button2:SetPoint("LEFT", d.button1, "RIGHT", 13, 0)
+        popupDialogs[i] = d
+    end
+    env.StaticPopup_Show = function(which, a1, a2, data)
+        local info = env.StaticPopupDialogs[which]
+        if not info then return nil end
+        local dialog
+        for _, d in ipairs(popupDialogs) do
+            if d.__shown and d.which == which then dialog = d break end
+        end
+        if not dialog then
+            for _, d in ipairs(popupDialogs) do
+                if not d.__shown then dialog = d break end
+            end
+        end
+        if not dialog then return nil end
+        dialog.which, dialog.data = which, data
+        local text = string.format(info.text or "", a1, a2)
+        dialog.text:SetText(text)
+        -- StaticPopup_Resize: the text's height between a 16 px top and the buttons (the mock's GetStringHeight
+        -- knows one line; the preview driver measures the wrapped text)
+        local lines = select(2, text:gsub("\n", "")) + 1
+        dialog:SetHeight(16 + math.max(lines * 12, dialog.text:GetStringHeight()) + 8 + 21 + 16)
+        for i, b in ipairs({ dialog.button1, dialog.button2 }) do
+            local label = info["button" .. i]
+            b.text:SetText(label)
+            b.__shown = label ~= nil
+        end
+        if not info.button2 then
+            dialog.button1:ClearAllPoints()
+            dialog.button1:SetPoint("BOTTOM", dialog, "BOTTOM", 0, 16)
+        else
+            dialog.button1:ClearAllPoints()
+            dialog.button1:SetPoint("BOTTOMRIGHT", dialog, "BOTTOM", -6, 16)
+        end
+        M.popups[#M.popups + 1] = { which = which, text = text, data = data, dialog = dialog }
+        dialog:Show()
+        if info.OnShow then info.OnShow(dialog, data) end
+        return dialog
+    end
+    env.StaticPopup_Hide = function(which, data)
+        for _, d in ipairs(popupDialogs) do
+            if d.__shown and d.which == which and (data == nil or d.data == data) then
+                d:Hide()
+                local info = env.StaticPopupDialogs[which]
+                if info and info.OnHide then info.OnHide(d, d.data) end
+            end
+        end
+    end
+    function M.StaticPopupClick(which, button, dialog)
+        if not dialog then
+            for _, d in ipairs(popupDialogs) do
+                if d.__shown and d.which == which then dialog = d break end
+            end
+        end
+        assert(dialog, "StaticPopupClick: no dialog showing " .. tostring(which))
+        local info = env.StaticPopupDialogs[which] or {}
+        -- button2 runs OnCancel only (a dialog without one just hides), never OnAccept
+        local fn
+        if button == 2 then fn = info.OnCancel else fn = info.OnAccept end
+        if fn then fn(dialog, dialog.data, "clicked") end
+        env.StaticPopup_Hide(which)
+    end
     new("EditBox", "SendMailNameEditBox", env.UIParent):SetMaxLetters(12)
     env.DressUpItemLink = function(link) M.dressedUp = link end
     env.TogglePVPFrame = function() M.pvpFrameToggled = (M.pvpFrameToggled or 0) + 1 end
@@ -866,6 +1292,18 @@ return function(opts)
             end
         end
         return found
+    end
+
+    -- The cursor enters (on) or leaves a frame: IsMouseOver answers it, OnEnter / OnLeave run, and a frame under the
+    -- cursor lights its HIGHLIGHT layer (CSimpleFrame; a disabled button does not, CSimpleButton::OnLayerCursorEnter).
+    -- A disabled button runs OnEnter / OnLeave only after SetMotionScriptsWhileDisabled(true) (CSimpleButton.cpp:832).
+    function M.Hover(frame, on)
+        if on == nil then on = true end
+        frame.__mouseOver = on and true or nil
+        if isA(frame.__otype, "Button") and not frame.__enabled and not frame.__motionWhileDisabled then
+            return
+        end
+        fire(frame, on and "OnEnter" or "OnLeave", true)
     end
 
     function M.Clickables(root)

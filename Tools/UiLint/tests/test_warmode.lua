@@ -225,6 +225,11 @@ test("warmode: off at an inn, confirm, WARMODE 1; on, the cooldown greys the but
     H.eq(P.bonus.rows[3].value:GetText(), "31 Alliance  -  22 Horde")
     H.eq(P.today.rows[1].value:GetText(), "0 / 3,720")
     H.eq(P.today.rows[4].value:GetText(), "118 / 96")
+    -- the last row of Today keeps clear of the panel's bottom border, and the War Fronts table still fits under it
+    local _, _, _, _, lastY = P.today.rows[5].label:GetPoint(1)
+    H.ok(P.today:GetHeight() + lastY - 12 >= 16, "Today's last row has room above the border")
+    local _, _, _, _, zoneY = P.fronts.zones[4][1]:GetPoint(1)
+    H.ok(P.fronts:GetHeight() + zoneY - 12 >= 16, "the War Fronts table fits its panel")
     P.toggle:Click()
     local d = M.env.BleakholdDialog
     H.ok(d:IsShown(), "a confirmation first")
@@ -295,6 +300,13 @@ test("warmode: the button greys itself (place, combat, dead, level, busy, the se
     wmst(M, { [1] = 1, [13] = 1, [14] = 840, [15] = 248 })
     r, on = reason()
     H.eq(r, "You are Wanted: War Mode stays on until the hunt ends."); H.ok(not on)
+    -- the reason is right-aligned under the toggle, wide enough for this one on a line, clear of the description
+    local A = ns.Activities
+    H.eq(P.hero.reason:GetWidth(), 340)
+    local _, rel, rp, rx = P.hero.reason:GetPoint(1)
+    local tp, _, _, tx = P.toggle:GetPoint(1)
+    H.ok(rel == P.toggle and rp == "BOTTOMRIGHT" and tp == "TOPRIGHT", "under the toggle, right-aligned")
+    H.ok(A.CW + tx + rx - P.hero.reason:GetWidth() > A.PAD + A.DESC_W, "clear of the description")
     H.eq(P.hero.status:GetText(), "Wanted for a kill streak  -  14:00 left  -  bounty 248 honor")
     -- a grey button sends nothing; Toggle tells why in the error frame
     P.toggle:Click()
@@ -438,8 +450,8 @@ test("hud: shown in a running Front, its pips, control, Dominion and countdown; 
     wpz(M)
     M.Advance(0.3)
     H.ok(hud:IsShown())
-    H.eq(hud.kicker:GetText(), "BLEAK FRONT"); H.eq(hud.zone:GetText(), "Crystalsong Forest")
-    H.eq(hud.time:GetText(), "1:12:00"); H.eq(hud.phase:GetText(), "LEFT")
+    H.eq(hud.kicker:GetText(), "Bleak Front"); H.eq(hud.zone:GetText(), "Crystalsong Forest")
+    H.eq(hud.time:GetText(), "1:12:00"); H.eq(hud.phase:GetText(), "left")
     H.ok(hud.pips[1]:IsShown() and hud.pips[3]:IsShown() and not hud.pips[4]:IsShown(), "three pips")
     local r, g, b = hud.pips[1]:GetVertexColor()
     local ar, ag, ab = ns.UI.Rgb(WM.TEAM.A.color)
@@ -463,7 +475,7 @@ test("hud: shown in a running Front, its pips, control, Dominion and countdown; 
     H.eq(hud.note:GetText(), "Dominion x3  -  Supremacy")
     wpz(M, { [3] = 2, [4] = 600, [5] = "", [6] = "", [7] = "", [8] = 0 })
     M.Advance(0.3)
-    H.eq(hud.phase:GetText(), "CEASEFIRE"); H.eq(hud.time:GetText(), "10:00")
+    H.eq(hud.phase:GetText(), "Ceasefire"); H.eq(hud.time:GetText(), "10:00")
     H.ok(not hud.control.a:IsShown() and hud.aText:GetText() == "", "no points outside a running Front")
     H.eq(hud.note:GetText(), "Ceasefire: the outposts are frozen")
     wpz(M, { [3] = 0 })
@@ -478,7 +490,7 @@ test("hud: shown in a running Front, its pips, control, Dominion and countdown; 
     wpz(M, { [1] = 267, [2] = "L", [7] = "", [8] = 0, [9] = 20, [10] = 35 })
     M.Advance(0.3)
     H.ok(hud:IsShown())
-    H.eq(hud.kicker:GetText(), "LEVELLING FRONT"); H.eq(hud.zone:GetText(), "Hillsbrad Foothills")
+    H.eq(hud.kicker:GetText(), "Levelling Front"); H.eq(hud.zone:GetText(), "Hillsbrad Foothills")
     H.eq(hud.note:GetText(), "Only levels 20-35 can capture here", "a level 80 out of the band")
 end)
 
@@ -686,7 +698,7 @@ test("events: banners for outposts and Wanted players, toasts for Fronts, the re
     -- Fronts: toasts that open the War Mode page
     local toast = M.env.BleakholdToastFrame
     ev({ "F", 2817, 7200, "Crystalsong Forest" })
-    H.eq(toast.kicker:GetText(), "WAR FRONT"); H.eq(toast.title:GetText(), "Crystalsong Forest: the Front has begun")
+    H.eq(toast.kicker:GetText(), "War Front"); H.eq(toast.title:GetText(), "Crystalsong Forest: the Front has begun")
     H.eq(toast.sub:GetText(), "It lasts 2 h 0 min. Capture and hold its outposts.")
     toast:Click()
     H.ok(ns.Activities.frame:IsShown() and ns.Activities.current == "warmode", "the toast opens War Mode")
