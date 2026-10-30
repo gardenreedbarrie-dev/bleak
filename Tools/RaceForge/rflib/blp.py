@@ -240,22 +240,24 @@ def decode(data: bytes, where: str, level_index: int = 0) -> tuple[int, int, byt
             raise BlpError(f"{where}: level {level_index} has {len(raw)} bytes, the client reads {level.expected}")
 
         palette = data[PALETTE_OFFSET:PALETTE_OFFSET + 1024]
-        alpha = raw[w * h:]
+        n = w * h
+        indices = bytes(raw[:n])
+        alpha = raw[n:]
 
-        for i in range(w * h):
-            p = raw[i] * 4
-            out[4 * i:4 * i + 3] = bytes((palette[p + 2], palette[p + 1], palette[p]))
+        # the palette's R, G and B through each index (bytes.translate: one table lookup per pixel)
+        for channel, offset in ((0, 2), (1, 1), (2, 0)):
+            out[channel::4] = indices.translate(bytes(palette[offset::4]))
 
-            if info.alpha_size == 0:
-                a = 255
-            elif info.alpha_size == 1:
-                a = 255 if alpha[i >> 3] >> (i & 7) & 1 else 0
-            elif info.alpha_size == 4:
-                a = ((alpha[i >> 1] >> (4 * (i & 1))) & 0xF) * 17
-            else:
-                a = alpha[i]
-
-            out[4 * i + 3] = a
+        if info.alpha_size == 0:
+            out[3::4] = b"\xff" * n
+        elif info.alpha_size == 8:
+            out[3::4] = bytes(alpha[:n])
+        else:
+            for i in range(n):
+                if info.alpha_size == 1:
+                    out[4 * i + 3] = 255 if alpha[i >> 3] >> (i & 7) & 1 else 0
+                else:
+                    out[4 * i + 3] = ((alpha[i >> 1] >> (4 * (i & 1))) & 0xF) * 17
 
         return w, h, out
 
@@ -368,6 +370,54 @@ def recolour(data: bytes, colours, where: str) -> bytes:
             struct.pack_into("<HHI", out, o, n0, n1, bits)
 
     return bytes(out)
+
+
+def opaque(data: bytes, where: str) -> bool:
+    """Whether every texel the client draws of the texture's first level is fully opaque: no alpha bits (alphaSize 0)
+    or every alpha 255."""
+    info = parse(data, where)
+
+    if info.alpha_size == 0 and info.kind != "DXT1":
+        return True
+
+    _, _, rgba = decode(data, where)
+    return rgba[3::4] == b"\xff" * (len(rgba) // 4)
+
+
+def palette_texture(original: bytes, where: str, palette: list[tuple[int, int, int]], levels: list[bytes]) -> bytes:
+    """A palette texture without alpha (alphaSize 0) with the original's header (magic, version, preferredFormat,
+    hasMips, size) but its own palette (up to 256 R, G, B entries) and levels (one index per pixel each, as many as
+    the original has, level i (width >> i) x (height >> i)), laid out as Blizzard's tools write them: the header,
+    the palette, then the levels."""
+    info = parse(original, where)
+    magic, version, _, _, preferred, has_mips, width, height = HEADER.unpack_from(original)[:8]
+
+    if not 1 <= len(palette) <= 256:
+        raise BlpError(f"{where}: a palette has 1 to 256 entries, not {len(palette)}")
+
+    if len(levels) != len(info.levels):
+        raise BlpError(f"{where}: {len(levels)} levels, the original has {len(info.levels)}")
+
+    offsets, sizes = [0] * 16, [0] * 16
+    pos = HEADER_SIZE
+
+    for i, level in enumerate(levels):
+        w, h = max(1, width >> i), max(1, height >> i)
+
+        if len(level) != w * h or (level and max(level) >= len(palette)):
+            raise BlpError(f"{where}: level {i} has {len(level)} indices for {w}x{h} pixels, or names an entry past "
+                           f"the {len(palette)} of the palette")
+
+        offsets[i], sizes[i] = pos, len(level)
+        pos += len(level)
+
+    pal = bytearray(1024)
+
+    for i, (r, g, b) in enumerate(palette):
+        pal[4 * i:4 * i + 4] = bytes((b, g, r, 0))
+
+    header = HEADER.pack(magic, version, 1, 0, preferred, has_mips, width, height, *offsets, *sizes)
+    return header + bytes(pal) + b"".join(bytes(level) for level in levels)
 
 
 def check(data: bytes, where: str, width: int, height: int) -> list[str]:

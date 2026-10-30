@@ -4312,7 +4312,12 @@ void CGxDeviceD3d9Ex::ITexForceRecreation(int32_t all) {
 
             uint32_t texelStrideInBytes;
             const void* texels;
-            texId->m_userFunc(GxTex_3, texId->m_width, texId->m_height, 0, 0, texId->m_userArg, texelStrideInBytes, texels);
+
+            // BLEAKHOLD(glow): not through a null callback (GxTexSetCannotUpdate) of a texture something still holds,
+            // such as a dead component's CharacterBaseSkin in a PlayerModel's copy of the model.
+            if (texId->m_userFunc) {
+                texId->m_userFunc(GxTex_3, texId->m_width, texId->m_height, 0, 0, texId->m_userArg, texelStrideInBytes, texels);
+            }
         }
     }
 

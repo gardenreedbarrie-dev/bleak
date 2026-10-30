@@ -18,6 +18,7 @@
 #include "WoW/Source/Game/GameClient/CDrawBowString.h"
 #include "WoW/Source/Glue/CGlueLoading.h"
 #include "WoW/Source/Glue/CGlueMgr.h"
+#include "WoW/Source/Glue/BleakholdCustomizeTable.h"
 #include "WoW/Source/Glue/CharacterSelection.h"
 #include "WoW/Source/Glue/ComponentData.h"
 #include "WoW/Source/Glue/CSimpleModelFFX.h"
@@ -701,6 +702,89 @@ void CCharacterCreation::RandomizeCharCustomization() {
     CCharacterCreation::m_character->SetRandomHairColor(COMPONENT_CONTEXT_0);
     CCharacterCreation::m_character->SetRandomHairStyle(COMPONENT_CONTEXT_0);
     CCharacterCreation::m_character->SetRandomFacialFeature(COMPONENT_CONTEXT_0);
+
+    CCharacterCreation::m_prevSkinIndex = CCharacterCreation::m_character->m_data.m_preferences.m_skinID;
+    CCharacterCreation::m_prevFaceIndex = CCharacterCreation::m_character->m_data.m_preferences.m_faceId;
+    CCharacterCreation::m_prevHairColorIndex = CCharacterCreation::m_character->m_data.m_preferences.m_hairColorId;
+    CCharacterCreation::m_prevHairStyleIndex = CCharacterCreation::m_character->m_data.m_preferences.m_hairStyleId;
+    CCharacterCreation::m_prevFacialHairIndex = CCharacterCreation::m_character->m_data.m_preferences.m_facialHairId;
+
+    CCharacterCreation::Dress();
+    CGlueLoading::StartLoad(CCharacterCreation::m_character, 1);
+}
+
+// BLEAKHOLD(customize): where a row stands in the walk its arrows make (CycleCharCustomization on
+// CharacterComponent.cpp's SetNext*/SetPrev*): the 1-based position of the current value (0 when the arrows cannot
+// come back to it), how many values they reach and the raw value. The face walk starts at the last skin chosen with the
+// skin row (m_prevSkinIndex), as CycleCharCustomization passes it.
+bool CCharacterCreation::GetCharCustomizationInfo(CHAR_CUSTOMIZATION_TYPE type, int32_t* position, int32_t* count, int32_t* raw) {
+    if (!CCharacterCreation::m_character || type < CHAR_CUSTOMIZATION_SKIN || type > CHAR_CUSTOMIZATION_FACIAL_FEATURE) {
+        return false;
+    }
+
+    BleakholdComponentTable table(CCharacterCreation::m_character, COMPONENT_CONTEXT_0);
+
+    if (!table.Valid()) {
+        return false;
+    }
+
+    BleakholdCustomize::Info info = BleakholdCustomize::RowInfo(table, BleakholdLookOf(CCharacterCreation::m_character), type, static_cast<int32_t>(CCharacterCreation::m_prevSkinIndex));
+    *position = info.position;
+    *count = info.count;
+    *raw = info.raw;
+    return true;
+}
+
+// BLEAKHOLD(customize): selects a raw value on a row when the row's arrows can reach it, with what one arrow press that
+// lands on it does (a face can bring its skin, a hair style or a features value its hair colour) and one model
+// reload. The skin row also moves the face walk's start, as CycleCharCustomization does. False, and nothing changed,
+// when the arrows cannot reach the value.
+bool CCharacterCreation::SetCharCustomizationRaw(CHAR_CUSTOMIZATION_TYPE type, int32_t raw) {
+    if (!CCharacterCreation::m_character || type < CHAR_CUSTOMIZATION_SKIN || type > CHAR_CUSTOMIZATION_FACIAL_FEATURE) {
+        return false;
+    }
+
+    BleakholdComponentTable table(CCharacterCreation::m_character, COMPONENT_CONTEXT_0);
+
+    if (!table.Valid()) {
+        return false;
+    }
+
+    BleakholdCustomize::Prefs look = BleakholdLookOf(CCharacterCreation::m_character);
+    BleakholdCustomize::Plan plan;
+
+    if (!BleakholdCustomize::PlanJump(table, look, type, raw, static_cast<int32_t>(CCharacterCreation::m_prevSkinIndex), &plan)) {
+        return false;
+    }
+
+    if (BleakholdCustomize::RowValue(look, type) == raw) {
+        return true;
+    }
+
+    BleakholdRunPlan(CCharacterCreation::m_character, plan);
+
+    if (type == CHAR_CUSTOMIZATION_SKIN) {
+        CCharacterCreation::m_prevSkinIndex = CCharacterCreation::m_character->m_data.m_preferences.m_skinID;
+    }
+
+    CGlueLoading::StartLoad(CCharacterCreation::m_character, 1);
+    return true;
+}
+
+// BLEAKHOLD(customize): Randomize with locked rows (bit row - 1 of keepMask keeps that row, rows as
+// CycleCharCustomization numbers them). The rolled rows fit the kept ones (BleakholdCustomize::RandomizeKeep). No
+// kept row is the stock Randomize, unchanged.
+void CCharacterCreation::RandomizeCharCustomization(uint32_t keepMask) {
+    keepMask &= (1u << BleakholdCustomize::NUM_ROWS) - 1;
+
+    if (!keepMask || !CCharacterCreation::m_character) {
+        CCharacterCreation::RandomizeCharCustomization();
+        return;
+    }
+
+    BleakholdComponentTable table(CCharacterCreation::m_character, COMPONENT_CONTEXT_0);
+    BleakholdComponentRandomizer randomizer(CCharacterCreation::m_character, COMPONENT_CONTEXT_0);
+    BleakholdCustomize::RandomizeKeep(randomizer, table, keepMask);
 
     CCharacterCreation::m_prevSkinIndex = CCharacterCreation::m_character->m_data.m_preferences.m_skinID;
     CCharacterCreation::m_prevFaceIndex = CCharacterCreation::m_character->m_data.m_preferences.m_faceId;

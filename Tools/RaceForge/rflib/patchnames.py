@@ -11,8 +11,8 @@ it, the base archives (common.MPQ, expansion.MPQ, lichking.MPQ, locale-<locale>.
 - case never matters: patch-s.MPQ and patch-S.MPQ are one file to Windows, to the client and to the launcher;
 - patch-0 and patch-1 sort before the stock patch-2 and patch-3, which would then outrank them.
 
-The art archives therefore use letters or the digits 4-9 only, and never a name in taken_patches.json (or one already
-in the realm's patch folder, --patches-dir).
+The art archives therefore use letters, the digits 4-9 or "~" (which sorts after every letter) only, and never a name
+in taken_patches.json (or one already in the realm's patch folder, --patches-dir).
 """
 
 from __future__ import annotations
@@ -22,8 +22,9 @@ import os
 
 TAKEN_FILE = "taken_patches.json"
 
-# One character each: patch-<c>.MPQ. Digits below 4 are the stock patches or sort below them.
-ART_CHARACTERS = "456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+# One character each: patch-<c>.MPQ. Digits below 4 are the stock patches or sort below them; "~" sorts after every
+# letter (customize's model archive patch-~.MPQ).
+ART_CHARACTERS = "456789ABCDEFGHIJKLMNOPQRSTUVWXYZ~"
 
 
 class PatchNameError(Exception):
@@ -40,7 +41,7 @@ def art_archive_names(letters: str, dbc_mpq: str | None) -> list[str]:
     letters = letters.upper()
 
     if not letters or any(c not in ART_CHARACTERS for c in letters) or len(set(letters)) != len(letters):
-        raise PatchNameError(f"--art-letters {letters!r}: give distinct characters from A-Z and 4-9 (patch-0 and "
+        raise PatchNameError(f"--art-letters {letters!r}: give distinct characters from A-Z, 4-9 and ~ (patch-0 and "
                              "patch-1 sort below the stock patch-2 and patch-3, which are taken)")
 
     names = [f"patch-{c}.MPQ" for c in letters]
@@ -91,6 +92,38 @@ def load_taken(path: str) -> dict[str, str]:
             taken[key] = group["comment"]
 
     return taken
+
+
+REALM_GROUP = "Bleakhold realm"  # the realm's own archives: the tools may rebuild them
+STOCK_GROUP = "Blizzard"
+CUSTOMIZE_GROUP = "RaceForge customize"
+
+
+def load_groups(path: str) -> list[tuple[str, set[str]]]:
+    """taken_patches.json as [(owner comment, {name key})], checked as load_taken() checks it."""
+    load_taken(path)
+
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+
+    return [(g["comment"], {name_key(n.strip()) for n in g["names"]}) for g in data["taken"]]
+
+
+def realm_owned(groups: list[tuple[str, set[str]]]) -> set[str]:
+    """The names of the Bleakhold realm group (REALM_GROUP): the archives the realm owns and its tools rebuild."""
+    found = [names for comment, names in groups if comment.startswith(REALM_GROUP)]
+
+    if not found:
+        raise PatchNameError(f"{TAKEN_FILE} has no \"{REALM_GROUP}\" group naming the realm's own archives")
+
+    return set().union(*found)
+
+
+def foreign(groups: list[tuple[str, set[str]]]) -> dict[str, str]:
+    """{name key: owner} of the archives another project owns (Reforged, WoW Forever, MapForge, CafeForge, ...):
+    every group but the stock patches, the realm's own and customize's own archives. No tool rebuilds them."""
+    keep = (REALM_GROUP, STOCK_GROUP, CUSTOMIZE_GROUP)
+    return {n: comment for comment, names in groups if not comment.startswith(keep) for n in names}
 
 
 def scan_patches_dir(folder: str) -> dict[str, str]:

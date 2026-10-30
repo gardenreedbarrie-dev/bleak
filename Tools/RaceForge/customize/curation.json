@@ -1,0 +1,68 @@
+{
+  "_readme": "What raceforge.py customize takes from the Ascension Character Customization package for the Bleakhold realm, and what it hides (README.md, 'Bleakhold appearance data contract'). Numbers only: option numbers of the pinned package, no art. Hiding sets flag 0x8 on the rows; the rows and their numbers stay. Every hidden row has a reason. Skin groups colour the picker's number (plain, marked, fel; Death Knight skins, flag 0x4, are their own group); a skin not listed is plain. The owner signs off the contact sheets that customize --preview makes on the server; change this file after that review.",
+  "version": 1,
+  "package": {
+    "name": "Ascension Character Customization",
+    "author": "Ijostrom",
+    "licence": "AGPL-3.0",
+    "url": "https://github.com/Ijostrom/Ascension_Character_Customization",
+    "commit": "9d082f467d2e92376763454de2ec8ad3f3c921e3",
+    "credits": "Models and textures: Project Ascension. Baked NPC textures and DBC reference: Project Reforged (per the package's README)."
+  },
+  "near_duplicate_delta_e": 2.0,
+  "skin_groups": {
+    "Human": {
+      "Female": {"marked": [18]}
+    },
+    "Orc": {
+      "Male": {"plain": [25, 45], "marked": [30, 35, 40]}
+    },
+    "Dwarf": {
+      "Female": {"plain": [29], "marked": [23, 25, 31]}
+    },
+    "NightElf": {
+      "Female": {"plain": [15, 20], "marked": [25, 34]}
+    },
+    "BloodElf": {
+      "Female": {"plain": [25, 35], "marked": [40, 45, 50, 55], "fel": [61]}
+    }
+  },
+  "hidden": [
+    {"race": "Human", "sex": "Female", "section": "skin", "colours": [22],
+     "reason": "painted clothing: a dark strap harness is painted onto the skin"},
+    {"race": "NightElf", "sex": "Female", "section": "skin", "colours": [30],
+     "reason": "painted clothing: a bead belt is painted onto the skin (its teal body tattoos are covered by the Moonwell Sigils marks); owner to confirm on the contact sheet"},
+    {"race": "Draenei", "sex": "Female", "section": "skin", "colours": [21],
+     "reason": "broken: barbershop-only row (flag 0x12) whose skin, underwear and 20 face textures are not in the package"},
+    {"race": "Draenei", "sex": "Female", "section": "underwear", "colours": [21],
+     "reason": "broken: the underwear of the broken skin 21"},
+    {"race": "Draenei", "sex": "Male", "section": "face", "colours": [16],
+     "reason": "broken: barbershop-only face rows (flags 0x2, 0x6) at skin colour 16 whose textures are not in the package"}
+  ],
+  "race_filters": {
+    "BloodElf": {
+      "comment": "Blood Elf keeps every package skin, the fel ones too."
+    },
+    "HighElf": {
+      "from": "BloodElf",
+      "keep_skins": {"Male": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], "Female": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]},
+      "hide_groups": ["marked", "fel"],
+      "reason": "High Elf skins: the plain Blood Elf tones go on the purple ramp of skins.json. Kept: the ten stock tones the realm's High Elves have today (and the Death Knight skins); the package's other Blood Elf tones are near-duplicates on a ten-colour ramp until the owner's High Elf contact sheet picks them (customize lists the ones that fit at least near_duplicate_delta_e apart). Marked skins stay only when listed in keep_skins (their marks must survive the recolour); fel skins never: High Elves have no fel options."
+    },
+    "Draenei": {
+      "hide_groups": ["fel"],
+      "reason": "fel Draenei skins belong to the Eredar only"
+    },
+    "Eredar": {
+      "from": "Draenei",
+      "comment": "Eredar keeps every Draenei skin, the fel ones too."
+    }
+  },
+  "notes": [
+    "Rows of package races 12-21 (Skeleton 15, Taunka 19, ...) are never taken: races 15 and 19 are High Elf and Eredar on this realm, cloned from the merged Blood Elf (10) and Draenei (11).",
+    "Rows the package names but does not ship (Dwarf female scalps at hair colours 13-22, Draenei male features at hair colours 10-21, a few single faces and scalps) are rebuilt on the server from the nearest texture of the same style, recoloured to the target colour; with no source the row is hidden and the report says so.",
+    "Repeated rows (Blood Elf male has 170 repeated features rows) keep only the last, the one the client uses today.",
+    "No section-2 (features) row is ever hidden: the client counts features by position, so a hole would lose the last value.",
+    "Off-lore tones (for example Night Elf female 25, orange with flame tattoos) stay unless the owner asks to hide them."
+  ]
+}

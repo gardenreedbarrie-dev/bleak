@@ -2,7 +2,7 @@
 """blpconvert: write BLP2 textures the 3.3.5a (12340) client loads.
 
 Usage:
-  blpconvert.py IN OUT.blp [--format dxt1|dxt5|bgra] [--size WxH | --pad] [--no-mips] [--jobs N]
+  blpconvert.py IN OUT.blp [--format dxt1|dxt5|bgra|pal8] [--size WxH | --pad] [--no-mips] [--jobs N]
   blpconvert.py --info FILE.blp [FILE.blp ...]
   blpconvert.py --decode FILE.blp OUT.png [--mip N]
 
@@ -20,6 +20,15 @@ alphaSize, preferredFormat, hasMips, width, height, 16 mip offsets, 16 mip sizes
   bgra  colorEncoding 3, alphaSize 8, preferredFormat 2 (PIXEL_ARGB8888): uncompressed. The Bleakhold
         client re-encodes this encoding to DXT5 with a fast range-fit encoder when it opens the file
         (ThirdParty/WarcraftXL/host/textures/blp/BlpHost.cpp), so dxt1/dxt5 from here look better.
+  pal8  colorEncoding 1, alphaSize 8, preferredFormat 8 (PIXEL_UNSPECIFIED, as in Blizzard's palette
+        files): one byte of palette index per texel, then one byte of alpha per texel, with one 256-entry
+        palette (B, G, R, 0) in the header for every level. This is the only encoding the character
+        texture compositor pastes (TextureCacheGetPal, WoW/Common/TextureCache.cpp; any other encoding
+        fills the section with flat green), so character layers (faces, underwear, Bleakhold marks)
+        must use it. A picture with 256 colours or fewer keeps them exactly; otherwise a median cut
+        picks 256 (deterministic, no dithering) and every level, mips included, maps each texel to
+        the nearest entry. pack_pal8() takes ready palette indices and alpha for callers that build
+        their own palette (Tools/MarkForge).
 With mips (the default) every level down to 1x1 is written: the client walks CalcLevelCount(w, h)
 levels (Engine/Source/Images/MippedImg.cpp) and fails the whole texture if one is missing. Never
 make a texture six times as wide as it is tall: the client takes that for a cube map.
@@ -37,12 +46,13 @@ import sys
 import zlib
 
 BLP_HEADER_SIZE = 0x94 + 1024
-PIXEL_DXT1, PIXEL_DXT3, PIXEL_ARGB8888, PIXEL_DXT5 = 0, 1, 2, 7
+PIXEL_DXT1, PIXEL_DXT3, PIXEL_ARGB8888, PIXEL_DXT5, PIXEL_UNSPECIFIED = 0, 1, 2, 7, 8
 FORMATS = {
-    # name: (colorEncoding, alphaSize, preferredFormat, bytes per 4x4 block or None for BGRA)
+    # name: (colorEncoding, alphaSize, preferredFormat, bytes per 4x4 block or None for BGRA / palette)
     "dxt1": (2, 0, PIXEL_DXT1, 8),
     "dxt5": (2, 8, PIXEL_DXT5, 16),
     "bgra": (3, 8, PIXEL_ARGB8888, None),
+    "pal8": (1, 8, PIXEL_UNSPECIFIED, None),
 }
 
 
@@ -648,13 +658,190 @@ def encode_level(img, fmt, pool=None):
 
 
 def level_size(level, width, height, fmt):
-    """CalcLevelSize (Engine/Source/Images/MippedImg.cpp) for the formats written here."""
+    """CalcLevelSize (Engine/Source/Images/MippedImg.cpp) for the formats written here; for a palette
+    texture the index bytes plus the alpha bits the client reads (CBLPFile::DecompPalARGB8888)."""
     w = max(1, width >> level)
     h = max(1, height >> level)
     if fmt == "bgra":
         return w * h * 4
+    if fmt == "pal8":
+        return w * h * 2
+    if fmt in ("pal0", "pal1", "pal4"):
+        bits = int(fmt[3:])
+        return w * h + (w * h * bits + 7) // 8
     w, h = max(4, w), max(4, h)
     return w * h * (4 if fmt == "dxt1" else 8) // 8
+
+
+# --------------------------------------------------------------------------------------- palette (pal8)
+
+def _box_split(box):
+    """(range, channel) of the widest channel of a box of ((r, g, b), weight); range 0 when it cannot split."""
+    if len(box) < 2:
+        return (0, 0)
+    best = (0, 0)
+    for ch in range(3):
+        lo = min(c[ch] for c, _ in box)
+        hi = max(c[ch] for c, _ in box)
+        if hi - lo > best[0]:
+            best = (hi - lo, ch)
+    return best
+
+
+def _median_cut(colours, count):
+    """colours: {(r, g, b): weight}. Splits the colour box with the widest channel range at its weighted
+    median until there are `count` boxes (or no box can be split); every step is deterministic (ties go to
+    the lower channel, then the earlier box). Returns the weighted mean colour of each box."""
+    boxes = [sorted(colours.items())]
+    splits = [_box_split(boxes[0])]
+    while len(boxes) < count:
+        i = max(range(len(boxes)), key=lambda k: (splits[k][0], -k))
+        width, ch = splits[i]
+        if width == 0:
+            break
+        box = sorted(boxes[i], key=lambda cw: (cw[0][ch], cw[0]))
+        total = sum(w for _, w in box)
+        acc = 0
+        cut = 1
+        for k, (_, w) in enumerate(box):
+            acc += w
+            if acc * 2 >= total:
+                cut = k + 1
+                break
+        cut = max(1, min(len(box) - 1, cut))
+        boxes[i:i + 1] = [box[:cut], box[cut:]]
+        splits[i:i + 1] = [_box_split(box[:cut]), _box_split(box[cut:])]
+    out = []
+    for box in boxes:
+        total = sum(w for _, w in box) or 1
+        out.append(tuple(int((sum(c[ch] * w for c, w in box) + total // 2) // total) for ch in range(3)))
+    return out
+
+
+def _nearest_index(palette, colour):
+    r, g, b = colour
+    best_i, best_d = 0, None
+    for i, (pr, pg, pb) in enumerate(palette):
+        d = (r - pr) * (r - pr) + (g - pg) * (g - pg) + (b - pb) * (b - pb)
+        if best_d is None or d < best_d:
+            best_i, best_d = i, d
+            if d == 0:
+                break
+    return best_i
+
+
+def _nearest_indices(palette, colours):
+    """_nearest_index for many colours; with numpy when it is installed (same answers: integer distances,
+    the first of equal entries), else in plain Python."""
+    try:
+        import numpy as np
+    except ImportError:
+        return [_nearest_index(palette, c) for c in colours]
+    pal = np.array(palette, np.int64)
+    out = []
+    for k in range(0, len(colours), 4096):
+        c = np.array(colours[k:k + 4096], np.int64)
+        d = ((c[:, None, :] - pal[None, :, :]) ** 2).sum(-1)
+        out.extend(int(i) for i in d.argmin(1))
+    return out
+
+
+def quantize_pal8(levels):
+    """One palette for a mip chain of Images: the exact colours when every level together has 256 or fewer
+    (sorted), else a median cut of level 0's colours, weighted by alpha + 1 so that the colour bled into
+    transparent texels still counts a little. Returns (palette [(r, g, b)] * <=256, [index bytes per level])."""
+    seen = {}
+    for level in levels:
+        d = level.data
+        for o in range(0, len(d), 4):
+            key = (d[o], d[o + 1], d[o + 2])
+            seen[key] = seen.get(key, 0) + d[o + 3] + 1
+            if len(seen) > 256:
+                break
+        if len(seen) > 256:
+            break
+    if len(seen) <= 256:
+        palette = sorted(seen)
+    else:
+        weights = {}
+        d = levels[0].data
+        for o in range(0, len(d), 4):
+            key = (d[o], d[o + 1], d[o + 2])
+            weights[key] = weights.get(key, 0) + d[o + 3] + 1
+        palette = _median_cut(weights, 256)
+    lookup = {c: i for i, c in enumerate(palette)}
+    missing = set()
+    for level in levels:
+        d = level.data
+        for o in range(0, len(d), 4):
+            key = (d[o], d[o + 1], d[o + 2])
+            if key not in lookup:
+                missing.add(key)
+    missing = sorted(missing)
+    lookup.update(zip(missing, _nearest_indices(palette, missing)))
+    indices = []
+    for level in levels:
+        d = level.data
+        out = bytearray(level.width * level.height)
+        for p, o in enumerate(range(0, len(d), 4)):
+            out[p] = lookup[(d[o], d[o + 1], d[o + 2])]
+        indices.append(bytes(out))
+    return palette, indices
+
+
+def pack_pal8(width, height, palette, indices, alphas, mips=True):
+    """The bytes of a pal8 BLP2 (colorEncoding 1, alphaSize 8, preferredFormat 8): palette is up to 256
+    (r, g, b) entries, indices and alphas one bytes object per level (level i is (width >> i) x (height >> i),
+    at least 1x1), every level the client walks present when mips is set. Raises ValueError on any
+    inconsistency, so a caller with its own palette (Tools/MarkForge) cannot write a file the client rejects."""
+    if not (is_pow2(width) and is_pow2(height)):
+        raise ValueError("%dx%d is not a power of two in both dimensions" % (width, height))
+    if width == 6 * height:
+        raise ValueError("a texture six times as wide as tall loads as a cube map")
+    if not 1 <= len(palette) <= 256:
+        raise ValueError("a palette has 1 to 256 entries, not %d" % len(palette))
+    want = level_count(width, height) if mips else 1
+    if len(indices) != want or len(alphas) != want:
+        raise ValueError("%d index and %d alpha levels, the client reads %d" % (len(indices), len(alphas), want))
+    if want > 16:
+        raise ValueError("more than 16 mip levels")
+    blobs = []
+    for i in range(want):
+        n = max(1, width >> i) * max(1, height >> i)
+        if len(indices[i]) != n or len(alphas[i]) != n:
+            raise ValueError("level %d: %d indices and %d alpha bytes for %d texels" % (i, len(indices[i]), len(alphas[i]), n))
+        if max(indices[i]) >= len(palette):
+            raise ValueError("level %d names palette entry %d of %d" % (i, max(indices[i]), len(palette)))
+        blobs.append(bytes(indices[i]) + bytes(alphas[i]))
+    offsets = [0] * 16
+    sizes = [0] * 16
+    pos = BLP_HEADER_SIZE
+    for i, blob in enumerate(blobs):
+        offsets[i] = pos
+        sizes[i] = len(blob)
+        pos += len(blob)
+    enc, alpha_size, preferred, _ = FORMATS["pal8"]
+    header = struct.pack("<4sIBBBBII16I16I", b"BLP2", 1, enc, alpha_size, preferred, 1 if mips else 0,
+                         width, height, *(offsets + sizes))
+    pal = bytearray(1024)
+    for i, (r, g, b) in enumerate(palette):
+        pal[4 * i:4 * i + 4] = bytes((b, g, r, 0))
+    blob = header + bytes(pal) + b"".join(blobs)
+    assert len(header) + 1024 == BLP_HEADER_SIZE
+    return blob
+
+
+def write_pal8_blp(path, levels, mips=True):
+    palette, indices = quantize_pal8(levels)
+    alphas = [bytes(level.data[3::4]) for level in levels]
+    try:
+        blob = pack_pal8(levels[0].width, levels[0].height, palette, indices, alphas, mips)
+    except ValueError as e:
+        raise SystemExit("%s: %s" % (path, e))
+    tmp = path + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(blob)
+    os.replace(tmp, path)
 
 
 # --------------------------------------------------------------------------------------------- output
@@ -704,6 +891,11 @@ def convert(img, out_path, fmt=None, mips=True, jobs=None):
     if fmt != "dxt1":
         fill_transparent(chain)
     levels = chain if mips else chain[:1]
+    if fmt == "pal8":
+        if not (is_pow2(img.width) and is_pow2(img.height)):
+            raise SystemExit("%s: %dx%d is not a power of two in both dimensions" % (out_path, img.width, img.height))
+        write_pal8_blp(out_path, levels, mips)
+        return fmt
     pool = None
     if jobs != 1:
         import concurrent.futures
@@ -751,6 +943,11 @@ def check_blp(path):
         fmt = "bgra"
         if h["preferredFormat"] != PIXEL_ARGB8888:
             problems.append("encoding 3 should have preferredFormat 2 (PIXEL_ARGB8888)")
+    elif h["encoding"] == 1:
+        if h["alphaSize"] in (0, 1, 4, 8):
+            fmt = "pal%d" % h["alphaSize"]
+        else:
+            problems.append("palette texture with alphaSize %d (the client knows 0, 1, 4 and 8)" % h["alphaSize"])
     else:
         problems.append("encoding %d is not checked by this tool" % h["encoding"])
     levels = level_count(w, hgt) if h["hasMips"] & 0xF else 1
@@ -789,6 +986,27 @@ def decode_blp(path, mip=0):
     w, hgt = max(1, h["width"] >> mip), max(1, h["height"] >> mip)
     data = blob[h["offsets"][mip]:h["offsets"][mip] + h["sizes"][mip]]
     img = Image(w, hgt)
+    if h["encoding"] == 1:
+        palette = blob[0x94:0x94 + 1024]
+        n = w * hgt
+        alpha_size = h["alphaSize"]
+        alpha = data[n:]
+        for i in range(n):
+            p = data[i] * 4
+            o = i * 4
+            img.data[o] = palette[p + 2]
+            img.data[o + 1] = palette[p + 1]
+            img.data[o + 2] = palette[p]
+            if alpha_size == 8:
+                a = alpha[i]
+            elif alpha_size == 4:
+                a = ((alpha[i >> 1] >> (4 * (i & 1))) & 0xF) * 17
+            elif alpha_size == 1:
+                a = 255 if (alpha[i >> 3] >> (i & 7)) & 1 else 0
+            else:
+                a = 255
+            img.data[o + 3] = a
+        return img
     if h["encoding"] == 3:
         img.data[0::4] = data[2::4][:w * hgt]
         img.data[1::4] = data[1::4][:w * hgt]
@@ -844,7 +1062,8 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description="Write BLP2 textures for the 3.3.5a client.")
     ap.add_argument("input", nargs="?")
     ap.add_argument("output", nargs="?")
-    ap.add_argument("--format", choices=sorted(FORMATS), help="default: dxt5 with alpha, dxt1 without")
+    ap.add_argument("--format", choices=sorted(FORMATS),
+                    help="default: dxt5 with alpha, dxt1 without; pal8 for character layers (palette, 8-bit alpha)")
     ap.add_argument("--size", help="resample to WxH (powers of two)")
     ap.add_argument("--pad", action="store_true", help="pad to the next power of two instead of resampling")
     ap.add_argument("--no-mips", action="store_true", help="write only the top level")

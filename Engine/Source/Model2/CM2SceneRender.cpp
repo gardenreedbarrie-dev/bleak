@@ -5,6 +5,7 @@
 #include "Engine/Source/Gx/CGxDevice/CGxDevice.h"
 #include "Engine/Source/Gx/Gx.h"
 #include "Engine/Source/Model2/M2Cache.h"
+#include "Engine/Source/Model2/M2Glow.h"
 #include "Engine/Source/Model2/M2Light.h"
 #include "Engine/Source/Model2/M2Model.h"
 #include "Engine/Source/Model2/M2Modern.h"
@@ -26,6 +27,16 @@ const uint32_t s_fogModes[7] = { 1, 1, 1, 2, 2, 3, 4 };
 
 // STATIC: 0x00AF58A8
 static C44Matrix s_identity;
+
+// BLEAKHOLD(glow): the texture a stage samples: the model's own, or for a glow element (M2Glow.h) the model's glow
+// texture on the first stage (a glow batch has one texture) and nothing after it.
+static CTexture* M2GlowStageTexture(const M2Element* element, const CM2Model* model, uint32_t combo, uint32_t stage) {
+    if (!(element->m_flags & M2Glow::kElementFlag)) {
+        return model->m_textures[combo];
+    }
+
+    return stage ? nullptr : model->GetGlowTexture(nullptr);
+}
 
 // VERIFY: 6a3520ef manual
 // OFFSET: 0x0081F330
@@ -99,7 +110,9 @@ void CM2SceneRender::SetupTextures() {
             CGxTex* gxTex = nullptr;
             CTexture* texture;
 
-            if (combo < this->m_data->m_textures.m_count && (texture = this->m_curModel->m_textures[combo]) != nullptr) {
+            // BLEAKHOLD(glow): was this->m_curModel->m_textures[combo]
+            if (combo < this->m_data->m_textures.m_count &&
+                (texture = M2GlowStageTexture(this->m_curElement, this->m_curModel, combo, i)) != nullptr) {
                 gxTex = TextureGetGxTex(texture, 1, nullptr);
 
                 if (gxTex) {
@@ -423,11 +436,24 @@ void CM2SceneRender::DrawBatch() {
     this->m_curBatch = element->m_batch;
     this->m_curSkinSection = element->m_skinSection;
     this->m_curMaterial = &this->m_data->m_materials[this->m_curBatch->m_materialIndex];
+
+    // BLEAKHOLD(glow): a glow element draws with its glow material (unlit, additive, no depth write) and the glow
+    // texture (SetupTextures), pulled towards the camera so it keeps winning the depth test against its own skin.
+    int32_t glow = (element->m_flags & M2Glow::kElementFlag) != 0;
+
+    if (glow) {
+        this->m_curMaterial = M2GlowMaterial(this->m_curMaterial);
+    }
+
     element->m_effect->SetCurrent();
 
     this->SetupLighting();
     this->SetupMaterial();
     this->SetupTextures();
+
+    if (glow) {
+        GxRsSet(GxRs_PolygonOffset, M2Glow::kDepthBias);
+    }
 
     if (CShaderEffect::s_enableShaders && (this->m_curType != this->m_prevType || this->m_curModel != this->m_prevModel || this->m_curSkinSection->m_boneComboIndex != this->m_prevSkinSection->m_boneComboIndex)) {
         float* constants = g_theGxDevicePtr->ShaderConstantsLock(GxSh_Vertex) + 31 * 4;
@@ -491,6 +517,11 @@ void CM2SceneRender::DrawBatch() {
         batch.m_minIndex = 0;
         batch.m_maxIndex = this->m_curSkinSection->m_vertexCount - 1;
         g_theGxDevicePtr->Draw(&batch, 1);
+    }
+
+    // BLEAKHOLD(glow): CM2SceneRender::Draw starts every pass at no offset; the next element draws without one.
+    if (glow) {
+        GxRsSet(GxRs_PolygonOffset, 0.0f);
     }
 }
 

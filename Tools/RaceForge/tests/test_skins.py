@@ -462,6 +462,299 @@ class ColourTests(unittest.TestCase):
             self.assertIn(text, str(caught.exception))
 
 
+class VisibleRampTests(unittest.TestCase):
+    """Only the skins someone can pick are spread over the palette: a merged High Elf has 60 living skin rows per sex
+    of which 10 are visible (0x11) and the rest hidden (0x8, 0x19), plus 3 Death Knight rows (0x5). The ten visible
+    tones each get one palette entry, as with ten rows; a hidden row takes the numbers of its nearest visible tone."""
+
+    VISIBLE = range(10)
+    DK = (60, 61, 62)
+
+    @staticmethod
+    def flags(colour: int) -> int:
+        if colour in VisibleRampTests.DK:
+            return 0x5
+
+        return 0x11 if colour < 10 else (0x8, 0x19)[colour % 2]
+
+    @staticmethod
+    def tone(colour: int) -> tuple[int, int, int]:
+        """Made-up tones: the visible ones from pale to dark, the hidden ones in between, the Death Knight's grey."""
+        if colour in VisibleRampTests.DK:
+            L, C = 0.78 - 0.12 * (colour - 60), 0.01
+        elif colour < 10:
+            L, C = 0.9 - 0.05 * colour, 0.06
+        else:
+            L, C = 0.9 - 0.45 * ((colour * 37) % 50) / 49, 0.05
+
+        return recolor.oklab_to_srgb8(L, C * math.cos(math.radians(55)), C * math.sin(math.radians(55)))
+
+    @classmethod
+    def setUpClass(cls):
+        cls.tmp = tempfile.mkdtemp()
+        realm = ss.make_realm(cls.tmp)
+        schema = schema_access.get("CharSections")
+        table = DbcTable.from_bytes(realm["realm"]["CharSections"], schema)
+        table.rows = [r for r in table.rows if table.get(r, "raceID") != ss.HIGH_ELF]
+        next_id = table.max_id() + 1
+        textures = {}
+
+        for sex in (0, 1):
+            for colour in list(range(60)) + list(cls.DK):
+                for section in (0, 1) if colour in (0, 15, 60) else (0,):
+                    row = [0] * len(schema.columns)
+                    table.set(row, "id", next_id)
+                    next_id += 1
+
+                    for column, value in (("raceID", ss.HIGH_ELF), ("sexID", sex), ("baseSection", section),
+                                          ("variationIndex", 0), ("colorIndex", colour),
+                                          ("flags", cls.flags(colour) if section == 0 else 0x1)):
+                        table.set(row, column, value)
+
+                    kind = "Skin00" if section == 0 else "FaceLower00"
+                    name = f"Character\\BloodElf\\{('Male', 'Female')[sex]}\\Ramp{kind}_{colour:02d}.blp"
+                    table.set_str(row, "textureName[0]", name)
+                    size = 32 if section == 0 else 16
+                    textures[name] = ss.blp_palette(size, size, ss.skin_texture(size, size, cls.tone(colour),
+                                                                                "body" if section == 0 else "lower"),
+                                                    alpha_size=0)
+                    table.rows.append(row)
+
+        data = realm["data"]
+        ss.write_mpq(os.path.join(data, "common.MPQ"), {**realm["textures"], **textures,
+                                                        "Interface\\Glues\\Base.blp": b"made up"})
+        ss.write_mpq(os.path.join(realm["patches"], "Patch-R.MPQ"), {
+            CR: realm["realm"]["ChrRaces"], CS: table.to_bytes(), "Interface\\Glues\\Custom.blp": b"the realm's own"})
+        config = configmod.load(os.path.join(TOOL_DIR, "races.json")).for_realm()
+        cls.races = skins.load(os.path.join(TOOL_DIR, "skins.json"), config)
+        cls.race = cls.races[0]
+        cls.game = skins.game_archives(realm["client"], realm["patches"], config.archives.optional_packs)
+        cls.plan = skins.make_plan(cls.game, config, cls.races)
+        cls.forged = cls.plan.forged[0]
+        cls.textures = textures
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.game.close()
+        shutil.rmtree(cls.tmp)
+
+    def skin_L(self, sex: int, colour: int) -> float:
+        name = f"Character\\BloodElf\\{('Male', 'Female')[sex]}\\RampSkin00_{colour:02d}.blp"
+        width, height, rgba = blp.decode(self.textures[name], name)
+        return recolor.stats(width, height, rgba, False, self.race.settings).L
+
+    def test_the_ten_visible_tones_get_the_palette_entries(self):
+        for sex in (0, 1):
+            living = {c.index: c for c in self.forged.colours if c.sex == sex and not c.dk}
+            self.assertEqual(sorted(living), list(self.VISIBLE), "only the visible tones are colours")
+            ranked = sorted(living, key=lambda k: (-living[k].skin.L, k))
+
+            for i, k in enumerate(ranked):
+                L, C, h = recolor.lch(recolor.hex_to_oklab(self.race.palette[i]))
+                self.assertEqual(living[k].target, (round(L, 6), round(C, 6), round(h, 4)), (sex, k))
+
+        self.assertEqual(skins.near_duplicate_problems(self.plan.forged, self.races), [])
+
+    def test_a_hidden_tone_takes_its_nearest_visible_tones_numbers(self):
+        for sex in (0, 1):
+            visible = {k: self.skin_L(sex, k) for k in self.VISIBLE}
+
+            for k in range(10, 60):
+                L = self.skin_L(sex, k)
+                nearest = min(visible, key=lambda v: (abs(visible[v] - L), v))
+                self.assertEqual(self.forged.skin_transforms[("HighElf", sex, k)].params(),
+                                 self.forged.skin_transforms[("HighElf", sex, nearest)].params(), (sex, k))
+
+            # a hidden skin's face is recoloured with the same numbers (the face loop finds a transform)
+            face = next(r for r in self.forged.after.rows if self.forged.after.get(r, "raceID") == ss.HIGH_ELF
+                        and self.forged.after.get(r, "sexID") == sex and self.forged.after.get(r, "baseSection") == 1
+                        and self.forged.after.get(r, "colorIndex") == 15)
+            self.assertTrue(self.forged.after.get_str(face, "textureName[0]").startswith(self.race.prefix))
+
+    def test_death_knight_rows_still_spread_over_their_own_ramp(self):
+        for sex in (0, 1):
+            dk = {c.index: c for c in self.forged.colours if c.sex == sex and c.dk}
+            self.assertEqual(sorted(dk), list(self.DK))
+            goals = recolor.targets({k: c.skin for k, c in dk.items()}, self.race.palette_lab(True))
+            self.assertEqual({k: c.target for k, c in dk.items()}, goals)
+            ranked = sorted(dk, key=lambda k: (-dk[k].skin.L, k))
+            first, last = (recolor.lch(recolor.hex_to_oklab(self.race.dk_palette[i])) for i in (0, -1))
+            self.assertAlmostEqual(dk[ranked[0]].target[0], first[0], places=5)
+            self.assertAlmostEqual(dk[ranked[-1]].target[0], last[0], places=5)
+
+    def test_nearest_visible(self):
+        def c(L):
+            return ("x", recolor.SkinColour(L, 0.05, 50.0, 1))
+
+        found = {False: {0: c(0.9), 3: c(0.7)}, True: {}}
+        hidden = {False: {5: c(0.8), 6: c(0.71)}, True: {7: c(0.6)}}
+        self.assertEqual(skins.nearest_visible(found, hidden), {5: 0, 6: 3, 7: 3},
+                         "a tie goes to the lower index; a ramp with no visible tone takes the other's")
+        self.assertEqual(skins.nearest_visible({False: {}, True: {}}, hidden), {5: None, 6: None, 7: None})
+        self.assertTrue(skins.skin_visible(0x11) and skins.skin_visible(0x2) and skins.skin_visible(0x5))
+        self.assertFalse(skins.skin_visible(0x8) or skins.skin_visible(0x19) or skins.skin_visible(0)
+                         or skins.skin_visible(0x4))
+
+
+class OpaqueUnderwearTests(unittest.TestCase):
+    """The package's underwear (NakedPelvis, NakedTorso) is an opaque copy of the Blood Elf skin with the garment
+    painted in, pasted over the whole section when nothing is worn there: the High Elf's copy is recoloured where it is
+    bare skin, the cloth keeps its colour, and the Blood Elf's rows and files stay as they are."""
+
+    BAND = (112, 24, 30)
+    ROWS, COLUMNS = range(1, 3), range(3, 8)  # where the fixture paints the cloth
+
+    @staticmethod
+    def name(sex: int, part: str, colour: int) -> str:
+        sex_name = ("Male", "Female")[sex]
+        return f"Character\\BloodElf\\{sex_name}\\BloodElf{sex_name}Naked{part}Skin00_{colour:02d}.blp"
+
+    def realm(self, dxt_torso: bool = False):
+        """The skins realm with race 10's and 15's underwear rows on opaque package-like textures (16 x 8, the
+        skin's rectangle of its 32 x 32 texture, with a band of cloth painted in)."""
+        realm = ss.make_realm(self.tmp)
+        schema = schema_access.get("CharSections")
+        table = DbcTable.from_bytes(realm["realm"]["CharSections"], schema)
+        textures = {}
+
+        # the skins without the made-up cloth patch of ss.skin_texture's "body" (a package skin has no cloth: its
+        # underwear is the skin with the garment painted in)
+        for row in table.rows:
+            if table.get(row, "raceID") in (ss.BLOOD_ELF, ss.HIGH_ELF) and table.get(row, "baseSection") == 0:
+                sex, colour = table.get(row, "sexID"), table.get(row, "colorIndex")
+                plain = f"Character\\BloodElf\\{('Male', 'Female')[sex]}\\PlainSkin00_{colour:02d}.blp"
+                tone = ss.TONES[colour % len(ss.TONES)]
+                textures[plain] = ss.blp_palette(32, 32, ss.skin_texture(32, 32, tone, "lower"), alpha_size=0)
+                table.set_str(row, "textureName[0]", plain)
+
+        skins_of = {(table.get(r, "sexID"), table.get(r, "colorIndex")): table.get_str(r, "textureName[0]")
+                    for r in table.rows if table.get(r, "raceID") == ss.BLOOD_ELF and table.get(r, "baseSection") == 0}
+
+        for (sex, colour), skin_name in skins_of.items():
+            w, h, skin = blp.decode(textures[skin_name], skin_name)
+
+            for slot, part in ((0, "Pelvis"), (1, "Torso")):
+                x0, y0, rw, rh = (skin_rect := skins.UNDERWEAR_RECTS[slot])[0] * w // 512, \
+                    skin_rect[1] * h // 512, skin_rect[2] * w // 512, skin_rect[3] * h // 512
+                rgba = bytearray(rw * rh * 4)
+
+                for y in range(rh):
+                    for x in range(rw):
+                        o, q = 4 * (y * rw + x), 4 * ((y0 + y) * w + x0 + x)
+                        rgba[o:o + 4] = skin[q:q + 4]
+
+                        if y in self.ROWS and x in self.COLUMNS:
+                            rgba[o:o + 3] = bytes(self.BAND)
+
+                if dxt_torso and slot == 1 and colour == 0:
+                    textures[self.name(sex, part, colour)] = ss.blp_dxt(rw, rh, bytes(rgba), "DXT1")
+                else:
+                    textures[self.name(sex, part, colour)] = ss.blp_palette(rw, rh, bytes(rgba), alpha_size=0)
+
+        for row in table.rows:
+            if table.get(row, "raceID") in (ss.BLOOD_ELF, ss.HIGH_ELF) and table.get(row, "baseSection") == 4:
+                sex, colour = table.get(row, "sexID"), table.get(row, "colorIndex")
+                table.set_str(row, "textureName[0]", self.name(sex, "Pelvis", colour))
+                table.set_str(row, "textureName[1]", self.name(sex, "Torso", colour))
+
+        ss.write_mpq(os.path.join(realm["data"], "common.MPQ"), {**realm["textures"], **textures,
+                                                                 "Interface\\Glues\\Base.blp": b"made up"})
+        ss.write_mpq(os.path.join(realm["patches"], "Patch-R.MPQ"), {
+            CR: realm["realm"]["ChrRaces"], CS: table.to_bytes(), "Interface\\Glues\\Custom.blp": b"the realm's own"})
+        config = configmod.load(os.path.join(TOOL_DIR, "races.json")).for_realm()
+        races = skins.load(os.path.join(TOOL_DIR, "skins.json"), config)
+        game = skins.game_archives(realm["client"], realm["patches"], config.archives.optional_packs)
+        self.addCleanup(game.close)
+        return table, textures, lambda: skins.make_plan(game, config, races)
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmp)
+
+    def test_bare_skin_recoloured_cloth_kept_blood_elf_untouched(self):
+        before, textures, plan_of = self.realm()
+        forged = plan_of().forged[0]
+        after = forged.after
+        checked = 0
+
+        for index, (old, row) in enumerate(zip(before.rows, after.rows)):
+            race, section = after.get(row, "raceID"), after.get(row, "baseSection")
+
+            if race == ss.BLOOD_ELF:
+                self.assertEqual(names_of(after, row), names_of(before, old), "the Blood Elf's rows stay")
+                continue
+
+            if race != ss.HIGH_ELF or section != 4:
+                continue
+
+            sex, colour = after.get(row, "sexID"), after.get(row, "colorIndex")
+            skin_row = next(r for r in after.rows if after.get(r, "raceID") == ss.HIGH_ELF and
+                            after.get(r, "baseSection") == 0 and after.get(r, "sexID") == sex and
+                            after.get(r, "colorIndex") == colour)
+            purple_name = after.get_str(skin_row, "textureName[0]")
+            sw, sh, purple = blp.decode(forged.textures[purple_name], purple_name)
+
+            for slot, part in ((0, "Pelvis"), (1, "Torso")):
+                original = self.name(sex, part, colour)
+                new_name = after.get_str(row, f"textureName[{slot}]")
+                self.assertRegex(new_name, r"^Character\\BleakholdSkins\\HighElf\\[0-9a-f]{10}\\" +
+                                 original.replace("\\", "\\\\") + "$")
+                data = forged.textures[new_name]
+                info, src = blp.parse(data, new_name), blp.parse(textures[original], original)
+                self.assertEqual((info.kind, info.alpha_size, info.width, info.height, len(info.levels)),
+                                 ("palette", 0, src.width, src.height, len(src.levels)))
+                self.assertEqual(blp.check(data, new_name, src.width, src.height), [])
+                w, h, out = blp.decode(data, new_name)
+                _, _, uw = blp.decode(textures[original], original)
+                x0, y0 = skins.UNDERWEAR_RECTS[slot][0] * sw // 512, skins.UNDERWEAR_RECTS[slot][1] * sh // 512
+
+                for y in range(h):
+                    for x in range(w):
+                        o, q = 4 * (y * w + x), 4 * ((y0 + y) * sw + x0 + x)
+
+                        if y in self.ROWS and x in self.COLUMNS:
+                            self.assertEqual(out[o:o + 3], uw[o:o + 3], "the cloth keeps its colour")
+                        elif not (self.ROWS[0] - 3 <= y <= self.ROWS[-1] + 3 and
+                                  self.COLUMNS[0] - 3 <= x <= self.COLUMNS[-1] + 3):
+                            # away from the cloth (it is grown by up to 3 texels): the recoloured skin under it
+                            delta = max(abs(a - b) for a, b in zip(out[o:o + 3], purple[q:q + 3]))
+                            self.assertLessEqual(delta, 6, (sex, colour, part, x, y))
+                            checked += 1
+
+                self.assertNotEqual(out, uw, "the bare skin moved")
+
+        self.assertGreater(checked, 100)
+        # the Blood Elf's files are not in the realm's archive: nothing writes them
+        self.assertFalse([n for n in forged.textures if n.startswith("Character\\BloodElf")])
+
+    def test_opaque_underwear_that_cannot_be_recoloured_stops_the_run(self):
+        _, _, plan_of = self.realm(dxt_torso=True)
+
+        with self.assertRaises(skins.SkinsError) as caught:
+            plan_of()
+
+        text = str(caught.exception)
+        self.assertIn("underwear, variation 0, colour 0", text)
+        self.assertIn("NakedTorsoSkin00_00.blp", text)
+        self.assertIn("not a palette texture", text)
+
+    def test_garment_mask(self):
+        width, height = 16, 8
+        skin = bytearray(b"\xc8\xa0\x8c\xff" * (width * height))
+        uw = bytearray(skin)
+
+        for y in range(2, 5):
+            for x in range(3, 13):
+                uw[4 * (y * width + x):4 * (y * width + x) + 3] = bytes(self.BAND)
+
+        mask, threshold = skins.garment_mask(uw, skin, width, height)
+        self.assertEqual(threshold, skins.GARMENT_FLOOR)
+        self.assertTrue(all(mask[y * width + x] for y in range(2, 5) for x in range(3, 13)))
+        self.assertFalse(any(mask[7 * width + x] for x in range(width)), "two rows below the band: skin")
+        uw[4 * (7 * width + 1)] ^= 0xFF  # one odd texel: the majority drops it
+        self.assertFalse(skins.garment_mask(uw, skin, width, height)[0][7 * width + 1])
+
+
 # --- the archives --------------------------------------------------------------------------------------------------
 
 

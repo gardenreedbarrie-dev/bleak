@@ -177,3 +177,34 @@ test("graphics: the on/off variables are stock check buttons beside the lists, a
         H.eq(select(5, b:GetPoint(1)), -50, "all on one row")
     end
 end)
+
+test("graphics: Glowing marks switches bleakGlow, on its own beside the other checks", function(M, ns)
+    local G = ns.Graphics
+    ns.UI.Open("graphics")
+    local glow = G.frame.glow
+    H.eq(glow:GetObjectType(), "CheckButton")
+    H.eq(glow.label:GetText(), "Glowing marks")
+    H.eq(select(5, glow:GetPoint(1)), -50, "on the row of the checks")
+    H.ok(not glow:IsEnabled(), "a client without bleakGlow: off")
+    glow:Click()
+    H.eq(M.cvars.bleakGlow, nil, "nothing set")
+    -- the exe registers bleakGlow (default on); the post-processing switch does not touch it
+    bleakholdClient(M)
+    M.cvars.bleakGlow = "1"
+    G.Refresh()
+    H.ok(glow:IsEnabled() and glow:GetChecked(), "on")
+    glow:Click()
+    H.eq(M.cvars.bleakGlow, "0")
+    H.ok(not glow:GetChecked(), "and its check clears")
+    G.frame.preset:SetValue("off")
+    H.ok(glow:IsEnabled(), "Off (stock look) leaves the glow switch alone")
+    H.eq(M.cvars.bleakGlow, "0", "and its value")
+    glow:Click()
+    H.eq(M.cvars.bleakGlow, "1")
+    for _, p in ipairs(G.PRESETS) do
+        H.eq(p.values.bleakGlow, nil, p.key .. " does not set the glow")
+    end
+    -- four checks fit in the General box
+    local last = glow.label:GetStringWidth() + 24 + 2 + 12 + 3 * 148
+    H.ok(last <= G.frame.general:GetWidth(), "the glow check fits: " .. last .. " of " .. G.frame.general:GetWidth())
+end)

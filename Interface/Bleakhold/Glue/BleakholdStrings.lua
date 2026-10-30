@@ -56,3 +56,26 @@ ABILITY_INFO_EREDAR2 = ABILITY_INFO_EREDAR2
 -- Character creation: the name boxes (BleakholdNames.lua).
 BLEAKHOLD_FIRST_NAME = BLEAKHOLD_FIRST_NAME or "First Name"
 BLEAKHOLD_LAST_NAME = BLEAKHOLD_LAST_NAME or "Last Name"
+
+-- Character creation and the paid customization screen: the appearance rows (BleakholdCustomize.lua). The stock rows
+-- keep their stock names; these name the rows Bleakhold adds when the realm's tables have marks and glowing eyes.
+BLEAKHOLD_CUSTOMIZE_EYES = BLEAKHOLD_CUSTOMIZE_EYES or "Eyes"
+BLEAKHOLD_CUSTOMIZE_MARKINGS = BLEAKHOLD_CUSTOMIZE_MARKINGS or "Markings"
+BLEAKHOLD_CUSTOMIZE_MARK_COLOUR = BLEAKHOLD_CUSTOMIZE_MARK_COLOUR or "Mark Colour"
+BLEAKHOLD_CUSTOMIZE_NO_MARKINGS = BLEAKHOLD_CUSTOMIZE_NO_MARKINGS or "No markings"
+BLEAKHOLD_CUSTOMIZE_DEFAULT_EYES = BLEAKHOLD_CUSTOMIZE_DEFAULT_EYES or "Race default"
+BLEAKHOLD_CUSTOMIZE_GLOWING = BLEAKHOLD_CUSTOMIZE_GLOWING or "glowing"
+BLEAKHOLD_CUSTOMIZE_PAINT = BLEAKHOLD_CUSTOMIZE_PAINT or "paint"
+-- The tooltip of a row: what each input does.
+BLEAKHOLD_CUSTOMIZE_HINT = BLEAKHOLD_CUSTOMIZE_HINT
+    or "Mouse wheel: step. Shift-click an arrow: 5 at a time. Right-click: a random one."
+BLEAKHOLD_CUSTOMIZE_LOCK = BLEAKHOLD_CUSTOMIZE_LOCK or "Lock: Randomize leaves this row as it is."
+-- The skin groups the row's number is coloured by (the curation's plain, marked and fel skins; glowing ones).
+BLEAKHOLD_CUSTOMIZE_GROUP_MARKED = BLEAKHOLD_CUSTOMIZE_GROUP_MARKED or "Marked or tattooed"
+BLEAKHOLD_CUSTOMIZE_GROUP_FEL = BLEAKHOLD_CUSTOMIZE_GROUP_FEL or "Fel"
+BLEAKHOLD_CUSTOMIZE_GROUP_GLOWING = BLEAKHOLD_CUSTOMIZE_GROUP_GLOWING or "Glowing"
+
+-- true: on a paid customization (the Appearance Artist's change at login) the name boxes are greyed out and keep the
+-- character's name; the server refuses a new name there anyway (mod-bleakhold, Bleakhold.Appearance.AllowNameChange).
+BLEAKHOLD_LOCK_CUSTOMIZE_NAME = BLEAKHOLD_LOCK_CUSTOMIZE_NAME ~= false
+BLEAKHOLD_CUSTOMIZE_NAME_LOCKED = BLEAKHOLD_CUSTOMIZE_NAME_LOCKED or "The name stays as it is on this screen."

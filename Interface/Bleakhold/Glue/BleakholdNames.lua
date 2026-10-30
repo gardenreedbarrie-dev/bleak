@@ -62,11 +62,27 @@ local function lastNameBox()
     return box and box:IsShown() and box or nil
 end
 
+-- The character's own name while the name is locked (a paid customization, BH.NameLocked), else nil.
+local function lockedName()
+    if not BH.NameLocked() or type(PaidChange_GetName) ~= "function" then
+        return nil
+    end
+
+    local name = PaidChange_GetName()
+    return type(name) == "string" and name ~= "" and name or nil
+end
+
 -- The name CreateCharacter should get for `name`: when `name` is the first name box's text, the last name box's
--- text is added after a space. Anything else is passed on unchanged.
+-- text is added after a space. Anything else is passed on unchanged. While the name is locked it is the character's
+-- own name.
 function BH.FullName(name)
     local firstBox = CharacterCreateNameEdit
     local lastBox = lastNameBox()
+    local locked = type(name) == "string" and lockedName()
+
+    if locked then
+        return locked
+    end
 
     if type(name) ~= "string" or not firstBox or not lastBox then
         return name
@@ -574,5 +590,145 @@ local function installTwoNames()
 end
 
 BH.Try(installTwoNames)
+
+-- ----------------------------------------------------------------------------------- paid customization
+
+-- A paid customization (PAID_CHARACTER_CUSTOMIZATION, the Appearance Artist's change at login) keeps the name: the
+-- server refuses a new one there (mod-bleakhold, Bleakhold.Appearance.AllowNameChange). With
+-- BLEAKHOLD_LOCK_CUSTOMIZE_NAME the name boxes are greyed out, take neither the focus nor typing, the Randomize name
+-- button is hidden under a short note, and CreateCharacter gets the character's own name, which the client sends
+-- without a name check (CCharacterCreation::CreateCharacter). A race or faction change is left as it is.
+function BH.NameLocked()
+    return BLEAKHOLD_LOCK_CUSTOMIZE_NAME ~= false and PAID_SERVICE_TYPE ~= nil
+        and PAID_SERVICE_TYPE == (PAID_CHARACTER_CUSTOMIZATION or 1)
+end
+
+local LOCK_NOTE = "BleakholdNameLockedNote"
+
+local function lockedBoxes()
+    local boxes = { CharacterCreateNameEdit }
+    local lastBox = _G[LAST_NAME_EDIT]
+
+    if lastBox then
+        boxes[#boxes + 1] = lastBox
+    end
+
+    return boxes
+end
+
+local function onLockedFocus(box)
+    if box.bleakholdLocked then
+        box:ClearFocus()
+    end
+end
+
+-- Typing (userInput) puts the name back; the screen's own SetText (the paid name on the next show) is let through.
+local function onLockedText(box, userInput)
+    local text = box.bleakholdLocked
+
+    if userInput and text and box:GetText() ~= text then
+        box:SetText(text)
+    end
+end
+
+local function lockBox(box)
+    if not box.bleakholdUnlocked then
+        local r, g, b, a = box:GetTextColor()
+        box.bleakholdUnlocked = { alpha = box:GetAlpha(), color = { r, g, b, a },
+                                  autoFocus = box.IsAutoFocus and box:IsAutoFocus() }
+        BH.HookScript(box, "OnEditFocusGained", onLockedFocus)
+        BH.HookScript(box, "OnTextChanged", onLockedText)
+    end
+
+    box.bleakholdLocked = box:GetText() or ""
+    box:ClearFocus()
+    box:SetAutoFocus(false)
+    box:EnableMouse(false)
+    box:SetTextColor(0.5, 0.5, 0.5)
+    box:SetAlpha(0.6)
+end
+
+local function unlockBox(box)
+    local saved = box.bleakholdUnlocked
+
+    if not saved or not box.bleakholdLocked then
+        return
+    end
+
+    box.bleakholdLocked = nil
+    box:EnableMouse(true)
+    box:SetAlpha(saved.alpha or 1)
+
+    if saved.color[1] then
+        box:SetTextColor(saved.color[1], saved.color[2], saved.color[3], saved.color[4])
+    end
+
+    if saved.autoFocus ~= nil then
+        box:SetAutoFocus(saved.autoFocus and true or false)
+    end
+end
+
+local function lockNote()
+    local note = _G[LOCK_NOTE]
+
+    if not note then
+        local holder = _G[LAST_NAME_EDIT] and BleakholdNameAnchor or CharacterCreateNameEdit
+        note = CharacterCreateNameEdit:GetParent():CreateFontString(LOCK_NOTE, "OVERLAY")
+        note:SetFontObject(GlueFontDisableSmall or GlueFontHighlightSmall or GlueEditBoxFont)
+        note:SetTextColor(0.6, 0.6, 0.6)
+        note:SetPoint("TOP", holder, "BOTTOM", 0, -2)
+        note:SetText(BLEAKHOLD_CUSTOMIZE_NAME_LOCKED)
+    end
+
+    return note
+end
+
+-- Every show of the screen, after the names have been set: lock them on a paid customization, unlock otherwise.
+function BH.ApplyNameLock()
+    if not CharacterCreateNameEdit then
+        return
+    end
+
+    local random = CharacterCreateRandomName
+
+    if BH.NameLocked() then
+        local name = lockedName()
+
+        if name and BH.namesPath == "bleakhold" then
+            BH.SetFullName(name)
+        end
+
+        for _, box in ipairs(lockedBoxes()) do
+            lockBox(box)
+        end
+
+        if random then
+            random.bleakholdWasShown = random.bleakholdWasShown or (random:IsShown() and true or false)
+            random:Hide()
+        end
+
+        lockNote():Show()
+        BH.nameLocked = true
+    elseif BH.nameLocked then
+        for _, box in ipairs(lockedBoxes()) do
+            unlockBox(box)
+        end
+
+        if random and random.bleakholdWasShown then
+            random:Show()
+        end
+
+        if random then
+            random.bleakholdWasShown = nil
+        end
+
+        lockNote():Hide()
+        BH.nameLocked = nil
+    end
+end
+
+if CharacterCreateNameEdit then
+    BH.HookScript(CharacterCreate or CharacterCreateNameEdit:GetParent(), "OnShow", BH.ApplyNameLock)
+end
 
 BH.FlushLoadErrors("BleakholdNames.lua")

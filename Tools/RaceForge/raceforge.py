@@ -7,6 +7,9 @@
                                    [--server-sql-out <the server's generated-SQL folder>]
     python3 -I raceforge.py skins --patches <the realm's patch folder> --client <the launcher's game folder>
                                   --out <output folder> [--preview]
+    python3 -I raceforge.py customize --package <the Ascension package checkout> --patches <the realm's patch folder>
+                                      --client <the launcher's game folder> --out <output folder> [--marks <manifest>]
+    python3 -I raceforge.py picker-data [--package <the package checkout>] [--check]
     python3 -I raceforge.py install --from <output folder of update or skins> --patches <the realm's patch folder>
                                     [--dry-run] [--restore]
     python3 -I raceforge.py find --patches <the realm's patch folder> --client <the launcher's game folder>
@@ -22,6 +25,7 @@ changes, the AzerothCore SQL and a report. See README.md.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import sys
@@ -42,14 +46,21 @@ from rflib.forge import OPTIONAL_TABLES, REQUIRED_TABLES, Forge, ForgeError, fin
 
 DEFAULT_CONFIG = os.path.join(HERE, "races.json")
 DEFAULT_SKINS = os.path.join(HERE, "skins.json")
+CUSTOMIZE_DIR = os.path.join(HERE, "customize")
+DEFAULT_CURATION = os.path.join(CUSTOMIZE_DIR, "curation.json")
+DEFAULT_CATALOGUE = os.path.join(CUSTOMIZE_DIR, "catalogue.json")
+DEFAULT_COUNTS = os.path.join(CUSTOMIZE_DIR, "package_counts.json")
+DEFAULT_BASE = "/root/wowdata/customize-base"
+REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
 DEFAULT_MPQ = "patch-R.MPQ"
 OUTPUT_ENTRIES = ("client", "server", "customization", "report.txt")
-# Art archives of a customization package: patch-<character>.MPQ. Every letter but F K O W belongs to a patch the
-# realm ships (taken_patches.json); the digits 4-9 load after the stock patch-3.MPQ and below every lettered patch
-# (rflib/patchnames.py), and 5 is MapForge's server-side extract. The client reads MPQ v1 offsets as unsigned 32-bit
-# (InitializeTables), and MpqPack writes v1, so an archive stays below 4 GiB: 3500 MB (MiB) of files leaves room for
-# the tables, and the four default archives hold 14000 MB.
-DEFAULT_ART_LETTERS = "6789"
+# Art archives of a customization package (build --customization): patch-<character>.MPQ. Every letter but W belongs
+# to a patch the realm ships (taken_patches.json); the digits 4-9 load after the stock patch-3.MPQ and below every
+# lettered patch (rflib/patchnames.py); 4 and 5 are CafeForge's and MapForge's, 6 and 7 the realm's customize
+# archives. The client reads MPQ v1 offsets as unsigned 32-bit (InitializeTables), and MpqPack writes v1, so an
+# archive stays below 4 GiB: 3500 MB (MiB) of files leaves room for the tables, and the two default archives hold
+# 7000 MB.
+DEFAULT_ART_LETTERS = "89"
 DEFAULT_ART_MAX_MB = 3500
 MAX_ART_MB = 4000
 TAKEN_PATCHES = os.path.join(HERE, patchnames.TAKEN_FILE)
@@ -777,7 +788,7 @@ def cmd_skins(args) -> int:
         raise ForgeError(str(e)) from None
 
     try:
-        plan = skins.make_plan(game, config, races)
+        plan = skins.make_plan(game, config, races, args.art_archive)
         up_to_date = not plan.writes
         need = skins.space_needed(plan) if plan.writes else 0
         free = skins.free_space(out_dir) + (skins.entries_size(out_dir, skins.OUT_ENTRIES) if args.force else 0)
@@ -819,6 +830,135 @@ def cmd_skins(args) -> int:
               f"--patches {os.path.abspath(args.patches)}")
 
     return 1 if result.failed else 0
+
+
+def cmd_customize(args) -> int:
+    from rflib import realm_customize as rc  # noqa: E402  (loads Tools/MapForge's archive code)
+
+    config = configmod.load(args.config).for_realm()
+    art = tuple(f"patch-{c}.MPQ" for c in args.art_letters.upper())
+    names = list(art) + [args.models_archive, args.marks_archive] + ([args.move_art] if args.move_art else [])
+    taken = patchnames.load_taken(TAKEN_PATCHES)
+    owners = {patchnames.name_key(n): taken.get(patchnames.name_key(n), "") for n in names}
+    wrong = [n for n in names if "customize" not in owners[patchnames.name_key(n)].lower()]
+
+    if wrong:
+        raise ForgeError(f"{', '.join(wrong)}: not a name taken_patches.json gives to customize; the archives of "
+                         f"customize are {', '.join(n for n, o in taken.items() if 'customize' in o.lower())}")
+
+    opts = rc.Options(package=args.package, patches=args.patches, client=args.client, out=args.out, base=args.base,
+                      curation=args.curation, catalogue=args.catalogue, marks=args.marks, server_dbc=args.dbc,
+                      move_art=args.move_art, art_names=art, art_max_mb=args.art_max_mb,
+                      models_archive=args.models_archive, marks_archive=args.marks_archive, locale=args.locale,
+                      any_package=args.any_package, run_id=args.run_id or "", base_from=args.base_from,
+                      keep_free_gb=args.keep_free_gb, marks_partial=args.marks_partial)
+    out_dir = os.path.abspath(args.out)
+
+    try:
+        update.clean_out_dir(out_dir, args.force, rc.OUT_ENTRIES)
+        plan, written, problems = rc.run(opts, config)
+    except (rc.CustomizeError, update.UpdateError) as e:
+        raise ForgeError(str(e)) from None
+
+    for combo in plan.combos:
+        print(f"{combo.label}: " + ", ".join(f"{n} {combo.holders[n].name}" for n in rc.TABLES))
+
+    print(f"CharSections: {plan.hashes.get('charsections_rows')} rows; BarberShopStyle: "
+          f"{plan.hashes.get('barbershopstyle_rows')} rows; hidden {len(plan.server.merged.hidden)}; rebuilt "
+          f"{len(plan.rebuilt)}; remapped pairs {sum(len(m.moved) for m in plan.mappings.values())}")
+
+    for archive in plan.new_archives:
+        print(f"{archive.name} ({archive.role}): {len(archive.files) + len(archive.blobs)} files, "
+              f"{archive.size() / 1e6:.1f} MB{' (unchanged)' if archive.unchanged else ''}")
+
+    for path in sorted(written.values()):
+        print(f"written: {path}")
+
+    for warning in plan.warnings + plan.game.warnings:
+        print(f"warning: {warning}")
+
+    print(f"{len(problems)} checks failed" if problems else "every check passed")
+
+    for problem in problems[:40]:
+        print(f"  [FAIL] {problem}", file=sys.stderr)
+
+    if problems:
+        print(f"Some checks failed (report: {os.path.join(out_dir, 'report.txt')}): do not install this output.",
+              file=sys.stderr)
+        return 1
+
+    print(f"Next: python3 -I {os.path.join(HERE, 'raceforge.py')} install --from {out_dir} "
+          f"--patches {os.path.abspath(args.patches)}")
+    return 0
+
+
+def cmd_picker_data(args) -> int:
+    from rflib import curation as curmod, marksrows, picker  # noqa: E402
+
+    try:
+        cur = curmod.load(args.curation)
+        catalogue = marksrows.load_catalogue(args.catalogue)
+
+        if args.package:
+            from rflib import realm_customize as rc  # noqa: E402
+
+            commit = rc.package_commit(args.package)
+
+            if commit != cur.commit and not args.any_package:
+                raise ForgeError(f"{args.package} is at commit {commit or '(not a git checkout)'}, the curation pins "
+                                 f"{cur.commit}: check out that commit (--any-package skips this check)")
+
+            tables = rc.load_package_tables(args.package)
+            counts_text = picker.counts_text(picker.counts_from_tables(tables["CharSections"],
+                                                                       tables["CharacterFacialHairStyles"],
+                                                                       commit or cur.commit))
+            counts = json.loads(counts_text)
+        else:
+            counts = picker.load_counts(args.counts)
+            counts_text = None
+
+        if counts.get("package") != cur.commit:
+            raise ForgeError(f"{args.counts}: made from package commit {counts.get('package')}, the curation pins "
+                             f"{cur.commit}: run picker-data --package <the pinned checkout>")
+
+        files = picker.outputs(args.repo, counts, cur, catalogue)
+
+        if counts_text is not None:
+            files[os.path.abspath(args.counts)] = counts_text
+    except (curmod.CurationError, marksrows.MarksError, picker.PickerError) as e:
+        raise ForgeError(str(e)) from None
+
+    stale = []
+
+    for path, text in sorted(files.items()):
+        try:
+            with open(path, encoding="utf-8") as f:
+                current = f.read()
+        except FileNotFoundError:
+            current = None
+
+        if current == text:
+            print(f"up to date: {path}")
+            continue
+
+        if args.check:
+            stale.append(path)
+            continue
+
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+
+        with open(path, "w", encoding="utf-8", newline="\n") as f:
+            f.write(text)
+
+        print(f"wrote {path}")
+
+    if stale:
+        for path in stale:
+            print(f"error: {path} is not what picker-data makes; run raceforge.py picker-data", file=sys.stderr)
+
+        return 1
+
+    return 0
 
 
 def cmd_find(args) -> int:
@@ -871,7 +1011,8 @@ def cmd_schemas(args) -> int:
 
 
 EASY_OUT = "Bleakhold-RaceForge-Output"
-COMMANDS = ("build", "validate", "update", "skins", "install", "find", "schemas", "-h", "--help")
+COMMANDS = ("build", "validate", "update", "skins", "customize", "picker-data", "install", "find", "schemas", "-h",
+            "--help")
 
 
 def easy_mode(argv: list[str]) -> int:
@@ -999,6 +1140,57 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--locale", help="the client's locale (default: the one of Data/<locale>/locale-<locale>.MPQ)")
     p.add_argument("--preview", action="store_true", help="also write PNG contact sheets of every skin colour, before "
                                                           "and after, to --out/preview")
+    p.add_argument("--art-archive", metavar="ARCHIVE", help="put the recoloured textures into this archive "
+                                                            "(patch-F.MPQ on the realm) instead of the tables' one, "
+                                                            "so a skins change rebuilds a small archive")
+
+    p = sub.add_parser("customize", help="merge the Ascension customization package into the realm's tables for races "
+                                         "1-11, High Elf 15 and Eredar 19 (and the marks and eyes with --marks)")
+    p.add_argument("--package", required=True, help="the package checkout (/root/wowdata/ascc), at the commit "
+                                                    "customize/curation.json pins")
+    p.add_argument("--patches", required=True, help="the realm's patch folder (/srv/bleakhold-launcher/patches)")
+    p.add_argument("--client", required=True, help="the game folder the launcher ships (/srv/bleakhold-launcher/base)")
+    p.add_argument("--out", required=True, help="output folder (not inside --patches or --client)")
+    p.add_argument("--base", default=DEFAULT_BASE, help=f"the saved base: the realm's tables from before the package "
+                                                        f"and the barber id ledger (default {DEFAULT_BASE})")
+    p.add_argument("--marks", help="MarkForge's marks_manifest.json: add the mark (features) and eye (face) rows "
+                                   "and pack them (stage 2)")
+    p.add_argument("--marks-partial", action="store_true", help="a dev run only: accept a --marks manifest without "
+                                                                "every race-sex, all 12 looks and eyes 1-5")
+    p.add_argument("--dbc", help="the server's data/dbc, to compare its BarberShopStyle.dbc with the client's")
+    p.add_argument("--move-art", metavar="ARCHIVE", help="also move the table archives' other files into this "
+                                                         "archive (patch-O.MPQ, once), leaving them tables only")
+    p.add_argument("--art-letters", default="67", help="characters of the package art archives (default 67)")
+    p.add_argument("--art-max-mb", type=int, default=3500, help="file data per art archive in MB (default 3500)")
+    p.add_argument("--models-archive", default="patch-~.MPQ", help="the archive of the package's models (default "
+                                                                    "patch-~.MPQ, above every lettered patch)")
+    p.add_argument("--marks-archive", default="patch-K.MPQ", help="the archive of the marks and eyes (default "
+                                                                   "patch-K.MPQ)")
+    p.add_argument("--curation", default=DEFAULT_CURATION, help="default: customize/curation.json")
+    p.add_argument("--catalogue", default=DEFAULT_CATALOGUE, help="default: customize/catalogue.json")
+    p.add_argument("--config", default=DEFAULT_CONFIG, help="races config (default: races.json next to raceforge.py)")
+    p.add_argument("--locale", help="the client's locale (default: the one of Data/<locale>/locale-<locale>.MPQ)")
+    p.add_argument("--run-id", help="the id of this run in the remap SQL (default: customize-<UTC time>)")
+    p.add_argument("--base-from", metavar="FOLDER", help="the realm's archives from before the package, laid out as "
+                                                         "the patch folder (an install's old-patches): the saved base "
+                                                         "for tables that are merged already and have none")
+    p.add_argument("--keep-free-gb", type=float, default=5.0, help="refuse to write when less than this would stay "
+                                                                   "free on --out's disk (default 5)")
+    p.add_argument("--any-package", action="store_true", help="take a package at another commit than the pinned one")
+    p.add_argument("--force", action="store_true", help="replace earlier output in --out")
+
+    p = sub.add_parser("picker-data", help="write the glue picker's and the barbershop hook's numbers "
+                                           "(BleakholdCustomizeData.lua, BarberData.lua) from the curation, the "
+                                           "catalogue and the package counts")
+    p.add_argument("--package", help="the pinned package checkout: also make customize/package_counts.json from its "
+                                     "tables")
+    p.add_argument("--check", action="store_true", help="write nothing; fail when a file is not what picker-data "
+                                                        "makes (CI)")
+    p.add_argument("--counts", default=DEFAULT_COUNTS, help="default: customize/package_counts.json")
+    p.add_argument("--curation", default=DEFAULT_CURATION)
+    p.add_argument("--catalogue", default=DEFAULT_CATALOGUE)
+    p.add_argument("--repo", default=REPO_ROOT, help="the repository the Interface files are written into")
+    p.add_argument("--any-package", action="store_true", help="take a package at another commit than the pinned one")
 
     p = sub.add_parser("install", help="put the archives of an update or skins output folder into the realm's patch "
                                        "folder")
@@ -1039,6 +1231,10 @@ def main(argv: list[str] | None = None) -> int:
             return cmd_update(args)
         if args.command == "skins":
             return cmd_skins(args)
+        if args.command == "customize":
+            return cmd_customize(args)
+        if args.command == "picker-data":
+            return cmd_picker_data(args)
         if args.command == "install":
             return cmd_install(args)
         if args.command == "find":

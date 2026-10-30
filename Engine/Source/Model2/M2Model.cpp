@@ -801,6 +801,146 @@ void CM2Model::ReplaceTexture(uint32_t type, CTexture* texture) {
     this->m_fFlags &= ~0x10u;
 }
 
+// BLEAKHOLD(glow): queues a call that holds a texture handle (m_args[1]), as ReplaceTexture does while the model
+// loads.
+static void M2GlowQueueTextureCall(CM2Model* model, uint32_t type, uint32_t arg, CTexture* texture) {
+    CM2ModelCall* call = new (__FILE__, __LINE__) CM2ModelCall();
+
+    if (!call) {
+        return;
+    }
+
+    call->m_type = type;
+    call->m_next = nullptr;
+    // A model off its scene keeps its calls' times relative to the scene's (DetachFromScene, AttachToScene).
+    call->m_time = model->m_scene ? model->m_scene->m_time : 0;
+    call->m_args[0] = arg;
+    call->m_args[1] = texture ? reinterpret_cast<uintptr_t>(HandleDuplicate(reinterpret_cast<HOBJECT>(texture))) : 0;
+    *model->m_modelCallTail = call;
+    model->m_modelCallTail = &call->m_next;
+}
+
+// BLEAKHOLD(glow)
+void CM2Model::SetGlowTexture(CTexture* texture, uint32_t sections) {
+    if (!(this->m_fFlags & 1)) {
+        M2GlowQueueTextureCall(this, M2Glow::kCallSetGlowTexture, sections, texture);
+        return;
+    }
+
+    // The new handle first: the caller may hand back the texture the model already holds.
+    CTexture* previous = this->m_bleakGlowTexture;
+    this->m_bleakGlowTexture = reinterpret_cast<CTexture*>(HandleDuplicate(reinterpret_cast<HOBJECT>(texture)));
+    this->m_bleakGlowSections = texture ? (sections & M2Glow::kAllSections) : 0;
+
+    if (previous) {
+        HandleClose(reinterpret_cast<HOBJECT>(previous));
+    }
+}
+
+// BLEAKHOLD(glow)
+void CM2Model::ReplaceTextureAtIndex(uint32_t index, CTexture* texture) {
+    if (!(this->m_fFlags & 1)) {
+        M2GlowQueueTextureCall(this, M2Glow::kCallReplaceTextureAtIndex, index, texture);
+        return;
+    }
+
+    M2Data* data = this->m_shared->m_data;
+
+    if (!this->m_textures || index >= data->m_textures.m_count) {
+        return;
+    }
+
+    CTexture* replacement = texture;
+
+    if (!replacement && this->m_shared->m_textures) {
+        replacement = this->m_shared->m_textures[index];
+    }
+
+    CTexture* previous = this->m_textures[index];
+    this->m_textures[index] = reinterpret_cast<CTexture*>(HandleDuplicate(reinterpret_cast<HOBJECT>(replacement)));
+
+    if (previous) {
+        HandleClose(reinterpret_cast<HOBJECT>(previous));
+    }
+
+    if (this->m_textures[index] && !TextureGetGxTex(this->m_textures[index], 0, nullptr)) {
+        this->m_fFlags &= ~2u;
+    }
+
+    for (uint32_t i = 0; i < data->m_particles.m_count; i++) {
+        if (data->m_particles[i].m_textureIndex == index) {
+            this->m_particleEmitters[i]->SetTexture(this->m_textures[index]);
+        }
+    }
+
+    this->m_fFlags &= ~0x10u;
+}
+
+// BLEAKHOLD(glow)
+void CM2Model::ReplaceGeosetTexture(uint32_t geosetId, CTexture* texture) {
+    if (!(this->m_fFlags & 1)) {
+        M2GlowQueueTextureCall(this, M2Glow::kCallReplaceGeosetTexture, geosetId, texture);
+        return;
+    }
+
+    M2Data* data = this->m_shared->m_data;
+    M2SkinProfile* skin = this->m_shared->m_skinData;
+
+    if (!skin) {
+        return;
+    }
+
+    uint32_t unitCount = 0;
+
+    for (uint32_t i = 0; i < skin->m_batches.m_count; i++) {
+        unitCount += skin->m_batches[i].m_textureCount;
+    }
+
+    if (!unitCount) {
+        return;
+    }
+
+    size_t bytes = sizeof(M2Glow::BatchTexture) * unitCount;
+    M2Glow::BatchTexture* units = static_cast<M2Glow::BatchTexture*>(SMemAlloc(bytes, __FILE__, __LINE__, 0));
+
+    if (!units) {
+        return;
+    }
+
+    uint32_t count = 0;
+
+    for (uint32_t i = 0; i < skin->m_batches.m_count; i++) {
+        const M2Batch& batch = skin->m_batches[i];
+        uint32_t geoset = M2Glow::kNoTexture;
+
+        if (batch.m_skinSectionIndex < skin->m_skinSections.m_count) {
+            const M2SkinSection& section = skin->m_skinSections[batch.m_skinSectionIndex];
+            geoset = M2SkinSectionGeosetId(section, skin->m_indices.m_count); // BLEAKHOLD(modernassets)
+        }
+
+        for (uint32_t unit = 0; unit < batch.m_textureCount; unit++) {
+            uint32_t comboIndex = batch.m_textureComboIndex + unit;
+            uint32_t textureIndex = M2Glow::kNoTexture;
+
+            if (comboIndex < data->m_textureCombos.m_count) {
+                textureIndex = data->m_textureCombos[comboIndex];
+            }
+
+            units[count].geoset = geoset;
+            units[count].texture = textureIndex < data->m_textures.m_count ? textureIndex : M2Glow::kNoTexture;
+            count++;
+        }
+    }
+
+    uint32_t indices[8];
+    uint32_t found = M2Glow::GeosetOnlyTextures(units, count, geosetId, indices, 8);
+    SMemFree(units, __FILE__, __LINE__, 0);
+
+    for (uint32_t i = 0; i < found; i++) {
+        this->ReplaceTextureAtIndex(indices[i], texture);
+    }
+}
+
 // VERIFY: 859397f9 manual
 // OFFSET: 0x00825410
 void CM2Model::ReplaceParticleColor(uint32_t id, CImVector color0, CImVector color1, CImVector color2) {
@@ -3731,6 +3871,8 @@ M2BatchRange::M2BatchRange() {
 // OFFSET: 0x0082BE60
 CM2Model::CM2Model() {
     this->m_bleakDance = nullptr;
+    this->m_bleakGlowTexture = nullptr; // BLEAKHOLD(glow)
+    this->m_bleakGlowSections = 0;
     this->m_scaleSq = 0.0f;
     this->m_refCount = 1;
     this->m_fFlags = (this->m_fFlags & 0xFF800000) | 0x340;
@@ -6593,6 +6735,12 @@ CM2Model::~CM2Model() {
         M2DanceRelease(this);
     }
 
+    // BLEAKHOLD(glow)
+    if (this->m_bleakGlowTexture) {
+        HandleClose(reinterpret_cast<HOBJECT>(this->m_bleakGlowTexture));
+        this->m_bleakGlowTexture = nullptr;
+    }
+
     CM2Model* model30 = this->m_model30;
 
     if (model30 && model30->m_refCount-- == 1) {
@@ -6691,7 +6839,7 @@ CM2Model::~CM2Model() {
         CM2ModelCall* call = this->m_modelCallList;
         this->m_modelCallList = call->m_next;
 
-        if (!call->m_type && call->m_args[1]) {
+        if (M2Glow::CallHoldsTexture(call->m_type) && call->m_args[1]) { // BLEAKHOLD(glow): was !call->m_type
             HandleClose(reinterpret_cast<HOBJECT>(call->m_args[1]));
         }
 
@@ -7535,6 +7683,11 @@ int32_t CM2Model::InitializeLoaded() {
     this->m_fFlags = (this->m_fFlags & ~0x10u) | (optimize << 4);
 
     if (source) {
+        // BLEAKHOLD(glow): a copy takes its source's glow before it lets go of the source (M2Glow::TakeSourceGlow).
+        M2Glow::TakeSourceGlow(*this, source, [](CTexture* texture) {
+            return reinterpret_cast<CTexture*>(HandleDuplicate(reinterpret_cast<HOBJECT>(texture)));
+        });
+
         if (source->m_refCount-- == 1) {
             g_modelPool->Delete(source);
         }
@@ -7651,11 +7804,26 @@ int32_t CM2Model::InitializeLoaded() {
             case 14:
                 this->LoadSequence(call->m_args[0]);
                 break;
+
+            // BLEAKHOLD(glow)
+            case M2Glow::kCallSetGlowTexture:
+                this->SetGlowTexture(reinterpret_cast<CTexture*>(call->m_args[1]), static_cast<uint32_t>(call->m_args[0]));
+                break;
+
+            case M2Glow::kCallReplaceTextureAtIndex:
+                this->ReplaceTextureAtIndex(static_cast<uint32_t>(call->m_args[0]),
+                    reinterpret_cast<CTexture*>(call->m_args[1]));
+                break;
+
+            case M2Glow::kCallReplaceGeosetTexture:
+                this->ReplaceGeosetTexture(static_cast<uint32_t>(call->m_args[0]),
+                    reinterpret_cast<CTexture*>(call->m_args[1]));
+                break;
         }
 
         this->m_modelCallList = call->m_next;
 
-        if (!call->m_type && call->m_args[1]) {
+        if (M2Glow::CallHoldsTexture(call->m_type) && call->m_args[1]) { // BLEAKHOLD(glow): was !call->m_type
             HandleClose(reinterpret_cast<HOBJECT>(call->m_args[1]));
         }
 

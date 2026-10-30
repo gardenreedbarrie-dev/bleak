@@ -286,6 +286,10 @@ jobs:
       - name: Install tools
         run: sudo apt-get update && sudo apt-get install -y libxml2-utils python3-pil python3-numpy
 
+      # the repository is public: no Blizzard or Ascension textures, models, tables, archives or renders of them
+      - name: No game art in the repository
+        run: python3 -I tests/test_no_game_art.py
+
       - name: Lua lint and tests
         run: bash Tools/UiLint/check.sh
 
@@ -293,6 +297,7 @@ jobs:
         run: |
           python3 -I Tools/MpqPack/tests/run_tests.py
           python3 -I Tools/RaceForge/tests/run_tests.py
+          python3 -I Tools/RaceForge/raceforge.py picker-data --check
           python3 -I Tools/EmojiForge/tests/run_tests.py
           python3 -I Tools/DanceForge/tests/run_tests.py
           python3 -I Tools/DanceForge/danceforge.py check
@@ -311,6 +316,21 @@ jobs:
 
       - name: Storm wall geometry tests
         run: bash Tools/StormWall/tests/run_tests.sh
+
+      - name: Glow draw rules tests
+        run: bash Tools/GlowDraw/tests/run_tests.sh
+
+      - name: Glowing marks core tests
+        run: bash Tools/MarkForge/tests/run_marks_core.sh
+
+      # the marks and eye sprites' generator, on a synthetic tube body (no game data); needs python3-numpy
+      - name: MarkForge tests
+        run: |
+          python3 -I Tools/MarkForge/markforge.py doctor
+          python3 -I Tools/MarkForge/tests/run_tests.py
+
+      - name: Customization walk tests
+        run: bash Tools/CustomizeWalk/tests/run_tests.sh
 
       - name: Server module tests
         run: bash Server/mod-bleakhold-ui/tests/run_tests.sh --fuzz-iterations 100000 --fuzz-seconds 20

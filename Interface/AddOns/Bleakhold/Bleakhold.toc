@@ -56,5 +56,7 @@ WarFront.lua
 Season.lua
 Leaderboards.lua
 Graphics.lua
+BarberData.lua
+Barber.lua
 Demo.lua
 Integration.lua

@@ -248,6 +248,11 @@ def texture_for(name: str, colour: int, section: int, slot: int) -> bytes:
         size, features = (16, 16), "body"
 
     rgba = skin_texture(*size, tone, features)
+
+    if section == 4:
+        # the stock kind of underwear: cloth layered over the skin by its alpha (skins leaves it alone)
+        return blp_palette(*size, with_alpha_edge(rgba, *size), alpha_size=8)
+
     kind = ("palette", "DXT1", "BGRA", "DXT5")[(colour + slot + section) % 4]
 
     if kind == "palette":

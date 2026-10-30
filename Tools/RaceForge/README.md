@@ -91,6 +91,11 @@ folder with their archive paths as subfolders and add `--mpq-extra <folder>`.
 
 ## Character customization packages (more faces, hair, skins, tattoos, HD models)
 
+This section is `build`, for stock DBCs (races 22 and 23). The Bleakhold realm, whose race patch already has High Elf
+in slot 15 and Eredar in 19, takes the package with `customize` instead ("The realm's appearance options" below):
+`build` would write races 22 and 23 and an archive named like the realm's `Patch-R.MPQ`, and it refuses the realm's
+tables anyway.
+
 A customization package such as Ascension Character Customization (HD models of the stock races and 500+ extra
 faces, hair styles, skins and markings) is a folder with `DBFilesClient\*.dbc` next to art folders
 (`Character\`, `Textures\`). Give it to RaceForge and it is merged into your DBCs first, so High Elf and Eredar,
@@ -111,8 +116,8 @@ question). The package is your own download; nothing of it is in this repository
 - CharSections is sorted again (the client groups consecutive rows). Ids that clash with a row you keep get new ones.
 - Helmet masks: the new races copy the template race's bit exactly, so a package mask like "every race but a few"
   cannot hide geosets the template race shows.
-- The art (every file under the package's folders except `DBFilesClient`) is packed into `client\patch-6.MPQ`,
-  then `patch-7.MPQ`, `patch-8.MPQ` and `patch-9.MPQ` as needed, with at most 3500 MB of files each
+- The art (every file under the package's folders except `DBFilesClient`) is packed into `client\patch-8.MPQ`,
+  then `patch-9.MPQ` as needed, with at most 3500 MB of files each
   (`--art-max-mb`), streamed one file at a time. `--no-art` merges the tables only. See the names and sizes below.
 - `customization\base-dbc` in the output holds your DBCs with the package merged in: the starting point the checks
   compare against (`raceforge.py validate` finds it by itself). The report lists every merge step, and checks that
@@ -123,24 +128,25 @@ their `Data` folder.
 
 ### Art archive names and sizes
 
-Every letter but F, K, O and W already names a patch the realm ships: H L R T V X Y Z (the realm; R is RaceForge's
-own `patch-R.MPQ`, Y the HD pack), A B C D E G I M N P S U (Reforged), J (a login screen) and Q (MapForge), and so do
-the digits 2 and 3 (stock), 4 (CafeForge's café archive) and 5 (MapForge). Free: F, K, O, W and 6-9. The
-launcher installs files by name, so an art archive under one of those names would replace that patch on every
-player's PC. The art therefore takes digits:
+Every letter but W already names a patch the realm ships: H L R T V X Y Z (the realm; R is RaceForge's own
+`patch-R.MPQ`, Y the HD pack), A B C D E G I M N P S U (Reforged), J (a login screen), Q (MapForge) and F K O
+(`customize` and `skins`), and so do the digits 2 and 3 (stock), 4 (CafeForge's café archive), 5 (MapForge), 6 and 7
+(`customize`'s package art) and `~` (`customize`'s models). Free: W, 8 and 9. The launcher installs files by name, so
+an art archive under one of those names would replace that patch on every player's PC. The art therefore takes
+digits (default `--art-letters 89`):
 
 - The client opens every `Data\patch-?.MPQ` with exactly one character, of any kind, in place of `?`, and every
   `Data\<locale>\patch-<locale>-?.MPQ`. It sorts them by path without regard to case, and when two hold the same
   file, the one that sorts last wins (`WoW/Source/WowServices/PatchFiles.cpp`, `OpenArchives` in
   `WoW/Source/Client.cpp`, and `Tools/MpqPack/README.md`). Case never matters: `patch-s.MPQ` is `patch-S.MPQ`.
-- Digits sort before letters. `patch-6.MPQ` to `patch-9.MPQ` load after every base archive and the stock
+- Digits sort before letters. `patch-4.MPQ` to `patch-9.MPQ` load after every base archive and the stock
   `patch-2.MPQ` and `patch-3.MPQ`, and below every lettered patch. So the art adds files and replaces stock ones,
   but where a realm or Reforged patch holds the same file (an HD model in Reforged's patches or in `Patch-Y.MPQ`),
   that patch wins and the package's file is not used. For the package's files to win over Reforged's patches, give
   the free letter after them: `--art-letters W`. It still loses to X, Y and Z.
-- `--art-letters` takes A-Z and 4-9: `patch-0` and `patch-1` would sort below the stock patches, 2 and 3 are the
-  stock patches, 4 is CafeForge's café archive and 5 is MapForge's archive for the server's extractors (both are in
-  `taken_patches.json`, so 6-9 are the free digits).
+- `--art-letters` takes A-Z, 4-9 and `~`: `patch-0` and `patch-1` would sort below the stock patches, 2 and 3 are
+  the stock patches, 4 is CafeForge's café archive, 5 is MapForge's archive for the server's extractors and 6 and 7
+  are `customize`'s (all in `taken_patches.json`, so 8 and 9 are the free digits). `~` sorts after every letter.
 
 `taken_patches.json`, next to `races.json`, lists every name in use with its owner. RaceForge refuses an art name in
 it before it does anything else, and with `--patches-dir <folder>` (the realm's patch folder, or a client's `Data`
@@ -152,8 +158,8 @@ in the report: never publish such archives next to the realm's patches. When a n
 Size: MpqPack writes MPQ format 0 (v1), whose offsets are 32 bits, so each archive stays under 4 GiB. The client
 reads those offsets unsigned (`InitializeTables` in `Engine/Source/BlizzardCore/Source/Packages/Mopaq`), so
 archives between 2 and 4 GiB are fine. 3500 MB of files per archive leaves room for the tables (`--art-max-mb`
-takes at most 4000), and the four default names hold 14000 MB; for a larger package, add a free letter
-(`--art-letters 6789F`; the refusal lists the free ones, and a letter sorts after the lettered patches before it, as
+takes at most 4000), and the two default names hold 7000 MB; for a larger package, add a free letter
+(`--art-letters 89W`; the refusal lists the free ones, and a letter sorts after the lettered patches before it, as
 above). The client also reads format 1 (v2, with 64-bit offsets, for archives over 4 GiB), but
 MpqPack does not write it.
 
@@ -167,7 +173,7 @@ MpqPack does not write it.
 | `server\sql\bleakhold_races.sql` | Required world-database rows |
 | `server\sql\bleakhold_races_content_masks.sql` | Optional quest, item, area spell, condition and mail race masks |
 | `server\sql\bleakhold_races_remove.sql` | Undoes both SQL files |
-| `client\patch-6.MPQ` ... `patch-9.MPQ` | The customization package's art (`--customization`), as many as it needs |
+| `client\patch-8.MPQ`, `patch-9.MPQ` | The customization package's art (`--customization`), as many as it needs |
 | `customization\base-dbc\*.dbc` | Your DBCs with the package merged in, before the races were added |
 | `report.txt` | Every change, warning and check |
 
@@ -447,8 +453,20 @@ stay exactly as they are.
 
   and only that row's texture name changes to it. The rows and their order stay, every other field of every row stays,
   and the new names are appended to the string block. Hair and facial hair rows are not changed (they have colours of
-  their own), nor underwear rows: section 4 can be listed, but its cloth colours sit near skin hues and would turn
-  purple too.
+  their own), nor underwear rows with alpha (the stock kind, cloth layered over the skin): section 4 can be listed,
+  but its cloth colours sit near skin hues and would turn purple too.
+- Opaque underwear (the package's NakedPelvis and NakedTorso: an opaque copy of the template race's skin with the
+  garment painted in, which the client pastes over the whole leg-upper and torso-upper section when nothing is worn
+  there) would show the template's skin on a purple High Elf. When the skin is recoloured, such a texture (alphaSize
+  0, or every alpha 255) is recoloured where it is bare skin only: a texel whose largest channel difference from the
+  original skin it covers (the skin texture of the same race, sex and colour, its torso-upper rectangle 256,0 256x128
+  for texture 1 and its leg-upper rectangle 256,192 256x128 for texture 0) is above max(22, median + 4 x MAD) is
+  cloth, cleaned by a 3x3 majority and grown by 2 texels (MarkForge's garment test); the cloth keeps its colour, the
+  rest takes the recoloured skin's. The result is a palette texture again (256 colours, the original's header, size
+  and level count, alphaSize 0, every level made again), under the same `Character\BleakholdSkins\<race>\<hash>\`
+  rule, its hash also over the skin, the cloth threshold and an algorithm version. An opaque underwear texture that
+  cannot be done so (not a palette texture, or no recoloured skin of its colour) stops the run with its row and
+  name: it would stay on the template's skin colour.
 - Each new texture keeps the original's format, size, header and alpha: a palette texture gets a new palette; a DXT1,
   DXT3 or DXT5 texture (the type the client takes from preferredFormat) new endpoint colours in every block of every
   level, each block in the mode it had (endpoints whose order flips swap places and the indices follow; a four-colour
@@ -456,8 +474,9 @@ stay exactly as they are.
   new pixels in every level. The levels are walked as the client walks them (CalcLevelCount, the header's offsets and
   sizes). A JPEG or BLP1 texture, or any other format, stops the run with the texture's name and format.
 - The colours, in OKLab (a perceptual colour space): the skin colour of a sex and skin colour index is the median of
-  the opaque pixels of mid lightness of its skin texture (section 0, variation 0, texture 0). A sex's skin colours are
-  ranked by lightness and spread over `palette`, lightest first, so the palest Blood Elf skin gets the palest lavender
+  the opaque pixels of mid lightness of its skin texture (section 0, variation 0, texture 0). A sex's visible skin
+  colours (no 0x8, flag 0x1 or 0x2) are ranked by lightness and spread over `palette`, lightest first (a hidden one
+  takes the numbers of the nearest visible one, by skin lightness, of its own ramp), so the palest Blood Elf skin gets the palest lavender
   and the darkest the deepest violet (the Death Knight rows, flag 0x4, over `dk_palette`). Every pixel of a texture then
   moves with its skin colour: the skin's lightness becomes the target's through a curve on lightness, so the shading
   stays; its chroma and hue become the target's, and colours near the skin's keep part of their difference from it.
@@ -509,6 +528,19 @@ files under `Character\BleakholdSkins\HighElf\` that the new plan does not use (
 CharSections.dbc, above). `--out` must have room for the rebuilt
 archives first ("needs X GB free ..., has Y GB"). A rebuilt archive is downloaded again by every player who has it:
 a rebuilt HD pack archive is large.
+
+### The art archive (`--art-archive`)
+
+`--art-archive patch-F.MPQ` (on the realm) puts the recoloured textures of the archives every player loads into that
+archive, a new one or the realm's own of that name, outside every pack; their CharSections.dbc stays where it is (a
+pack's own copy keeps its textures). Then `Patch-R.MPQ` holds tables only, and a palette change rebuilds a small
+archive instead of a large one; the textures leave `Patch-R.MPQ` as stale files on that run.
+
+Never recoloured, whatever `sections` says: a face row's third texture (the eye sprite of the appearance contract) and
+any texture under `Character\BleakholdMarks\` or `Character\BleakholdEyes\`; their rows keep those names.
+
+Two skins a player can see whose target colours come out less than 2 apart (OKLab, on the 0-100 scale) stop the run:
+hide one in `customize/curation.json` (`keep_skins`), so the High Elf gets no near-identical purple tones.
 
 ### Running it again
 
@@ -700,6 +732,458 @@ On the VPS, as root (each command prints a few lines to screenshot):
      Interface/GlueXML/CharacterCreate.lua --out /root/glue/
    ```
 
+## Bleakhold appearance data contract
+
+Version 1. This is what the realm's appearance data means, for everyone who writes or reads it: RaceForge
+(`customize`, `skins`, `picker-data`), MarkForge (`Tools/MarkForge`, the marks and eye sprites), Bleakhold.exe (the
+glow bake, the eye geoset, the glue natives and the barbershop), the glue and addon Lua, and mod-bleakhold (the
+Appearance Artist and the appearance check). A change to anything here needs every one of them changed with it.
+
+Only Bleakhold.exe is supported (the launcher ships it). A stock exe never reads the third texture of a face or
+features row: it draws no marks and no eye colours, and it offers up to 6 faces and 13 features that look the same.
+That is accepted and not worked around. The Bleakhold glue does not load in a stock exe.
+
+### The five bytes
+
+Every look is the five stock appearance bytes, as create, customize, the barbershop, the character list,
+`PLAYER_BYTES`/`PLAYER_BYTES_2`, corpses and the `characters` columns `skin`, `face`, `hairStyle`, `hairColor` and
+`facialStyle` carry them. No packet and no column is added. Each byte is 0-255.
+
+- Races 1-8, 10 and 11 use the option numbers of the pinned package (Ascension Character Customization, commit
+  `9d082f46`, `customize/curation.json`); Goblin (9, not playable, its package art not shipped) keeps the realm's.
+  High Elf (15) uses exactly Blood Elf's (10) numbers and Eredar (19) Draenei's (11): their rows are clones.
+- A number never changes its meaning once it is live. Where the package moved an option a character already has (the
+  Death Knight skins moved, for example Human 10-12 to 26-28), `customize` writes a one-time remap of the characters
+  (see "Existing characters").
+- Hair styles and features keep their numbers, and `customize` checks it for every race, sex and kind (and the
+  clones): each hair style of the saved base keeps its CharHairGeosets geoset and showScalp and its section-3 rows'
+  textures at every colour a character can pick, and each features value below the base's count keeps its five
+  CharacterFacialHairStyles geosets and its section-2 rows' two textures at every hair colour (a blank slot that gets
+  a texture counts). A style or value that is missing or differs is listed in the report and in summary.json
+  (`changed_styles`, `changed_features`) and stops the run, unless the curation lists it in `accepted_changes`
+  (`{"race", "sex", "kind": "style" | "feature", "values", "reason"}`). An accepted one moves to the merged value whose
+  rows name the same textures and geosets, or keeps its number and gets `at_login | 8`; `remap_characters.sql` does
+  both (characters and corpse bytes2), and `count_hidden.sql` counts who is still on it.
+
+### Features byte: value = look × B + base
+
+| Part | Meaning |
+|---|---|
+| `B` | The race and sex's number of CharacterFacialHairStyles rows in the pinned package (table below). High Elf has Blood Elf's, Eredar Draenei's |
+| `base = value % B` | The package feature: beard, tusks, horns, earrings, face tattoo |
+| `look = value // B` | 0: no mark. 1-12: `look = 3 × (design − 1) + colour`, design 1-4 and colour 1-3 in catalogue order (`customize/catalogue.json`) |
+
+| B | Human | Orc | Dwarf | Night Elf | Undead | Tauren | Gnome | Troll | Blood Elf / High Elf | Draenei / Eredar |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Male | 9 | 11 | 11 | 6 | 17 | 7 | 8 | 11 | 10 | 8 |
+| Female | 7 | 7 | 6 | 19 | 8 | 5 | 7 | 6 | 11 | 7 |
+
+- The largest value is 13 × 19 − 1 = 246 (Night Elf female). `customize` fails on any value above 255.
+- A race and sex has all 12 looks or none. Colour 3 is the race's paint colour, which has no `_Glow` file.
+- `B` is frozen: the ledger (see "Ids") records it, and `customize` refuses a package whose B differs for a race and sex
+  that has marks.
+- CharacterFacialHairStyles gets a row for every value: `variationID = value`, the five geosets copied from the base
+  value's row. The client then counts `13 × B` features (`CountFacialFeatures`).
+- CharSections section 2 (features) gets, for every value from B up, a row at every hair colour where its base value
+  has one: textureName[0] and [1] copied from the base row, textureName[2] the look's mark texture, the flags copied
+  from the base row exactly.
+- The race-sexes with no section-2 rows in the package (Human, Orc, Dwarf, Gnome, Troll, Blood Elf and Draenei
+  females, both Tauren, and so High Elf and Eredar females) get rows for their base values too, once they have marks:
+  empty textures, at every hair colour of their hair rows, flags 0x11 where a player can pick that hair colour, 0x5
+  where only a Death Knight can, 0x8 where nobody can. Without marks they get no section-2 rows.
+- Every features value must have a row at every hair colour a player or Death Knight can pick (gate), and a section-2
+  row is never hidden: `GetNthFacialFeatureIndex` walks only the first `count` values, so a hidden row in the middle
+  would lose the last value.
+
+### Face byte: value = base + 40 × eye
+
+| Part | Meaning |
+|---|---|
+| `base = value % 40` | The package face variation, 0-38 (gate: every face variation of the package is below 40) |
+| `eye = value // 40` | 0: the race's own eyes, no third texture. 1-3: the race's eye colours in catalogue order. 4: Blood Red, 5: Unholy Green (Death Knights only) |
+
+- The largest value is 38 + 200 = 238.
+- Eyes 1-3: a copy of every face row of the base value (every skin colour) that a player who is not a Death Knight
+  can pick at creation (flag 0x1, neither 0x4 nor 0x8), with the flags of the base row without 0x10, so a Death Knight
+  cannot pick them. Package faces are 0x1, so these rows are 0x1.
+- Eyes 4-5: a copy of every face row that a Death Knight can pick at creation (0x1 with 0x4 or 0x10, no 0x8), flags
+  0x5. So a Death Knight gets eyes 0 (the frost blue the client always shows for the class), 4 and 5.
+- textureName[0] and [1] are the base row's; textureName[2] is the eye sprite.
+- A race and sex whose model, in any pack combination, has no geoset 1703 gets no eye rows.
+- Eyes change on the customize screen (creation and the Appearance Artist), like faces. The barbershop cannot change
+  faces.
+
+### The third texture (CharSections textureName[2])
+
+| Section | textureName[2] |
+|---|---|
+| 1 face | Empty: as stock. Set: the eye sprite. The client shows geoset 1703 and draws its batches with this texture in place of `deathKnightEyeGlow.blp` |
+| 2 features | Empty: as stock. Set: the mark texture, pasted section by section after the face and underwear and before the features, scalp and items |
+| 3 hair | The stock scalp texture, unchanged |
+| 0 skin, 4 underwear | Unchanged (empty in the package) |
+
+The package as shipped has textureName[2] empty in every face and features row (`customize` checks it), so on today's
+data the new exe behaves as the old one. A third texture that cannot be read, or breaks the file rules below, is
+skipped and logged once by the exe; it never hangs or paints green.
+
+### Paths
+
+| Files | Path |
+|---|---|
+| The package's textures named by merged rows | `Character\Ascension\<the package's path>`, for example `Character\Ascension\Character\BloodElf\Female\BloodElfFemaleSkin00_10.blp` |
+| Missing package textures rebuilt by recolouring | `Character\Ascension\Rebuilt\<10 hex>\<the package's path>` |
+| Textures a model names itself (`deathKnightEyeGlow.blp`) | Their own stock names, next to the models |
+| High Elf purple skins (`skins`) | `Character\BleakholdSkins\HighElf\<10 hex>\<the source path>` |
+| Marks | `Character\BleakholdMarks\<RaceFile>\<Sex>\<Design>_<Colour>.blp` |
+| Glow of a mark (optional) | The same path with `_Glow` before `.blp` |
+| Eye sprites | `Character\BleakholdEyes\<RaceFile>\<Sex>\Eye_<Colour>.blp` |
+
+- `RaceFile` is ChrRaces' clientFileString: `Human`, `Orc`, `Dwarf`, `NightElf`, `Scourge`, `Tauren`, `Gnome`,
+  `Troll`, `BloodElf`, `Draenei`, `HighElf`, `Eredar`. `Sex` is `Male` or `Female`. `Design` and `Colour` are the
+  keys in `customize/catalogue.json` (letters and digits only). High Elf and Eredar have designs and folders of their
+  own; the Death Knight eyes of every race and sex are `Eye_BloodRed.blp` and `Eye_UnholyGreen.blp` in its folder.
+- Every name is at most 259 bytes (the client's buffers are 260).
+- The exe looks for the `_Glow` file of every texture it pastes from CharSections, by this name rule, so a package
+  skin can be given a glow later without a new rule.
+
+### File rules
+
+| File | Rule |
+|---|---|
+| Mark | BLP2, palette (colorEncoding 1), alphaSize 8, 512 × 512, every mip level (10). It covers all ten sections at their 512 places (table below); texels outside them have alpha 0 |
+| `_Glow` | The mark's header (size, encoding, alphaSize, levels) and its alpha bytes at every level, byte for byte. Its colours are the emitted light (black: none). No `_Glow`: the mark is plain ink |
+| Eye sprite | BLP2 with the width, height and encoding of the model's own `deathKnightEyeGlow.blp` (the package has two different ones: Night Elf male and Tauren female share one, the other models the other) |
+| Every texture a CharSections row names (sections 0-4, rebuilt ones too) | Pastes at componentTextureLevel 7, 8 and 9 (below) |
+
+Section places at the 512 layout (`s_sectionInfoRaw`), x, y, width × height: arm upper 0,0 256×128; arm lower 0,128
+256×128; hand 0,256 256×64; torso upper 256,0 256×128; torso lower 256,128 256×64; leg upper 256,192 256×128; leg
+lower 256,320 256×128; foot 256,448 256×64; face upper 0,320 256×64; face lower 0,384 256×128. At level L each is
+shifted down by 9 − L.
+
+The paste rule (`PasteToSection`, `PasteFromSkin`): a texture smaller than its target in both width and height is
+scaled; otherwise its width must be the target's width × 2^k (k ≥ 0) and its height the target's height × 2^k with the
+same k, with at least k + 1 mip levels. Any other size makes the client loop for ever. The target of a skin
+(textureName[0] of section 0) is the whole 512 × 512 at level 9; face and features textureName[0] and [1], and hair
+textureName[1] and [2], go to face lower and face upper; underwear textureName[0] to leg upper and [1] to torso upper.
+
+### Archives
+
+| Archive | Holds | Written by |
+|---|---|---|
+| `Patch-R.MPQ` | The tables only (CharSections, CharHairGeosets, CharacterFacialHairStyles, BarberShopStyle, HelmetGeosetVisData, CreatureDisplayInfoExtra, plus the race patch's own) | `customize` (and `skins` for its copy of CharSections) |
+| `patch-O.MPQ` | Patch-R's old art, moved once, then frozen | stage 1 (deploy) |
+| `patch-6.MPQ`, `patch-7.MPQ` | The package's textures under `Character\Ascension\` (patch-7 only past 3500 MB) | `customize` |
+| `patch-~.MPQ` | The package's `.m2`, `.skin` and `.anim` files and the textures they name themselves | `customize` |
+| `patch-K.MPQ` | Marks and eye sprites | `customize --marks` |
+| `patch-F.MPQ` | The High Elf purple skins | `skins --art-archive patch-F.MPQ` |
+
+`taken_patches.json` lists them all. `~` sorts after every letter (Tools/MapForge/dbc/patches.py), so patch-~ wins
+over Reforged's A-U and the realm's X, Y and Z for the models; the launcher accepts the name (`validate_rel_path`
+forbids only `<>:"|?*`, control characters, reserved names and a trailing dot or space), `make_manifest.py` takes any
+`.MPQ` in `patches/`, and players download objects by hash, never by this name. A Windows client loading it is still
+to be seen in game. The Reforged mirror patches are never rebuilt: `customize` stops before writing anything when the
+client reads one of its six tables, in any combination of the launcher's packs, from an archive of an optional pack
+the realm does not own, or from one `taken_patches.json` gives to another project (Reforged, WoW Forever, MapForge,
+CafeForge), and names the archive, the combination and the table. The realm's own archives are archives.own and the
+"Bleakhold realm" group of `taken_patches.json`, so Patch-Y, in the HD pack, is still merged; `write()` checks the
+archives it rebuilds again.
+
+### Flags
+
+`ComponentFlagsMatch` (`WoW/Common/ComponentCore/ComponentUtils.cpp`):
+
+| Where | Player | Death Knight |
+|---|---|---|
+| Creation and the customize screen | 0x1, no 0x4, no 0x8 | 0x1, and 0x4 or 0x10, no 0x8 |
+| In the world and the barbershop | 0x1 or 0x2, no 0x4, no 0x8 | 0x1 or 0x2, and 0x4 or 0x10, no 0x8 |
+
+So 0x11 is a row for everyone, 0x5 a Death Knight-only row, 0x2 alone a barbershop-only row and 0x8 a hidden one (NPCs
+can use every row).
+
+- High Elf and Eredar rows are copies of Blood Elf and Draenei rows with their flags; the curation's race filters run
+  after the copy.
+- Hiding sets 0x8; the row and its number stay. A hidden skin is its section-0 row; a hidden face is every row of that
+  variation (every skin colour), and no eye rows are made from it.
+- Mark rows copy their base row's flags; new base rows are 0x11, 0x5 or 0x8 by hair colour; eyes 1-3 are the base
+  flags without 0x10; eyes 4-5 are 0x5.
+- BarberShopStyle has a type-3 (skin) row for every skin a player or Death Knight can pick in the world that is not
+  hidden, Death Knight-only skins included (the server checks the class).
+
+### Ids
+
+- CharSections: every (race, sex, section, variation, colour) appears once and the table is sorted by that key (gate;
+  `BuildComponentArray` needs it). Of package rows that repeat a key, the last one is kept, which is the one the
+  client uses today. Ids come out the same for the same inputs; nothing refers to them but the hash below.
+- BarberShopStyle: the barbershop sends row ids, so they never change. The id ledger `barber_ids.json` beside the saved
+  base (`/root/wowdata/customize-base/`) maps `"race,sex,type,data"` to an id. The realm's rows from before the
+  package keep their ids; every other key takes its id from the ledger; a new key gets the next id above every id in
+  use (the realm's and the ledger's), in key order, and is added. An id is never given to another key, so stage 2 keeps
+  every id of stage 1 with its meaning. The ledger also records B per race and sex.
+- BarberShopStyle `costModifier` is the server's factor (`Player::GetBarberShopCost`: hair 1.0, facial 0.75, skin 0.75),
+  so the price shown is the price charged. New skin rows are named `Skin Color <n>` (n: the place in that race and
+  sex's barbershop skin order, from 1), and so is a package skin row without a name (all of its Tauren rows); new
+  mark rows are named `<Design>, <Colour>` (catalogue names). Every row of races 1-11, 15 and 19 has a name (a gate:
+  the barber shows it on the step's banner).
+- The server must read the same tables: `customize` writes `server/appearance-hashes.json` with
+  - `charsections`: SHA-1 over the rows in ascending id, each as seven little-endian uint32: id, race, sex, section,
+    flags, variation, colour (the fields AzerothCore loads, `diiixxxiii`);
+  - `barbershopstyle`: SHA-1 over the rows in ascending id, each as five little-endian uint32: id, type, race, sex,
+    data (`nixx...xiii`), and the SHA-1 of the whole file, which must be byte for byte the client's in every pack
+    combination.
+  The world database's `charsections_dbc`, `barbershopstyle_dbc` and `creaturedisplayinfoextra_dbc` must be empty.
+
+### Existing characters
+
+`customize` writes `server/sql/remap_tables.sql`, `remap_characters.sql` and `restore_characters.sql` for the characters
+database, run with the world server stopped. `remap_tables.sql` creates `bh_appearance_backup` and
+`bh_appearance_set_customize` and runs first, on its own (a CREATE TABLE commits in MySQL); `remap_characters.sql` then
+holds nothing that commits by itself (its working tables are TEMPORARY, created and dropped as such), so it runs whole
+in one transaction together with what customize.sh puts around it (the Appearance Artist's purchases):
+
+- the remap matches texture names, old to new, per race and sex: skin and face as a pair (the package's Death Knight
+  skins have only three faces each); a pair with no exact match keeps the skin and takes the nearest face that
+  exists on it, and the character gets `at_login | 8` (customize at next login); hair colour and features alone.
+  High Elf takes Blood Elf's mapping, Eredar Draenei's;
+- `corpse.bytes1` (skin in bits 24-31) and `bytes2` (face, hair style, hair colour, features) get the same mapping;
+- every changed character is kept in `bh_appearance_backup` with its old and new values. The restore sets back only the
+  five appearance columns (and the corpse bytes), and each only where it still holds the remapped value;
+- a character whose `at_login | 8` the remap set (none was waiting) is noted in `bh_appearance_set_customize`; the
+  restore takes the 8 off again while it still waits (`at_login - 8` behind the bit test), so an undone remap leaves no
+  free customize. One that waited before the remap (a GM's, an Appearance Artist purchase) stays;
+- NPC looks (CreatureDisplayInfoExtra, not otherwise merged: the package's NPC looks and baked textures are not
+  shipped) move the same way, every row counting, so an NPC on a moved skin keeps it (its HD head comes from the skin
+  row).
+- stage 2 (`--marks`) writes a `remap_characters.sql` that moves nobody (its second line says so): the base-to-merged
+  moves are stage 1's, already made, and stage 2 keeps every stage-1 value (customize.sh checks the same meaning).
+
+### Picker data
+
+`raceforge.py picker-data` writes two files from `customize/curation.json`, `customize/catalogue.json` and
+`customize/package_counts.json` (numbers taken from the pinned package's tables by `picker-data --package`; no art).
+CI runs `picker-data --check`.
+
+| File | Global | Flag rules |
+|---|---|---|
+| `Interface/Bleakhold/Glue/BleakholdCustomizeData.lua` | `BleakholdCustomizeData` | Creation and the customize screen |
+| `Interface/AddOns/Bleakhold/BarberData.lua` | `ns.BarberData` (`local ADDON, ns = ...`) | In the world and the barbershop |
+
+```lua
+BleakholdCustomizeData = {
+    version = 1,
+    package = "9d082f467d2e",      -- the pinned package commit
+    eyeStride = 40,                -- face = base + eyeStride * eye
+    looksPerDesign = 3,            -- look = looksPerDesign * (design - 1) + colour
+    groups = { "plain", "marked", "fel", "deathknight" },  -- skin group codes 1-4
+    races = {
+        -- the clientFileString: GetNameForRace()'s 2nd return (glue), UnitRace("player")'s 2nd return
+        BloodElf = {
+            -- the sex as in the DBCs: 0 male, 1 female (GetSelectedSex() and UnitSex(): 2 -> 0, 3 -> 1)
+            [0] = {
+                B = 10,
+                looks = 13,        -- 13 with marks, 1 without
+                designs = { "Sunstrider Filigree", "Sunwell Rays", "Fel Brand", "Phoenix War Paint" },
+                colours = { "Sunwell Gold", "Fel Green", "Phoenix Red" },
+                colourGlows = { true, true, false },  -- colour 3 is the paint colour
+                eyes = { "Sunwell Gold", "Phoenix Crimson", "Arcane Violet", "Blood Red", "Unholy Green" },  -- eyes 1-5
+                skinGroup = { [0] = 1, [1] = 1, [40] = 2, [61] = 3, [63] = 4 },  -- raw skin -> group code
+                normal = {
+                    skins = { 0, 1, 2 },                -- the raw skins the arrows reach with some face, ascending
+                    skinSets = { { 0, 1, 2 } },         -- the skin walks: the skins that fit a face (SkinFits)
+                    skinSetOfFace = 1,                  -- raw face -> its skin walk; or { default = 1, [face] = 2 }
+                    faceWalks = { { 0, 1, 14, 40, 41, 54, 80 } },  -- the face walks (FaceFits), raw faces, ascending
+                    faceWalkOfSkin = 1,                 -- start skin (m_prevSkinIndex) -> its face walk; or a table
+                    hairStyles = 16,                    -- at a hair colour; or { default = 16, [rawHairColour] = n }
+                    hairColors = 24,                    -- for a hair style; or { default = 24, [rawHairStyle] = n }
+                    features = 130,                     -- at a hair colour (looks * B); or a table as above
+                },
+                deathKnight = { --[[ the same keys, Death Knight flag rules ]] },
+            },
+        },
+    },
+}
+```
+
+- The lists are the stage-2 view: every race and sex with all 12 looks and eyes 1-5. They are the walks the arrows
+  really make (`picker.Walk`, a copy of `WoW/Common/BleakholdCustomize.h`'s `SkinFits` and `FaceFits`): the face
+  arrows' loop starts at the last skin chosen with the skin row and reaches a face when some skin it visits fits it,
+  so from most skins a face walk holds the faces of every skin (a Death Knight's faces of the normal skins and of the
+  Death Knight skins); the skin arrows reach only the skins that fit the current face.
+- The Lua compares them with the exe's rows (`GetCharCustomizationInfo`, `GetBarberShopStyleInfo` returns 5-7): a walk
+  fits a native row when it has as many values and the row's raw value at the row's position. A face walk that fits
+  (the start skin's first, else the one walk that does) with values at or above 40 means eyes are live; the start
+  skin's walk without them means not yet (stage 1). The skin walk of the current face that fits means the skin groups
+  apply. Native features count = `looks × B` means marks are live, `B` means not yet. Anything else: plain `n/N`, no
+  virtual rows.
+- A skin in no list is hidden; `skinGroup` holds every listed skin. A count that does not depend on the other rows is
+  a number, otherwise `{ default = n, [raw] = m }`.
+- `BarberData.lua` has the same `races` blocks with the barbershop's lists: `skinSets` keep only skins with a type-3
+  row; no `skinSetOfFace` and no face walks (the barbershop cannot change or read the face, so its hook takes the
+  skin walk of `skinSets` that fits the native row).
+
+### catalogue.json
+
+`Tools/RaceForge/customize/catalogue.json` names, per RaceFile, the 4 designs, the 3 mark colours (hex, and whether it
+glows; colour 3 never does) and the 3 eye colours (hex), each with a key (letters and digits, used in paths) and a
+name (shown to players), plus the two Death Knight eyes. MarkForge draws these designs under these keys;
+`picker-data` and the BarberShopStyle names take the names from it. Both sexes of a race share its entries.
+
+### marks_manifest.json (MarkForge to `customize --marks`)
+
+```json
+{
+  "format": 1,
+  "tool": "markforge",
+  "catalogue_sha1": "<SHA-1 of catalogue.json's bytes>",
+  "races": [
+    {
+      "race": "NightElf",
+      "sex": "Female",
+      "looks": [
+        {"look": 1, "design": "MoonwellSigils", "colour": "EluneBlue",
+         "texture": "Character\\BleakholdMarks\\NightElf\\Female\\MoonwellSigils_EluneBlue.blp",
+         "file": "files/Character/BleakholdMarks/NightElf/Female/MoonwellSigils_EluneBlue.blp", "sha1": "<40 hex>",
+         "glow": "Character\\BleakholdMarks\\NightElf\\Female\\MoonwellSigils_EluneBlue_Glow.blp",
+         "glow_file": "files/Character/BleakholdMarks/NightElf/Female/MoonwellSigils_EluneBlue_Glow.blp",
+         "glow_sha1": "<40 hex>"}
+      ],
+      "eyes": [
+        {"eye": 1, "colour": "MoonlightSilver",
+         "texture": "Character\\BleakholdEyes\\NightElf\\Female\\Eye_MoonlightSilver.blp",
+         "file": "files/Character/BleakholdEyes/NightElf/Female/Eye_MoonlightSilver.blp", "sha1": "<40 hex>"}
+      ]
+    }
+  ]
+}
+```
+
+- One entry per race and sex. `looks`: all 12 or none, `look = 3 × (design − 1) + colour` with the catalogue's order;
+  `glow`, `glow_file` and `glow_sha1` are `null` for a look without glow (always for colour 3). `eyes`: any of 1-5,
+  each colour a catalogue eye (`BloodRed`, `UnholyGreen` for 4 and 5).
+- `file` is relative to the manifest's folder, with `/`. `customize` checks every SHA-1, path, key and file rule
+  above, and stops on any mismatch.
+- `catalogue_sha1` must be the catalogue the run reads.
+- `customize --marks` needs every race and sex of the catalogue (24) with all 12 looks and eyes 1-5, the shape the
+  picker data offers (`marksrows.full_manifest()`); a manifest with fewer stops the run. `--marks-partial` takes one
+  with fewer, for a dev run only (never on the realm: the client would offer looks the tables lack).
+- MarkForge's own form (`"format": "bleakhold-marks/1"`, `Tools/MarkForge/README.md`) is read too, and only when its
+  `gates.passed` is true, its `source` is `game` (built from the realm's client and patches: a `--package` dev build
+  may not have read every underwear) and every race-sex has `garment_missing` 0. A fixture is refused.
+- `customize` also reads the form `markforge.py build` writes today (`"format": "bleakhold-marks/1"`: `race_sexes`
+  with `race`, `race_file`, `sex` 0/1, `marks` with design and colour numbers, `glow_texture`, and `eyes` with `key`
+  and `dk_only`; files at `files/<client path>`). That form records `catalogue_version`, not the SHA-1, so every key,
+  name, hex value, glow and `dk_only` it holds is checked against the catalogue; it must have `gates.passed` true and
+  must not be a `fixture`.
+
+### Credits
+
+The package is Ascension Character Customization by Ijostrom (AGPL-3.0; its LICENSE ships with patch-6, with a note of
+what RaceForge changes). Its README credits Project Ascension for the models and textures and Project Reforged for the
+baked NPC textures and as a reference for DBC files. RaceForge ships none of it: it reads the package on the realm's
+server and writes the archives there.
+
+## The realm's appearance options (`raceforge.py customize`)
+
+`customize` puts the Ascension Character Customization package on the Bleakhold realm: every package option for races
+1-8, 10 and 11, the same for High Elf (15, Blood Elf's) and Eredar (19, Draenei's), and with `--marks` the glowing
+marks and eyes of the contract above. It works on the launcher's folders like `skins` and never writes into them:
+
+```sh
+cd /root/bleak/Tools/RaceForge
+python3 -I raceforge.py customize --package /root/wowdata/ascc --patches /srv/bleakhold-launcher/patches \
+  --client /srv/bleakhold-launcher/base --dbc /var/lib/docker/volumes/azerothcore-wotlk_ac-client-data/_data/dbc \
+  --out /root/raceforge-customize --move-art patch-O.MPQ --force
+echo "exit code: $?"
+```
+
+It must print `exit code: 0` and `every check passed`. Then `install --from /root/raceforge-customize`, then `skins
+--art-archive patch-F.MPQ` (the clones lost their purple names), then `install` again and publish. bleakserv's
+`deploy/customize/customize.sh` runs these steps with the server's side (backups, the world server stopped for the
+remap, the server's tables, the checks of the hashes).
+
+What it does:
+
+- **The saved base.** The first run saves every table it merges into, as the client reads it today, per archive and
+  with its SHA-1, to `--base` (default `/root/wowdata/customize-base`, outside the patch folder). Every later run merges
+  from those copies, so running it again (stage 2, a curation change) gives the same tables plus the change. Tables
+  that are merged already (`Character\Ascension\` names, or a CharSections of more than 20000 rows from a hand install)
+  with no saved copy stop it. While the package is not live (the realm's own tables are read), each table must still
+  be its saved copy: a Patch-R re-forged since the base was saved (new barber rows, a new race's rows, helmet bits)
+  stops the run, as merging from the old copy would drop those changes. Move the base's `tables/` and `base.json`
+  aside (keep `barber_ids.json`, the ledger) and run again to save it afresh; `customize.sh rollback stage1` does
+  that itself.
+- **The package.** Its checkout must be at the commit `customize/curation.json` pins (`--any-package` skips this).
+  Its tables are merged as `merge()` in `rflib/realm_customize.py` describes: rows of races 1-8, 10 and 11 replace the
+  realm's, the last row of a repeated key wins, Goblin (9) and races 12-21 keep the realm's rows (the package's
+  Skeleton 15 and Taunka 19 are never taken), every texture is renamed to `Character\Ascension\<its path>`, the
+  curation hides rows, 10 and 11 are copied to 15 and 19, the race filters run, HelmetGeosetVisData takes the
+  package's bits of races 1-11 with bit 15 = bit 10 and bit 19 = bit 11, and BarberShopStyle gets hair, features and
+  skin rows with ledger ids and the server's price factors. CreatureDisplayInfoExtra is not merged: its NPC looks only
+  move to the new numbers, like the characters.
+- **Missing textures** (rows that name files the package lacks and the game does not have) are made from the nearest
+  texture of the same race, sex, section, variation and slot, moved by the colour change of a texture that exists at
+  both colours (the row's other slot, another variation, the hair texture for features and scalps, the skin for
+  faces), and named `Character\Ascension\Rebuilt\<hash>\<path>`. With no source, a features row keeps no paint and any
+  other row is hidden; the report lists both.
+- **Every pack combination.** The tables are forged into the archive each combination reads them from (a base
+  archive's table goes into `archives.own`, `Patch-R.MPQ`); two combinations that need different copies in one archive
+  stop it. The server copies are the combination without packs; every combination must agree on what the server
+  reads (`appearance-hashes.json`) and on BarberShopStyle.dbc byte for byte.
+- **Art.** The textures rows name go into `patch-6.MPQ` (`patch-7.MPQ` past `--art-max-mb`), the package's `.m2`,
+  `.skin` and `.anim` files and the textures they name themselves into `patch-~.MPQ`, which loads above every
+  lettered patch, the marks and eyes into `patch-K.MPQ`. Goblin, GoblinOld, Naga and `Textures\BakedNPCTextures` are
+  not shipped. Each archive holds `Bleakhold\customize-<role>.json` with the SHA-1 of its contents: an archive the
+  realm already has with the same contents is not written again, so stage 2 rebuilds `Patch-R.MPQ` and writes
+  `patch-K.MPQ` only. `patch-6.MPQ` also holds the package's LICENSE and a note of what RaceForge changed.
+- **`--move-art patch-O.MPQ`** moves every other file of the table archives (not DBFilesClient, not skins' files, which
+  its next run moves to `--art-archive`) into that archive, once, so `Patch-R.MPQ` holds tables only and a later
+  change of a table makes players download a few MB. A file stays where an archive between the two holds the same
+  name in any pack combination.
+
+The checks (any one failing writes no archive, and the exit code is 1):
+
+- one row per CharSections key, the table sorted, every value at most 255, no third texture in the package's face
+  and features rows, faces below 40, every features value at every hair colour players can pick, 15 and 19 the copies
+  of 10 and 11 but for their filters;
+- every texture a row names is in an archive, and pastes at componentTextureLevel 7, 8 and 9 (`PasteToSection`'s
+  loop, contract "File rules"); every `Character\Ascension\` name resolves, in every combination, to the planned file;
+- every race and sex's model (ChrRaces -> CreatureDisplayInfo -> CreatureModelData, as the client finds it in each
+  combination) has every geoset its selectable rows need (hair styles, the five features geosets, 1703 for eye rows)
+  and reads each of its `.anim` files from its own archive, byte for byte (`rflib/geosets.py`);
+- the archives read back: the planned tables, every other file kept, the planned new files.
+
+`--marks <marks_manifest.json>` (stage 2) adds the rows of the contract's encodings from MarkForge's manifest, checks
+every file of it (SHA-1, size, palette, alpha, the `_Glow` alpha), refuses a B that changed since the marks went live,
+and writes `marks_rollback.sql`.
+
+Output:
+
+| Path | Contents |
+|---|---|
+| `client\<archive>` | The rebuilt table archives at their place in the patch folder, and the new archives |
+| `install.json` | For `install`: the table archives with the files they replace, the new archives as new |
+| `server\dbc\*.dbc` | The six tables for the server's data/dbc (the five merged ones and CreatureDisplayInfoExtra) |
+| `server\appearance-hashes.json` | The server-visible hashes (contract, "Ids") |
+| `server\barber_ids.json` | A copy of the ledger as this run left it |
+| `server\sql\remap_characters.sql`, `restore_characters.sql` | The existing characters' remap and its way back (contract, "Existing characters") |
+| `server\sql\count_hidden.sql` | Characters on a hidden skin, or on a hidden face on the skin colour it is hidden at (read only; every count must be 0 after the remap) |
+| `server\sql\marks_rollback.sql` | With `--marks`: every features value and face back to its base |
+| `report.txt`, `summary.json` | Where each combination reads each table, the merge notes, hidden rows and why, rebuilt and dropped textures, the archives, the models, the remap, the hashes, every failed check |
+
+The ledger (`barber_ids.json`) is saved into the base only when every check passed.
+
+## Picker data (`raceforge.py picker-data`)
+
+`picker-data` writes `Interface/Bleakhold/Glue/BleakholdCustomizeData.lua` and
+`Interface/AddOns/Bleakhold/BarberData.lua` (contract, "Picker data") from `customize/curation.json`,
+`customize/catalogue.json` and `customize/package_counts.json`, with the same curation, clones and race filters as
+`customize` and every race and sex with all 12 looks and eyes 1-5.
+`--check` writes nothing and fails when a file is not what it makes (CI runs it). After a change of the curation or
+the catalogue, run `python3 -I Tools/RaceForge/raceforge.py picker-data` and commit the two Lua files.
+
+`package_counts.json` holds the pinned package's CharSections rows of races 1-11 as numbers only (section, variation,
+flags, colour ranges) and B per race and sex; no art and no names. After the pin moves to another package commit:
+`raceforge.py picker-data --package <the checkout at that commit>` writes it again with the Lua files.
+
 ## Checks
 
 `build` re-reads what it wrote and checks:
@@ -764,5 +1248,18 @@ lines in it, a binary file, line numbers past a form feed, a Windows-1252 ellips
 line), `--out` (a folder, one file per different copy), `--list` (the `*` marks, another combination's archive, a file
 only one pack has), a file in no archive, a path and a `--list` folder a shell has stripped of their backslashes,
 `alternate.MPQ` above every patch, and an archive without a listfile.
+
+`test_realm_customize.py` runs `customize` on a made-up realm (`tests/synth_customize.py`: High Elf and Eredar in
+`Patch-R.MPQ`'s slots 15 and 19 as on the live realm, an HD pack archive with its own model, and a made-up package
+that moves the Death Knight skins, adds faces, styles and colours, repeats a row, lacks two textures and has rows of
+Skeleton 15, Taunka 19 and Goblin that must be dropped): stage 1 with `--move-art`, install, stage 2 with a made-up
+marks manifest, install, `skins --art-archive`, install, then every table, archive, hash, the ledger, the saved base and
+the remap SQL; the refusals (an unpinned package, merged tables without a base, a texture size that would hang the
+client, a model without a needed geoset or with another archive's `.anim`, eyes without geoset 1703, a third texture
+in the package, a changed B, a name outside customize's); the curation and the ledger. `test_marks_rows.py` covers the
+encodings, the flag rules, the paste rule, the catalogue, the manifest and the mark and eye rows; `test_remap.py` the
+mapping and its SQL on SQLite (run twice, corpses, a restore after a player changed their look, the marks rollback);
+`test_picker_data.py` the counts, the client's lists on the real numbers, the Lua (120 columns, the client's Lua 5.1
+when `Tools/UiLint/build/wowlua` is built), `--check`, and that its lists equal those of customize's own merge.
 
 After a change to the Rec classes, regenerate the layouts with `py -3 -I Tools\RaceForge\raceforge.py schemas --write`.

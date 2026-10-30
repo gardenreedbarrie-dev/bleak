@@ -1,0 +1,79 @@
+{
+  "race": "NightElf",
+  "designs": [
+    {
+      "key": "MoonwellSigils",
+      "name": "Moonwell Sigils",
+      "lore": "Elune's phases as the moonwell priestesses wear them: the moon waxing and waning down the spine, a collarbone arc, moon-leaves down the outer arm, moon dots at the wrists and ankles, crescents under the eyes.",
+      "elements": [
+        {"on": "torso", "kind": "column", "from": [0.45, 1.0], "to": [2.05, 1.0], "count": 5, "phases": true,
+         "shape": {"shape": "crescent", "r": 2.2, "rot": -90, "fill": 0.8}, "rim": 0.22, "link": 0.14},
+        {"on": "torso", "kind": "ring", "at": [1.25, 1.0], "r": 3.6, "w": 0.16, "glow": 0.6},
+        {"on": "torso", "kind": "line", "smooth": true, "pts": [[0.32, 0.0], [0.22, 0.1], [0.24, 0.2], [0.34, 0.28]], "taper": [0.34, 0.12]},
+        {"on": "torso", "kind": "column", "from": [0.5, 0.0], "to": [0.8, 0.0], "count": 3, "scale": [1.0, 0.55],
+         "shape": {"shape": "disc", "r": 0.8, "fill": 1.0}},
+        {"on": "torso", "kind": "shape", "shape": "crescent", "at": [1.62, 0.0], "r": 3.0, "rot": -90, "thick": 0.32, "fill": 0.75, "rim": 0.25},
+        {"on": "arm", "kind": "vine", "pts": [[0.3, 0.0], [1.0, 0.02], [1.8, 0.0]], "amp": 1.5, "period": 13, "w": 0.24,
+         "leaf": {"len": 2.6, "wid": 1.0, "every": 0.5, "fill": 0.65}},
+        {"on": "arm", "kind": "band", "t": 1.86, "motif": "dots", "n": 10, "size": 1.1, "rails": 0.12, "gap": 1.5},
+        {"on": "leg", "kind": "column", "from": [1.15, 0.0], "to": [1.8, 0.0], "count": 8, "scale": [1.0, 0.7],
+         "shape": {"shape": "disc", "r": 0.48, "fill": 1.0}},
+        {"on": "leg", "kind": "band", "t": 1.9, "motif": "diamonds", "n": 12, "size": 1.25, "rails": 0.12, "gap": 1.4},
+        {"on": "face", "kind": "arc", "at": [0.5, -0.06], "r": 0.44, "from": -150, "to": -35, "w": 0.022, "taper": [0.012, 0.03]},
+        {"on": "face", "kind": "shape", "shape": "crescent", "at": [0.0, 0.78], "r": 0.11, "rot": -90, "thick": 0.4, "fill": 0.85, "rim": 0.014},
+        {"on": "face", "kind": "column", "from": [0.62, -0.62], "to": [0.78, -0.42], "count": 3, "scale": [0.6, 1.0],
+         "shape": {"shape": "disc", "r": 0.03, "fill": 1.0}}
+      ]
+    },
+    {
+      "key": "CenarionVines",
+      "name": "Cenarion Vines",
+      "lore": "The druids' living vines: one leafy tendril winds down each arm and leg and climbs the flank to the ribs, with a pair of leaves at the temples.",
+      "elements": [
+        {"on": "arm", "kind": "helix", "from": 0.2, "to": 2.05, "turns": 1.25, "phase": 0.05, "w": 0.26,
+         "leaf": {"len": 2.4, "wid": 0.95, "every": 0.17, "fill": 0.65}},
+        {"on": "leg", "kind": "helix", "from": 0.25, "to": 1.85, "turns": 1.0, "phase": 0.1, "w": 0.28,
+         "leaf": {"len": 2.6, "wid": 1.0, "every": 0.16, "fill": 0.65}},
+        {"on": "torso", "kind": "vine", "pts": [[2.9, 0.47], [2.2, 0.5], [1.5, 0.52], [0.9, 0.56]], "amp": 1.3, "period": 11, "w": 0.24,
+         "leaf": {"len": 2.4, "wid": 0.95, "every": 0.5, "fill": 0.6}},
+        {"on": "face", "kind": "shape", "shape": "leaf", "at": [0.92, 0.18], "r": 0.11, "len": 0.24, "wid": 0.09, "rot": 120, "fill": 0.7, "rim": 0.012},
+        {"on": "face", "kind": "shape", "shape": "leaf", "at": [0.98, 0.0], "r": 0.09, "len": 0.18, "wid": 0.07, "rot": 80, "fill": 0.7, "rim": 0.012},
+        {"on": "face", "kind": "line", "smooth": true, "pts": [[0.8, 0.32], [0.95, 0.12], [0.97, -0.12]], "w": 0.014}
+      ]
+    },
+    {
+      "key": "SentinelTalon",
+      "name": "Sentinel Talon",
+      "lore": "The Sentinels' owl-talon marks: three claw stripes raking down from the temple, chevrons stacked on the shoulders and thighs, a feathered line down each forearm.",
+      "elements": [
+        {"on": "face", "kind": "claws", "from": [0.98, 0.22], "to": [0.42, -0.8], "count": 3, "spacing": 0.1, "curve": 0.06, "w": 0.03, "taper": [0.036, 0.01]},
+        {"on": "arm", "kind": "chevron", "at": [0.22, 0.0], "wid": 4.4, "h": 1.9, "w": 0.32},
+        {"on": "arm", "kind": "chevron", "at": [0.38, 0.0], "wid": 3.6, "h": 1.6, "w": 0.28},
+        {"on": "arm", "kind": "chevron", "at": [0.52, 0.0], "wid": 2.8, "h": 1.3, "w": 0.24},
+        {"on": "arm", "kind": "line", "pts": [[1.15, 0.0], [1.9, 0.0]], "w": 0.18},
+        {"on": "arm", "kind": "stripes", "from": [1.2, 0.0], "to": [1.85, 0.0], "count": 6, "len": 3.2, "angle": 30, "taper": [0.3, 0.06]},
+        {"on": "leg", "kind": "chevron", "at": [0.25, 0.0], "wid": 5.0, "h": 2.2, "w": 0.34},
+        {"on": "leg", "kind": "chevron", "at": [0.42, 0.0], "wid": 4.0, "h": 1.8, "w": 0.3},
+        {"on": "leg", "kind": "chevron", "at": [0.57, 0.0], "wid": 3.0, "h": 1.4, "w": 0.26},
+        {"on": "torso", "kind": "line", "smooth": true, "pts": [[0.35, 0.92], [0.7, 0.8], [1.15, 0.78]], "taper": [0.4, 0.1]},
+        {"on": "torso", "kind": "line", "smooth": true, "pts": [[0.5, 0.97], [0.95, 0.88], [1.4, 0.86]], "taper": [0.36, 0.08]}
+      ]
+    },
+    {
+      "key": "Starfall",
+      "name": "Starfall",
+      "lore": "The night sky the Kaldorei have watched for ten thousand years: constellations across the shoulders and down the back, a falling star along each forearm, star freckles on the cheekbones.",
+      "elements": [
+        {"on": "torso", "kind": "constellation", "area": [[0.25, 0.72], [1.3, 0.98]], "count": 7, "seed": 41, "r": 0.85, "w": 0.13},
+        {"on": "torso", "kind": "constellation", "area": [[1.4, 0.8], [2.4, 0.98]], "count": 5, "seed": 77, "r": 0.75, "w": 0.13},
+        {"on": "arm", "kind": "constellation", "area": [[0.15, -0.12], [0.75, 0.12]], "count": 5, "seed": 19, "r": 0.8, "w": 0.13},
+        {"on": "arm", "kind": "line", "pts": [[1.25, 0.08], [1.9, -0.04]], "taper": [0.06, 0.38]},
+        {"on": "arm", "kind": "shape", "shape": "star", "n": 4, "inner": 0.32, "at": [1.92, -0.045], "r": 1.4, "fill": 1.0},
+        {"on": "leg", "kind": "constellation", "area": [[0.15, -0.1], [0.75, 0.1]], "count": 5, "seed": 23, "r": 0.8, "w": 0.13},
+        {"on": "face", "kind": "shape", "shape": "star", "n": 4, "inner": 0.35, "at": [0.72, -0.48], "r": 0.06, "fill": 1.0},
+        {"on": "face", "kind": "shape", "shape": "star", "n": 4, "inner": 0.35, "at": [0.86, -0.36], "r": 0.04, "fill": 1.0},
+        {"on": "face", "kind": "shape", "shape": "star", "n": 4, "inner": 0.35, "at": [0.6, -0.6], "r": 0.035, "fill": 1.0}
+      ]
+    }
+  ]
+}

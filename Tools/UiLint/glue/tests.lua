@@ -33,6 +33,8 @@ if SCENARIO:find("^custom") or SCENARIO == "races12-nudged" or SCENARIO == "race
 end
 
 dofile(HARNESS .. "/stock.lua")
+-- The stock customization rows and the option lists behind them (Bleakhold.exe's functions for the picker-* scenarios).
+dofile(HARNESS .. "/customize_stock.lua")(SCENARIO)
 
 -- A realm patch's own two-names screen (names_realm.lua): its boxes exist before the Bleakhold glue loads.
 if SCENARIO:find("^names%-realm") then
@@ -75,7 +77,7 @@ local entries = {}
 for line in toc:gmatch("[^\r\n]+") do
     if line:sub(1, 1) ~= "#" then entries[#entries + 1] = line:gsub("%s+$", "") end
 end
-check(#entries == 6, "TOC lists 6 files")
+check(#entries == 8, "TOC lists 8 files")
 for _, entry in ipairs(entries) do
     local path = GLUE .. "/" .. entry:gsub("\\", "/")
     check(exists(path), "TOC entry resolves: " .. entry)
@@ -829,6 +831,9 @@ local ok, err = pcall(function()
     elseif SCENARIO:find("^login") then loginScenario()
     elseif MOCK.nameGlue then realmNamesScenario()
     elseif SCENARIO:find("^names") then namesScenario()
+    elseif SCENARIO:find("^picker") then
+        -- the appearance rows (BleakholdCustomize.lua): Tools/UiLint/tests/test_customize_glue.lua
+        dofile(HARNESS .. "/../tests/test_customize_glue.lua")({ check = check, scenario = SCENARIO, harness = HARNESS })
     elseif SCENARIO == "races12" then racesScenario(12)
     elseif SCENARIO == "races12-female" then racesScenario(12, true)
     elseif SCENARIO == "races10" then racesScenario(10)

@@ -48,7 +48,7 @@ import re
 import shutil
 from dataclasses import dataclass, field
 
-from . import blp, install, recolor, schema_access, update
+from . import appearance, blp, install, recolor, schema_access, update
 from .config import Config, RaceConfig
 from .dbc import DbcError, DbcTable, to_signed
 from .validate import Validation
@@ -69,6 +69,16 @@ SECTION_NAMES = {0: "skin", 1: "face", 2: "facial hair", 3: "hair", 4: "underwea
 # The sections whose colour index is the skin colour: hair and facial hair count hair colours instead.
 SKIN_COLOUR_SECTIONS = (0, 1, 4)
 DEATH_KNIGHT = 0x4  # CharSections flag of the Death Knight rows (ComponentFlagsMatch)
+SKIN = 0
+FACE = 1
+UNDERWEAR = 4
+# Opaque underwear (the package's NakedPelvis/NakedTorso: a copy of the skin with the garment painted in) is pasted
+# over a whole section when nothing is worn there (CreateRequestLU: texture 0 over LU, CreateRequestTU: texture 1
+# over TU, WoW/Common/ComponentCore/CharacterComponent.cpp): its rectangle of the 512 skin layout, (x, y, w, h).
+UNDERWEAR_RECTS = {0: (256, 192, 256, 128), 1: (256, 0, 256, 128)}
+GARMENT_FLOOR = 22.0  # a texel is cloth when it differs from the skin by more than max(this, median + 4 MAD)
+UNDERWEAR_VERSION = "raceforge-underwear-1"
+NEAR_DUPLICATE_DE = 2.0  # customize/curation.json near_duplicate_delta_e: visible skins' targets at least this apart
 SEXES = {0: "Male", 1: "Female"}
 OUT_ENTRIES = ("client", "merged", "staging", "preview", "report.txt", "install.json")
 SPACE_MARGIN = 256 * 1024 * 1024
@@ -469,7 +479,10 @@ class Forged:
     source_sizes: dict[str, tuple[int, int]] = field(default_factory=dict)  # new name -> the source's width, height
     expected_names: dict[tuple[int, int], str] = field(default_factory=dict)  # (row index, slot) -> the race's name
     race_rows: set = field(default_factory=set)  # row indexes of the skinned races
-    colours: list[Colour] = field(default_factory=list)
+    colours: list[Colour] = field(default_factory=list)  # the visible skin colours only
+    # (race, sex, colour index) -> the numbers its rows are recoloured with; a hidden skin colour has the ones of its
+    # nearest visible colour (nearest_visible())
+    skin_transforms: dict[tuple[str, int, int], recolor.Transform] = field(default_factory=dict)
     rows_recoloured: int = 0
     rows_changed: int = 0  # rows whose texture names differ from the realm's copy
     rows_restored: int = 0
@@ -524,6 +537,7 @@ class Recolourer:
         self.stats: dict[tuple[str, str], recolor.SkinColour | None] = {}
         self.transforms: dict[str, recolor.Transform] = {}
         self.textures: dict[tuple[str, str], bytes] = {}
+        self.decoded: dict[str, tuple[int, int, bytearray]] = {}
 
     def winner(self, name: str, packs_on: frozenset) -> tuple[GameArchive | None, bytes | None]:
         archive = self.game.patchset.top(name, packs_on)
@@ -582,6 +596,142 @@ class Recolourer:
                 raise SkinsError(str(e)) from None
 
         return digest.hexdigest()[:HASH_DIGITS], self.textures[key]
+
+    def decode(self, data: bytes, where: str) -> tuple[int, int, bytearray]:
+        key = hashlib.sha1(data).hexdigest()
+
+        if key not in self.decoded:
+            try:
+                self.decoded[key] = blp.decode(data, where)
+            except blp.BlpError as e:
+                raise SkinsError(str(e)) from None
+
+        return self.decoded[key]
+
+    def underwear(self, data: bytes, where: str, slot: int, skin: bytes, skin_where: str,
+                  transform: recolor.Transform) -> tuple[str, bytes]:
+        """(hash, texture) of an opaque underwear texture recoloured where it is bare skin (underwear_texture()):
+        the hash covers the underwear, the skin it was painted from, the colour numbers, the cloth threshold and the
+        algorithm version."""
+        params = canonical(transform.params())
+        digest = hashlib.sha1()
+        digest.update(f"{UNDERWEAR_VERSION}\0{GARMENT_FLOOR}\0{slot}\0{recolor.ALGORITHM_VERSION}\0".encode())
+        digest.update(params.encode() + b"\0" + hashlib.sha1(skin).digest())
+        digest.update(data)
+        key = (digest.hexdigest(), "underwear")
+
+        if key not in self.textures:
+            _, recoloured = self.recoloured(skin, skin_where, transform)
+            self.textures[key] = underwear_texture(data, where, slot, self.decode(skin, skin_where),
+                                                   self.decode(recoloured, skin_where), self.decode(data, where))
+
+        return digest.hexdigest()[:HASH_DIGITS], self.textures[key]
+
+
+# --- opaque underwear --------------------------------------------------------------------------------------------
+
+
+def skin_rect(skin: tuple[int, int, bytearray], slot: int, width: int, height: int) -> bytearray:
+    """The skin texture's rectangle that underwear texture `slot` covers (UNDERWEAR_RECTS, scaled to the skin's
+    size), brought to width x height (each texel the one under its centre)."""
+    sw, sh, rgba = skin
+    x, y, w, h = UNDERWEAR_RECTS[slot]
+    fx, fy = sw / 512, sh / 512
+    out = bytearray(width * height * 4)
+
+    for ty in range(height):
+        sy = min(sh - 1, int((y + (ty + 0.5) * h / height) * fy))
+
+        for tx in range(width):
+            sx = min(sw - 1, int((x + (tx + 0.5) * w / width) * fx))
+            o, p = 4 * (ty * width + tx), 4 * (sy * sw + sx)
+            out[o:o + 4] = rgba[p:p + 4]
+
+    return out
+
+
+def garment_mask(underwear: bytearray, skin: bytearray, width: int, height: int) -> tuple[list[bool], float]:
+    """Where an opaque underwear texture is cloth, not skin: as MarkForge's atlas.garment_from, a texel whose largest
+    channel difference from the skin it was painted from is above max(GARMENT_FLOOR, median + 4 * MAD), cleaned by a
+    3x3 majority and grown by 2 texels. Returns the mask (row by row) and the threshold."""
+    n = width * height
+    d = [max(abs(underwear[4 * i] - skin[4 * i]), abs(underwear[4 * i + 1] - skin[4 * i + 1]),
+             abs(underwear[4 * i + 2] - skin[4 * i + 2])) for i in range(n)]
+    ordered = sorted(d)
+    median = (ordered[(n - 1) // 2] + ordered[n // 2]) / 2
+    spread = sorted(abs(v - median) for v in d)
+    mad = (spread[(n - 1) // 2] + spread[n // 2]) / 2
+    threshold = max(GARMENT_FLOOR, median + 4.0 * mad)
+    cloth = [v > threshold for v in d]
+    voted = [False] * n
+
+    for y in range(height):
+        for x in range(width):
+            votes = 0
+
+            for yy in (y - 1, y, y + 1):
+                if 0 <= yy < height:
+                    row = yy * width
+
+                    for xx in (x - 1, x, x + 1):
+                        if 0 <= xx < width and cloth[row + xx]:
+                            votes += 1
+
+            voted[y * width + x] = votes >= 5
+
+    for _ in range(2):
+        grown = list(voted)
+
+        for y in range(height):
+            for x in range(width):
+                i = y * width + x
+
+                if not voted[i] and ((x > 0 and voted[i - 1]) or (x + 1 < width and voted[i + 1])
+                                     or (y > 0 and voted[i - width]) or (y + 1 < height and voted[i + width])):
+                    grown[i] = True
+
+        voted = grown
+
+    return voted, threshold
+
+
+def underwear_texture(data: bytes, where: str, slot: int, skin: tuple, recoloured_skin: tuple,
+                      underwear: tuple) -> bytes:
+    """An opaque palette underwear texture with its bare skin recoloured: each texel that is not cloth
+    (garment_mask(), against the original skin it was painted from) takes the colour of the recoloured skin's texel
+    it covers; the cloth keeps its colour. Re-quantised to 256 colours, with the original's header, size and level
+    count, no alpha (alphaSize 0), every level made again from the first."""
+    import blpconvert  # noqa: E402  (Tools/BlpConvert, on sys.path through Tools/MapForge/dbc)
+
+    info = blp.parse(data, where)
+
+    if info.kind != "palette":
+        raise SkinsError(f"{where}: opaque underwear in {info.kind}, not a palette texture: it cannot be recoloured "
+                         "where it is bare skin")
+
+    width, height, rgba = underwear
+    mask, _ = garment_mask(rgba, skin_rect(skin, slot, width, height), width, height)
+    new = skin_rect(recoloured_skin, slot, width, height)
+    out = bytearray(rgba)
+
+    for i, cloth in enumerate(mask):
+        if not cloth:
+            out[4 * i:4 * i + 3] = new[4 * i:4 * i + 3]
+
+        out[4 * i + 3] = 255
+
+    levels = blpconvert.build_mips(blpconvert.Image(width, height, out), mips=len(info.levels) > 1)
+    levels = levels[:len(info.levels)]
+
+    for level in levels:
+        level.data[3::4] = b"\xff" * (level.width * level.height)
+
+    palette, indices = blpconvert.quantize_pal8(levels)
+
+    try:
+        return blp.palette_texture(data, where, palette, indices)
+    except blp.BlpError as e:
+        raise SkinsError(str(e)) from None
 
 
 def canonical(value) -> str:
@@ -681,6 +831,26 @@ def forge(game: Game, label: str, packs_on: frozenset, races: list[SkinRace], wo
     return forged
 
 
+def skin_visible(flags: int) -> bool:
+    """Whether someone can pick a skin row with these flags, at creation or in the world, Death Knight or not."""
+    return any(appearance.selectable(flags, w, dk) for w in appearance.WHERE for dk in (False, True))
+
+
+def nearest_visible(found: dict[bool, dict[int, tuple]],
+                    hidden: dict[bool, dict[int, tuple]]) -> dict[int, int | None]:
+    """For each hidden skin colour of one sex ({dk: {index: (name, SkinColour)}}), the visible colour whose numbers it
+    takes: the one of the same ramp (living or Death Knight) whose skin lightness is nearest, ties to the lower index;
+    the other ramp's when its own has none; None when the sex has no visible skin."""
+    out = {}
+
+    for dk in (False, True):
+        for k, (_, skin) in sorted(hidden[dk].items()):
+            pool = found[dk] or found[not dk]
+            out[k] = min(pool, key=lambda v: (abs(pool[v][1].L - skin.L), v)) if pool else None
+
+    return out
+
+
 def forge_race(forged: Forged, race: SkinRace, game: Game, packs_on: frozenset, label: str, work: Recolourer):
     table = forged.after
     rows = [(i, row) for i, row in enumerate(table.rows) if table.get(row, "raceID") == race.race.id]
@@ -703,6 +873,7 @@ def forge_race(forged: Forged, race: SkinRace, game: Game, packs_on: frozenset, 
     # The skin colours: the skin row (section 0, variation 0) of each sex and colour index, the last one as
     # BuildComponentArray takes it.
     transforms: dict[tuple[int, int], recolor.Transform] = {}
+    skin_sources: dict[tuple[int, int], str] = {}  # (sex, colour) -> the skin row's texture 0 (its original)
 
     if race.sections:
         skin_rows = {}
@@ -712,7 +883,11 @@ def forge_race(forged: Forged, race: SkinRace, game: Game, packs_on: frozenset, 
                 skin_rows[(table.get(row, "sexID"), table.get(row, "colorIndex"))] = row
 
         for sex in sorted({sex for sex, _ in skin_rows}):
+            # only the skins someone can pick (no 0x8, flag 0x1 or 0x2) are ranked and spread over the palette, on
+            # the living ramp or, with 0x4, the Death Knight one; a hidden skin (an NPC's, or one the curation hid)
+            # takes the numbers of the nearest visible one (nearest_visible())
             found = {False: {}, True: {}}
+            hidden = {False: {}, True: {}}
 
             for (s, k), row in sorted(skin_rows.items()):
                 if s != sex:
@@ -724,7 +899,9 @@ def forge_race(forged: Forged, race: SkinRace, game: Game, packs_on: frozenset, 
                     raise SkinsError(f"{race.race.name}: {row_label(table, row)} names no texture")
 
                 skin = work.skin_colour(read_source(name, row), name, race.settings)
-                found[bool(table.get(row, "flags") & DEATH_KNIGHT)][k] = (name, skin)
+                skin_sources[(sex, k)] = name
+                flags = table.get(row, "flags")
+                (found if skin_visible(flags) else hidden)[bool(flags & DEATH_KNIGHT)][k] = (name, skin)
 
             # the hue a nearly grey skin's colours are also weighed against (recolor.Transform): the living skins'
             living = recolor.living_hue([skin for _, skin in found[False].values()], race.settings)
@@ -740,10 +917,32 @@ def forge_race(forged: Forged, race: SkinRace, game: Game, packs_on: frozenset, 
                     transforms[(sex, k)] = transform
                     forged.colours.append(Colour(race.name, sex, k, dk, name, skin, goals[k], transform))
 
+            for k, source in nearest_visible(found, hidden).items():
+                if source is None:
+                    # no visible skin of this sex at all: the hidden ones are spread over their own ramp, as before
+                    continue
+
+                transforms[(sex, k)] = transforms[(sex, source)]
+
+            for dk in (False, True):
+                alone = {k: skin for k, (_, skin) in hidden[dk].items() if (sex, k) not in transforms}
+
+                if alone:
+                    goals = recolor.targets(alone, race.palette_lab(dk))
+
+                    for k, skin in alone.items():
+                        transforms[(sex, k)] = work.transform(skin, goals[k], race.settings, living)
+
+        forged.skin_transforms.update({(race.name, sex, k): t for (sex, k), t in transforms.items()})
+
+    # opaque underwear (the package's) covers the skin: recoloured where it is bare skin when its skin colour is
+    underwear_too = SKIN in race.sections and UNDERWEAR not in race.sections
+
     for index, row in rows:
         section = table.get(row, "baseSection")
         sex, colour = table.get(row, "sexID"), table.get(row, "colorIndex")
         recoloured = section in race.sections
+        painted = False  # an opaque underwear texture of the row recoloured where it is bare skin
         changed = False
 
         for slot in range(3):
@@ -754,6 +953,62 @@ def forge_race(forged: Forged, race: SkinRace, game: Game, packs_on: frozenset, 
                 continue
 
             source = source_path(name, race)
+
+            if underwear_too and section == UNDERWEAR and slot in UNDERWEAR_RECTS:
+                data = read_source(source, row)
+
+                try:
+                    covers = blp.opaque(data, source)
+                except blp.BlpError as e:
+                    raise SkinsError(str(e)) from None
+
+                if covers:
+                    transform = transforms.get((sex, colour))
+                    skin_name = skin_sources.get((sex, colour))
+
+                    if transform is None or skin_name is None:
+                        raise SkinsError(f"{race.race.name}: {row_label(table, row)} names the opaque underwear "
+                                         f"{source}, which covers the recoloured skin, but there is no recoloured "
+                                         f"skin of colour {colour} to paint it from: it would stay on its original "
+                                         "name, with the template race's skin colour")
+
+                    try:
+                        digest, texture = work.underwear(data, source, slot, read_source(skin_name, row), skin_name,
+                                                         transform)
+                    except SkinsError as e:
+                        raise SkinsError(f"{race.race.name}: {row_label(table, row)}: {e}") from None
+
+                    new_name = f"{race.prefix}{digest}\\{source}"
+
+                    if len(new_name.encode("utf-8")) > MAX_NAME_BYTES:
+                        raise SkinsError(f"{new_name}: {len(new_name.encode('utf-8'))} bytes, longer than the "
+                                         f"{MAX_NAME_BYTES} the client takes")
+
+                    forged.textures[new_name] = texture
+                    forged.sources[new_name] = source
+                    info = blp.parse(data, source)
+                    forged.source_sizes[new_name] = (info.width, info.height)
+                    painted = True
+
+                    if new_name != name:
+                        table.set_str(row, column, new_name)
+
+                    if new_name != forged.before.get_str(forged.before.rows[index], column):
+                        changed = True
+
+                    forged.expected_names[(index, slot)] = new_name
+                    continue
+
+            # never recoloured: a face row's third texture (the eye sprite) and every mark or eye texture
+            if recoloured and (section == FACE and slot == 2 or appearance.is_ours(source)):
+                if source != name:
+                    table.set_str(row, column, source)
+
+                if source != forged.before.get_str(forged.before.rows[index], column):
+                    changed = True
+
+                forged.expected_names[(index, slot)] = source
+                continue
 
             if recoloured:
                 transform = transforms.get((sex, colour))
@@ -786,9 +1041,9 @@ def forge_race(forged: Forged, race: SkinRace, game: Game, packs_on: frozenset, 
 
             forged.expected_names[(index, slot)] = new_name
 
-        forged.rows_recoloured += int(recoloured)
+        forged.rows_recoloured += int(recoloured or painted)
         forged.rows_changed += int(changed)
-        forged.rows_restored += int(changed and not recoloured)
+        forged.rows_restored += int(changed and not (recoloured or painted))
 
     forged.previews += previews_of(forged, race, rows, work, packs_on)
 
@@ -927,8 +1182,10 @@ def marker_bytes(target: Target, races: list[SkinRace]) -> bytes:
     return (json.dumps(data, indent=2) + "\n").encode("utf-8")
 
 
-def place(game: Game, forged: list[Forged], races: list[SkinRace]) -> dict[str, Target]:
-    """Which archive gets which files (see the module's docstring); SkinsError when a combination has nowhere to go."""
+def place(game: Game, forged: list[Forged], races: list[SkinRace], art: GameArchive | None = None) -> dict[str, Target]:
+    """Which archive gets which files (see the module's docstring); SkinsError when a combination has nowhere to go.
+    art (--art-archive): the recoloured textures of the archives every player loads go there instead, so a change of
+    skins rebuilds that small archive and the tables' archive, not an archive of art."""
     targets: dict[str, Target] = {}
 
     def put(archive: GameArchive, result: Forged, reason: str, labels: list[str]):
@@ -986,12 +1243,35 @@ def place(game: Game, forged: list[Forged], races: list[SkinRace]) -> dict[str, 
 
     prefixes = [r.prefix.lower() for r in races]
 
+    if art is not None:
+        art_target = targets.setdefault(art.client_path.lower(), Target(art))
+
+        for key, target in list(targets.items()):
+            if target is art_target or target.copy_for or target.archive.pack is not None:
+                continue
+
+            moving = [n for n in target.files if any(n.replace("/", "\\").lower().startswith(p) for p in prefixes)]
+
+            for name in moving:
+                data = target.files.pop(name)
+                known = next((n for n in art_target.files if key_of(n) == key_of(name)), None)
+
+                if known is not None and art_target.files[known] != data:
+                    raise SkinsError(f"{art.name} would need two different copies of {name}")
+
+                art_target.files[known or name] = data
+
+            if moving:
+                art_target.labels += target.labels
+                art_target.reasons.append(f"holds the recoloured textures of {', '.join(target.labels)} "
+                                          f"(--art-archive; their CharSections.dbc stays in {target.archive.name})")
+
     for key, target in targets.items():
         archive = target.archive
         planned = {key_of(n) for n in target.files}
         own = {key_of(COPY_MARKER)} | ({key_of(CHAR_SECTIONS)} if key in game.copies else set())
 
-        for name in archive.reader.names():
+        for name in (archive.reader.names() if archive.reader is not None else []):
             normal = name.replace("/", "\\").lower()
 
             if (any(normal.startswith(p) for p in prefixes) or key_of(name) in own) and key_of(name) not in planned:
@@ -1123,7 +1403,69 @@ class Plan:
         return [t for t in sorted(self.targets.values(), key=lambda t: t.archive.rank()) if t.changed]
 
 
-def make_plan(game: Game, config: Config, races: list[SkinRace]) -> Plan:
+def art_archive(game: Game, name: str) -> GameArchive:
+    """The --art-archive: the realm's archive of that name, or a new one (outside every pack, below or above the tables'
+    archive: the names are skins' own, so its place in the order does not matter)."""
+    if not re.fullmatch(r"(?i)patch-[4-9A-Z~]\.mpq", name):
+        raise SkinsError(f"--art-archive {name}: give a Data\\patch-<c>.MPQ name (c: 4-9, A-Z or ~)")
+
+    existing = next((a for a in game.archives if a.client_path.lower() == ("data\\" + name).lower()), None)
+
+    if existing is not None and existing.is_base:
+        raise SkinsError(f"--art-archive {name} is a base archive")
+
+    pack = patches.pack_of("Data\\" + name, game.patchset.packs)
+
+    if pack is not None:
+        raise SkinsError(f"--art-archive {name} is in the optional pack {pack}: every player must load it")
+
+    if existing is not None:
+        return existing
+
+    archive = GameArchive("", "Data\\" + name, 1, None, origin="new", rel=name)
+    game.patchset.archives.append(archive)
+    game.patchset.archives.sort(key=lambda a: a.rank())
+    return archive
+
+
+def near_duplicate_problems(forged: list[Forged], races: list[SkinRace], table_of=None) -> list[str]:
+    """Two skins a player can see whose target colours are less than NEAR_DUPLICATE_DE apart (OKLab, 0-100): the
+    curation must hide one (customize/curation.json, keep_skins)."""
+    problems = []
+
+    for result in forged:
+        table = result.after
+        visible = set()
+
+        for row in table.rows:
+            if table.get(row, "baseSection") == 0 and table.get(row, "variationIndex") == 0 and \
+                    any(appearance.selectable(table.get(row, "flags"), w, dk) for w in appearance.WHERE
+                        for dk in (False, True)):
+                visible.add((table.get(row, "raceID"), table.get(row, "sexID"), table.get(row, "colorIndex")))
+
+        by: dict[tuple[str, int, bool], dict[int, tuple]] = {}
+        race_ids = {r.name: r.race.id for r in races}
+
+        for colour in result.colours:
+            if (race_ids.get(colour.race), colour.sex, colour.index) in visible:
+                by.setdefault((colour.race, colour.sex, colour.dk), {})[colour.index] = colour.target
+
+        for (race, sex, dk), targets in sorted(by.items()):
+            keys = sorted(targets)
+
+            for i, a in enumerate(keys):
+                for b in keys[i + 1:]:
+                    d = 100 * math.dist(targets[a], targets[b])
+
+                    if d < NEAR_DUPLICATE_DE:
+                        problems.append(f"{result.label}: {race} {SEXES.get(sex, sex)}{' Death Knight' if dk else ''} "
+                                        f"skins {a} and {b} get colours {d:.1f} apart (OKLab, under "
+                                        f"{NEAR_DUPLICATE_DE}): hide one in customize/curation.json (keep_skins)")
+
+    return list(dict.fromkeys(problems))
+
+
+def make_plan(game: Game, config: Config, races: list[SkinRace], art_name: str | None = None) -> Plan:
     """Everything decided, nothing written: SkinsError when the realm does not fit."""
     unreadable = [f"{a.name}: {a.error}" for a in game.archives if a.reader is None]
 
@@ -1155,6 +1497,7 @@ def make_plan(game: Game, config: Config, races: list[SkinRace]) -> Plan:
         raise SkinsError("; ".join(dict.fromkeys(problems)))
 
     game.copies = find_copies(game)
+    art = art_archive(game, art_name) if art_name else None
     work = Recolourer(game)
     forged = [forge(game, label, packs_on, races, work) for label, packs_on in configurations]
     owners = owners_of(forged)
@@ -1165,15 +1508,15 @@ def make_plan(game: Game, config: Config, races: list[SkinRace]) -> Plan:
             owner = owners[result.holder.client_path.lower()]
             forged[i] = forge(game, result.label, result.packs_on, races, work, base=owner.data)
 
-    targets = place(game, forged, races)
-    problems = view_problems(View(game, targets), forged)
+    targets = place(game, forged, races, art)
+    problems = view_problems(View(game, targets), forged) + near_duplicate_problems(forged, races)
 
     if problems:
         raise SkinsError("the planned archives would not give every player the new skins, so nothing is written: "
                          + "; ".join(problems))
 
     for target in targets.values():
-        if target.changed:
+        if target.changed and target.archive.reader is not None:
             try:
                 # refuses an archive that cannot be copied whole (no listfile, files it does not list)
                 patches.archive_contents(target.archive.reader, target.archive.name)
@@ -1191,7 +1534,9 @@ def space_needed(plan: Plan) -> int:
     for target in plan.writes:
         reader = target.archive.reader
         total += target.archive.size + sum(len(d) for d in target.files.values())
-        staging = max(staging, sum(b.file_size for b in reader.blocks if b.flags & mpqpack.FILE_EXISTS))
+
+        if reader is not None:
+            staging = max(staging, sum(b.file_size for b in reader.blocks if b.flags & mpqpack.FILE_EXISTS))
 
     return total + staging
 
@@ -1250,8 +1595,13 @@ def write(plan: Plan, out_dir: str) -> dict[str, str]:
         stale = {key_of(n) for n in target.stale}
 
         try:
-            patches.rebuild(archive, replacements, out_path, os.path.join(out_dir, "staging"),
-                            drop=lambda n: key_of(n) in stale)
+            if archive.reader is None:  # a new --art-archive
+                mpqpack.write_archive_streaming(out_path, sorted(replacements.items()))
+            else:
+                patches.rebuild(archive, replacements, out_path, os.path.join(out_dir, "staging"),
+                                drop=lambda n: key_of(n) in stale)
+        except mpqpack.MpqError as e:
+            raise SkinsError(f"writing {out_path}: {e}") from None
         except patches.PatchError as e:
             raise SkinsError(str(e)) from None
         finally:
@@ -1309,7 +1659,7 @@ def check(plan: Plan, written: dict[str, str]) -> Validation:
             report = reader.verify()
             result.expect(not report.problems, f"{name}: passes the client reader's checks",
                           "; ".join(report.problems[:5]))
-            before = {key_of(n) for n in target.archive.reader.names()}
+            before = {key_of(n) for n in target.archive.reader.names()} if target.archive.reader is not None else set()
             after = {key_of(n) for n in reader.names()}
             stale = {key_of(n) for n in target.stale}
             planned = {key_of(n) for n in target.files}
@@ -1649,6 +1999,11 @@ def manifest_entries(plan: Plan, written: dict[str, str]) -> list[dict]:
 
     for key, path in sorted(written.items()):
         archive = plan.targets[key].archive
+
+        if archive.origin == "new":  # a new --art-archive
+            entries.append(install.entry(archive.rel, archive.client_path, "new", "", None, None, path))
+            continue
+
         entries.append(install.entry(archive.rel, archive.client_path, archive.origin, archive.path, archive.size,
                                      archive.mtime_ns, path))
 

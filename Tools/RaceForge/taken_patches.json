@@ -30,6 +30,10 @@
         {
             "comment": "Tools/CafeForge: the café archive (café models, textures, icons, markers, café-only DBC copies)",
             "names": ["patch-4.MPQ"]
+        },
+        {
+            "comment": "RaceForge customize, the realm's appearance options: patch-6 and patch-7 (the Ascension package's textures), patch-~ (its models, above every lettered patch), patch-K (marks and eye sprites), patch-O (Patch-R's old art, moved once by customize --move-art), patch-F (the High Elf purple skins, skins --art-archive)",
+            "names": ["patch-6.MPQ", "patch-7.MPQ", "patch-~.MPQ", "patch-K.MPQ", "patch-O.MPQ", "patch-F.MPQ"]
         }
     ]
 }

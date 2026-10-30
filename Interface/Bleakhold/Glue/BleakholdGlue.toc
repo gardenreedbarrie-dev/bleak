@@ -6,5 +6,7 @@ BleakholdStrings.lua
 BleakholdGlueCore.lua
 BleakholdCharacterCreate.lua
 BleakholdNames.lua
+BleakholdCustomizeData.lua
+BleakholdCustomize.lua
 BleakholdDialog.lua
 BleakholdLogin.lua

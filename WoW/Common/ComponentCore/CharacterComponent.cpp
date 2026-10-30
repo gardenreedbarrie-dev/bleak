@@ -11,6 +11,7 @@
 #include <alloca.h>
 #endif
 #include "WoW/Common/ComponentCore/CharacterComponent.h"
+#include <cstdarg>
 #include "Engine/Source/Base/Handle.h"
 #include "Engine/Source/Base/ObjectAlloc.h"
 #include "Engine/Source/Base/Prop.h"
@@ -21,8 +22,10 @@
 #include "Engine/Source/Gx/CGxDevice/CGxDevice.h"
 #include "Engine/Source/Gx/CGxTexFlags.h"
 #include "Engine/Source/Gx/Gx.h"
+#include "Engine/Source/Model2/M2Glow.h"
 #include "Engine/Source/Model2/M2Model.h"
 #include "Engine/Source/Model2/M2Scene.h"
+#include "Engine/Source/Os/OsFile.h"
 #include "Engine/Source/Os/Path.h"
 #include "Engine/Source/Os/Processor.h"
 #include "Engine/Source/Os/System.h"
@@ -33,6 +36,7 @@
 #include "Engine/Source/Storm/Source/SThread.h"
 #include "Engine/Source/Tempest/CImVector.h"
 #include "Engine/Source/Tempest/CRandom.h"
+#include "WoW/Common/ComponentCore/BleakMarks.h"
 #include "WoW/Common/ComponentCore/ComponentUtils.h"
 #include "WoW/Common/TextureCache.h"
 #include "WoW/Source/DB/DBClient/DBClient.h"
@@ -196,12 +200,134 @@ static SCritSect s_finishedListCritSect;
 // STATIC: 0x00B6BA20
 static SCritSect s_mipBitsCritSect;
 
+// BLEAKHOLD(glow): the glow bake's state. Its buffers are used on the main thread only (the worker thread pastes into
+// request buffers), sized s_glowSize (BleakMarks::GlowSize of the character texture), made at the first glow texture.
+static uint32_t s_glowSize;
+static uint32_t s_glowMipLevels;
+static CompSectionInfo s_glowSectionInfo[NUM_COMPONENT_SECTIONS];
+static MipBits* s_glowBuffer;
+static MipBits* s_glowCompressedBuffer;
+static BlpPalPixel s_blackPalette[256];
+
+// BLEAKHOLD(glow): every component (GlowSweep; main thread), and the bytes of all glow textures.
+static CCharacterComponent* s_glowList;
+static uint32_t s_glowBytes;
+static uint32_t s_glowSweepTime;
+static int32_t s_glowSweepSoon; // a whole bake found a model not yet animated: GlowSweep looks again next frame
+
+// BLEAKHOLD(glow): whether `<name>_Glow.blp` exists, by name hash (1 yes, 2 no), so each name costs one look.
+static BleakMarks::NameSet<4096> s_glowExists;
+
+// BLEAKHOLD(glow): Logs\BleakholdMarks.log and the textures it has named, so each bad file is logged once; the worker
+// thread logs too, so both go under s_bleakLogCritSect.
+static SCritSect s_bleakLogCritSect;
+static HSLOG s_bleakLog;
+static int32_t s_bleakLogTried;
+static BleakMarks::NameSet<1024> s_bleakLogged;
+static uint32_t s_marksDumpCount;
+
+// BLEAKHOLD(glow): CCharacterComponent::m_glowState
+static const uint32_t GLOW_IN_RANGE = 0x1;  // within the distance limit at the last look (it has a margin)
+static const uint32_t GLOW_REQUESTED = 0x2; // GlowSweep asked for a bake to make the glow texture
+static const uint32_t GLOW_DXT1 = 0x4;      // the glow texture is DXT1
+static const uint32_t GLOW_FAILED = 0x8;    // the glow texture could not be made (tried again after a look change)
+
+// BLEAKHOLD(glow): palettes are 256 BGRx entries, as BleakMarks::PasteAtlasRect reads them; the glow draw's section
+// mask (CM2Model::SetGlowTexture) has a bit for each of our sections
+static_assert(sizeof(BlpPalPixel) == 4, "palettes are 256 BGRx entries");
+static_assert(M2Glow::kSectionCount == NUM_COMPONENT_SECTIONS, "one glow section bit per component section");
+
+// BLEAKHOLD(glow): a line in Logs\BleakholdMarks.log (also in release builds, where DebugLog is empty). Any thread.
+static void BleakLog(const char* format, ...) {
+    s_bleakLogCritSect.Enter();
+
+    if (!s_bleakLog && !s_bleakLogTried) {
+        s_bleakLogTried = 1;
+        SLogCreate("Logs\\BleakholdMarks.log", 0, &s_bleakLog);
+    }
+
+    if (s_bleakLog) {
+        va_list args;
+        va_start(args, format);
+        SLogVWrite(s_bleakLog, format, args);
+        va_end(args);
+    }
+
+    s_bleakLogCritSect.Leave();
+}
+
+// BLEAKHOLD(glow): logs `what` about a file name once per session. Any thread.
+static void BleakLogOnce(const char* name, const char* what) {
+    uint64_t hash = BleakMarks::NameHash(name);
+    s_bleakLogCritSect.Enter();
+    bool first = s_bleakLogged.Insert(hash, 1);
+    s_bleakLogCritSect.Leave();
+
+    if (first) {
+        BleakLog("%s: %s", name ? name : "(no name)", what);
+    }
+}
+
+// BLEAKHOLD(glow): what the paste guards need to know of a loaded texture.
+static BleakMarks::TextureFacts BleakTextureFacts(void* texture, const TCTEXTUREINFO& info) {
+    BleakMarks::TextureFacts facts;
+    facts.width = info.m_width;
+    facts.height = info.m_height;
+    facts.mipCount = info.m_mipCount;
+    facts.alphaBits = info.m_alphaSize;
+    facts.palettized = TextureCacheGetPal(texture) != nullptr;
+
+    return facts;
+}
+
+// BLEAKHOLD(glow): whether a paste may go ahead: its plan pastes, and every mip level from `first` on that it reads
+// lies inside the file (checked for palettized textures, the only ones the pastes read; the others paint green as
+// they always did). Otherwise the texture is skipped and logged once. `requireOffsets`: no level may be missing (the
+// rule for marks and `_Glow` files). `lastMip`: the last level the paste reads, when it stops before the end of the
+// chain (PasteAtlasLayer); the others read every level. A chain past the cache's 16 mip offsets is refused by the
+// plans (kSkipSize), and by MipsReadable (kSkipBounds) should one get here, never cut down to 16 levels: the paste
+// loops would still read the rest. Any thread.
+static bool BleakPastePlanUsable(void* texture, const TCTEXTUREINFO& info, const BleakMarks::PastePlan& plan, bool requireOffsets, uint32_t lastMip = 0xFFFFFFFF) {
+    CACHEENTRY* entry = static_cast<CACHEENTRY*>(texture);
+    char what[160];
+
+    if (!BleakMarks::PastePlanOk(plan)) {
+        SStrPrintf(what, sizeof(what), "skipped, %s (%ux%u, %u levels, alpha %u)", BleakMarks::VerdictName(plan.verdict), static_cast<uint32_t>(info.m_width), static_cast<uint32_t>(info.m_height), static_cast<uint32_t>(info.m_mipCount), static_cast<uint32_t>(info.m_alphaSize));
+        BleakLogOnce(entry->m_fileName, what);
+        return false;
+    }
+
+    if (!TextureCacheGetPal(texture) || !entry->m_data || !info.m_mipCount) {
+        return true;
+    }
+
+    uint32_t first = plan.verdict == BleakMarks::kPasteScale ? 0 : plan.mip;
+    uint32_t last = info.m_mipCount - 1;
+
+    if (last > lastMip) {
+        last = lastMip;
+    }
+
+    if (!BleakMarks::MipsReadable(entry->m_data->m_mipOffsets, entry->m_size, BleakTextureFacts(texture, info), first, last, requireOffsets)) {
+        SStrPrintf(what, sizeof(what), "skipped, %s (%ux%u, %u bytes)", BleakMarks::VerdictName(BleakMarks::kSkipBounds), static_cast<uint32_t>(info.m_width), static_cast<uint32_t>(info.m_height), static_cast<uint32_t>(entry->m_size));
+        BleakLogOnce(entry->m_fileName, what);
+        return false;
+    }
+
+    return true;
+}
+
 // VERIFY: e87c3da6 auto
 // OFFSET: 0x00401FF0
 bool CCharacterComponent::Initialize() {
+    // BLEAKHOLD(glow): the default stays 8 (256 x 256). Level 9 (512, what the package's skins and thin marks are made
+    // for) costs four times the memory per character (a 512 DXT1 skin with mips is 171 KB, 17 MB for 100 characters,
+    // twice that in a 32-bit address space with the managed copy) and is only made the default once a 100-character
+    // city test on a 32-bit client passes (CRITIC 18). Players can set it themselves; it needs a restart.
     CCharacterComponent::g_componentTextureLevelVar = CVar::Register("componentTextureLevel", "Number of mip levels used for character component textures", 0x1, "8", &ComponentVarHandler, 0, false, nullptr, false);
     CCharacterComponent::g_componentThreadVar = CVar::Register("componentThread", "Multi thread character component processing", 0x1, "1", &ComponentVarHandler, 0, false, nullptr, false);
     CCharacterComponent::g_componentCompressVar = CVar::Register("componentCompress", "Character component texture compression", 0x1, "1", &ComponentVarHandler, 0, false, nullptr, false);
+    CCharacterComponent::RegisterBleakGlowCVars(); // BLEAKHOLD(glow)
 
     uint32_t mipLevels = CCharacterComponent::g_componentTextureLevelVar->m_intValue;
     int32_t useThread = CCharacterComponent::g_componentThreadVar->m_intValue;
@@ -919,7 +1045,7 @@ void CCharacterComponent::SetItemSlotUsingAttachSlot(ITEM_SLOT itemSlot, GEOCOMP
 
 // VERIFY: 1db943d8 manual
 // OFFSET: 0x004E82D0
-void CCharacterComponent::PasteCrappyGreen(MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel, int32_t dstMipOffset) {
+void CCharacterComponent::PasteCrappyGreen(MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel, int32_t dstMipOffset, uint32_t color) {
     uint32_t width = srcSize.x;
     uint32_t height = srcSize.y;
 
@@ -930,7 +1056,7 @@ void CCharacterComponent::PasteCrappyGreen(MipBits* dstMips, C2iVector& dstPos, 
             uint32_t* pixel = reinterpret_cast<uint32_t*>(dst);
 
             for (uint32_t x = 0; x < width; x++) {
-                pixel[x] = 0xFF00FF00;
+                pixel[x] = color; // BLEAKHOLD(glow): green, or black in the glow bake
             }
         }
 
@@ -1102,14 +1228,18 @@ void CCharacterComponent::PasteTransparent8Bit(void* texture, const BlpPalPixel*
 
 // VERIFY: 8ec155b7 manual
 // OFFSET: 0x004E89F0
-void CCharacterComponent::PasteOpaqueScale(void* texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo) {
+void CCharacterComponent::PasteOpaqueScale(void* texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, const BlpPalPixel* palOverride) {
     uint32_t srcWidth = srcInfo.m_width;
     uint32_t width = srcSize.x;
     uint32_t height = srcSize.y;
-    BlpPalPixel* pal = TextureCacheGetPal(texture);
+    const BlpPalPixel* pal = TextureCacheGetPal(texture);
 
     if (!pal) {
         return;
+    }
+
+    if (palOverride) {
+        pal = palOverride; // BLEAKHOLD(glow)
     }
 
     srcPos.x >>= 1;
@@ -1258,6 +1388,7 @@ void CCharacterComponent::SetTexturesDirty() {
 // OFFSET: 0x004E8E70
 void CCharacterComponent::CreateRequestAU() {
     this->m_request->m_baseTextures[SECTION_ARM_UPPER] = TextureCacheCopyTexture(this->m_baseVariation[VARIATION_SKIN].m_texture[0]);
+    this->MarkLayerRequest(SECTION_ARM_UPPER); // BLEAKHOLD(glow)
 
     for (int32_t layer = 0; layer < 2; layer++) {
         if ((1 << layer) & this->m_section[SECTION_ARM_UPPER].m_layerMask) {
@@ -1270,6 +1401,7 @@ void CCharacterComponent::CreateRequestAU() {
 // OFFSET: 0x004E8F00
 void CCharacterComponent::CreateRequestAL() {
     this->m_request->m_baseTextures[SECTION_ARM_LOWER] = TextureCacheCopyTexture(this->m_baseVariation[VARIATION_SKIN].m_texture[0]);
+    this->MarkLayerRequest(SECTION_ARM_LOWER); // BLEAKHOLD(glow)
 
     for (int32_t layer = 0; layer < 7; layer++) {
         if ((1 << layer) & this->m_section[SECTION_ARM_LOWER].m_layerMask) {
@@ -1282,6 +1414,7 @@ void CCharacterComponent::CreateRequestAL() {
 // OFFSET: 0x004E8F90
 void CCharacterComponent::CreateRequestHA() {
     this->m_request->m_baseTextures[SECTION_HAND] = TextureCacheCopyTexture(this->m_baseVariation[VARIATION_SKIN].m_texture[0]);
+    this->MarkLayerRequest(SECTION_HAND); // BLEAKHOLD(glow)
 
     if (this->m_section[SECTION_HAND].m_layerMask & 0x1) {
         this->m_request->AddLayer(SECTION_HAND, this->m_section[SECTION_HAND].m_layerTex[0]);
@@ -1300,6 +1433,8 @@ void CCharacterComponent::CreateRequestHU() {
     if (this->m_baseVariation[VARIATION_FACE].m_texture[1]) {
         this->m_request->AddLayer(SECTION_HEAD_UPPER, this->m_baseVariation[VARIATION_FACE].m_texture[1]);
     }
+
+    this->MarkLayerRequest(SECTION_HEAD_UPPER); // BLEAKHOLD(glow)
 
     if (this->m_baseVariation[VARIATION_FACIAL_HAIR].m_texture[1]) {
         this->m_request->AddLayer(SECTION_HEAD_UPPER, this->m_baseVariation[VARIATION_FACIAL_HAIR].m_texture[1]);
@@ -1323,6 +1458,8 @@ void CCharacterComponent::CreateRequestHL() {
         this->m_request->AddLayer(SECTION_HEAD_LOWER, this->m_baseVariation[VARIATION_FACE].m_texture[0]);
     }
 
+    this->MarkLayerRequest(SECTION_HEAD_LOWER); // BLEAKHOLD(glow)
+
     if (this->m_baseVariation[VARIATION_FACIAL_HAIR].m_texture[0]) {
         this->m_request->AddLayer(SECTION_HEAD_LOWER, this->m_baseVariation[VARIATION_FACIAL_HAIR].m_texture[0]);
     }
@@ -1341,6 +1478,8 @@ void CCharacterComponent::CreateRequestTU() {
         this->m_request->AddLayer(SECTION_TORSO_UPPER, this->m_baseVariation[VARIATION_UNDERWEAR].m_texture[1]);
     }
 
+    this->MarkLayerRequest(SECTION_TORSO_UPPER); // BLEAKHOLD(glow)
+
     for (int32_t layer = 0; layer < 5; layer++) {
         if ((1 << layer) & this->m_section[SECTION_TORSO_UPPER].m_layerMask) {
             this->m_request->AddLayer(SECTION_TORSO_UPPER, this->m_section[SECTION_TORSO_UPPER].m_layerTex[layer]);
@@ -1352,6 +1491,7 @@ void CCharacterComponent::CreateRequestTU() {
 // OFFSET: 0x004E9280
 void CCharacterComponent::CreateRequestTL() {
     this->m_request->m_baseTextures[SECTION_TORSO_LOWER] = TextureCacheCopyTexture(this->m_baseVariation[VARIATION_SKIN].m_texture[0]);
+    this->MarkLayerRequest(SECTION_TORSO_LOWER); // BLEAKHOLD(glow)
 
     for (int32_t layer = 0; layer < 7; layer++) {
         if ((1 << layer) & this->m_section[SECTION_TORSO_LOWER].m_layerMask) {
@@ -1369,6 +1509,8 @@ void CCharacterComponent::CreateRequestLU() {
         this->m_request->AddLayer(SECTION_LEG_UPPER, this->m_baseVariation[VARIATION_UNDERWEAR].m_texture[0]);
     }
 
+    this->MarkLayerRequest(SECTION_LEG_UPPER); // BLEAKHOLD(glow)
+
     int32_t first = (this->m_flags & 0x20) != 0;
     int32_t last = 3 - first;
 
@@ -1383,6 +1525,7 @@ void CCharacterComponent::CreateRequestLU() {
 // OFFSET: 0x004E9400
 void CCharacterComponent::CreateRequestLL() {
     this->m_request->m_baseTextures[SECTION_LEG_LOWER] = TextureCacheCopyTexture(this->m_baseVariation[VARIATION_SKIN].m_texture[0]);
+    this->MarkLayerRequest(SECTION_LEG_LOWER); // BLEAKHOLD(glow)
 
     int32_t first = (this->m_flags & 0x20) != 0;
     int32_t last = 2 * ((this->m_flags & 0x20) == 0) + 4;
@@ -1398,6 +1541,7 @@ void CCharacterComponent::CreateRequestLL() {
 // OFFSET: 0x004E94B0
 void CCharacterComponent::CreateRequestFO() {
     this->m_request->m_baseTextures[SECTION_FOOT] = TextureCacheCopyTexture(this->m_baseVariation[VARIATION_SKIN].m_texture[0]);
+    this->MarkLayerRequest(SECTION_FOOT); // BLEAKHOLD(glow)
 
     if (this->m_section[SECTION_FOOT].m_layerMask & 0x1) {
         this->m_request->AddLayer(SECTION_FOOT, this->m_section[SECTION_FOOT].m_layerTex[0]);
@@ -1556,15 +1700,13 @@ static void CompressBlock(const uint8_t* src, uint32_t stride, uint8_t* out) {
     out[6] = indices >> 16;
 }
 
-// VERIFY: b6708f12 manual
-// OFFSET: 0x004E9BA0
-static void ComputeMipLevels(MipBits* src, MipBits* dst) {
-    int32_t size = s_textureSize;
-
+// BLEAKHOLD(glow): the body of the original ComputeMipLevels (0x004E9BA0, below), sized so the glow texture can use
+// it too (`size` = 1 << `mipLevels`).
+static void ComputeMipLevelsSized(MipBits* src, MipBits* dst, int32_t size, uint32_t mipLevels) {
     if ((OsGetProcessorFeatures() & 0x14) == 0x14) {
-        for (uint32_t level = 0; level < CCharacterComponent::s_mipLevels; level++, size >>= 1) {
+        for (uint32_t level = 0; level < mipLevels; level++, size >>= 1) {
             if (size < 4) {
-                CompressBlockSSE(reinterpret_cast<const uint8_t*>(src->m_mip[CCharacterComponent::s_mipLevels - 2]), 16, reinterpret_cast<uint32_t*>(dst->m_mip[level]));
+                CompressBlockSSE(reinterpret_cast<const uint8_t*>(src->m_mip[mipLevels - 2]), 16, reinterpret_cast<uint32_t*>(dst->m_mip[level]));
                 continue;
             }
 
@@ -1584,9 +1726,9 @@ static void ComputeMipLevels(MipBits* src, MipBits* dst) {
             }
         }
     } else {
-        for (uint32_t level = 0; level < CCharacterComponent::s_mipLevels; level++, size >>= 1) {
+        for (uint32_t level = 0; level < mipLevels; level++, size >>= 1) {
             if (size < 4) {
-                CompressBlock(reinterpret_cast<const uint8_t*>(src->m_mip[CCharacterComponent::s_mipLevels - 2]), 16, reinterpret_cast<uint8_t*>(dst->m_mip[level]));
+                CompressBlock(reinterpret_cast<const uint8_t*>(src->m_mip[mipLevels - 2]), 16, reinterpret_cast<uint8_t*>(dst->m_mip[level]));
                 continue;
             }
 
@@ -1606,6 +1748,12 @@ static void ComputeMipLevels(MipBits* src, MipBits* dst) {
             }
         }
     }
+}
+
+// VERIFY: b6708f12 manual
+// OFFSET: 0x004E9BA0
+static void ComputeMipLevels(MipBits* src, MipBits* dst) {
+    ComputeMipLevelsSized(src, dst, s_textureSize, CCharacterComponent::s_mipLevels);
 }
 
 // VERIFY: 1f11ee93 manual
@@ -1774,6 +1922,7 @@ void CCharacterComponent::LoadBaseVariation(COMPONENT_VARIATIONS variation, int3
     }
 
     if (!ComponentValidateBase(CCharacterComponent::s_chrVarArray, this->m_data.m_preferences.m_raceID, this->m_data.m_preferences.m_sexID, variation, variationIndex, colorIndex)) {
+        this->LoadGlowLayer(variation, textureIndex); // BLEAKHOLD(glow): no texture, no glow
         return;
     }
 
@@ -1788,6 +1937,7 @@ void CCharacterComponent::LoadBaseVariation(COMPONENT_VARIATIONS variation, int3
         }
     }
 
+    this->LoadGlowLayer(variation, textureIndex); // BLEAKHOLD(glow)
     this->SetDirtySections(1 << section);
 }
 
@@ -1818,6 +1968,7 @@ void CCharacterComponent::SetHairColor(int32_t hairColorID, bool loadHair, const
 
     this->LoadBaseVariation(VARIATION_FACIAL_HAIR, 0, this->m_data.m_preferences.m_facialHairId, this->m_data.m_preferences.m_hairColorId, SECTION_HEAD_LOWER, debug);
     this->LoadBaseVariation(VARIATION_FACIAL_HAIR, 1, this->m_data.m_preferences.m_facialHairId, this->m_data.m_preferences.m_hairColorId, SECTION_HEAD_UPPER, debug);
+    this->LoadMarkLayer(debug); // BLEAKHOLD(glow)
 }
 
 // VERIFY: 2d880572 manual
@@ -1900,6 +2051,7 @@ void CCharacterComponent::SetBeardStyle(int32_t facialHairID, bool loadVariation
     if (loadVariation) {
         this->LoadBaseVariation(VARIATION_FACIAL_HAIR, 0, this->m_data.m_preferences.m_facialHairId, this->m_data.m_preferences.m_hairColorId, SECTION_HEAD_LOWER, debug);
         this->LoadBaseVariation(VARIATION_FACIAL_HAIR, 1, this->m_data.m_preferences.m_facialHairId, this->m_data.m_preferences.m_hairColorId, SECTION_HEAD_UPPER, debug);
+        this->LoadMarkLayer(debug); // BLEAKHOLD(glow)
     }
 
     this->SetDirtySections(0x300);
@@ -1945,6 +2097,10 @@ void CCharacterComponent::SetSkinColor(int32_t skinID, bool loadHair, bool rende
                 DebugLog("**** Unable to Load Texture %s\n", s_path);
             }
         }
+
+        // BLEAKHOLD(glow)
+        this->LoadGlowLayer(VARIATION_UNDERWEAR, 0);
+        this->LoadGlowLayer(VARIATION_UNDERWEAR, 1);
     }
 
     this->ReplaceExtraSkinTexture(debug);
@@ -2728,7 +2884,9 @@ bool CCharacterComponent::SetPrevFacialFeature(COMPONENT_CONTEXT context) {
 
     CharSectionsRec* keepRec = ComponentGetSectionsRecord(CCharacterComponent::s_chrVarArray, this->m_data.m_preferences.m_raceID, this->m_data.m_preferences.m_sexID, VARIATION_FACIAL_HAIR, facialHairID, this->m_data.m_preferences.m_hairColorId, nullptr);
 
-    if (ComponentFlagsMatch(keepRec->m_flags, selection)) {
+    // BLEAKHOLD(glow): a feature with no row at the current hair colour gave a null record here (the forward step
+    // checks it; CRITIC 6)
+    if (keepRec && ComponentFlagsMatch(keepRec->m_flags, selection)) {
         this->SetBeardStyle(keepRec->m_variationIndex, true, nullptr);
     } else {
         this->SetHairColor(rec->m_colorIndex, false, nullptr);
@@ -2887,16 +3045,21 @@ void CCharacterComponent::TurnOffGuildTabardPurchase() {
 
 // VERIFY: 5f4d62d3 manual
 // OFFSET: 0x004EC550
-void CCharacterComponent::Paste(void* texture, MipBits* dstMips, const C2iVector& dstPos, const C2iVector& srcPos, const C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel) {
+void CCharacterComponent::Paste(void* texture, MipBits* dstMips, const C2iVector& dstPos, const C2iVector& srcPos, const C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t srcMipLevel, uint32_t dstSize, const BlpPalPixel* palOverride) {
     C2iVector pos = dstPos;
     C2iVector src = srcPos;
     C2iVector size = srcSize;
-    uint32_t stride = 4 * s_textureSize;
-    BlpPalPixel* pal = TextureCacheGetPal(texture);
+    uint32_t stride = 4 * (dstSize ? dstSize : s_textureSize); // BLEAKHOLD(glow)
+    const BlpPalPixel* pal = TextureCacheGetPal(texture);
 
     if (!pal) {
-        CCharacterComponent::PasteCrappyGreen(dstMips, pos, stride, size, srcInfo, srcMipLevel, -static_cast<int32_t>(srcMipLevel));
+        // BLEAKHOLD(glow): the glow bake covers with black what the colour bake paints green
+        CCharacterComponent::PasteCrappyGreen(dstMips, pos, stride, size, srcInfo, srcMipLevel, -static_cast<int32_t>(srcMipLevel), palOverride ? 0xFF000000 : 0xFF00FF00);
         return;
+    }
+
+    if (palOverride) {
+        pal = palOverride; // BLEAKHOLD(glow)
     }
 
     switch (srcInfo.m_alphaSize) {
@@ -2920,15 +3083,19 @@ void CCharacterComponent::Paste(void* texture, MipBits* dstMips, const C2iVector
 
 // VERIFY: 4a30e6aa manual
 // OFFSET: 0x004EC690
-void CCharacterComponent::PasteTransparent1BitScale(void* texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo) {
+void CCharacterComponent::PasteTransparent1BitScale(void* texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, const BlpPalPixel* palOverride) {
     uint32_t srcRowPitch = srcInfo.m_width;
     uint32_t copyWidth = srcSize.x;
     uint32_t copyHeight = srcSize.y;
 
-    BlpPalPixel* pal = TextureCacheGetPal(texture);
+    const BlpPalPixel* pal = TextureCacheGetPal(texture);
 
     if (!pal) {
         return;
+    }
+
+    if (palOverride) {
+        pal = palOverride; // BLEAKHOLD(glow)
     }
 
     srcPos.x >>= 1;
@@ -3055,15 +3222,19 @@ void CCharacterComponent::PasteTransparent1BitScale(void* texture, MipBits* dstM
 
 // VERIFY: 3cc4e3c5 manual
 // OFFSET: 0x004ECC20
-void CCharacterComponent::PasteTransparent4BitScale(void* texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo) {
+void CCharacterComponent::PasteTransparent4BitScale(void* texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, const BlpPalPixel* palOverride) {
     uint32_t srcRowPitch = srcInfo.m_width;
     uint32_t copyWidth = srcSize.x;
     uint32_t copyHeight = srcSize.y;
 
-    BlpPalPixel* pal = TextureCacheGetPal(texture);
+    const BlpPalPixel* pal = TextureCacheGetPal(texture);
 
     if (!pal) {
         return;
+    }
+
+    if (palOverride) {
+        pal = palOverride; // BLEAKHOLD(glow)
     }
 
     srcPos.x >>= 1;
@@ -3206,15 +3377,19 @@ void CCharacterComponent::PasteTransparent4BitScale(void* texture, MipBits* dstM
 
 // VERIFY: 523c6ae3 manual
 // OFFSET: 0x004ED200
-void CCharacterComponent::PasteTransparent8BitScale(void* texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo) {
+void CCharacterComponent::PasteTransparent8BitScale(void* texture, MipBits* dstMips, C2iVector& dstPos, uint32_t dstStride, C2iVector& srcPos, C2iVector& srcSize, TCTEXTUREINFO& srcInfo, const BlpPalPixel* palOverride) {
     uint32_t srcRowPitch = srcInfo.m_width;
     uint32_t copyWidth = srcSize.x;
     uint32_t copyHeight = srcSize.y;
 
-    BlpPalPixel* pal = TextureCacheGetPal(texture);
+    const BlpPalPixel* pal = TextureCacheGetPal(texture);
 
     if (!pal) {
         return;
+    }
+
+    if (palOverride) {
+        pal = palOverride; // BLEAKHOLD(glow)
     }
 
     srcPos.x >>= 1;
@@ -3349,6 +3524,11 @@ bool CCharacterComponent::VariationsLoaded(int32_t wait) {
             if (this->m_baseVariation[variation].m_texture[i] && !TextureCacheGetInfo(this->m_baseVariation[variation].m_texture[i], info, wait)) {
                 return false;
             }
+
+            // BLEAKHOLD(glow): and their `_Glow` files
+            if (this->m_glowLayer[variation][i] && !TextureCacheGetInfo(this->m_glowLayer[variation][i], info, wait)) {
+                return false;
+            }
         }
     }
 
@@ -3424,16 +3604,24 @@ static bool __stdcall ItemDisplayHasGeosetGroup(uint32_t displayID, int32_t grou
 // OFFSET: 0x004ED900
 void CCharacterComponent::GeosRenderPrep() {
     bool eyeGlow = false;
+    CharSectionsRec* faceRec = ComponentGetSectionsRecord(CCharacterComponent::s_chrVarArray, this->m_data.m_preferences.m_raceID, this->m_data.m_preferences.m_sexID, VARIATION_FACE, this->m_data.m_preferences.m_faceId, this->m_data.m_preferences.m_skinID, nullptr);
 
     if (this->m_data.m_preferences.m_classId == 6) {
         eyeGlow = true;
-    } else {
-        CharSectionsRec* faceRec = ComponentGetSectionsRecord(CCharacterComponent::s_chrVarArray, this->m_data.m_preferences.m_raceID, this->m_data.m_preferences.m_sexID, VARIATION_FACE, this->m_data.m_preferences.m_faceId, this->m_data.m_preferences.m_skinID, nullptr);
-
-        if (faceRec && (faceRec->m_flags & 0x4)) {
-            eyeGlow = true;
-        }
+    } else if (faceRec && (faceRec->m_flags & 0x4)) {
+        eyeGlow = true;
     }
+
+    // BLEAKHOLD(glow): a face row's third texture is an eye sprite: the glowing eyes (geoset 1703) drawn with it in
+    // place of deathKnightEyeGlow.blp, for any class. Empty in every row today, so nothing changes until the data has
+    // eye options.
+    const char* eyeSprite = faceRec && BleakMarks::HasTexture(faceRec->m_textureName[2]) ? faceRec->m_textureName[2] : nullptr;
+
+    if (eyeSprite) {
+        eyeGlow = true;
+    }
+
+    this->SetEyeSprite(eyeSprite);
 
     CM2Model* model = this->m_data.m_model;
     model->SetGeometryVisible(0, 2000, 0);
@@ -4098,26 +4286,27 @@ void CCharacterComponent::SetShieldItemDisplay(int32_t displayID) {
 
 // VERIFY: e411dd8f manual
 // OFFSET: 0x004EF9D0
-void CCharacterComponent::PasteScale(void* texture, MipBits* dstMips, const C2iVector& dstPos, const C2iVector& srcPos, const C2iVector& srcSize, TCTEXTUREINFO& srcInfo) {
+void CCharacterComponent::PasteScale(void* texture, MipBits* dstMips, const C2iVector& dstPos, const C2iVector& srcPos, const C2iVector& srcSize, TCTEXTUREINFO& srcInfo, uint32_t dstSize, const BlpPalPixel* palOverride) {
     C2iVector pos = dstPos;
     C2iVector src = srcPos;
     C2iVector size = srcSize;
+    uint32_t stride = 4 * (dstSize ? dstSize : s_textureSize); // BLEAKHOLD(glow)
 
     switch (srcInfo.m_alphaSize) {
         case 0:
-            CCharacterComponent::PasteOpaqueScale(texture, dstMips, pos, 4 * s_textureSize, src, size, srcInfo);
+            CCharacterComponent::PasteOpaqueScale(texture, dstMips, pos, stride, src, size, srcInfo, palOverride);
             break;
 
         case 1:
-            CCharacterComponent::PasteTransparent1BitScale(texture, dstMips, pos, 4 * s_textureSize, src, size, srcInfo);
+            CCharacterComponent::PasteTransparent1BitScale(texture, dstMips, pos, stride, src, size, srcInfo, palOverride);
             break;
 
         case 4:
-            CCharacterComponent::PasteTransparent4BitScale(texture, dstMips, pos, 4 * s_textureSize, src, size, srcInfo);
+            CCharacterComponent::PasteTransparent4BitScale(texture, dstMips, pos, stride, src, size, srcInfo, palOverride);
             break;
 
         case 8:
-            CCharacterComponent::PasteTransparent8BitScale(texture, dstMips, pos, 4 * s_textureSize, src, size, srcInfo);
+            CCharacterComponent::PasteTransparent8BitScale(texture, dstMips, pos, stride, src, size, srcInfo, palOverride);
             break;
     }
 }
@@ -4129,6 +4318,11 @@ void CCharacterComponent::ComputeLoadProgress(int64_t& local, int64_t& total) {
         for (int32_t i = 0; i < 3; i++) {
             if (this->m_baseVariation[variation].m_texture[i]) {
                 TextureCacheComputeLoadProgress(this->m_baseVariation[variation].m_texture[i], local, total);
+            }
+
+            // BLEAKHOLD(glow)
+            if (this->m_glowLayer[variation][i]) {
+                TextureCacheComputeLoadProgress(this->m_glowLayer[variation][i], local, total);
             }
         }
     }
@@ -4204,6 +4398,24 @@ CCharacterComponent::CCharacterComponent() {
     memset(this->m_itemSlotForAttachSlot, 0xFF, sizeof(this->m_itemSlotForAttachSlot));
     this->m_flags &= ~0x20;
     this->m_data.m_model = nullptr;
+
+    // BLEAKHOLD(glow)
+    memset(this->m_glowLayer, 0, sizeof(this->m_glowLayer));
+    this->m_glowTexture = nullptr;
+    this->m_glowTextureBytes = 0;
+    this->m_glowSections = 0;
+    this->m_glowState = 0;
+    this->m_eyeSprite = nullptr;
+
+    // BLEAKHOLD(glow): every component is in s_glowList (main thread only), so GlowSweep can switch glow on and off
+    this->m_glowNext = s_glowList;
+    this->m_glowPrev = &s_glowList;
+
+    if (s_glowList) {
+        s_glowList->m_glowPrev = &this->m_glowNext;
+    }
+
+    s_glowList = this;
 }
 
 // VERIFY: 4f3c1a66 manual
@@ -4218,6 +4430,21 @@ CCharacterComponent::~CCharacterComponent() {
         GxTexSetCannotUpdate(TextureGetGxTex(this->m_baseSkinTexture, 1, nullptr));
         HandleClose(reinterpret_cast<HOBJECT>(this->m_baseSkinTexture));
         this->m_baseSkinTexture = nullptr;
+    }
+
+    // BLEAKHOLD(glow): before the model goes, so it lets go of the glow texture too
+    this->DestroyGlowTexture();
+    this->FreeGlowLayers();
+
+    if (this->m_glowPrev) {
+        *this->m_glowPrev = this->m_glowNext;
+
+        if (this->m_glowNext) {
+            this->m_glowNext->m_glowPrev = this->m_glowPrev;
+        }
+
+        this->m_glowPrev = nullptr;
+        this->m_glowNext = nullptr;
     }
 
     if (this->m_data.m_model) {
@@ -4675,10 +4902,15 @@ bool CCharacterComponent::SetPrevHairStyle(COMPONENT_CONTEXT context) {
 
 // VERIFY: f3be180c auto
 // OFFSET: 0x004F07D0
-void CCharacterComponent::PasteFromSkin(COMPONENT_SECTIONS section, void* texture, MipBits* dstMips) {
+void CCharacterComponent::PasteFromSkin(COMPONENT_SECTIONS section, void* texture, MipBits* dstMips, const CompPasteTarget* target) {
     if (!TextureCacheHasMips(texture)) {
         return;
     }
+
+    // BLEAKHOLD(glow): the glow bake pastes into its own texture, with its own palette
+    const CompSectionInfo* sections = target ? target->m_sections : s_sectionInfo;
+    uint32_t textureSize = target ? target->m_size : s_textureSize;
+    const BlpPalPixel* palOverride = target ? target->m_palette : nullptr;
 
     TCTEXTUREINFO info;
     info.m_width = 0;
@@ -4690,27 +4922,41 @@ void CCharacterComponent::PasteFromSkin(COMPONENT_SECTIONS section, void* textur
     uint32_t width = info.m_width;
     info.m_alphaSize = 0;
 
-    if (info.m_width < s_textureSize && info.m_height < s_textureSize) {
-        CCharacterComponent::PasteScale(texture, dstMips, s_sectionInfo[section].m_pos, s_sectionInfo[section].m_pos, s_sectionInfo[section].m_size, info);
+    // BLEAKHOLD(glow): a size the loops below would never finish with, or read or write out of bounds with, is
+    // skipped (and logged once) instead (CRITIC 17)
+    const CompSectionInfo& rect = sections[section];
+    BleakMarks::PastePlan plan = BleakMarks::PlanSkinPaste(BleakTextureFacts(texture, info), rect.m_pos.x + rect.m_size.x, rect.m_pos.y + rect.m_size.y, textureSize);
+
+    if (!BleakPastePlanUsable(texture, info, plan, false)) {
+        return;
+    }
+
+    if (info.m_width < textureSize && info.m_height < textureSize) {
+        CCharacterComponent::PasteScale(texture, dstMips, sections[section].m_pos, sections[section].m_pos, sections[section].m_size, info, textureSize, palOverride);
         return;
     }
 
     uint32_t mipLevel = 0;
 
-    while (width != s_textureSize) {
+    while (width != textureSize) {
         width >>= 1;
         mipLevel++;
     }
 
-    CCharacterComponent::Paste(texture, dstMips, s_sectionInfo[section].m_pos, s_sectionInfo[section].m_pos, s_sectionInfo[section].m_size, info, mipLevel);
+    CCharacterComponent::Paste(texture, dstMips, sections[section].m_pos, sections[section].m_pos, sections[section].m_size, info, mipLevel, textureSize, palOverride);
 }
 
 // VERIFY: c9c0de88 auto
 // OFFSET: 0x004F08A0
-void CCharacterComponent::PasteToSection(COMPONENT_SECTIONS section, void* texture, MipBits* dstMips) {
+void CCharacterComponent::PasteToSection(COMPONENT_SECTIONS section, void* texture, MipBits* dstMips, const CompPasteTarget* target) {
     if (!TextureCacheHasMips(texture)) {
         return;
     }
+
+    // BLEAKHOLD(glow): the glow bake pastes into its own texture, with its own palette
+    const CompSectionInfo* sections = target ? target->m_sections : s_sectionInfo;
+    uint32_t textureSize = target ? target->m_size : s_textureSize;
+    const BlpPalPixel* palOverride = target ? target->m_palette : nullptr;
 
     TCTEXTUREINFO info;
     info.m_width = 0;
@@ -4720,13 +4966,21 @@ void CCharacterComponent::PasteToSection(COMPONENT_SECTIONS section, void* textu
     info.m_opaque = 1;
     TextureCacheGetInfo(texture, info, 1);
     uint32_t width = info.m_width;
-    uint32_t sectionWidth = s_sectionInfo[section].m_size.x;
+    uint32_t sectionWidth = sections[section].m_size.x;
     C2iVector srcPos;
 
-    if (info.m_width < sectionWidth && info.m_height < static_cast<uint32_t>(s_sectionInfo[section].m_size.y)) {
+    // BLEAKHOLD(glow): a size the loop below would never finish with (`while (width != sectionWidth)`), or that
+    // would read or write out of bounds, is skipped (and logged once) instead (CRITIC 17)
+    BleakMarks::PastePlan plan = BleakMarks::PlanSectionPaste(BleakTextureFacts(texture, info), sectionWidth, sections[section].m_size.y, textureSize);
+
+    if (!BleakPastePlanUsable(texture, info, plan, false)) {
+        return;
+    }
+
+    if (info.m_width < sectionWidth && info.m_height < static_cast<uint32_t>(sections[section].m_size.y)) {
         srcPos.x = 0;
         srcPos.y = 0;
-        CCharacterComponent::PasteScale(texture, dstMips, s_sectionInfo[section].m_pos, srcPos, s_sectionInfo[section].m_size, info);
+        CCharacterComponent::PasteScale(texture, dstMips, sections[section].m_pos, srcPos, sections[section].m_size, info, textureSize, palOverride);
         return;
     }
 
@@ -4739,7 +4993,7 @@ void CCharacterComponent::PasteToSection(COMPONENT_SECTIONS section, void* textu
 
     srcPos.x = 0;
     srcPos.y = 0;
-    CCharacterComponent::Paste(texture, dstMips, s_sectionInfo[section].m_pos, srcPos, s_sectionInfo[section].m_size, info, mipLevel);
+    CCharacterComponent::Paste(texture, dstMips, sections[section].m_pos, srcPos, sections[section].m_size, info, mipLevel, textureSize, palOverride);
 }
 
 // VERIFY: a9b97d50 auto
@@ -4762,6 +5016,7 @@ CCharacterComponent* CCharacterComponent::AllocComponent() {
 // OFFSET: 0x004F09D0
 void CCharacterComponent::RenderPrepAU() {
     CCharacterComponent::PasteFromSkin(SECTION_ARM_UPPER, this->m_baseVariation[VARIATION_SKIN].m_texture[0], CCharacterComponent::s_textureBuffer);
+    this->MarkLayerRenderPrep(SECTION_ARM_UPPER); // BLEAKHOLD(glow)
 
     for (int32_t layer = 0; layer < 2; layer++) {
         if ((1 << layer) & this->m_section[SECTION_ARM_UPPER].m_layerMask) {
@@ -4774,6 +5029,7 @@ void CCharacterComponent::RenderPrepAU() {
 // OFFSET: 0x004F0A30
 void CCharacterComponent::RenderPrepAL() {
     CCharacterComponent::PasteFromSkin(SECTION_ARM_LOWER, this->m_baseVariation[VARIATION_SKIN].m_texture[0], CCharacterComponent::s_textureBuffer);
+    this->MarkLayerRenderPrep(SECTION_ARM_LOWER); // BLEAKHOLD(glow)
 
     for (int32_t layer = 0; layer < 7; layer++) {
         if ((1 << layer) & this->m_section[SECTION_ARM_LOWER].m_layerMask) {
@@ -4786,6 +5042,7 @@ void CCharacterComponent::RenderPrepAL() {
 // OFFSET: 0x004F0A90
 void CCharacterComponent::RenderPrepHA() {
     CCharacterComponent::PasteFromSkin(SECTION_HAND, this->m_baseVariation[VARIATION_SKIN].m_texture[0], CCharacterComponent::s_textureBuffer);
+    this->MarkLayerRenderPrep(SECTION_HAND); // BLEAKHOLD(glow)
 
     if (this->m_section[SECTION_HAND].m_layerMask & 0x1) {
         CCharacterComponent::PasteToSection(SECTION_HAND, this->m_section[SECTION_HAND].m_layerTex[0], CCharacterComponent::s_textureBuffer);
@@ -4804,6 +5061,8 @@ void CCharacterComponent::RenderPrepHU() {
     if (this->m_baseVariation[VARIATION_FACE].m_texture[1]) {
         CCharacterComponent::PasteToSection(SECTION_HEAD_UPPER, this->m_baseVariation[VARIATION_FACE].m_texture[1], CCharacterComponent::s_textureBuffer);
     }
+
+    this->MarkLayerRenderPrep(SECTION_HEAD_UPPER); // BLEAKHOLD(glow)
 
     if (this->m_baseVariation[VARIATION_FACIAL_HAIR].m_texture[1]) {
         CCharacterComponent::PasteToSection(SECTION_HEAD_UPPER, this->m_baseVariation[VARIATION_FACIAL_HAIR].m_texture[1], CCharacterComponent::s_textureBuffer);
@@ -4827,6 +5086,8 @@ void CCharacterComponent::RenderPrepHL() {
         CCharacterComponent::PasteToSection(SECTION_HEAD_LOWER, this->m_baseVariation[VARIATION_FACE].m_texture[0], CCharacterComponent::s_textureBuffer);
     }
 
+    this->MarkLayerRenderPrep(SECTION_HEAD_LOWER); // BLEAKHOLD(glow)
+
     if (this->m_baseVariation[VARIATION_FACIAL_HAIR].m_texture[0]) {
         CCharacterComponent::PasteToSection(SECTION_HEAD_LOWER, this->m_baseVariation[VARIATION_FACIAL_HAIR].m_texture[0], CCharacterComponent::s_textureBuffer);
     }
@@ -4845,6 +5106,8 @@ void CCharacterComponent::RenderPrepTU() {
         CCharacterComponent::PasteToSection(SECTION_TORSO_UPPER, this->m_baseVariation[VARIATION_UNDERWEAR].m_texture[1], CCharacterComponent::s_textureBuffer);
     }
 
+    this->MarkLayerRenderPrep(SECTION_TORSO_UPPER); // BLEAKHOLD(glow)
+
     for (int32_t layer = 0; layer < 5; layer++) {
         if ((1 << layer) & this->m_section[SECTION_TORSO_UPPER].m_layerMask) {
             CCharacterComponent::PasteToSection(SECTION_TORSO_UPPER, this->m_section[SECTION_TORSO_UPPER].m_layerTex[layer], CCharacterComponent::s_textureBuffer);
@@ -4856,6 +5119,7 @@ void CCharacterComponent::RenderPrepTU() {
 // OFFSET: 0x004F0CA0
 void CCharacterComponent::RenderPrepTL() {
     CCharacterComponent::PasteFromSkin(SECTION_TORSO_LOWER, this->m_baseVariation[VARIATION_SKIN].m_texture[0], CCharacterComponent::s_textureBuffer);
+    this->MarkLayerRenderPrep(SECTION_TORSO_LOWER); // BLEAKHOLD(glow)
 
     for (int32_t layer = 0; layer < 7; layer++) {
         if ((1 << layer) & this->m_section[SECTION_TORSO_LOWER].m_layerMask) {
@@ -4873,6 +5137,8 @@ void CCharacterComponent::RenderPrepLU() {
         CCharacterComponent::PasteToSection(SECTION_LEG_UPPER, this->m_baseVariation[VARIATION_UNDERWEAR].m_texture[0], CCharacterComponent::s_textureBuffer);
     }
 
+    this->MarkLayerRenderPrep(SECTION_LEG_UPPER); // BLEAKHOLD(glow)
+
     int32_t last = 3 - ((this->m_flags & 0x20) != 0);
 
     for (int32_t layer = (this->m_flags & 0x20) != 0; layer < last; layer++) {
@@ -4886,6 +5152,7 @@ void CCharacterComponent::RenderPrepLU() {
 // OFFSET: 0x004F0DB0
 void CCharacterComponent::RenderPrepLL() {
     CCharacterComponent::PasteFromSkin(SECTION_LEG_LOWER, this->m_baseVariation[VARIATION_SKIN].m_texture[0], CCharacterComponent::s_textureBuffer);
+    this->MarkLayerRenderPrep(SECTION_LEG_LOWER); // BLEAKHOLD(glow)
 
     int32_t last = 2 * ((this->m_flags & 0x20) == 0) + 4;
 
@@ -4900,6 +5167,7 @@ void CCharacterComponent::RenderPrepLL() {
 // OFFSET: 0x004F0E40
 void CCharacterComponent::RenderPrepFO() {
     CCharacterComponent::PasteFromSkin(SECTION_FOOT, this->m_baseVariation[VARIATION_SKIN].m_texture[0], CCharacterComponent::s_textureBuffer);
+    this->MarkLayerRenderPrep(SECTION_FOOT); // BLEAKHOLD(glow)
 
     if (this->m_section[SECTION_FOOT].m_layerMask & 0x1) {
         CCharacterComponent::PasteToSection(SECTION_FOOT, this->m_section[SECTION_FOOT].m_layerTex[0], CCharacterComponent::s_textureBuffer);
@@ -4910,6 +5178,7 @@ void CCharacterComponent::RenderPrepFO() {
 // OFFSET: 0x004F0E80
 void CCharacterComponent::ProcessFinishedRequest() {
     CCharacterComponent::s_bInRenderPrep = 1;
+    uint32_t glowSections = (this->m_flags & 0x1) ? 0xFFFFFFFF : this->m_dirtySections; // BLEAKHOLD(glow)
 
     if (this->m_flags & 0x4) {
         this->GeosRenderPrep();
@@ -4920,6 +5189,7 @@ void CCharacterComponent::ProcessFinishedRequest() {
     }
 
     this->UpdateSections();
+    this->GlowRenderPrep(glowSections); // BLEAKHOLD(glow): the item textures are still loaded here
     this->m_request->m_flags &= ~0x1;
     this->m_flags &= ~0x1;
     this->m_request = nullptr;
@@ -4944,7 +5214,15 @@ void CCharacterComponent::ProcessComponentRequest(CComponentRequest* request) {
     }
 
     for (uint32_t i = 0; i < request->m_layerCount; i++) {
-        CCharacterComponent::PasteToSection(static_cast<COMPONENT_SECTIONS>(request->m_layerSections[i]), request->m_layerTextures[i], dstMips);
+        uint8_t section = request->m_layerSections[i];
+
+        // BLEAKHOLD(glow): a mark is an atlas, pasted at each section's own place
+        if (section & CComponentRequest::ATLAS_LAYER) {
+            CCharacterComponent::PasteAtlasLayer(static_cast<COMPONENT_SECTIONS>(section & ~CComponentRequest::ATLAS_LAYER), request->m_layerTextures[i], dstMips);
+            continue;
+        }
+
+        CCharacterComponent::PasteToSection(static_cast<COMPONENT_SECTIONS>(section), request->m_layerTextures[i], dstMips);
     }
 
     if (request->m_format == GxTex_Dxt1) {
@@ -5086,6 +5364,7 @@ uint32_t STORMAPI CCharacterComponent::ThreadProc(void* param) {
 // OFFSET: 0x004F14A0
 void CCharacterComponent::RenderPrepSections() {
     CCharacterComponent::s_bInRenderPrep = 1;
+    uint32_t glowSections = (this->m_flags & 0x1) ? 0xFFFFFFFF : this->m_dirtySections; // BLEAKHOLD(glow)
 
     if (this->m_flags & 0x4) {
         this->GeosRenderPrep();
@@ -5096,6 +5375,7 @@ void CCharacterComponent::RenderPrepSections() {
     }
 
     this->PrepSections();
+    this->GlowRenderPrep(glowSections); // BLEAKHOLD(glow): the item textures are still loaded here
     this->m_flags &= ~0x1;
     this->m_dirtySections = 0;
     this->DestroyRenderTextures();
@@ -5245,6 +5525,8 @@ int32_t CCharacterComponent::Update(const void* data, void* param) {
         CCharacterComponent::ProcessComponentFinishedList(0);
     }
 
+    CCharacterComponent::GlowSweep(); // BLEAKHOLD(glow)
+
     return 1;
 }
 
@@ -5295,6 +5577,17 @@ bool CCharacterComponent::Initialize(EGxTexFormat format, uint32_t mipLevels, in
         s_sectionInfo[section].m_pos.y = CCharacterComponent::s_sectionInfoRaw[section].m_pos.y >> (9 - mipLevels);
         s_sectionInfo[section].m_size.x = CCharacterComponent::s_sectionInfoRaw[section].m_size.x >> (9 - mipLevels);
         s_sectionInfo[section].m_size.y = CCharacterComponent::s_sectionInfoRaw[section].m_size.y >> (9 - mipLevels);
+    }
+
+    // BLEAKHOLD(glow): the glow texture's size and sections (its buffers are made with the first glow texture)
+    s_glowSize = BleakMarks::GlowSize(s_textureSize);
+    s_glowMipLevels = BleakMarks::MipCountFor(s_glowSize) - 1;
+
+    for (int32_t section = 0; section < NUM_COMPONENT_SECTIONS; section++) {
+        s_glowSectionInfo[section].m_pos.x = CCharacterComponent::s_sectionInfoRaw[section].m_pos.x >> (9 - s_glowMipLevels);
+        s_glowSectionInfo[section].m_pos.y = CCharacterComponent::s_sectionInfoRaw[section].m_pos.y >> (9 - s_glowMipLevels);
+        s_glowSectionInfo[section].m_size.x = CCharacterComponent::s_sectionInfoRaw[section].m_size.x >> (9 - s_glowMipLevels);
+        s_glowSectionInfo[section].m_size.y = CCharacterComponent::s_sectionInfoRaw[section].m_size.y >> (9 - s_glowMipLevels);
     }
 
     TextureCacheResetLoadCount();
@@ -5475,6 +5768,19 @@ bool CCharacterComponent::Destroy() {
         s_threadTextureBuffer = nullptr;
     }
 
+    // BLEAKHOLD(glow)
+    if (s_glowBuffer) {
+        TextureFreeMippedImg(s_glowBuffer, PIXEL_ARGB8888, s_glowSize, s_glowSize);
+        s_glowBuffer = nullptr;
+    }
+
+    if (s_glowCompressedBuffer) {
+        TextureFreeMippedImg(s_glowCompressedBuffer, PIXEL_DXT1, s_glowSize, s_glowSize);
+        s_glowCompressedBuffer = nullptr;
+    }
+
+    s_glowExists.Clear();
+
     for (uint32_t i = 0; i < CCharacterComponent::s_chrVarArrayLength; i++) {
         for (int32_t variation = 0; variation < NUM_COMPONENT_VARIATIONS; variation++) {
             CharVariationList& list = CCharacterComponent::s_chrVarArray[i].m_variation[variation];
@@ -5507,6 +5813,17 @@ bool CCharacterComponent::Destroy() {
 // VERIFY: 0acf5d15 manual
 // OFFSET: 0x004F24D0
 bool CCharacterComponent::Init(ComponentData* data, const char* debug) {
+    // BLEAKHOLD(glow): the old model lets go of the glow texture and gets its own eye texture back; the textures
+    // are made again for the new look
+    this->DestroyGlowTexture();
+    this->FreeGlowLayers();
+
+    if (this->m_eyeSprite && this->m_data.m_model) {
+        this->m_data.m_model->ReplaceGeosetTexture(1703, nullptr); // BLEAKHOLD(glow): glow-draw interface
+    }
+
+    this->m_eyeSprite = nullptr;
+
     if (this->m_data.m_model) {
         this->m_data.m_model->Release();
     }
@@ -5753,5 +6070,825 @@ void CCharacterComponent::AddItemByType(INVENTORY_TYPES invType, int32_t display
 
         default:
             break;
+    }
+}
+
+// ---------------------------------------------------------------------------------------------------- BLEAKHOLD(glow)
+//
+// Glowing marks and eyes (WoW/Common/ComponentCore/BleakMarks.h; the data contract is in Tools/RaceForge/README.md).
+// - A features row's third texture is a mark: an atlas of all ten sections, pasted into the character texture after
+//   the face and underwear and before the features, scalp and items (MarkLayerRenderPrep, MarkLayerRequest).
+// - Every CharSections texture the component pastes may have `<name>_Glow.blp` beside it (LoadGlowLayer). When any
+//   does, the component bakes a second, small texture (CharacterBaseGlow) by replaying the same layers: a layer with
+//   a `_Glow` file pastes it, every other layer pastes black through its own alpha, so armour and hair hide the glow
+//   where they hide the mark. The model draws it again, additive and unlit (Engine/Source/Model2/M2Glow.h).
+// - A face row's third texture is an eye sprite, drawn on geoset 1703 (GeosRenderPrep, SetEyeSprite).
+// Today no row has a third texture and no `_Glow` file exists: then nothing here does anything but look up each
+// texture's `_Glow` name once.
+
+static bool GlowEnabled() {
+    return !CCharacterComponent::s_bleakGlowVar || CCharacterComponent::s_bleakGlowVar->m_intValue != 0;
+}
+
+// The scene frames since the scene last animated a model, which is when it measures the model's camera distance
+// (CM2Model::m_scaleSq): the glow's distance rules take it with the distance (BleakMarks::FramesSinceAnimated). An
+// unseen character beyond about 33 yards is not animated, and its m_scaleSq is 0 or the last distance before that.
+static uint32_t GlowFramesSinceAnimated(const CM2Model* model) {
+    if (!model || !model->m_scene) {
+        return BleakMarks::kNeverAnimated;
+    }
+
+    return BleakMarks::FramesSinceAnimated(model->m_frameStamp, model->m_scene->m_frameStamp);
+}
+
+// The userArg of a let-go DXT1 glow texture (GlowLetGoUserFunc), and the black texels every let-go one latches (never
+// written; zero-initialized, so it takes no room in the exe).
+static uint8_t s_glowLetGoDxt1;
+static uint8_t s_glowBlack[BleakMarks::kGlowBlackBytes];
+
+// The device callback of a glow texture the component has let go of (DestroyGlowTexture) while a copy of the model may
+// still hold it (BleakMarks::kGlowBlackBytes says why it is not null and latches black): an upload after that, or after
+// the device recreates its textures, makes the copy's glow black, which draws nothing. Never reaches the component.
+static void GlowLetGoUserFunc(EGxTexCommand command, uint32_t width, uint32_t height, uint32_t face, uint32_t level, void* userArg, uint32_t& texelStrideInBytes, const void*& texels) {
+    if (command != GxTex_Latch) {
+        return;
+    }
+
+    bool dxt1 = userArg == &s_glowLetGoDxt1;
+    texels = BleakMarks::GlowLatchBytes(width, height, dxt1) <= sizeof(s_glowBlack) ? s_glowBlack : nullptr;
+    texelStrideInBytes = BleakMarks::GlowLatchStride(width, dxt1);
+}
+
+// Whether `<name>_Glow.blp` exists, looked up once per name (CRITIC 18). Main thread.
+static bool GlowFileExists(const char* glowName) {
+    uint64_t hash = BleakMarks::NameHash(glowName);
+    uint8_t known = 0;
+
+    if (s_glowExists.Find(hash, &known)) {
+        return known == 1;
+    }
+
+    bool exists = SFile::FileExists(glowName) != 0;
+    s_glowExists.Insert(hash, exists ? 1 : 2);
+
+    return exists;
+}
+
+// The `_Glow` file the glow bake pastes for a layer: its own when it is loaded, palettized and the same size and alpha
+// as the layer; otherwise null, and the layer pastes black through its alpha (BleakMarks::GlowLayer).
+static void* GlowFileFor(void* texture, void* glow) {
+    if (!texture || !glow || !TextureCacheHasMips(texture) || !TextureCacheHasMips(glow)) {
+        return nullptr;
+    }
+
+    TCTEXTUREINFO layerInfo;
+    TCTEXTUREINFO glowInfo;
+    layerInfo.m_width = glowInfo.m_width = 0;
+    layerInfo.m_height = glowInfo.m_height = 0;
+    layerInfo.m_mipCount = glowInfo.m_mipCount = 0;
+    layerInfo.m_alphaSize = glowInfo.m_alphaSize = 0;
+    layerInfo.m_opaque = glowInfo.m_opaque = 1;
+    TextureCacheGetInfo(texture, layerInfo, 1);
+    TextureCacheGetInfo(glow, glowInfo, 1);
+
+    if (!TextureCacheGetPal(glow) || layerInfo.m_width != glowInfo.m_width || layerInfo.m_height != glowInfo.m_height || layerInfo.m_alphaSize != glowInfo.m_alphaSize) {
+        BleakLogOnce(static_cast<CACHEENTRY*>(glow)->m_fileName, "skipped, not palettized or not the size and alpha of its texture");
+        return nullptr;
+    }
+
+    return glow;
+}
+
+// The glow bake's buffers, made with the first glow texture. Main thread.
+static bool GlowBuffers(bool dxt1) {
+    if (!s_glowSize) {
+        return false;
+    }
+
+    if (!s_glowBuffer) {
+        s_glowBuffer = TextureAllocMippedImg(PIXEL_ARGB8888, s_glowSize, s_glowSize);
+    }
+
+    if (dxt1 && !s_glowCompressedBuffer) {
+        s_glowCompressedBuffer = TextureAllocMippedImg(PIXEL_DXT1, s_glowSize, s_glowSize);
+
+        // ComputeMipLevelsSized leaves the last level alone: black (an all-zero DXT1 block) rather than garbage.
+        for (uint32_t level = 0; s_glowCompressedBuffer && level <= s_glowMipLevels; level++) {
+            uint32_t blocks = (s_glowSize >> level) / 4 ? (s_glowSize >> level) / 4 : 1;
+            memset(s_glowCompressedBuffer->m_mip[level], 0, blocks * blocks * 8);
+        }
+    }
+
+    return s_glowBuffer && (!dxt1 || s_glowCompressedBuffer);
+}
+
+// bleakMarksDump: one bake as Logs\BleakMarks_<n>_<what>.tga (32-bit, top row first); `dxt1` blocks are decoded.
+static void DumpBake(const char* what, uint32_t index, const void* texels, uint32_t size, bool dxt1) {
+    if (!texels || !size) {
+        return;
+    }
+
+    uint32_t bytes = size * size * 4;
+    uint8_t* image = static_cast<uint8_t*>(SMemAlloc(bytes, __FILE__, __LINE__, 0));
+
+    if (!image) {
+        return;
+    }
+
+    if (dxt1) {
+        const uint8_t* block = static_cast<const uint8_t*>(texels);
+        uint32_t blocks = size / 4 ? size / 4 : 1;
+        uint8_t decoded[64];
+
+        for (uint32_t by = 0; by < blocks; by++) {
+            for (uint32_t bx = 0; bx < blocks; bx++, block += 8) {
+                BleakMarks::DecodeDxt1Block(block, decoded);
+
+                for (uint32_t y = 0; y < 4 && by * 4 + y < size; y++) {
+                    for (uint32_t x = 0; x < 4 && bx * 4 + x < size; x++) {
+                        memcpy(image + 4 * ((by * 4 + y) * size + bx * 4 + x), decoded + 4 * (y * 4 + x), 4);
+                    }
+                }
+            }
+        }
+    } else {
+        memcpy(image, texels, bytes);
+    }
+
+    for (uint32_t i = 0; i < size * size; i++) {
+        image[4 * i + 3] = 0xFF;
+    }
+
+    char path[260];
+    SStrPrintf(path, sizeof(path), "Logs\\BleakMarks_%03u_%s.tga", index, what);
+    OsCreateDirectory("Logs", 0);
+    HOSFILE file = OsCreateFile(path, OS_GENERIC_WRITE, 0, OS_CREATE_ALWAYS, OS_FILE_ATTRIBUTE_NORMAL, OS_FILE_TYPE_ANY);
+
+    if (file != OS_INVALID_FILE) {
+        uint8_t header[18];
+        BleakMarks::TgaHeader(header, size, size);
+        uint32_t written = 0;
+        OsWriteFile(file, header, sizeof(header), &written);
+        OsWriteFile(file, image, bytes, &written);
+        OsCloseFile(file);
+        BleakLog("dump %s", path);
+    }
+
+    SMemFree(image, __FILE__, __LINE__, 0);
+}
+
+// The bake number of the next bleakMarksDump file, or 0 when this bake is not dumped (off, or 64 dumped already).
+static uint32_t NextDumpIndex() {
+    if (!CCharacterComponent::s_bleakMarksDumpVar || !CCharacterComponent::s_bleakMarksDumpVar->m_intValue || s_marksDumpCount >= 64) {
+        return 0;
+    }
+
+    return ++s_marksDumpCount;
+}
+
+void CCharacterComponent::LoadGlowLayer(COMPONENT_VARIATIONS variation, int32_t textureIndex) {
+    void*& glow = this->m_glowLayer[variation][textureIndex];
+    void* texture = this->m_baseVariation[variation].m_texture[textureIndex];
+    void* next = nullptr;
+
+    // Not for the baked skins of NPCs, nor while glow is off (GlowSweep looks again when it is switched on).
+    if (texture && !(this->m_data.m_flags & 0x1) && GlowEnabled()) {
+        CACHEENTRY* entry = static_cast<CACHEENTRY*>(texture);
+        char glowName[BleakMarks::kNameMax];
+
+        if (BleakMarks::GlowName(entry->m_fileName, glowName, sizeof(glowName))) {
+            if (strlen(glowName) >= sizeof(entry->m_fileName)) {
+                BleakLogOnce(glowName, "skipped, a longer name than the texture cache keeps (127 characters)");
+            } else if (GlowFileExists(glowName)) {
+                next = TextureCacheCreateTexture(glowName);
+            }
+        }
+    }
+
+    // The new one first, so the same file is not freed and read again.
+    if (glow) {
+        TextureCacheDestroyTexture(glow);
+    }
+
+    if (glow != next) {
+        this->m_glowState &= ~GLOW_FAILED;
+    }
+
+    glow = next;
+}
+
+void CCharacterComponent::FreeGlowLayers() {
+    for (int32_t variation = 0; variation < NUM_COMPONENT_VARIATIONS; variation++) {
+        for (int32_t i = 0; i < 3; i++) {
+            if (this->m_glowLayer[variation][i]) {
+                TextureCacheDestroyTexture(this->m_glowLayer[variation][i]);
+                this->m_glowLayer[variation][i] = nullptr;
+            }
+        }
+    }
+
+    this->m_glowState &= ~(GLOW_FAILED | GLOW_REQUESTED);
+}
+
+uint32_t CCharacterComponent::CountGlowLayers() {
+    uint32_t count = 0;
+
+    for (int32_t variation = 0; variation < NUM_COMPONENT_VARIATIONS; variation++) {
+        for (int32_t i = 0; i < 3; i++) {
+            count += this->m_glowLayer[variation][i] != nullptr;
+        }
+    }
+
+    return count;
+}
+
+void CCharacterComponent::LoadMarkLayer(const char* debug) {
+    void*& texture = this->m_baseVariation[VARIATION_FACIAL_HAIR].m_texture[2];
+    CharSectionsRec* rec = ComponentGetSectionsRecord(CCharacterComponent::s_chrVarArray, this->m_data.m_preferences.m_raceID, this->m_data.m_preferences.m_sexID, VARIATION_FACIAL_HAIR, this->m_data.m_preferences.m_facialHairId, this->m_data.m_preferences.m_hairColorId, nullptr);
+    const char* name = rec && BleakMarks::HasTexture(rec->m_textureName[2]) ? rec->m_textureName[2] : nullptr;
+
+    // No mark before and none now: nothing changes (every row today).
+    if (!texture && !name) {
+        return;
+    }
+
+    void* next = nullptr;
+
+    if (name) {
+        SStrCopy(s_pathEnd, name, sizeof(s_path));
+        next = TextureCacheCreateTexture(s_path);
+    }
+
+    if (texture) {
+        TextureCacheDestroyTexture(texture);
+    }
+
+    texture = next;
+    this->LoadGlowLayer(VARIATION_FACIAL_HAIR, 2);
+    this->SetDirtySections((1 << NUM_COMPONENT_SECTIONS) - 1);
+}
+
+void CCharacterComponent::MarkLayerRenderPrep(COMPONENT_SECTIONS section) {
+    if (this->m_baseVariation[VARIATION_FACIAL_HAIR].m_texture[2]) {
+        CCharacterComponent::PasteAtlasLayer(section, this->m_baseVariation[VARIATION_FACIAL_HAIR].m_texture[2], CCharacterComponent::s_textureBuffer);
+    }
+}
+
+void CCharacterComponent::MarkLayerRequest(COMPONENT_SECTIONS section) {
+    if (this->m_baseVariation[VARIATION_FACIAL_HAIR].m_texture[2]) {
+        this->m_request->AddLayer(static_cast<uint8_t>(section | CComponentRequest::ATLAS_LAYER), this->m_baseVariation[VARIATION_FACIAL_HAIR].m_texture[2]);
+    }
+}
+
+void CCharacterComponent::PasteAtlasLayer(COMPONENT_SECTIONS section, void* texture, MipBits* dstMips, const CompPasteTarget* target) {
+    if (!texture || !dstMips || !TextureCacheHasMips(texture)) {
+        return;
+    }
+
+    const CompSectionInfo* sections = target ? target->m_sections : s_sectionInfo;
+    uint32_t textureSize = target ? target->m_size : s_textureSize;
+
+    TCTEXTUREINFO info;
+    info.m_width = 0;
+    info.m_height = 0;
+    info.m_mipCount = 0;
+    info.m_alphaSize = 0;
+    info.m_opaque = 1;
+    TextureCacheGetInfo(texture, info, 1);
+
+    // The file rules (square, palettized, the character texture's size x 2^k, every level there): anything else is
+    // skipped and logged once, never pasted green and never a hang.
+    BleakMarks::PastePlan plan = BleakMarks::PlanAtlasPaste(BleakTextureFacts(texture, info), textureSize);
+    uint32_t dstLevels = BleakMarks::MipCountFor(textureSize);
+    uint32_t last = plan.mip + dstLevels - 1;
+
+    if (!BleakPastePlanUsable(texture, info, plan, true, last)) {
+        return;
+    }
+
+    if (last >= info.m_mipCount) {
+        last = info.m_mipCount - 1;
+    }
+
+    // A second safeguard: the plan refuses chains past the cache's 16 mip offsets, so this never cuts anything.
+    if (last >= BleakMarks::kCacheMipLevels) {
+        last = BleakMarks::kCacheMipLevels - 1;
+    }
+
+    const BlpPalPixel* pal = target && target->m_palette ? target->m_palette : TextureCacheGetPal(texture);
+    uint32_t x = sections[section].m_pos.x;
+    uint32_t y = sections[section].m_pos.y;
+    uint32_t w = sections[section].m_size.x;
+    uint32_t h = sections[section].m_size.y;
+
+    for (uint32_t level = plan.mip, dstLevel = 0; level <= last; level++, dstLevel++) {
+        BleakMarks::PalMip mip;
+        mip.indices = static_cast<const uint8_t*>(TextureCacheGetMip(texture, level));
+        mip.width = info.m_width >> level ? info.m_width >> level : 1;
+        mip.height = info.m_height >> level ? info.m_height >> level : 1;
+        mip.alphaBits = info.m_alphaSize;
+
+        if (!mip.indices) {
+            break;
+        }
+
+        uint32_t dstSize = textureSize >> dstLevel ? textureSize >> dstLevel : 1;
+        BleakMarks::PasteAtlasRect(mip, reinterpret_cast<const uint8_t*>(pal), x, y, w, h, reinterpret_cast<uint8_t*>(dstMips->m_mip[dstLevel]), 4 * dstSize);
+
+        x >>= 1;
+        y >>= 1;
+        w = w >> 1 ? w >> 1 : 1;
+        h = h >> 1 ? h >> 1 : 1;
+    }
+}
+
+void CCharacterComponent::BakeGlowSection(COMPONENT_SECTIONS section) {
+    const CompPasteTarget emit = { s_glowSectionInfo, s_glowSize, nullptr };
+    const CompPasteTarget black = { s_glowSectionInfo, s_glowSize, s_blackPalette };
+    MipBits* dst = s_glowBuffer;
+    const CharacterSection& items = this->m_section[section];
+
+    // Each section starts black at every level (the buffer holds other characters' sections).
+    const CompSectionInfo& rect = s_glowSectionInfo[section];
+
+    for (uint32_t level = 0; level <= s_glowMipLevels; level++) {
+        uint32_t size = s_glowSize >> level ? s_glowSize >> level : 1;
+        uint32_t w = rect.m_size.x >> level ? rect.m_size.x >> level : 1;
+        uint32_t h = rect.m_size.y >> level ? rect.m_size.y >> level : 1;
+        BleakMarks::FillRect(reinterpret_cast<uint8_t*>(dst->m_mip[level]), 4 * size, rect.m_pos.x >> level, rect.m_pos.y >> level, w, h, 0xFF000000u);
+    }
+
+    // The colour bake's layers in its order (RenderPrepXX / CreateRequestXX): the skin, then underwear and face, the
+    // mark, then features, scalp and items.
+    auto skin = [&]() {
+        void* file = GlowFileFor(this->m_baseVariation[VARIATION_SKIN].m_texture[0], this->m_glowLayer[VARIATION_SKIN][0]);
+
+        // An opaque layer without light leaves the section black.
+        if (file) {
+            CCharacterComponent::PasteFromSkin(section, file, dst, &emit);
+        }
+    };
+
+    auto layer = [&](COMPONENT_VARIATIONS variation, int32_t index) {
+        void* texture = this->m_baseVariation[variation].m_texture[index];
+
+        if (!texture) {
+            return;
+        }
+
+        void* file = GlowFileFor(texture, this->m_glowLayer[variation][index]);
+        CCharacterComponent::PasteToSection(section, file ? file : texture, dst, file ? &emit : &black);
+    };
+
+    auto mark = [&]() {
+        void* texture = this->m_baseVariation[VARIATION_FACIAL_HAIR].m_texture[2];
+
+        if (!texture) {
+            return;
+        }
+
+        void* file = GlowFileFor(texture, this->m_glowLayer[VARIATION_FACIAL_HAIR][2]);
+        CCharacterComponent::PasteAtlasLayer(section, file ? file : texture, dst, file ? &emit : &black);
+    };
+
+    auto itemLayers = [&](int32_t first, int32_t last) {
+        for (int32_t i = first; i < last; i++) {
+            if ((1 << i) & items.m_layerMask) {
+                CCharacterComponent::PasteToSection(section, items.m_layerTex[i], dst, &black);
+            }
+        }
+    };
+
+    CharSectionsRec* skinRec = ComponentGetSectionsRecord(CCharacterComponent::s_chrVarArray, this->m_data.m_preferences.m_raceID, this->m_data.m_preferences.m_sexID, VARIATION_SKIN, 0, this->m_data.m_preferences.m_skinID, nullptr);
+    int32_t pants = (this->m_flags & 0x20) != 0;
+
+    switch (section) {
+        case SECTION_ARM_UPPER:
+            skin();
+            mark();
+            itemLayers(0, 2);
+            break;
+
+        case SECTION_ARM_LOWER:
+        case SECTION_TORSO_LOWER:
+            skin();
+            mark();
+            itemLayers(0, 7);
+            break;
+
+        case SECTION_HAND:
+        case SECTION_FOOT:
+            skin();
+            mark();
+            itemLayers(0, 1);
+            break;
+
+        case SECTION_TORSO_UPPER:
+            skin();
+
+            if (!(items.m_layerMask & 0x7)) {
+                layer(VARIATION_UNDERWEAR, 1);
+            }
+
+            mark();
+            itemLayers(0, 5);
+            break;
+
+        case SECTION_LEG_UPPER:
+            skin();
+
+            if (pants || !(items.m_layerMask & 0x3)) {
+                layer(VARIATION_UNDERWEAR, 0);
+            }
+
+            mark();
+            itemLayers(pants, 3 - pants);
+            break;
+
+        case SECTION_LEG_LOWER:
+            skin();
+            mark();
+            itemLayers(pants, 2 * !pants + 4);
+            break;
+
+        case SECTION_HEAD_UPPER:
+            if (skinRec && (skinRec->m_flags & 0x8)) {
+                skin();
+            }
+
+            layer(VARIATION_FACE, 1);
+            mark();
+            layer(VARIATION_FACIAL_HAIR, 1);
+            layer(VARIATION_HAIR, 2);
+            break;
+
+        case SECTION_HEAD_LOWER:
+            if (skinRec && (skinRec->m_flags & 0x8)) {
+                skin();
+            }
+
+            layer(VARIATION_FACE, 0);
+            mark();
+            layer(VARIATION_FACIAL_HAIR, 0);
+            layer(VARIATION_HAIR, 1);
+            break;
+
+        default:
+            break;
+    }
+}
+
+void CCharacterComponent::BakeGlowTexture(uint32_t sections) {
+    if (!s_glowBuffer) {
+        return;
+    }
+
+    for (int32_t section = 0; section < NUM_COMPONENT_SECTIONS; section++) {
+        if (!((1 << section) & sections)) {
+            continue;
+        }
+
+        this->BakeGlowSection(static_cast<COMPONENT_SECTIONS>(section));
+
+        // The sections that hold any light are the only ones the model draws again.
+        const CompSectionInfo& rect = s_glowSectionInfo[section];
+        bool light = BleakMarks::AnyLight(reinterpret_cast<const uint8_t*>(s_glowBuffer->m_mip[0]), 4 * s_glowSize, rect.m_pos.x, rect.m_pos.y, rect.m_size.x, rect.m_size.y);
+        this->m_glowSections = light ? this->m_glowSections | (1u << section) : this->m_glowSections & ~(1u << section);
+    }
+
+    if ((this->m_glowState & GLOW_DXT1) && s_glowCompressedBuffer) {
+        ComputeMipLevelsSized(s_glowBuffer, s_glowCompressedBuffer, s_glowSize, s_glowMipLevels);
+    }
+}
+
+void CCharacterComponent::CreateGlowTexture() {
+    bool dxt1 = this->m_gxTexFormat == GxTex_Dxt1;
+
+    if (!GlowBuffers(dxt1)) {
+        this->m_glowState |= GLOW_FAILED;
+        return;
+    }
+
+    CGxTexFlags flags(GxTex_LinearMipLinear, 0, 0, 0, 0, 0, 1);
+
+    if (g_theGxDevicePtr->DeviceApi() == GxApi_GLL) {
+        flags.m_bit14 = 1;
+    }
+
+    this->m_glowState = dxt1 ? this->m_glowState | GLOW_DXT1 : this->m_glowState & ~GLOW_DXT1;
+    this->m_glowTexture = TextureCreate(s_glowSize, s_glowSize, dxt1 ? GxTex_Dxt1 : GxTex_Rgb565, dxt1 ? GxTex_Dxt1 : GxTex_Argb8888, flags, this, &CCharacterComponent::UpdateGlowTexture, "CharacterBaseGlow", 1);
+
+    if (!this->m_glowTexture) {
+        this->m_glowState |= GLOW_FAILED;
+        BleakLog("glow texture %ux%u could not be made", s_glowSize, s_glowSize);
+        return;
+    }
+
+    this->m_glowTextureBytes = BleakMarks::TextureBytes(s_glowSize, dxt1);
+    this->m_glowSections = 0;
+    s_glowBytes += this->m_glowTextureBytes;
+}
+
+void CCharacterComponent::DestroyGlowTexture() {
+    if (!this->m_glowTexture) {
+        return;
+    }
+
+    if (this->m_data.m_model) {
+        this->m_data.m_model->SetGlowTexture(nullptr, 0); // BLEAKHOLD(glow): glow-draw interface
+    }
+
+    // No callback may reach this component after this. A copy of the model may still hold the texture (a PlayerModel's
+    // DuplicateModel takes it, M2Glow::TakeSourceGlow), and the device calls a texture's callback unchecked when it
+    // recreates its textures (CGxDeviceD3d::ITexForceRecreation). So the callback is not nulled (GxTexSetCannotUpdate)
+    // but swapped for GlowLetGoUserFunc: a copy that still draws the texture fills it with black, which draws nothing.
+    CGxTex* gxTex = TextureGetGxTex(this->m_glowTexture, 1, nullptr);
+
+    if (gxTex) {
+        GxTexSetUserData(gxTex, &GlowLetGoUserFunc, (this->m_glowState & GLOW_DXT1) ? &s_glowLetGoDxt1 : nullptr);
+    }
+
+    HandleClose(reinterpret_cast<HOBJECT>(this->m_glowTexture));
+    this->m_glowTexture = nullptr;
+    s_glowBytes -= this->m_glowTextureBytes < s_glowBytes ? this->m_glowTextureBytes : s_glowBytes;
+    this->m_glowTextureBytes = 0;
+    this->m_glowSections = 0;
+}
+
+// After the colour bake (RenderPrepSections, ProcessFinishedRequest), on the main thread, with s_bInRenderPrep set and
+// the item textures still loaded: the glow texture is made, baked (the sections the colour bake did), uploaded and
+// handed to the model, or let go.
+void CCharacterComponent::GlowRenderPrep(uint32_t sections) {
+    const uint32_t allSections = (1u << NUM_COMPONENT_SECTIONS) - 1;
+    this->m_glowState &= ~GLOW_REQUESTED;
+    sections &= allSections;
+    uint32_t glowLayers = this->CountGlowLayers();
+
+    // bleakMarksDump: whole bakes of characters with a mark or a `_Glow` file.
+    uint32_t dumpIndex = 0;
+
+    if (sections == allSections && (glowLayers || this->m_baseVariation[VARIATION_FACIAL_HAIR].m_texture[2])) {
+        dumpIndex = NextDumpIndex();
+    }
+
+    if (dumpIndex) {
+        const CharacterPreferences& prefs = this->m_data.m_preferences;
+        BleakLog("dump %03u: race %u sex %u skin %u face %u hair %u/%u features %u, %u glow files", dumpIndex, prefs.m_raceID, prefs.m_sexID, prefs.m_skinID, prefs.m_faceId, prefs.m_hairStyleId, prefs.m_hairColorId, prefs.m_facialHairId, glowLayers);
+
+        // The colour bake: the request's buffer on the worker path, else s_textureBuffer.
+        if (this->m_request && this->m_request->m_mipBits) {
+            DumpBake("skin", dumpIndex, this->m_request->m_mipBits->m_mipBits->m_mip[0], s_textureSize, this->m_request->m_format == GxTex_Dxt1);
+        } else if (!this->m_request) {
+            DumpBake("skin", dumpIndex, CCharacterComponent::s_textureBuffer->m_mip[0], s_textureSize, false);
+        }
+    }
+
+    if (!BleakMarks::WantsGlow(GlowEnabled(), (this->m_data.m_flags & 0x1) != 0, glowLayers)) {
+        this->DestroyGlowTexture();
+        return;
+    }
+
+    CM2Model* model = this->m_data.m_model;
+    uint32_t framesSince = GlowFramesSinceAnimated(model);
+    float distanceSq = model ? model->m_scaleSq : 0.0f;
+    bool wasInRange = (this->m_glowState & GLOW_IN_RANGE) != 0;
+    bool mayCreate = BleakMarks::GlowMayCreate(framesSince, distanceSq, wasInRange);
+    this->m_glowState = BleakMarks::GlowRangeAfter(framesSince, distanceSq, wasInRange) ? this->m_glowState | GLOW_IN_RANGE : this->m_glowState & ~GLOW_IN_RANGE;
+    bool created = false;
+
+    if (!this->m_glowTexture) {
+        bool dxt1 = this->m_gxTexFormat == GxTex_Dxt1;
+
+        // Only a whole bake makes the texture: only then are the item textures of every section loaded, so armour
+        // covers the glow from the first frame (GlowSweep asks for a whole bake). Not measured within the distance
+        // limit lately (a character the scene has not animated is not 0 yards away) or past the budget: GlowSweep
+        // asks again when that changes.
+        if (sections != allSections || !model || !mayCreate || (this->m_glowState & GLOW_FAILED) || !BleakMarks::GlowFits(s_glowBytes, BleakMarks::TextureBytes(s_glowSize, dxt1), BleakMarks::kGlowBudgetBytes)) {
+            // A new model often bakes before the scene first animates it (a character shown in the glue screens):
+            // looked at again next frame, not in a quarter of a second, so its glow comes with it.
+            if (sections == allSections && model && framesSince == BleakMarks::kNeverAnimated) {
+                s_glowSweepSoon = 1;
+            }
+
+            return;
+        }
+
+        this->CreateGlowTexture();
+
+        if (!this->m_glowTexture) {
+            return;
+        }
+
+        created = true;
+    }
+
+    if (!sections) {
+        return;
+    }
+
+    uint32_t oldSections = this->m_glowSections;
+    this->BakeGlowTexture(sections);
+    CGxTex* gxTex = TextureGetGxTex(this->m_glowTexture, 1, nullptr);
+
+    if (sections == allSections) {
+        GxTexUpdate(gxTex, 0, 0, s_glowSize, s_glowSize, 1);
+    } else {
+        for (int32_t section = 0; section < NUM_COMPONENT_SECTIONS; section++) {
+            if ((1 << section) & sections) {
+                const CompSectionInfo& rect = s_glowSectionInfo[section];
+                GxTexUpdate(gxTex, rect.m_pos.x, rect.m_pos.y, rect.m_pos.x + rect.m_size.x, rect.m_pos.y + rect.m_size.y, 1);
+            }
+        }
+    }
+
+    if (model && (created || this->m_glowSections != oldSections)) {
+        model->SetGlowTexture(this->m_glowTexture, this->m_glowSections); // BLEAKHOLD(glow): glow-draw interface
+    }
+
+    if (dumpIndex) {
+        BleakLog("dump %03u: glow sections 0x%03x", dumpIndex, this->m_glowSections);
+        DumpBake("glow", dumpIndex, s_glowBuffer->m_mip[0], s_glowSize, false);
+    }
+}
+
+// The device asks for the glow texture's texels outside a bake (it lost the texture, or uploads it late): bake it
+// whole now, loading the item textures the last bake let go of.
+void CCharacterComponent::BakeGlowForDevice() {
+    if (!s_glowBuffer) {
+        return;
+    }
+
+    this->VariationsLoaded(1);
+
+    // ItemsLoaded loads the item textures of the dirty sections only.
+    uint32_t dirty = this->m_dirtySections;
+    this->m_dirtySections = dirty | ((1u << NUM_COMPONENT_SECTIONS) - 1);
+    this->ItemsLoaded(1);
+    this->m_dirtySections = dirty;
+
+    this->BakeGlowTexture((1u << NUM_COMPONENT_SECTIONS) - 1);
+
+    if (!this->m_dirtySections && !(this->m_flags & 0x1) && !this->m_request) {
+        this->DestroyRenderTextures();
+    }
+}
+
+void CCharacterComponent::UpdateGlowTexture(EGxTexCommand command, uint32_t width, uint32_t height, uint32_t face, uint32_t level, void* userArg, uint32_t& texelStrideInBytes, const void*& texels) {
+    CCharacterComponent* component = static_cast<CCharacterComponent*>(userArg);
+
+    switch (command) {
+        case GxTex_Lock:
+            if (!CCharacterComponent::s_bInRenderPrep) {
+                component->BakeGlowForDevice();
+            }
+
+            break;
+
+        case GxTex_Latch: {
+            bool dxt1 = (component->m_glowState & GLOW_DXT1) != 0;
+            texelStrideInBytes = BleakMarks::GlowLatchStride(width, dxt1); // as GlowLetGoUserFunc latches
+            MipBits* mipBits = dxt1 ? s_glowCompressedBuffer : s_glowBuffer;
+            texels = mipBits ? mipBits->m_mip[level] : nullptr;
+            break;
+        }
+
+        default:
+            break;
+    }
+}
+
+void CCharacterComponent::SetEyeSprite(const char* sprite) {
+    if (sprite == this->m_eyeSprite || (sprite && this->m_eyeSprite && !strcmp(sprite, this->m_eyeSprite))) {
+        return;
+    }
+
+    CM2Model* model = this->m_data.m_model;
+
+    if (!model) {
+        return;
+    }
+
+    CTexture* texture = nullptr;
+
+    if (sprite) {
+        SStrCopy(s_pathEnd, sprite, sizeof(s_path));
+        texture = CreateTexture(s_path, &s_status);
+
+        if (!texture) {
+            BleakLogOnce(sprite, "eye sprite could not be loaded");
+        }
+    }
+
+    // nullptr gives the model its own texture back
+    model->ReplaceGeosetTexture(1703, texture); // BLEAKHOLD(glow): glow-draw interface
+
+    if (texture) {
+        HandleClose(reinterpret_cast<HOBJECT>(texture));
+    }
+
+    this->m_eyeSprite = sprite;
+}
+
+// Every frame from Update, at most four times a second (at once when bleakGlow changes, and the frame after a whole
+// bake of a model the scene has not animated yet): glow textures for characters the scene measured within 60 yards
+// (as the budget allows, nearer ones first), none for those it measured beyond 70, none at all with glow off.
+void CCharacterComponent::GlowSweep() {
+    uint32_t now = OsGetAsyncTimeMs();
+    bool changed = CCharacterComponent::s_bleakGlowChanged != 0;
+
+    if (!changed && !s_glowSweepSoon && now - s_glowSweepTime < 250) {
+        return;
+    }
+
+    s_glowSweepTime = now;
+    s_glowSweepSoon = 0;
+    CCharacterComponent::s_bleakGlowChanged = 0;
+    bool enabled = GlowEnabled();
+    uint32_t requestedBytes = 0; // glow textures asked for in this sweep: GlowRenderPrep makes them later
+
+    for (CCharacterComponent* component = s_glowList; component; component = component->m_glowNext) {
+        if (changed) {
+            if (!enabled) {
+                component->DestroyGlowTexture();
+                component->FreeGlowLayers();
+                continue;
+            }
+
+            // On again: the `_Glow` files skipped while it was off.
+            uint32_t before = component->CountGlowLayers();
+
+            for (int32_t variation = 0; variation < NUM_COMPONENT_VARIATIONS; variation++) {
+                for (int32_t i = 0; i < 3; i++) {
+                    if (component->m_baseVariation[variation].m_texture[i] && !component->m_glowLayer[variation][i]) {
+                        component->LoadGlowLayer(static_cast<COMPONENT_VARIATIONS>(variation), i);
+                    }
+                }
+            }
+
+            if (component->CountGlowLayers() != before) {
+                component->m_glowState |= GLOW_REQUESTED;
+                component->SetDirtySections((1 << NUM_COMPONENT_SECTIONS) - 1);
+            }
+
+            continue;
+        }
+
+        if (!enabled || (component->m_data.m_flags & 0x1) || !component->CountGlowLayers()) {
+            component->DestroyGlowTexture();
+            continue;
+        }
+
+        // The distance counts only when the scene measured it lately (GlowFramesSinceAnimated): a stale one neither
+        // makes a texture nor drops one, so a character the camera turns away from and back to keeps its glow.
+        CM2Model* model = component->m_data.m_model;
+        uint32_t framesSince = GlowFramesSinceAnimated(model);
+        float distanceSq = model ? model->m_scaleSq : 0.0f;
+        bool wasInRange = (component->m_glowState & GLOW_IN_RANGE) != 0;
+        component->m_glowState = BleakMarks::GlowRangeAfter(framesSince, distanceSq, wasInRange) ? component->m_glowState | GLOW_IN_RANGE : component->m_glowState & ~GLOW_IN_RANGE;
+
+        if (component->m_glowTexture) {
+            if (BleakMarks::GlowMustDrop(framesSince, distanceSq, wasInRange)) {
+                component->DestroyGlowTexture();
+            }
+
+            continue;
+        }
+
+        if (!model || !BleakMarks::GlowMayCreate(framesSince, distanceSq, wasInRange) || (component->m_glowState & (GLOW_REQUESTED | GLOW_FAILED))) {
+            continue;
+        }
+
+        // A bake makes the texture (the item textures are let go of after each bake, so it is a whole new one). The
+        // ones asked for in this sweep count against the budget already. With the budget full, holders unseen since
+        // or well farther away give theirs up (BleakMarks::PickEviction), so nearer characters glow first.
+        uint32_t bytes = BleakMarks::TextureBytes(s_glowSize, component->m_gxTexFormat == GxTex_Dxt1);
+
+        while (!BleakMarks::GlowFits(s_glowBytes + requestedBytes, bytes, BleakMarks::kGlowBudgetBytes)) {
+            CCharacterComponent* holder = BleakMarks::PickEviction(
+                s_glowList,
+                [](CCharacterComponent* item) { return item->m_glowNext; },
+                [](CCharacterComponent* item, BleakMarks::GlowHolder& out) {
+                    if (!item->m_glowTexture) {
+                        return false;
+                    }
+
+                    out.framesSince = GlowFramesSinceAnimated(item->m_data.m_model);
+                    out.distanceSq = item->m_data.m_model ? item->m_data.m_model->m_scaleSq : 0.0f;
+                    return true;
+                },
+                distanceSq);
+
+            if (!holder) {
+                break;
+            }
+
+            holder->DestroyGlowTexture();
+        }
+
+        if (BleakMarks::GlowFits(s_glowBytes + requestedBytes, bytes, BleakMarks::kGlowBudgetBytes)) {
+            component->m_glowState |= GLOW_REQUESTED;
+            component->SetDirtySections((1 << NUM_COMPONENT_SECTIONS) - 1);
+            requestedBytes += bytes;
+        }
     }
 }

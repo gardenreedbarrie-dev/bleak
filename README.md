@@ -555,12 +555,20 @@ replaced, so this works with signature checks on or off.
   their faction's column with its step and scale, with the parts its code finds by name (`BleakholdCharacterCreate.lua`).
   `Tools/RaceForge/raceforge.py find` tells which patch brings that screen and prints its race buttons
   (Tools/RaceForge/README.md, "Finding a file in the realm's archives").
-- Tests: `Tools/UiLint/glue/run.sh` runs the login, race and name scenarios against a mock of the glue API
-  (part of `Tools/UiLint/check.sh`).
+- Appearance rows (`BleakholdCustomize.lua`): "n/N" on every row of the creation and customize screens, coloured by
+  the option's group, the mouse wheel, Shift-click for 5 steps, a right-click rolls one row, and a lock per row that
+  Randomize keeps. Once the realm's tables have the Bleakhold marks and eye colours (Tools/RaceForge/README.md,
+  "Bleakhold appearance data contract") and match `BleakholdCustomizeData.lua`, Eyes, Markings and Mark Colour rows
+  are added beside them; otherwise the rows show the plain n/N of what their arrows reach. On a paid customization
+  the name boxes are greyed out (the server keeps the name). The console variable `bleakCustomizeSelfTest` (1, or 2
+  for every race, sex and class) walks every row and logs it to `Logs\BleakholdCustomize.log`. The barbershop gets
+  the same from the addon (`Interface/AddOns/Bleakhold/Barber.lua`, Markings and Mark Colour in a panel beside it).
+- Tests: `Tools/UiLint/glue/run.sh` runs the login, race, name and appearance-row (`picker-*`) scenarios against a
+  mock of the glue API (part of `Tools/UiLint/check.sh`).
 - Fonts: Marcellus and Marcellus SC, SIL Open Font License 1.1 (`Fonts/OFL.txt`).
 - Art: `Tools/BlpConvert/make_login_art.py` draws the login art (needs Pillow);
-  `Tools/BlpConvert/blpconvert.py IN OUT.blp [--format dxt1|dxt5|bgra] [--size WxH|--pad]` converts any picture
-  to a BLP the client loads. Textures must be powers of two.
+  `Tools/BlpConvert/blpconvert.py IN OUT.blp [--format dxt1|dxt5|bgra|pal8] [--size WxH|--pad]` converts any
+  picture to a BLP the client loads (`pal8` for character layers). Textures must be powers of two.
 
 ## Layout
 
@@ -577,6 +585,7 @@ replaced, so this works with signature checks on or off.
 | `Tools/BlpConvert/` | Python tool that converts pictures to BLP textures; draws the login art |
 | `Tools/EmojiForge/` | Python tool that holds the emoji catalogue and makes the emoji art, the addon's list and the server module's list |
 | `Tools/DanceForge/` | Python tool for the dances: choreography, the catalogue, the clip pack, the addon's and server module's lists, and the tests of the client's dance retargeting |
+| `Tools/MarkForge/` | Python tool that draws the Bleakhold glowing body marks and eye sprites from each race's own model, at install time on the VPS (its output is never committed) |
 | `Interface/Bleakhold/Glue/` | Bleakhold login screen and character creation (glue Lua, art, fonts) |
 | `Interface/Bleakhold/Emoji/` | Emoji bubble art (BLP, made by `Tools/EmojiForge`) with its licences and `NOTICE.md` |
 | `Interface/Bleakhold/Dances/` | Where the dance pack (`Dances.bdc`, built by `Tools/DanceForge`) and the dances' music go |

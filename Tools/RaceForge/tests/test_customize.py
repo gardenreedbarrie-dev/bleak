@@ -192,16 +192,16 @@ class CustomizationTests(unittest.TestCase):
             self.assertFalse(any(n.startswith("Character") for n in names))
 
         # The default art name is a digit: no realm or Reforged patch uses one, and it loads after the stock patch-3.
-        with mpqpack.MpqArchive(os.path.join(self.out, "client", "patch-6.MPQ")) as archive:
+        with mpqpack.MpqArchive(os.path.join(self.out, "client", "patch-8.MPQ")) as archive:
             self.assertEqual(archive.verify().problems, [])
             self.assertEqual(sorted(archive.names()), sorted(self.art))
 
             for name, data in self.art.items():
                 self.assertEqual(archive.read(name), data)
 
-        self.assertEqual(sorted(os.listdir(os.path.join(self.out, "client"))), ["DBFilesClient", "patch-6.MPQ", "patch-R.MPQ"])
-        self.assertIn("patch-6.MPQ: 3 art files", self.report)
-        self.assertIn("[PASS] art archive names (patch-6.MPQ) checked against taken_patches.json", self.report)
+        self.assertEqual(sorted(os.listdir(os.path.join(self.out, "client"))), ["DBFilesClient", "patch-8.MPQ", "patch-R.MPQ"])
+        self.assertIn("patch-8.MPQ: 3 art files", self.report)
+        self.assertIn("[PASS] art archive names (patch-8.MPQ) checked against taken_patches.json", self.report)
 
     def test_validate_command_uses_the_merged_starting_point(self):
         result = run_tool("validate", "--dbc", self.stock, "--out", self.out)

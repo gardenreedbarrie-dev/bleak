@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include "Engine/Source/Model2/M2Glow.h"
 #include "Engine/Source/Model2/M2Light.h"
 #include "Engine/Source/Model2/M2Shared.h"
 #include "Engine/Source/Tempest/C2Vector.h"
@@ -224,6 +225,10 @@ class CM2Model {
     /* 02EC */ uint32_t unused_02EC;
     // BLEAKHOLD(dance): the Bleakhold dance playing on this model (M2Dance.h), or null.
     M2DanceState* m_bleakDance;
+    // BLEAKHOLD(glow): the glow texture drawn over this model's skin batches (M2Glow.h), with a handle of its own, or
+    // null; and the component sections that hold any glow (M2Glow::kSections bits).
+    CTexture* m_bleakGlowTexture;
+    uint32_t m_bleakGlowSections;
 
     static void (*s_transformVertices[5])(CM2Model*, M2SkinSection*, uint8_t*, int32_t);
     static TSGrowableArray<M2ModelCallback> s_sequenceCallbacks;
@@ -338,6 +343,26 @@ class CM2Model {
     void LinkToAsyncHeadRecursive(int32_t textures);
     void ReplaceParticleColor(uint32_t id, CImVector color0, CImVector color1, CImVector color2);
     void ReplaceTexture(uint32_t type, CTexture* texture);
+    // BLEAKHOLD(glow): the glow pass (M2Glow.h). SetGlowTexture gives the model the glow texture it draws over its
+    // skin batches (null: none) and the sections that hold glow (bit i: CCharacterComponent::s_sectionInfoRaw[i]).
+    // ReplaceTextureAtIndex sets the texture at an index of the model's texture table for this model only (null puts
+    // the model file's own texture back); ReplaceGeosetTexture does that for the indices only one geoset's batches use
+    // (the eye glow of geoset 1703). All three are queued like ReplaceTexture while the model loads, and the model
+    // keeps a handle of its own. GetGlowTexture is the glow the model draws, always its own. A copy made by
+    // CM2Scene::DuplicateModel (the interface's PlayerModel frames and portraits) takes its source's glow when it
+    // finishes loading (InitializeLoaded, M2Glow::TakeSourceGlow), like the textures it copies there, and does not
+    // track the source after that: it keeps that glow until the frame copies the model again (SetUnit). When the
+    // component lets go of it before that, the texture turns black (CCharacterComponent::DestroyGlowTexture).
+    void SetGlowTexture(CTexture* texture, uint32_t sections = M2Glow::kAllSections);
+    void ReplaceTextureAtIndex(uint32_t index, CTexture* texture);
+    void ReplaceGeosetTexture(uint32_t geosetId, CTexture* texture);
+    CTexture* GetGlowTexture(uint32_t* sections) const {
+        if (sections) {
+            *sections = this->m_bleakGlowSections;
+        }
+
+        return this->m_bleakGlowTexture;
+    }
     void SetAnimating(int32_t animating);
     void SetEventCallback(void* callback, uint64_t param);
     void SetLightEnabled(uint32_t index, uint32_t enabled);

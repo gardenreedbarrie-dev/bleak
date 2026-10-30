@@ -45,6 +45,11 @@ class CCharacterCreation {
     static bool IsClassAvailable(int32_t classID);
     static void OnHide();
     static void RandomizeCharCustomization();
+    // BLEAKHOLD(customize): the picker's natives (CharacterCreation_Scripts.cpp), on the model of the arrows' walk in
+    // WoW/Common/BleakholdCustomize.h
+    static bool GetCharCustomizationInfo(CHAR_CUSTOMIZATION_TYPE type, int32_t* position, int32_t* count, int32_t* raw);
+    static bool SetCharCustomizationRaw(CHAR_CUSTOMIZATION_TYPE type, int32_t raw);
+    static void RandomizeCharCustomization(uint32_t keepMask);
     static void ResetCharCustomizeInfo();
     static void SetCharacterFacing(float facing);
     static void SetCharCustomizeModel(const char* modelName);

@@ -36,13 +36,17 @@ class NameTests(unittest.TestCase):
         for c in realm + reforged + "JQ" + "2345":
             self.assertIn(patchnames.name_key(f"patch-{c}.MPQ"), TAKEN, c)
 
+        # customize's archives (README, "Bleakhold appearance data contract", Archives)
+        for c in "67~KOF":
+            self.assertIn("customize", TAKEN[patchnames.name_key(f"patch-{c}.MPQ")], c)
+
         self.assertIn(patchnames.name_key("enUS/patch-enUS-8.MPQ"), TAKEN)
         self.assertIn("Reforged", TAKEN[patchnames.name_key("patch-S.MPQ")])
-        self.assertEqual(patchnames.free_characters(TAKEN, None, raceforge.DEFAULT_MPQ), "6789FKOW")
+        self.assertEqual(patchnames.free_characters(TAKEN, None, raceforge.DEFAULT_MPQ), "89W")
 
     def test_default_names_are_free_and_load_after_the_stock_patches(self):
         names = patchnames.art_archive_names(raceforge.DEFAULT_ART_LETTERS, raceforge.DEFAULT_MPQ)
-        self.assertEqual(names, ["patch-6.MPQ", "patch-7.MPQ", "patch-8.MPQ", "patch-9.MPQ"])
+        self.assertEqual(names, ["patch-8.MPQ", "patch-9.MPQ"])
         self.assertEqual(patchnames.problems(names, TAKEN), [])
 
         for name in names:
@@ -54,7 +58,7 @@ class NameTests(unittest.TestCase):
         self.assertEqual(patchnames.art_archive_names("w", None), ["patch-W.MPQ"])
 
     def test_bad_characters_are_refused(self):
-        for letters in ("", "0", "1", "2", "3", "SS", "~", "A-"):
+        for letters in ("", "0", "1", "2", "3", "SS", "!", "A-", "{"):
             with self.assertRaises(patchnames.PatchNameError, msg=letters):
                 patchnames.art_archive_names(letters, None)
 
@@ -117,7 +121,7 @@ class BuildTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0, letters)
             self.assertIn("refusing to write the customization art", result.stderr)
             self.assertIn("is taken by", result.stderr)
-            self.assertIn("free: 6 7 8 9 F K O W", result.stderr)
+            self.assertIn("free: 8 9 W", result.stderr)
             self.assertFalse(os.path.exists(os.path.join(self.tmp.name, f"taken-{letters}")), "refused before the output folder")
 
     def test_free_letter_override(self):
@@ -129,17 +133,17 @@ class BuildTests(unittest.TestCase):
         patches = os.path.join(self.tmp.name, "realm-patches")
         os.makedirs(patches)
 
-        for name in ("patch-6.mpq", "Patch-Y.MPQ", "patch-R.MPQ"):
+        for name in ("patch-8.mpq", "Patch-Y.MPQ", "patch-R.MPQ"):
             open(os.path.join(patches, name), "wb").close()
 
         result = self.build("scan", "--patches-dir", patches)
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("patch-6.MPQ is already in the patch folder", result.stderr)
-        self.assertIn("free: 7 8 9 F K O W", result.stderr)
+        self.assertIn("patch-8.MPQ is already in the patch folder", result.stderr)
+        self.assertIn("free: 9 W", result.stderr)
 
-        result = self.build("scan-ok", "--patches-dir", patches, "--art-letters", "7")
+        result = self.build("scan-ok", "--patches-dir", patches, "--art-letters", "9")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self.client_files("scan-ok"), ["DBFilesClient", "patch-7.MPQ", "patch-R.MPQ"])
+        self.assertEqual(self.client_files("scan-ok"), ["DBFilesClient", "patch-9.MPQ", "patch-R.MPQ"])
 
         with open(os.path.join(self.tmp.name, "scan-ok", "report.txt"), encoding="utf-8") as f:
             self.assertIn(f"--patches-dir {patches} (3 names)", f.read())
@@ -174,28 +178,27 @@ class BuildTests(unittest.TestCase):
         package = os.path.join(self.tmp.name, "big-package")
         write_package(package)
 
-        # Five files of 0.6 MB with 1 MB per archive: five archives, one more than the four default names.
-        for i in range(5):
+        # Three files of 0.6 MB with 1 MB per archive: three archives, one more than the two default names.
+        for i in range(3):
             with open(os.path.join(package, "Character", f"Big{i}.blp"), "wb") as f:
                 f.write(bytes([i]) * 600_000)
 
         result = run_tool("build", "--dbc", self.stock, "--out", os.path.join(self.tmp.name, "big"), "--mpq", "--customization", package, "--art-max-mb", "1")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("needs 5 archives", result.stderr)
-        self.assertIn("patch-6.MPQ, patch-7.MPQ, patch-8.MPQ, patch-9.MPQ", result.stderr)
+        self.assertIn("needs 3 archives", result.stderr)
+        self.assertIn("patch-8.MPQ, patch-9.MPQ", result.stderr)
 
         result = run_tool("build", "--dbc", self.stock, "--out", os.path.join(self.tmp.name, "big2"), "--mpq", "--customization", package, "--art-max-mb", "1",
-                          "--art-letters", "6789FW")
+                          "--art-letters", "89W")
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(self.client_files("big2"), ["DBFilesClient", "patch-6.MPQ", "patch-7.MPQ", "patch-8.MPQ", "patch-9.MPQ", "patch-F.MPQ",
-                                                     "patch-R.MPQ"])
+        self.assertEqual(self.client_files("big2"), ["DBFilesClient", "patch-8.MPQ", "patch-9.MPQ", "patch-R.MPQ", "patch-W.MPQ"])
 
     def test_easy_mode_uses_the_default_names(self):
         result = run_tool(self.stock, self.package)
         out = os.path.join(self.tmp.name, raceforge.EASY_OUT)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
-        self.assertEqual(sorted(os.listdir(os.path.join(out, "client"))), ["DBFilesClient", "patch-6.MPQ", "patch-R.MPQ"])
-        self.assertIn("client\\patch-6.MPQ -> the customization art", result.stdout)
+        self.assertEqual(sorted(os.listdir(os.path.join(out, "client"))), ["DBFilesClient", "patch-8.MPQ", "patch-R.MPQ"])
+        self.assertIn("client\\patch-8.MPQ -> the customization art", result.stdout)
 
 
 if __name__ == "__main__":

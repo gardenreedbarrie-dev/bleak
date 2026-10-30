@@ -4,7 +4,8 @@
 -- sets its bleakFx* console variables, with presets. The client saves them in Config.wtf. A stock
 -- client has none of these variables: the window then only says so. Stock 3.3.5a look, as the Video options: the
 -- Interface Options' boxes (General, Effects), UIDropDownMenu-dressed lists (preset, anti-aliasing), check buttons
--- for the on/off variables, OptionsSliderTemplate's sliders, red panel buttons, Defaults at the bottom left.
+-- for the on/off variables (and the glow of the Bleakhold marks, bleakGlow), OptionsSliderTemplate's sliders, red panel
+-- buttons, Defaults at the bottom left.
 local ADDON, ns = ...
 local U, UI = ns.U, ns.UI
 local C = UI.C
@@ -63,6 +64,21 @@ G.TOGGLES = {
     { cvar = "bleakFxGrassParting", label = "Grass parting",
       help = "The grass bends away from your character as you walk through it." },
 }
+
+-- The glow of the Bleakhold marks and eye colours (bleakGlow, WoW/Common/ComponentCore/CharacterComponent_CVar.cpp): a
+-- check button of its own beside the switches, on whenever the client has the variable (the glow is drawn with the
+-- character, not by the post-processing), and in no preset.
+G.GLOW = { cvar = "bleakGlow", label = "Glowing marks",
+           help = "Marks and eye colours of the Bleakhold appearance options glow in the dark. Off: the marks show as "
+               .. "paint and the eyes keep their colour without the glow." }
+
+function G.GlowAvailable()
+    return GetCVar ~= nil and GetCVar(G.GLOW.cvar) ~= nil
+end
+
+function G.GlowOn()
+    return G.GlowAvailable() and (tonumber(GetCVar(G.GLOW.cvar)) or 1) ~= 0
+end
 
 -- Presets set every slider plus the master switch and anti-aliasing. "bleakhold" is the client default.
 G.PRESETS = {
@@ -223,7 +239,7 @@ end
 -- the switches (f.toggles, in G.TOGGLES' order): anti-aliasing as a dropdown right of the preset, the on/off ones as
 -- check buttons on the row under them
 f.toggles = {}
-local CHECK_COL = 190
+local CHECK_COL = 148
 local lastDropdown, checks = f.preset, 0
 for i, t in ipairs(G.TOGGLES) do
     local b
@@ -268,6 +284,23 @@ for i, t in ipairs(G.TOGGLES) do
     b.def = t
     f.toggles[i] = b
 end
+
+f.glow = UI.CheckButton(general, G.GLOW.label, 24)
+f.glow:SetPoint("TOPLEFT", general, "TOPLEFT", 12 + checks * CHECK_COL, -50)
+f.glow:SetScript("OnClick", function()
+    if G.GlowAvailable() then
+        local on = G.GlowOn()
+        SetCVar(G.GLOW.cvar, on and "0" or "1")
+        if PlaySound then
+            PlaySound(on and "igMainMenuOptionCheckBoxOff" or "igMainMenuOptionCheckBoxOn")
+        end
+    end
+    G.Refresh()
+end)
+f.glow:SetScript("OnEnter", function(self)
+    UI.ShowTooltip(self, { G.GLOW.label, G.GLOW.help })
+end)
+f.glow:SetScript("OnLeave", hideHelp)
 
 f.note = UI.Text(general, 12, C.orange, "body", "LEFT")
 f.note:SetPoint("TOPLEFT", general, "TOPLEFT", 16, -84)
@@ -368,6 +401,8 @@ function G.Refresh()
         end
         b:SetActive(on)
     end
+    f.glow:SetChecked(G.GlowOn())
+    f.glow:SetActive(G.GlowAvailable())
     local note = ""
     if not available then
         note = "This client has no Bleakhold graphics. Install the Bleakhold client to use them."
