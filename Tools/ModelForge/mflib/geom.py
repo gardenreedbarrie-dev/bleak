@@ -909,17 +909,23 @@ def wobble(mesh, amp, seed=1, freq=6.0):
     return recompute_normals(out, 40.0)
 
 
-def plank_edges(mesh, seed=1, amp=0.01, axis="y"):
-    """Irregular board ends: shifts the vertices at the ends of `axis` by noise of the other coordinates."""
+def plank_edges(mesh, seed=1, amp=0.01, axis="y", inward=False):
+    """Irregular board ends: shifts the vertices at the ends of `axis` ("x", "y" or "z") by noise of the other
+    coordinates. inward=True only ever shortens the board (by up to amp), so it keeps its catalogue size."""
     (x0, y0, z0), (x1, y1, z1) = mesh.bounds()
-    ai = 0 if axis == "x" else 1
-    lo, hi = (x0, x1) if ai == 0 else (y0, y1)
+    ai = {"x": 0, "y": 1, "z": 2}.get(axis, 1)
+    lo, hi = ((x0, x1), (y0, y1), (z0, z1))[ai]
     out = mesh.copy()
     pts = []
     for p in mesh.p:
         q = list(p)
-        if abs(p[ai] - lo) < 1e-4 or abs(p[ai] - hi) < 1e-4:
-            q[ai] += _vnoise(p[0] * 9 + p[2] * 7, p[1] * 9, p[2] * 9, seed) * amp
+        at_lo, at_hi = abs(p[ai] - lo) < 1e-4, abs(p[ai] - hi) < 1e-4
+        if at_lo or at_hi:
+            n = _vnoise(p[0] * 9 + p[2] * 7, p[1] * 9, p[2] * 9, seed)
+            if inward:
+                q[ai] += (abs(n) if at_lo else -abs(n)) * amp
+            else:
+                q[ai] += n * amp
         pts.append(tuple(q))
     out.p = pts
     return recompute_normals(out, 40.0)
@@ -937,6 +943,220 @@ def sag(mesh, points, depth):
         pts.append((x, y, z - depth * math.sin(u * math.pi / 2)))
     out.p = pts
     return recompute_normals(out, 40.0)
+
+
+# -------------------------------------------------------------------------------- shared part shapes
+# Silhouette parts several designs share (section 5.8.1): spikes, horns and tusks, spoked wheels, rough boards,
+# flat discs that carry a decal, and the orientations that keep decals upright on any face.
+
+def mat_disc_facing(forward, up=(0.0, 0.0, 1.0)):
+    """Rotation for a part built along +Z (a cylinder or lathe whose top cap carries a decal: a gauge face, a
+    medallion) so that it faces `forward` with the cap chart upright as seen from there. mat_disc_facing((1, 0,
+    0)) equals MAT_DISC_FRONT. Facing straight up, the decal's top points to the back (-X)."""
+    f = norm(forward)
+    u = norm(up)
+    if abs(dot(f, u)) > 0.999:
+        u = (-1.0, 0.0, 0.0) if f[2] > 0 else (1.0, 0.0, 0.0)
+    right = norm(cross(u, f))
+    down = cross(right, f)
+    return ((down[0], right[0], f[0], 0.0), (down[1], right[1], f[1], 0.0), (down[2], right[2], f[2], 0.0))
+
+
+def mat_extrude_facing(forward, up=(0.0, 0.0, 1.0)):
+    """Like mat_disc_facing for extrude(): its front chart faces `forward`, upright (MAT_EXTRUDE_FRONT for +X)."""
+    f = norm(forward)
+    u = norm(up)
+    if abs(dot(f, u)) > 0.999:
+        u = (-1.0, 0.0, 0.0) if f[2] > 0 else (1.0, 0.0, 0.0)
+    right = norm(cross(u, f))
+    up2 = cross(f, right)
+    return ((right[0], up2[0], f[0], 0.0), (right[1], up2[1], f[1], 0.0), (right[2], up2[2], f[2], 0.0))
+
+
+def disc(r, sides=None, z=0.0, up=True, name="disc"):
+    """A flat disc at height z facing up (or down), one disc chart (seen from above: s along +Y, t along +X,
+    so the model's front is at the chart's bottom): a coffee surface, a coin, a lid top, a gauge face."""
+    mesh = Mesh()
+    _disc(mesh, z, r, sides or default_sides(r), up, math.pi, name=name)
+    return mesh
+
+
+def gear_polygon(teeth, r_out, r_in, duty=0.45):
+    """A gear outline with flat-topped teeth (a gear guard, a cog plate) for extrude(); star_polygon gives the
+    pointed saw-blade star."""
+    pts = []
+    step = TAU / teeth
+    for i in range(teeth):
+        a0 = step * i
+        for frac, r in ((0.0, r_in), (0.12, r_out), (0.12 + duty, r_out), (0.24 + duty, r_in)):
+            a = a0 + step * frac
+            pts.append((math.cos(a) * r, math.sin(a) * r))
+    return pts
+
+
+def flutes(mesh, n, amp, cx=0.0, cy=0.0, phase=0.0):
+    """Fluting: pushes a mesh in and out around the vertical axis through (cx, cy) with n rounded ribs (the
+    radial distance scaled by 1 + amp cos(n (phi - phase))), then re-smooths its normals: a fluted shake
+    glass, a scalloped dish, a lobed mane."""
+    out = mesh.copy()
+    pts = []
+    for x, y, z in mesh.p:
+        qx, qy = x - cx, y - cy
+        f = 1.0 + amp * math.cos(n * (math.atan2(qy, qx) - phase))
+        pts.append((cx + qx * f, cy + qy * f, z))
+    out.p = pts
+    return recompute_normals(out, 75.0)
+
+
+def spike(base, direction, r, h, sides=5, tip=0.0):
+    """A cone standing on `base` and pointing along `direction`: base radius r, height h (an iron spike, a claw
+    point, a horn tip). Readability: r >= 0.03 and h >= 0.06 read at 10 yd (section 5.8)."""
+    m = cone(r, tip, h, sides, caps=(True, tip > 0))
+    return transform(m, mat_chain(mat_translate(*base), mat_look(direction)))
+
+
+def _basis(axis):
+    a = norm(axis)
+    ref = (1.0, 0.0, 0.0) if abs(a[0]) < 0.9 else (0.0, 1.0, 0.0)
+    e1 = norm(cross(a, ref))
+    e2 = cross(a, e1)
+    return a, e1, e2
+
+
+def spike_ring(center, R, n, r, h, axis=(0.0, 0.0, 1.0), tilt=0.0, phase=0.0, sides=5):
+    """n spikes on a ring of radius R around `axis` through `center`, pointing outward and tilted toward the
+    axis direction by `tilt` radians (0 straight out, pi/2 along the axis): a spiked rim or collar."""
+    a, e1, e2 = _basis(axis)
+    out = []
+    for i in range(n):
+        ang = phase + TAU * i / n
+        radial = add(mul(e1, math.cos(ang)), mul(e2, math.sin(ang)))
+        p = add(center, mul(radial, R))
+        d = add(mul(radial, math.cos(tilt)), mul(a, math.sin(tilt)))
+        out.append(spike(p, d, r, h, sides))
+    return merge(out)
+
+
+def spike_row(p0, p1, n, direction, r, h, sides=5):
+    """n spikes evenly spaced from p0 to p1, all pointing along `direction` (a boiler ridge, a fence top)."""
+    out = []
+    for i in range(n):
+        t = (i + 0.5) / n
+        out.append(spike(lerp(p0, p1, t), direction, r, h, sides))
+    return merge(out)
+
+
+def bezier2_path(p0, p1, p2, steps=8):
+    out = []
+    for k in range(steps + 1):
+        t = k / steps
+        u = 1.0 - t
+        out.append(tuple(u * u * p0[i] + 2 * u * t * p1[i] + t * t * p2[i] for i in range(3)))
+    return out
+
+
+def horn(p0, p1, bend=(0.0, 0.0, 1.0), amount=0.3, r0=0.06, r1=0.008, steps=8, sides=8, cap=True, name="horn"):
+    """A curved, tapered horn, tusk or claw from its root p0 (radius r0) to its tip p1 (radius r1), bowed toward
+    `bend` by `amount` times its length (a quadratic Bezier). Capped at the root; with r1 0 the tip closes to a
+    point. Its chart runs along t from the root, so tex.g_bone's p["root"] is 0."""
+    d = sub(p1, p0)
+    L = length(d) or 1.0
+    dn = mul(d, 1.0 / L)
+    b = sub(bend, mul(dn, dot(bend, dn)))
+    b = norm(b) if length(b) > 1e-9 else (0.0, 0.0, 1.0)
+    mid = add(lerp(p0, p1, 0.5), mul(b, amount * L))
+    path = bezier2_path(p0, mid, p1, steps)
+    return sweep(path, lambda t: r0 + (r1 - r0) * t, sides, caps=(cap, r1 > 0), name=name)
+
+
+def wheel(R, r, n=4, hub_r=None, sides=None, rings=4, spoke_w=None, spoke_t=None, phase=0.0):
+    """A spoked wheel in the XY plane, centred at the origin (a valve wheel, a grinder's crank wheel): a torus rim
+    (R, r), n flat spokes and a hub; orient it with transform. Readability: r >= 0.012, spokes >= 0.025 wide."""
+    hub_r = hub_r or max(0.02, R * 0.22)
+    sw = spoke_w or max(0.025, r * 1.5)
+    st = spoke_t or max(0.016, r * 1.2)
+    rim = torus(R, r, sides or max(10, default_sides(R)), rings)
+    sp = spokes(n, R - r * 0.5, sw, st, r0=hub_r * 0.6, phase=phase)
+    hub = cylinder(hub_r, st * 1.8, 8, True, z0=-st * 0.9)
+    return merge([rim, sp, hub])
+
+
+def planks(w, d, h, n, axis="y", gap=0.012, seed=1, ragged=0.02, wobble_amp=0.004, bevel=0.0, z0=0.0):
+    """n rough boards side by side filling a W (Y) x D (X) x H block centred on X and Y with its base at z0. The
+    boards run along `axis`: "y" (across the width, stacked front to back: a top), "x" (front to back, stacked
+    across: a shelf) or "z" (upright, stacked across the width: a door, a front panel, the plank chalkboard).
+    Each board has irregular ends (plank_edges, inward only) and a light wobble, so the timber is crooked in
+    geometry as well as in paint (tex.g_planks with count 1 on each board's charts). 12 triangles a board
+    without a bevel."""
+    out = []
+    span = {"y": d, "x": w, "z": w}[axis]
+    bw = (span - gap * (n - 1)) / n
+    for i in range(n):
+        c = -span / 2 + bw / 2 + i * (bw + gap)
+        if axis == "y":
+            b = translate(box(w, bw, h, bevel, z0=z0), c, 0.0, 0.0)
+        elif axis == "x":
+            b = translate(box(bw, d, h, bevel, z0=z0), 0.0, c, 0.0)
+        else:
+            b = translate(box(bw, d, h, bevel, z0=z0), 0.0, c, 0.0)
+        b = plank_edges(b, seed + 7 * i, ragged, axis, inward=True)
+        if wobble_amp:
+            b = wobble(b, wobble_amp, seed + 13 * i)
+        out.append(b)
+    return merge(out)
+
+
+# ------------------------------------------------------------------------------------------- collision
+# Low-poly hulls for PropDef.collision (section 5.2.6): (positions, triangles), closed and wound outward. Merge
+# several with merge_hulls (a box and a pipe cylinder, three parasol poles).
+
+def hull_box(w, d, h, x=0.0, y=0.0, z0=0.0):
+    """A box hull W (Y) x D (X) x H centred on (x, y), base at z0: 12 triangles, a flat top."""
+    hx, hy = d / 2.0, w / 2.0
+    pos = [(x - hx, y - hy, z0), (x + hx, y - hy, z0), (x + hx, y + hy, z0), (x - hx, y + hy, z0),
+           (x - hx, y - hy, z0 + h), (x + hx, y - hy, z0 + h), (x + hx, y + hy, z0 + h), (x - hx, y + hy, z0 + h)]
+    tris = [(0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7), (0, 1, 5), (0, 5, 4), (1, 2, 6), (1, 6, 5), (2, 3, 7),
+            (2, 7, 6), (3, 0, 4), (3, 4, 7)]
+    return pos, tris
+
+
+def hull_gable(w, d, wall_h, top_h, x=0.0, y=0.0, z0=0.0):
+    """A box hull with a gable roof along Y (the sloped top of section 5.2.6, as EspressoSW's): walls to wall_h,
+    the ridge at top_h over the hull's middle; 16 triangles. Keep (top_h - wall_h) / (d / 2) above 1.2 so the
+    roof is steeper than the walkable 50 degrees (its normals' z under 0.6428)."""
+    hx, hy = d / 2.0, w / 2.0
+    zw, zt = z0 + wall_h, z0 + top_h
+    pos = [(x - hx, y - hy, z0), (x + hx, y - hy, z0), (x + hx, y + hy, z0), (x - hx, y + hy, z0),
+           (x - hx, y - hy, zw), (x + hx, y - hy, zw), (x + hx, y + hy, zw), (x - hx, y + hy, zw),
+           (x, y - hy, zt), (x, y + hy, zt)]
+    tris = [(0, 2, 1), (0, 3, 2), (1, 2, 6), (1, 6, 5), (3, 0, 4), (3, 4, 7), (0, 1, 5), (0, 5, 4), (4, 5, 8),
+            (2, 3, 7), (2, 7, 6), (6, 7, 9), (5, 6, 9), (5, 9, 8), (7, 4, 8), (7, 8, 9)]
+    return pos, tris
+
+
+def hull_cylinder(r, h, x=0.0, y=0.0, z0=0.0, sides=8):
+    """An upright n-sided prism hull (a pole, a stovepipe, a round stand): 4 * sides - 4 triangles."""
+    pos = []
+    for z in (z0, z0 + h):
+        for i in range(sides):
+            a = TAU * i / sides
+            pos.append((x + math.cos(a) * r, y + math.sin(a) * r, z))
+    tris = []
+    for i in range(sides):
+        j = (i + 1) % sides
+        tris += [(i, j, sides + j), (i, sides + j, sides + i)]
+    for i in range(1, sides - 1):
+        tris += [(0, i + 1, i), (sides, sides + i, sides + i + 1)]
+    return pos, tris
+
+
+def merge_hulls(*hulls):
+    pos, tris = [], []
+    for p, t in hulls:
+        base = len(pos)
+        pos += list(p)
+        tris += [(a + base, b + base, c + base) for a, b, c in t]
+    return pos, tris
 
 
 # ------------------------------------------------------------------------------------------ UV helpers

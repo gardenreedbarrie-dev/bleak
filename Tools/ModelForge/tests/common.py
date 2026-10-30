@@ -1,4 +1,10 @@
-"""Shared test fixtures: builds the M1 models once per test run into a temporary directory."""
+"""Shared test fixtures: the models under test, built once per run into a temporary directory.
+
+Every registered model (mflib/props, discovered) is tested. Environment:
+  MF_MODELS=GrinderSW,GrinderOrg   test only these models (the library tests still run): a builder's quick loop
+  MF_JOBS=2                        worker processes for the bake and the paint (default 2; the output is the
+                                   same for any value)
+The cube and EspressoSW are built with textures at full size (section 5.9), the others at --tex-scale 0.125."""
 
 import os
 import shutil
@@ -22,6 +28,51 @@ from mflib import skinwrite as S  # noqa: E402
 
 _STATE = {}
 
+FULL = ("Cube", "EspressoSW")   # textures at full size (section 5.9); golden hashes kept from M1
+CI_SCALE = 0.125
+
+
+def selected_models():
+    """The models under test: MF_MODELS (comma-separated) or every registered model."""
+    env = os.environ.get("MF_MODELS", "").strip()
+    if not env:
+        return list(props.REGISTRY)
+    return [n.strip() for n in env.split(",") if n.strip()]
+
+
+def limited():
+    return bool(os.environ.get("MF_MODELS", "").strip())
+
+
+def selection_problems():
+    """Why a selected model cannot be tested (unknown name, broken module), as messages."""
+    out = []
+    for name in selected_models():
+        if name in props.REGISTRY:
+            continue
+        mod = props.module_name(name)
+        if mod in props.BROKEN:
+            out.append("%s: mflib/props/%s.py does not load:\n%s" % (name, mod, props.BROKEN[mod]))
+        else:
+            out.append("%s is not registered (no mflib/props/%s.py defining NAME = %r and build)" % (name, mod, name))
+    return out
+
+
+def tested_models():
+    """The selected models that are registered (the others fail test_props.Registry)."""
+    return [n for n in selected_models() if n in props.REGISTRY]
+
+
+def tex_scale(name):
+    return 1.0 if name in FULL else CI_SCALE
+
+
+def jobs():
+    try:
+        return max(1, int(os.environ.get("MF_JOBS", "2")))
+    except ValueError:
+        return 2
+
 
 def workdir():
     if "dir" not in _STATE:
@@ -37,13 +88,19 @@ def cleanup():
 
 
 def built(name):
-    """The Built result of a full build of `name` (cube and EspressoSW: textures at full size, section 5.9)."""
+    """The Built result of a full build of `name` (bake and particles on; textures at tex_scale(name)). A build
+    that raises raises again for every test that asks, without building twice."""
     key = "built:" + name
     if key not in _STATE:
-        res = B.build_prop(props.REGISTRY[name].build({}), workdir(), 1.0, True, True, None, False,
-                           lambda *_a: None)
-        _STATE[key] = res
-    return _STATE[key]
+        try:
+            _STATE[key] = B.build_prop(props.REGISTRY[name].build({}), workdir(), tex_scale(name), True, True, jobs(),
+                                       False, lambda *_a: None)
+        except Exception as e:  # noqa: BLE001
+            _STATE[key] = e
+    res = _STATE[key]
+    if isinstance(res, Exception):
+        raise res
+    return res
 
 
 def read(path):

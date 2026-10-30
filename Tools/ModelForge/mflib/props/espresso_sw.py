@@ -252,7 +252,7 @@ def p_dark_walnut(ctx, seed, p):
 
 
 def p_iron(ctx, seed, p):
-    return T.g_iron(ctx, seed, {"rust": 0.05})
+    return T.g_iron(ctx, seed, {"rust": 0.05, "palette": T.IRON_DEEP})
 
 
 def cup_paints(base_z, centres):

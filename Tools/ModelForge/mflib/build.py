@@ -45,7 +45,9 @@ class Part:
     """A named piece of a prop: one mesh, one material preset, one texture slot.
 
     paint: (generator name, params) from tex.GENERATORS, or a callable f(ctx, seed, params) -> colour.
-    decals: {chart index (in the mesh) or chart name: f(w_px, h_px) -> tex.Img} composited over the paint.
+    decals: {chart index (in the mesh) or chart name: f(w_px, h_px) -> tex.Img} composited over the paint; a
+    decal also raises the texel's alpha to its own (a label on glass is opaque). On a lathe or cylinder the
+    side chart wraps once round the part: use paint2d.wrap_front to keep a decal's aspect.
     visible: counted by the readability rule (every named visible part >= 0.06 yd across, section 5.8).
     ao_floor: the lowest occlusion factor the bake applies to this part (0 = the plain bake)."""
 
@@ -73,20 +75,41 @@ class ParticleDef:
 
 
 class PropDef:
+    """What a props/*.py module's build() returns.
+
+    size: (W along Y, D along X, H), the cafe.json / section 5.8 size. The tests hold the collision hull to it
+    and the render geometry to render_size (when set; parts that legitimately stick out, such as portafilter
+    handles or a stovepipe) or to size, all within 2 cm (sizes.py).
+    atlas: {texture slot: size}, the own textures; a size is an int (square) or (w, h), e.g. a 512 x 1024
+    chalkboard face. tex_flags: {slot: M2 texture flags} for own textures (default 3, wrap; 0 clamps).
+    tiles: {texture slot: tile spec}, own textures that repeat instead of being atlases (section 5.8: the
+    counters' and back bars' "256² (wrap)"): {"paint": (generator, params) or f(ctx, seed, p), "size": 256 or
+    (w, h), "yards": the tile's size in yards (a number or (w, h)), "seed": n}. A part on a tile slot gets
+    UVs = its chart (s, t) / yards, wrapping; the tile is made seamless (tex.tile_image) and is not baked (the
+    part's own paint and decals are not used; put trims and decals on atlas parts). With "owner": a model name,
+    the tile is that model's texture (World\\...\\<owner>\\BH_Cafe_<owner>_<Slot>.blp): the M2 references it and
+    the build writes the same bytes there, so two models share one file (the back bars and the counters).
+    kind: a sizes.KINDS key; it sets the collision budget of section 5.2.6, whether a full hull is required and
+    the height the previews stand the piece at (on the back bar or on the floor)."""
+
     def __init__(self, name):
         self.name = name
         self.display = None
         self.size = None            # (W along Y, D along X, H): the cafe.json size
         self.depth_with_handles = None
+        self.render_size = None     # (W, D, H) of the render geometry when it differs from size
+        self.collision_size = None  # (W, D, H) of the collision hull when it differs from size
         self.budget = 4000
         self.collision_max = 120
         self.atlas = {"atlas": 512}
+        self.tex_flags = {}
+        self.tiles = {}
         self.parts = []
         self.particles = []
         self.collision = ([], [])  # (positions, triangles)
         self.model_frame = None
         self.kind = "machine"
-        self.max_height = 0.95
+        self.max_height = None      # optional extra height limit (the kind's own limit applies anyway)
         self.sloped_top = False
         self.notes = ""
 
@@ -96,6 +119,29 @@ class PropDef:
 
 
 # ------------------------------------------------------------------------------------------- helpers
+
+def tex_dims(size):
+    """An atlas size as (w, h): an int is a square."""
+    if isinstance(size, (tuple, list)):
+        return int(size[0]), int(size[1])
+    return int(size), int(size)
+
+
+def tile_yards(spec):
+    yd = spec.get("yards", 1.0)
+    if isinstance(yd, (tuple, list)):
+        return float(yd[0]), float(yd[1])
+    return float(yd), float(yd)
+
+
+def tile_texture(spec, tex_scale=1.0):
+    """The seamless image of a PropDef.tiles entry (blpconvert.Image)."""
+    w, h = tex_dims(spec.get("size", 256))
+    w, h = max(16, int(w * tex_scale)), max(16, int(h * tex_scale))
+    paint = spec["paint"]
+    fn, params = (paint, {}) if callable(paint) else (T.GENERATORS[paint[0]], paint[1])
+    return T.tile_image(fn, w, h, spec.get("seed", 1), params, tile_yards(spec)).to_image()
+
 
 def client_dir(name):
     return CLIENT_ROOT + "\\" + name
@@ -190,18 +236,24 @@ def build_prop(defn, out, tex_scale=1.0, bake=True, particles=True, jobs=None, c
     shared = [s for s in slots if s in SHARED]
     slots = own + shared
     tex_client = {}
+    tiles = defn.tiles or {}
     for s in own:
         suffix = "Atlas" if s == "atlas" else s[0].upper() + s[1:]
-        tex_client[s] = cdir + "\\BH_Cafe_" + name + "_" + suffix + ".blp"
+        # a tile with an "owner" is that model's texture (the back bars use the counters' tiles, section 5.8):
+        # the M2 points at the owner's file, and this build writes the same bytes there
+        tname = tiles.get(s, {}).get("owner", name)
+        tex_client[s] = client_dir(tname) + "\\BH_Cafe_" + tname + "_" + suffix + ".blp"
     for s in shared:
         tex_client[s] = shared_path(s)
     tex_index = {s: i for i, s in enumerate(slots)}
 
-    # ---- pack each own atlas
+    # ---- pack each own atlas (tiles are not packed: their parts' UVs wrap)
     part_uvs = {}
     placements = {}
     for s in own:
-        size = defn.atlas.get(s, 512)
+        if s in tiles:
+            continue
+        size = tex_dims(defn.atlas.get(s, 512))
         charts = []
         owners = []
         for pi, part in enumerate(defn.parts):
@@ -210,7 +262,7 @@ def build_prop(defn, out, tex_scale=1.0, bake=True, particles=True, jobs=None, c
             for ci, ch in enumerate(part.mesh.charts):
                 charts.append(ch)
                 owners.append((pi, ci))
-        pl, density = A.pack(charts, (size, size))
+        pl, density = A.pack(charts, size)
         placements[s] = (pl, owners, density, size)
         for (pi, ci), p in zip(owners, pl):
             part_uvs.setdefault(pi, {})[ci] = p
@@ -218,7 +270,10 @@ def build_prop(defn, out, tex_scale=1.0, bake=True, particles=True, jobs=None, c
         m = part.mesh
         if part.texture in placements:
             size = placements[part.texture][3]
-            uv = [part_uvs[pi][m.c[v]].uv(m.st[v][0], m.st[v][1], (size, size)) for v in range(len(m.p))]
+            uv = [part_uvs[pi][m.c[v]].uv(m.st[v][0], m.st[v][1], size) for v in range(len(m.p))]
+        elif part.texture in tiles:
+            tw, th = tile_yards(tiles[part.texture])
+            uv = [(m.st[v][0] / tw, m.st[v][1] / th) for v in range(len(m.p))]
         else:
             uv = [(0.5, 0.5)] * len(m.p)
         part_uvs[pi] = (part_uvs.get(pi), uv)
@@ -261,7 +316,7 @@ def build_prop(defn, out, tex_scale=1.0, bake=True, particles=True, jobs=None, c
             mats.append(mk)
         batches.append(S.Batch(gi, mats.index(mk), tex_index[slot], preset["coord"], preset["priority"]))
     model.materials = mats
-    model.textures = [(tex_client[s], SHARED[s][5] if s in SHARED else 3) for s in slots]
+    model.textures = [(tex_client[s], SHARED[s][5] if s in SHARED else defn.tex_flags.get(s, 3)) for s in slots]
 
     # ---- collision
     cpos, ctris = defn.collision
@@ -298,9 +353,19 @@ def build_prop(defn, out, tex_scale=1.0, bake=True, particles=True, jobs=None, c
     # ---- textures
     srch = _source_hash()
     for s in own:
+        if s in tiles:
+            dpath = disk_path(out, tex_client[s])
+            os.makedirs(os.path.dirname(dpath), exist_ok=True)
+            img = tile_texture(tiles[s], tex_scale)
+            alpha = any(p.material in ("glass", "glass1", "cutout") for p in defn.parts if p.texture == s)
+            MP.write(dpath, img, "dxt5" if alpha else "dxt1", False, _pool(jobs))
+            res.textures.append((tex_client[s], dpath))
+            log("  %s: %dx%d tile over %gx%g yd" % ((tex_client[s], img.width, img.height) + tile_yards(tiles[s])))
+            continue
         pl, owners, density, size = placements[s]
-        tsize = max(16, int(size * tex_scale))
-        key = hashlib.sha256(("%s|%s|%s|%d|%d|%s" % (name, s, srch, tsize, int(bake), m2_bytes[:0x140].hex()))
+        tsize = (max(16, int(size[0] * tex_scale)), max(16, int(size[1] * tex_scale)))
+        tkey = "%d" % tsize[0] if tsize[0] == tsize[1] else "%dx%d" % tsize
+        key = hashlib.sha256(("%s|%s|%s|%s|%d|%s" % (name, s, srch, tkey, int(bake), m2_bytes[:0x140].hex()))
                              .encode() + m2_bytes).hexdigest()[:24]
         dpath = disk_path(out, tex_client[s])
         img, owner = atlas_image(defn, s, pl, owners, size, tsize, bake, jobs, out if cache else None, key, log)
@@ -311,7 +376,7 @@ def build_prop(defn, out, tex_scale=1.0, bake=True, particles=True, jobs=None, c
         MP.write(dpath, img, "dxt5" if alpha else "dxt1", _cutout_mask(defn, owners, filled) if cutout else False,
                  _pool(jobs))
         res.textures.append((tex_client[s], dpath))
-        log("  %s: %dx%d, %.0f texels/yd" % (tex_client[s], tsize, tsize, density * tsize / size))
+        log("  %s: %dx%d, %.0f texels/yd" % (tex_client[s], tsize[0], tsize[1], density * tsize[0] / size[0]))
         if nobake_dir and bake:
             nimg, nowner = atlas_image(defn, s, pl, owners, size, tsize, False, jobs, out if cache else None,
                                        key + "-nobake", log)
@@ -404,19 +469,22 @@ def _paint_texel(job, td, i):
 
 
 def atlas_image(defn, slot, pl, owners, size, tsize, bake, jobs, cache_dir, key, log):
-    """Rasterizes, bakes and paints one atlas. Returns (blpconvert.Image, owner map)."""
-    k = tsize / float(size)
+    """Rasterizes, bakes and paints one atlas. size: the packing size (w, h); tsize: the texture size (w, h)
+    (smaller under --tex-scale). Returns (blpconvert.Image, owner map)."""
+    size, tsize = tex_dims(size), tex_dims(tsize)
+    tw, th = tsize
+    k = tw / float(size[0])
     if cache_dir:
         cpath = os.path.join(cache_dir, ".cache", key + ".rgba")
         if os.path.exists(cpath):
             from blpconvert import Image
             with open(cpath, "rb") as f:
                 blob = f.read()
-            n = tsize * tsize
-            img = Image(tsize, tsize, bytearray(blob[:4 * n]))
+            n = tw * th
+            img = Image(tw, th, bytearray(blob[:4 * n]))
             owner = list(json.loads(blob[4 * n:].decode()))
             return img, owner
-    td = BK.TexelData(tsize, tsize)
+    td = BK.TexelData(tw, th)
     place_of = dict(zip(owners, pl))
     charts = []
     chart_of = {}
@@ -435,13 +503,13 @@ def atlas_image(defn, slot, pl, owners, size, tsize, bake, jobs, cache_dir, key,
         uvs = []
         for v in range(len(m.p)):
             plc = place_of[(pi, m.c[v])]
-            u, vv = plc.uv(m.st[v][0], m.st[v][1], (size, size))
-            uvs.append((u * tsize, vv * tsize))
+            u, vv = plc.uv(m.st[v][0], m.st[v][1], size)
+            uvs.append((u * tw, vv * th))
         offset = chart_of[(pi, 0)] if m.charts else 0
         BK.rasterize(td, m, uvs, pi, offset)
     cov = td.covered()
     if bake:
-        step = max(1, tsize // 128)
+        step = max(1, max(tw, th) // 128)
         n = BK.compute_ao(td, occl, step, True, jobs)
         log("  bake: %d texels, %d occlusion samples x %d rays" % (len(cov), n, BK.AO_RAYS))
     zs = [p[2] for part in defn.parts for p in part.mesh.p]
@@ -450,7 +518,7 @@ def atlas_image(defn, slot, pl, owners, size, tsize, bake, jobs, cache_dir, key,
     _PJOB = {"td": td, "parts": defn.parts, "charts": charts, "bake": bake, "idx": cov}
     colors = _run_paint(len(cov), jobs)
     _PJOB = {}
-    img = T.Img(tsize, tsize, (0, 0, 0, 0))
+    img = T.Img(tw, th, (0, 0, 0, 0))
     for i, c in zip(cov, colors):
         img.r[i], img.g[i], img.b[i], img.a[i] = c
     # decals, in chart space
@@ -458,7 +526,7 @@ def atlas_image(defn, slot, pl, owners, size, tsize, bake, jobs, cache_dir, key,
         if part.texture != slot or not part.decals:
             continue
         for ckey, fn in part.decals.items():
-            ci = ckey if isinstance(ckey, int) else [j for j, ch in enumerate(part.mesh.charts) if ch.name == ckey][0]
+            ci = ckey if isinstance(ckey, int) else chart_index(part, ckey)
             plc = place_of[(pi, ci)]
             x0, y0 = int(round(plc.x * k)), int(round(plc.y * k))
             w, h = max(1, int(round(plc.w * k))), max(1, int(round(plc.h * k)))
@@ -467,14 +535,16 @@ def atlas_image(defn, slot, pl, owners, size, tsize, bake, jobs, cache_dir, key,
             for y in range(h):
                 for x in range(w):
                     X, Y = x0 + x, y0 + y
-                    if not (0 <= X < tsize and 0 <= Y < tsize):
+                    if not (0 <= X < tw and 0 <= Y < th):
                         continue
-                    j = Y * tsize + X
+                    j = Y * tw + X
                     if td.chart[j] != cid:
                         continue
                     a = dec.a[y * w + x]
                     if a > 0:
                         img.blend(X, Y, (dec.r[y * w + x], dec.g[y * w + x], dec.b[y * w + x]), a)
+                        if a > img.a[j]:
+                            img.a[j] = a     # a decal is painted on: opaque where it covers (a label on glass)
     # light
     floors = [part.ao_floor for part in defn.parts]
     for i in cov:
@@ -490,6 +560,15 @@ def atlas_image(defn, slot, pl, owners, size, tsize, bake, jobs, cache_dir, key,
             f.write(bytes(out.data))
             f.write(json.dumps(owner).encode())
     return out, owner
+
+
+def chart_index(part, name):
+    """The index of the first chart called `name` in a part's mesh (a decal key)."""
+    for j, ch in enumerate(part.mesh.charts):
+        if ch.name == name:
+            return j
+    raise KeyError("part %r has no chart %r (its charts: %s)" % (
+        part.name, name, ", ".join(sorted({ch.name for ch in part.mesh.charts}))))
 
 
 def _run_paint(n, jobs):
@@ -547,9 +626,26 @@ def default_model_frame(meas):
     return {"position": [0, 0, round(-cz, 3)], "scale": round(0.9 / max(r, 0.05), 2), "facing": 0.4}
 
 
-def write_manifest(out, entries, files):
-    man = {"tool": "ModelForge", "version": TOOL_VERSION, "models": entries, "icons": [],
-           "files": {c: _sha(d) for c, d in sorted(files)}}
+def write_manifest(out, entries, files, icons=None):
+    """DIR/manifest.json (section 5.9). icons: [{"id", "path"}] (`modelforge.py icons`); None keeps the icons of
+    a manifest already in DIR, with their file hashes, so `build` after `icons` loses nothing."""
+    files = list(files)
+    if icons is None:
+        icons = []
+        old = os.path.join(out, "manifest.json")
+        if os.path.exists(old):
+            try:
+                with open(old) as f:
+                    prev = json.load(f)
+            except (OSError, ValueError):
+                prev = {}
+            for ic in prev.get("icons", []):
+                d = disk_path(out, ic["path"])
+                if os.path.exists(d):
+                    icons.append(ic)
+                    files.append((ic["path"], d))
+    man = {"tool": "ModelForge", "version": TOOL_VERSION, "models": entries, "icons": icons,
+           "files": {c: _sha(d) for c, d in sorted(set(files))}}
     path = os.path.join(out, "manifest.json")
     with open(path, "w") as f:
         json.dump(man, f, indent=2, sort_keys=True)

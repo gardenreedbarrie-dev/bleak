@@ -61,6 +61,9 @@ PRESETS = {
                          ((0.10, 0.13, 0.22), 25.0, 160.0), ((0.04, 0.06, 0.14), (0.14, 0.18, 0.3)), "sw_night"),
     "org_day": Lighting((0.52, 0.42, 0.34), (1.0, 0.80, 0.56), G.norm((-0.3, 0.5, -0.8)),
                         ((0.78, 0.58, 0.42), 25.0, 180.0), ((0.72, 0.5, 0.34), (0.92, 0.74, 0.54)), "org_day"),
+    # Orgrimmar at night: a dim warm-violet ambient under a low red-brown moon (the Orgrimmar pieces' night check)
+    "org_night": Lighting((0.24, 0.20, 0.24), (0.40, 0.32, 0.36), G.norm((0.35, -0.3, -0.88)),
+                          ((0.14, 0.10, 0.10), 25.0, 160.0), ((0.08, 0.05, 0.06), (0.24, 0.15, 0.12)), "org_night"),
 }
 
 
@@ -582,6 +585,8 @@ def particle_drawables(m, textures, xform=None, cam=None, stages=(0.15, 0.5, 0.8
         life = t.get("life") or 1.0
         grav = t.get("gravity") or 0.0
         lat = t.get("latitude") or 0.0
+        # the spawn area: the client spreads births over width (X) by length (Y) round the emitter point
+        area = ((t.get("width") or 0.0), (t.get("length") or 0.0))
         tinfo = m["textures"][p["textureIndex"]] if p["textureIndex"] < len(m["textures"]) else None
         tex = textures.get(tinfo["path"], tinfo["flags"]) if tinfo else None
         ptr = p["partTracks"]
@@ -596,6 +601,9 @@ def particle_drawables(m, textures, xform=None, cam=None, stages=(0.15, 0.5, 0.8
                 spread = math.sin(lat) * (0.4 + 0.6 * ((k * 7 + si * 3) % 5) / 4.0)
                 dirv = G.norm((math.cos(a) * spread, math.sin(a) * spread, 1.0))
                 pos = list(p["position"])
+                # deterministic spots spread over the area (a golden-ratio walk along Y, alternating across X)
+                pos[0] += (((k + si) % 2) - 0.5) * 0.5 * area[0]
+                pos[1] += (((k + si * per_stage) * 0.618) % 1.0 - 0.5) * area[1]
                 for c in range(3):
                     pos[c] += dirv[c] * speed * age
                 pos[2] += -0.5 * grav * age * age

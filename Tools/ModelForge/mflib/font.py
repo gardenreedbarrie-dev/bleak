@@ -7,7 +7,11 @@
 * The 7 x 9 pixel font for small menu lines: glyph rows as hex (bit 0x40 = leftmost column), capitals 7 rows
   tall, descenders in rows 7-8, 1 px between glyphs and 3 px for a space. Renderers: chalk, engrave, paint.
 
-The lower-case vector set (chalkboard titles) is M5 work; `vector_text` raises for characters it lacks.
+The vector set has a lower case for the chalkboard titles ("The Lion's" / "Roast", "Welcome!"): x-height 62,
+ascenders at the cap line, descenders to 132 (a text with g, j, p, q or y gets that much more room below).
+`squeeze` narrows the lettering horizontally (tall chalk titles: section 5.5.1 wants caps of 70-90 px on a
+512 px board, which "The Grinding" only reaches condensed). chalk_mask composites any coverage mask (vector
+lettering, emblem.line_mask icons) as chalk. vector_mask raises KeyError for characters the set lacks.
 """
 
 import math
@@ -203,14 +207,56 @@ VECTOR_GLYPHS = {
     ")": (44, "M8 -6 C30 18 30 82 8 106"),
     "/": (60, "M52 -4 L8 104"),
 }
-VECTOR_CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-'.,!?&·:()/"
+VECTOR_LOWER = {
+    # x-height 62 (y 38-100), ascenders from 0, descenders to 132
+    "a": (82, "M18 46 C26 39 36 36 46 36 C60 36 68 44 68 56 V100 M68 64 C60 59 50 58 40 58 C24 58 14 66 14 80"
+              " C14 94 24 100 36 100 C50 100 62 92 68 82"),
+    "b": (86, "M14 0 V100 M14 60 C22 44 34 36 46 36 C64 36 76 50 76 68 C76 88 64 100 46 100 C34 100 22 92 14 80"),
+    "c": (78, "M70 46 C62 39 54 36 46 36 C26 36 12 50 12 68 C12 88 26 100 46 100 C56 100 64 96 72 88"),
+    "d": (86, "M70 0 V100 M70 60 C62 44 50 36 38 36 C20 36 10 50 10 68 C10 88 20 100 38 100 C50 100 62 92 70 80"),
+    "e": (82, "M14 68 H72 C72 48 60 36 44 36 C24 36 12 50 12 68 C12 88 26 100 46 100 C58 100 66 96 72 88"),
+    "f": (60, "M60 6 C55 2 50 0 44 0 C32 0 26 8 26 20 V100 M8 40 H54"),
+    "g": (84, "M68 38 V108 C68 124 56 132 40 132 C28 132 18 128 12 120 M68 60 C60 44 50 36 38 36 C20 36 10 50"
+              " 10 66 C10 84 20 96 38 96 C50 96 60 88 68 76"),
+    "h": (86, "M14 0 V100 M14 58 C22 44 32 36 46 36 C62 36 72 46 72 62 V100"),
+    "i": (48, "M24 40 V100 M24 12 L24 12"),
+    "j": (50, "M30 40 V112 C30 126 22 132 10 132 M30 12 L30 12"),
+    "k": (76, "M14 0 V100 M66 38 L14 78 M34 62 L70 100"),
+    "l": (48, "M24 0 V100"),
+    "m": (118, "M12 38 V100 M12 56 C18 44 26 36 38 36 C50 36 58 44 58 58 V100 M58 56 C64 44 72 36 84 36 C96 36"
+               " 104 44 104 58 V100"),
+    "n": (86, "M14 38 V100 M14 58 C22 44 32 36 46 36 C62 36 72 46 72 62 V100"),
+    "o": (88, "M44 36 C24 36 12 50 12 68 C12 88 24 100 44 100 C64 100 76 88 76 68 C76 50 64 36 44 36 Z"),
+    "p": (86, "M14 38 V132 M14 60 C22 44 34 36 46 36 C64 36 76 50 76 68 C76 88 64 100 46 100 C34 100 22 92 14 80"),
+    "q": (86, "M70 38 V132 M70 60 C62 44 50 36 38 36 C20 36 10 50 10 68 C10 88 20 100 38 100 C50 100 62 92 70 80"),
+    "r": (66, "M14 38 V100 M14 62 C20 46 30 36 44 36 C52 36 58 38 62 42"),
+    "s": (76, "M64 44 C58 38 50 36 40 36 C26 36 16 42 16 54 C16 76 66 62 66 84 C66 96 54 100 40 100 C28 100 18 96"
+              " 12 90"),
+    "t": (62, "M28 8 V86 C28 96 34 100 42 100 C48 100 54 98 58 94 M8 40 H54"),
+    "u": (86, "M14 38 V76 C14 92 24 100 38 100 C52 100 64 92 72 78 M72 38 V100"),
+    "v": (80, "M8 38 L40 100 L72 38"),
+    "w": (104, "M6 38 L28 100 L52 50 L76 100 L98 38"),
+    "x": (78, "M10 38 L68 100 M68 38 L10 100"),
+    "y": (80, "M8 38 L40 100 M72 38 L36 112 C30 126 22 132 10 132"),
+    "z": (78, "M12 38 H66 L12 100 H68"),
+    "é": (82, "M14 68 H72 C72 48 60 36 44 36 C24 36 12 50 12 68 C12 88 26 100 46 100 C58 100 66 96 72 88"
+              " M38 22 L54 6"),
+}
+VECTOR_GLYPHS.update(VECTOR_LOWER)
+VECTOR_CHARSET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-'.,!?&·:()/abcdefghijklmnopqrstuvwxyzé"
 SPACE_ADV = 40
 TRACKING = 8
+DESCENDERS = "gjpqy"
+DESCENT = 34          # extra room below the baseline (100-unit cap box) for a text with descenders
 
 
-def vector_measure(text, cap):
-    """Width in pixels of `text` at cap height `cap` (pixels)."""
-    k = cap / 100.0
+def _descent(text):
+    return DESCENT if any(ch in DESCENDERS for ch in text) else 0
+
+
+def vector_measure(text, cap, squeeze=1.0):
+    """Width in pixels of `text` at cap height `cap` (pixels), narrowed by `squeeze`."""
+    k = cap / 100.0 * squeeze
     w = 0.0
     for i, ch in enumerate(text):
         if ch == " ":
@@ -236,13 +282,16 @@ def _serifs(polys, sw):
     return out
 
 
-def vector_mask(text, cap, w=None, h=None, ox=0.0, oy=0.0, weight=0.16, serif=True):
-    """Coverage mask of `text`, cap height `cap` px, top-left of the cap box at (ox, oy)."""
+def vector_mask(text, cap, w=None, h=None, ox=0.0, oy=0.0, weight=0.16, serif=True, squeeze=1.0):
+    """Coverage mask of `text`, cap height `cap` px, top-left of the cap box at (ox, oy). The mask is tall
+    enough for descenders when the text has any; `squeeze` narrows the letters (the stroke keeps its width)."""
     k = cap / 100.0
-    tw = vector_measure(text, cap)
+    kx = k * squeeze
+    tw = vector_measure(text, cap, squeeze)
     sw = 100.0 * weight
     pad = sw * k
-    m = R.Mask(int(w or math.ceil(tw + 2 * pad + 2 * ox)), int(h or math.ceil(cap + 2 * pad + 2 * oy)))
+    m = R.Mask(int(w or math.ceil(tw + 2 * pad + 2 * ox)),
+               int(h or math.ceil(cap + 2 * pad + 2 * oy + _descent(text) * k)))
     x = 0.0
     strokes = []
     serifs = []
@@ -257,18 +306,19 @@ def vector_mask(text, cap, w=None, h=None, ox=0.0, oy=0.0, weight=0.16, serif=Tr
         if serif:
             serifs.extend(_serifs(moved, sw))
         x += adv + TRACKING
-    R.stroke(m, R.xform_polys(strokes, k, k, ox + pad, oy + pad), sw * k)
+    R.stroke(m, R.xform_polys(strokes, kx, k, ox + pad, oy + pad), sw * k)
     if serifs:
-        R.stroke(m, R.xform_polys(serifs, k, k, ox + pad, oy + pad), sw * k * 0.55)
+        R.stroke(m, R.xform_polys(serifs, kx, k, ox + pad, oy + pad), sw * k * 0.55)
     return m
 
 
-def fit_cap(text, box_w, box_h, weight=0.16, min_cap=8.0):
-    """The largest cap height (px) at which `text` fits the box; raises ValueError when it would be below
-    min_cap (section 5.5.1: a test renders every text into its region and fails when it does not fit)."""
+def fit_cap(text, box_w, box_h, weight=0.16, min_cap=8.0, squeeze=1.0):
+    """The largest cap height (px) at which `text` fits the box (descenders included when the text has any);
+    raises ValueError when it would be below min_cap (section 5.5.1: a test renders every text into its region
+    and fails when it does not fit)."""
     pad_k = 2 * weight
-    cap_h = box_h / (1.0 + pad_k)
-    w100 = vector_measure(text, 100.0) / 100.0
+    cap_h = box_h / (1.0 + pad_k + _descent(text) / 100.0)
+    w100 = vector_measure(text, 100.0, squeeze) / 100.0
     cap_w = box_w / (w100 + pad_k)
     cap = min(cap_h, cap_w)
     if cap < min_cap:
@@ -298,3 +348,29 @@ def two_tone(img, mask, fill, outline, ox=0, oy=0, outline_px=1, shadow=(1, 1), 
             f = mask.a[y * mask.w + x]
             if f > 0:
                 img.blend(X, Y, fill, f)
+
+
+def chalk_mask(img, mask, ox=0, oy=0, seed=1, color=(0.93, 0.94, 0.9), dust=0.3, grain=0.4):
+    """Composites a coverage mask (vector lettering, emblem.line_mask line art) as chalk: strokes whose coverage
+    breaks up in low-frequency grain (features of 5 px or more, so DXT and the mips keep it), a little brighter
+    where the chalk pressed hardest, and a soft dust halo around them."""
+    halo = R.blur(mask, max(2, int(round(min(mask.w, mask.h) * 0.012)) + 2))
+    for y in range(mask.h):
+        Y = oy + y
+        if not 0 <= Y < img.h:
+            continue
+        for x in range(mask.w):
+            X = ox + x
+            if not 0 <= X < img.w:
+                continue
+            i = y * mask.w + x
+            hv = halo.a[i]
+            if hv > 0.0:
+                img.blend(X, Y, color, hv * dust * 0.5)
+            a = mask.a[i]
+            if a > 0.0:
+                n = T.noise(X * 0.19, Y * 0.19, seed)
+                n2 = T.noise(X * 0.07, Y * 0.07, seed + 1)
+                ca = a * (1.0 - grain * T.smoothstep(0.5, 0.85, n)) * (0.82 + 0.18 * n2)
+                img.blend(X, Y, color, ca)
+    return img

@@ -60,8 +60,10 @@ class Lettering(unittest.TestCase):
             m = F.vector_mask(ch, 40)
             self.assertGreater(m.coverage(), 0.01, repr(ch))
 
+    @unittest.skipUnless("EspressoSW" in CM.tested_models(), "EspressoSW not selected (MF_MODELS)")
     def test_texts_fit_their_regions(self):
-        """Every text the M1 models carry fits the decal it is painted into (section 5.5.1)."""
+        """Every text EspressoSW carries fits the decal it is painted into (section 5.5.1); test_props.Decals
+        renders every model's decals at full size."""
         from mflib.props import espresso_sw as ES
         defn = ES.build({})
         res = CM.built("EspressoSW")
@@ -212,20 +214,6 @@ class Mips(unittest.TestCase):
         self.assertEqual(levels, 6)
         back = B.decode_blp(p)
         self.assertEqual((back.width, back.height), (32, 32))
-
-
-class BuiltTextures(unittest.TestCase):
-    def test_every_built_texture_is_valid(self):
-        for name in ("Cube", "EspressoSW"):
-            res = CM.built(name)
-            for client, disk in res.textures:
-                h, levels, problems = B.check_blp(disk)
-                self.assertEqual(problems, [], client)
-                self.assertTrue(B.is_pow2(h["width"]) and B.is_pow2(h["height"]), client)
-                self.assertNotEqual(h["width"], 6 * h["height"], client)
-                fmt = "dxt5" if h["preferredFormat"] == 7 else "dxt1"
-                if "Steam" in client or "Fire" in client:
-                    self.assertEqual(fmt, "dxt5", client)
 
 
 if __name__ == "__main__":

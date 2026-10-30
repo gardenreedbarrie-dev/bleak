@@ -9,6 +9,11 @@ Modules:
   atlas      chart packing                   bake  texture-space light bake    mips  gutters, mips, BLP output
   render     software rasterizer             preview  the preview modes and contact sheets
   build      turns a prop (props/*.py) into files, manifest entries and previews
+  icons      the section 5.7 spell icons (64 x 64 DXT1, rendered from the models or painted)
+  kit        part kits the designs share (cups, mugs, bottles, jars, kettle, bell, canopy, exhaust, gauge)
+  emitters   the section 5.2.7 emitter presets (steam, kettle steam, exhaust smoke, frost mist, embers, ...)
+  sizes      the section 5.8 sizes and the rules per kind of piece
+  props      one module per model, discovered (props/__init__.py)
 """
 
 import os

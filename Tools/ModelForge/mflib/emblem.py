@@ -1,8 +1,16 @@
-"""Original emblem shapes (CAFE.SPEC.md section 5.5.2), as SVG paths in a 100 x 100 box (y down).
+"""Original emblem shapes (CAFE.SPEC.md sections 5.5.1 and 5.5.2), as SVG paths in a 100 x 100 box (y down).
 
 These are shapes defined here, not the Alliance or Horde logos: `lion_head` is a front-facing stylised mane disc
-with ears and a muzzle, `tusk_crest` two curved tusks around a steaming cup. Each emblem is a list of layers
-(name, path, mode, height): mode "fill" or ("stroke", width); height drives the painted relief (render_relief).
+with ears and a muzzle, `tusk_crest` two curved tusks with leather wraps around a steaming cup on a saucer. Each
+emblem is a list of layers (name, path, mode, height): mode "fill", "dark" (a recess) or ("stroke", width);
+height drives the painted relief (render_relief).
+
+Also here:
+- the flavour glyphs of the syrup bottles (section 5.5.1): drop, flower, leaf, bean, berry, cinnamon, mint,
+  swirl, plus cactus (the Orgrimmar cactus apple) and cream (the whipped-cream canister), in GLYPHS, rendered
+  by paint2d.label; SYRUPS is the shelf order with each bottle's colour and glyph;
+- LINE_ICONS: line art for chalkboards and plates (the family icons coffee, tea, shake, and line versions of
+  lion_head and tusk_crest), rendered by line_mask and composited with font.chalk_mask or paint2d.paint_mask.
 """
 
 import math
@@ -68,6 +76,11 @@ def _mirror(d):
 
 
 EAR_L = "M27 36 C20 26 22 14 31 12 C38 12 43 18 42 27 Z"
+# tusk_crest: a tusk rising from the bottom centre up the left side, its tip curling in over the cup; the lit
+# ridge along its outer curve; two leather wraps near its root
+TUSK_L = "M47 94 C22 90 6 70 7 44 C8 26 16 12 28 6 C22 20 19 32 21 46 C23 64 32 76 50 82 Z"
+RIDGE_L = "M40 89 C22 84 12 66 12 46 C12 32 17 20 24 11"
+WRAP_L = "M24 79 L33 70 M30 85 L38 76"
 EAR_L_IN = "M30 30 C27 24 28 18 32 17 C36 17 38 21 37 26 Z"
 EYE_L = "M32 47 C36 43 42 43 46 48 C42 51 36 51 32 47 Z"
 BROW_L = "M30 42 C36 37 43 38 48 44"
@@ -93,12 +106,19 @@ EMBLEMS = {
         ("mouth", "M41 79 C45 82 55 82 59 79 M50 69 V76", ("stroke", 2.6), 0.3),
     ],
     "tusk_crest": [
-        ("tusk_l", "M44 90 C20 82 8 58 16 22 C22 48 30 66 48 78 Z", "fill", 0.7),
-        ("tusk_r", "M56 90 C80 82 92 58 84 22 C78 48 70 66 52 78 Z", "fill", 0.7),
-        ("cup", "M32 46 H68 L64 72 C62 80 56 82 50 82 C44 82 38 80 36 72 Z", "fill", 0.85),
-        ("handle", "M66 52 C78 52 78 66 64 66", ("stroke", 4.0), 0.85),
-        ("steam", "M42 38 C38 32 46 28 42 20 M50 38 C46 32 54 28 50 18 M58 38 C54 32 62 28 58 20",
-         ("stroke", 3.2), 0.6),
+        ("tusk_l", TUSK_L, "fill", 0.6),
+        ("tusk_r", _mirror(TUSK_L), "fill", 0.6),
+        ("ridge_l", RIDGE_L, ("stroke", 3.0), 0.78),
+        ("ridge_r", _mirror(RIDGE_L), ("stroke", 3.0), 0.78),
+        ("wrap_l", WRAP_L, ("stroke", 4.2), 0.42),
+        ("wrap_r", _mirror(WRAP_L), ("stroke", 4.2), 0.42),
+        ("saucer", "M20 86 C32 93 68 93 80 86 C68 81 32 81 20 86 Z", "fill", 0.66),
+        ("cup", "M29 44 H71 L67 70 C65 79 58 83 50 83 C42 83 35 79 33 70 Z", "fill", 0.86),
+        ("handle", "M68 50 C82 50 82 68 65 68", ("stroke", 5.0), 0.86),
+        ("rim", "M29 44 H71", ("stroke", 3.2), 0.97),
+        ("band", "M31.5 56 H68.5", ("stroke", 4.4), 0.4),
+        ("steam", "M40 36 C36 29 44 25 40 16 M50 36 C46 28 54 24 50 12 M60 36 C56 29 64 25 60 16",
+         ("stroke", 3.8), 0.6),
     ],
     "cup": [
         ("saucer", "M18 80 C30 88 70 88 82 80 C70 76 30 76 18 80 Z", "fill", 0.6),
@@ -126,13 +146,142 @@ EMBLEMS = {
 }
 
 
-def layer_masks(name, w, h, inset=0.0):
-    """{layer name: (Mask, mode, height)} for an emblem scaled into a w x h box."""
+def _flower_path(petals=5, r_in=12.0, r_out=44.0, cx=50.0, cy=50.0, samples=60, phase=-math.pi / 2):
+    """A flower outline: `petals` round petals between radius r_in and r_out."""
+    pts = []
+    for k in range(samples * petals // 5):
+        a = phase + 2 * math.pi * k / (samples * petals // 5)
+        f = abs(math.cos(petals * (a - phase) / 2.0)) ** 0.7
+        r = r_in + (r_out - r_in) * f
+        pts.append((cx + math.cos(a) * r, cy + math.sin(a) * r))
+    return "M" + " L".join("%.2f %.2f" % p for p in pts) + " Z"
+
+
+def _circle(cx, cy, r):
+    return "M%g %g a%g %g 0 1 0 %g 0 a%g %g 0 1 0 %g 0" % (cx - r, cy, r, r, 2 * r, r, r, -2 * r)
+
+
+def _spiral_path(turns=2.25, r0=6.0, r1=40.0, cx=50.0, cy=52.0, samples=60):
+    pts = []
+    for k in range(samples + 1):
+        f = k / float(samples)
+        a = -math.pi / 2 + f * turns * 2 * math.pi
+        r = r0 + (r1 - r0) * f
+        pts.append((cx + math.cos(a) * r, cy + math.sin(a) * r))
+    return "M" + " L".join("%.2f %.2f" % p for p in pts)
+
+
+def _ellipse_path(cx, cy, rx, ry, rot_deg=0.0, n=36):
+    a0 = math.radians(rot_deg)
+    pts = []
+    for k in range(n):
+        a = 2 * math.pi * k / n
+        x, y = math.cos(a) * rx, math.sin(a) * ry
+        pts.append((cx + x * math.cos(a0) - y * math.sin(a0), cy + x * math.sin(a0) + y * math.cos(a0)))
+    return "M" + " L".join("%.2f %.2f" % p for p in pts) + " Z"
+
+
+# The syrup bottles' flavour glyphs (section 5.5.1): one big shape each, read on a colour band at a glance.
+# "fill" layers take the glyph colour, "dark" layers cut back to the band colour (paint2d.label).
+GLYPHS = {
+    "drop": [
+        ("drop", "M50 6 C50 6 20 44 20 64 C20 82 33 94 50 94 C67 94 80 82 80 64 C80 44 50 6 50 6 Z", "fill", 0.8),
+        ("shine", "M33 66 C33 56 38 48 44 40", ("stroke", 6.0), 0.3),
+    ],
+    "flower": [
+        ("petals", _flower_path(5, 14.0, 46.0), "fill", 0.8),
+        ("heart", _circle(50, 50, 11), "dark", 0.3),
+    ],
+    "bean": [
+        ("bean", _ellipse_path(50, 50, 30, 42, 28), "fill", 0.8),
+        ("crease", "M60 14 C42 32 60 64 40 86", ("stroke", 7.0), 0.3),
+    ],
+    "berry": [
+        ("b1", _circle(36, 62, 18), "fill", 0.8),
+        ("b2", _circle(64, 62, 18), "fill", 0.8),
+        ("b3", _circle(50, 40, 18), "fill", 0.85),
+        ("stem", "M50 22 C50 14 54 8 60 4", ("stroke", 5.0), 0.7),
+        ("leaf", "M50 20 C38 8 24 10 18 18 C28 24 40 26 50 20 Z", "fill", 0.7),
+        ("glint", _circle(44, 36, 4) + " " + _circle(30, 58, 4) + " " + _circle(58, 58, 4), "dark", 0.3),
+    ],
+    "cinnamon": [
+        ("stick_a", "M16 72 L64 24", ("stroke", 20.0), 0.8),
+        ("stick_b", "M36 88 L84 40", ("stroke", 18.0), 0.75),
+        ("curl_a", "M64 24 m-5 0 a5 5 0 1 0 10 0 a4 4 0 1 0 -7 1", ("stroke", 3.6), 0.3),
+        ("curl_b", "M84 40 m-4 0 a4 4 0 1 0 8 0 a3 3 0 1 0 -6 1", ("stroke", 3.4), 0.3),
+        ("seam", "M24 70 L58 36 M44 86 L76 54", ("stroke", 3.0), 0.3),
+    ],
+    "mint": [
+        ("leaf_a", "M50 94 C24 82 12 52 24 22 C30 36 46 40 52 56 C58 72 56 84 50 94 Z", "fill", 0.8),
+        ("leaf_b", "M54 90 C64 70 66 48 84 30 C90 52 84 76 54 90 Z", "fill", 0.8),
+        ("veins", "M48 90 C40 70 32 48 26 28 M60 82 C68 66 74 52 82 36", ("stroke", 4.0), 0.3),
+    ],
+    "swirl": [
+        ("swirl", _spiral_path(), ("stroke", 12.0), 0.8),
+    ],
+    "cactus": [
+        ("pad", _ellipse_path(38, 62, 24, 32, -18), "fill", 0.75),
+        ("fruit", "M66 92 C52 92 46 80 48 66 C50 52 56 42 66 40 C76 42 82 52 84 66 C86 80 80 92 66 92 Z",
+         "fill", 0.85),
+        ("crown", "M58 42 L60 30 L66 38 L72 30 L74 42 Z", "fill", 0.85),
+        ("spines", _circle(30, 50, 3.0) + " " + _circle(44, 60, 3.0) + " " + _circle(28, 72, 3.0) + " "
+         + _circle(60, 62, 3.0) + " " + _circle(72, 72, 3.0) + " " + _circle(62, 82, 3.0), "dark", 0.3),
+    ],
+    "cream": [
+        ("rosette", _flower_path(8, 30.0, 46.0, samples=40), "fill", 0.8),
+        ("swirl", _spiral_path(1.6, 3.0, 22.0, 50.0, 50.0, 40), ("stroke", 5.5), 0.3),
+    ],
+}
+
+# Section 5.8.1: the Stormwind rack's bottles in shelf order (the Orgrimmar rack swaps berry for the two-tone
+# cactus apple, 88C070 / D46A8C). key: (colour, glyph, second colour or None).
+SYRUPS = [
+    ("honey", "E0A030", "drop", None), ("vanilla", "F0E6C8", "flower", None), ("caramel", "A0602A", "swirl", None),
+    ("cinnamon", "B5502A", "cinnamon", None), ("chocolate", "4A2A1A", "bean", None),
+    ("berry", "D46A8C", "berry", None), ("mint", "7FD1B9", "mint", None), ("cream", "FFFFFF", "cream", None),
+]
+SYRUPS_ORG = [row if row[0] != "berry" else ("cactus", "88C070", "cactus", "D46A8C") for row in SYRUPS]
+
+# Line art for chalkboards and plates: (path, mode) with mode ("stroke", width) or "fill" (dots, eyes).
+LINE_ICONS = {
+    "coffee": [
+        ("M20 82 C32 90 68 90 80 82", ("stroke", 5.0)),
+        ("M26 42 H74 L70 68 C68 77 60 81 50 81 C40 81 32 77 30 68 Z", ("stroke", 5.0)),
+        ("M72 48 C86 48 86 66 69 66", ("stroke", 5.0)),
+        ("M40 34 C36 26 46 22 40 12 M54 34 C50 26 60 22 54 10", ("stroke", 4.5)),
+    ],
+    "tea": [
+        ("M50 92 C18 74 16 38 50 10 C84 38 82 74 50 92 Z", ("stroke", 5.0)),
+        ("M50 92 V22 M50 66 L36 54 M50 66 L64 54 M50 46 L39 37 M50 46 L61 37", ("stroke", 4.0)),
+    ],
+    "shake": [
+        ("M30 34 H70 L63 90 H37 Z", ("stroke", 5.0)),
+        ("M28 34 C26 18 40 12 50 18 C60 12 74 18 72 34", ("stroke", 5.0)),
+        ("M58 22 L72 4", ("stroke", 5.0)),
+        ("M33 52 H67", ("stroke", 3.5)),
+        (_circle(44, 12, 6), "fill"),
+    ],
+}
+
+
+def _line_from_emblem(name, strokes, fills, width):
+    """Line art from an emblem's own paths: the outlines of `strokes` layers and the fills of `fills`."""
+    out = []
+    for lname, d, mode, _h in EMBLEMS[name]:
+        if lname in strokes:
+            out.append((d, ("stroke", mode[1] if isinstance(mode, tuple) else width)))
+        elif lname in fills:
+            out.append((d, "fill"))
+    return out
+
+
+def layer_masks(name, w, h, inset=0.0, table=None):
+    """{layer name: (Mask, mode, height)} for an emblem (or a glyph, with table=GLYPHS) scaled into w x h."""
     s = min(w, h) / (100.0 + 2 * inset)
     ox = (w - 100 * s) / 2
     oy = (h - 100 * s) / 2
     out = []
-    for lname, d, mode, height in EMBLEMS[name]:
+    for lname, d, mode, height in (table or EMBLEMS)[name]:
         m = R.Mask(w, h)
         polys = R.xform_polys(R.parse(d), s, s, ox, oy)
         if isinstance(mode, tuple):
@@ -144,9 +293,27 @@ def layer_masks(name, w, h, inset=0.0):
 
 
 def silhouette(name, w, h):
+    """Union of every layer of an emblem, or of a flavour glyph."""
+    table = EMBLEMS if name in EMBLEMS else GLYPHS
     m = R.Mask(w, h)
-    for _ln, lm, _mode, _hh in layer_masks(name, w, h):
+    for _ln, lm, _mode, _hh in layer_masks(name, w, h, table=table):
         m.max_with(lm)
+    return m
+
+
+def line_mask(name, w, h, width=None, inset=4.0):
+    """Coverage of a LINE_ICONS entry scaled into a w x h box; width (in 100-unit icon space) overrides every
+    stroke width, for a heavier chalk line."""
+    s = min(w, h) / (100.0 + 2 * inset)
+    ox = (w - 100 * s) / 2
+    oy = (h - 100 * s) / 2
+    m = R.Mask(w, h)
+    for d, mode in LINE_ICONS[name]:
+        polys = R.xform_polys(R.parse(d), s, s, ox, oy)
+        if mode == "fill":
+            R.fill(m, polys)
+        else:
+            R.stroke(m, polys, (width or mode[1]) * s)
     return m
 
 
@@ -198,3 +365,11 @@ def render_relief(name, w, h, palette, light=(-0.55, -0.75, 0.6), strength=2.2, 
                     img.blend(x, y, palette.get("outline", palette["dark"]), (a - cov[i]))
                     img.a[i] = max(img.a[i], a)
     return img
+
+
+# The tea leaf glyph is the family icon's leaf; the line versions of the two crests come from their own paths.
+GLYPHS["leaf"] = EMBLEMS["leaf"]
+LINE_ICONS["lion_head"] = _line_from_emblem("lion_head", ("mane", "face", "ear_l", "ear_r", "mouth", "brow_l",
+                                                          "brow_r"), ("eye_l", "eye_r", "nose"), 3.5)
+LINE_ICONS["tusk_crest"] = _line_from_emblem("tusk_crest", ("tusk_l", "tusk_r", "saucer", "cup", "handle", "steam"),
+                                             (), 3.5)

@@ -123,5 +123,27 @@ class Previews(unittest.TestCase):
         self.assertGreater(right[1], right[0], "left face (green) on the right: %r" % (right,))
 
 
+class Scene(unittest.TestCase):
+    def test_default_layout_places_every_model(self):
+        """Section 5.6 mode 4: the default layout of each city shows every café model of that city (the table
+        props included), so the two scene renders cover all of them."""
+        from mflib import props as PR
+        names = [n for n, *_r in PR.CATALOGUE]
+        for scene, own in (("sw", "SW"), ("org", "Org")):
+            with self.subTest(scene=scene):
+                placed = {name for _role, name, *_r in P.scene_layout(None, scene)[0] if name}
+                want = {n for n in names if n.endswith(own) or not n.endswith(("SW", "Org"))}
+                self.assertEqual(sorted(want - placed), [])
+                other = "Org" if own == "SW" else "SW"
+                self.assertEqual(sorted(n for n in placed if n.endswith(other)), [])
+
+    def test_fitted_camera_frames_its_points(self):
+        pts = [(x, y, z) for x in (-14.0, 5.0) for y in (-12.0, 5.5) for z in (0.0, 3.3)]
+        cam = P._fit_camera(pts, 212.0, 42.0, 30.0, (400, 250))
+        for p in pts:
+            sx, sy, _z = cam.project(cam.view(p))
+            self.assertTrue(0 <= sx / cam.ss <= 400 and 0 <= sy / cam.ss <= 250, (p, sx, sy))
+
+
 if __name__ == "__main__":
     unittest.main()
