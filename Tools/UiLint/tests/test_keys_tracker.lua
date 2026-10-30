@@ -276,7 +276,8 @@ test("tracker: a key run wins over a Rift floor; no Rift tracker outside an inst
     H.ok(t:IsShown(), "into the instance")
     H.eq(t.title:GetText(), "Eclipse Rift - Floor 7")
     H.send(M, "MPS", FX.examples(M).MPS)
-    H.eq(t.title:GetText(), "Halls of Lightning +8", "the key")
+    H.eq(t.title:GetText(), "Halls of Lightning", "the key")
+    H.eq(t.titleLevel:GetText(), "+8")
     H.ok(t.timebar:IsVisible())
 end)
 
@@ -349,4 +350,67 @@ test("tracker: a member's summary never shows the owner's key change as theirs; 
     M.Advance(0.1)
     H.contains(t.resultLines[1]:GetText(), "Keystone +2")
     H.contains(t.resultLines[1]:GetText(), "+10")
+end)
+
+-- "Scarlet Monastery: Cathedral +12" is wider than the title's 168 px: the client ends a one-line text with "...", so
+-- the level has its own text after the name, and only the name is cut to the room the level leaves.
+test("tracker: a long dungeon name is cut before its key level, which always shows after it", function(M, ns)
+    FX.connect(M, H)
+    local t = tracker(M)
+    local T = ns.KeyTracker
+    local room = T.W - 82
+    H.send(M, "DEF", { { "D", 8 }, { 190, "Scarlet Monastery: Cathedral", 2, 30, 40, {}, 1800 } })
+    H.send(M, "MPS", { { 7001, 190, 12, { 1, 3, 4 }, 7, 0, 1800 } })
+    H.send(M, "MP", { { 7001, 600000, 1800, 2, 0, 10, 100, 0, "", "", 1 } })
+    H.eq(t.title:GetText(), "Scarlet Monastery: Cathedral", "the name alone")
+    H.eq(t.titleLevel:GetText(), "+12", "the level in its own text")
+    H.ok(t.titleLevel:IsVisible())
+    local point, rel, relPoint, x = t.titleLevel:GetPoint(1)
+    H.ok(point == "LEFT" and rel == t.title and relPoint == "RIGHT" and x == 4, "right after the name")
+    local levelW = math.ceil(t.titleLevel:GetStringWidth())
+    H.ok(t.title:GetStringWidth() > room - levelW - 4, "the name is wider than its room here")
+    H.ok(t.title:GetWidth() + 4 + levelW <= room, "name and level within the old title's width: "
+        .. t.title:GetWidth() .. " + 4 + " .. levelW)
+    -- a short name: the level follows the name, not the title's far end
+    H.send(M, "MPS", { { 7002, 602, 8, { 1, 3, 4 }, 7, 0, 1800 } })
+    H.eq(t.title:GetText(), "Halls of Lightning")
+    H.eq(t.titleLevel:GetText(), "+8")
+    H.ok(t.title:GetWidth() <= math.ceil(t.title:GetStringWidth()) + 1, "the name's own width")
+    -- a Mythic 0 has no level; a Rift floor neither, with the whole width for its title
+    H.send(M, "MPS", { { 7003, 602, 0, {}, 7, 0, 0 } })
+    H.eq(t.title:GetText(), "Halls of Lightning")
+    H.eq(t.titleLevel:GetText(), "")
+    H.send(M, "MP", { { 7003, 600000, 0, 0, 0, 10, 100, 0, "", "", 4 } })
+    H.send(M, "RIFT", { { 8001, 1, 7, 3, "Echo of Nefarian", 120000, 18, "", 42, 1, 1 } })
+    M.inInstance, M.instanceType = true, "party"
+    M.EnterWorld()
+    H.eq(t.title:GetText(), "Eclipse Rift - Floor 7")
+    H.eq(t.titleLevel:GetText(), "")
+    H.eq(t.title:GetWidth(), room, "the whole title width again")
+end)
+
+-- The summary's lines are the tracker's width and wrap: "Keystone +2: Scarlet Monastery: Cathedral +12" and a long
+-- reward take two lines, and the lines under them (and the Close button) go below both.
+test("tracker: a summary line that wraps pushes the lines under it and the Close button down", function(M, ns)
+    FX.connect(M, H)
+    local t = tracker(M)
+    local T = ns.KeyTracker
+    H.send(M, "DEF", { { "D", 8 }, { 190, "Scarlet Monastery: Cathedral", 2, 30, 40, {}, 1800 } })
+    H.send(M, "MPS", { { 7001, 190, 10, { 1, 3, 4 }, 7, 0, 1800 } })
+    H.send(M, "MP", { { 7001, 600000, 1800, 2, 0, 100, 100, 15, "", "", 1 } })
+    H.send(M, "MPE", { { 7001, 1, 1453000, 2, 190, 12, 1840 }, { "T", 1, "", "2 Mythical Caches (gear in your bags)" },
+        { "T", 1, "", "Spoils chest" } })
+    local l = t.resultLines
+    H.eq(l[1]:GetText(), "Keystone +2: Scarlet Monastery: Cathedral +12")
+    H.eq(l[2]:GetText(), "Score 1,840")
+    H.eq(l[3]:GetText(), "+ 2 Mythical Caches (gear in your bags)")
+    H.eq(l[4]:GetText(), "+ Spoils chest")
+    H.eq(T.WrappedLines(l[1]), 2, "the keystone line takes two lines")
+    H.eq(T.WrappedLines(l[3]), 2, "the caches line too")
+    H.eq(yOf(l[2]), yOf(l[1]) - 2 * T.LINE_H, "the score under both lines of the keystone")
+    H.eq(yOf(l[3]), yOf(l[2]) - T.LINE_H)
+    H.eq(yOf(l[4]), yOf(l[3]) - 2 * T.LINE_H, "the chest under both lines of the caches")
+    local bottom = yOf(l[4]) - T.LINE_H
+    H.eq(yOf(t.closeBtn), bottom - 6, "Close under the last line")
+    H.eq(t:GetHeight(), -bottom + 34, "the frame fits them")
 end)

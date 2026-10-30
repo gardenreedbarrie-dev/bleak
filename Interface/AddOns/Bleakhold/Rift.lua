@@ -202,16 +202,17 @@ function P.EnterBlock()
     if (GetNumRaidMembers and GetNumRaidMembers() or 0) > 0 then
         return "The rift takes at most 5 players - leave the raid group first."
     end
+    -- never a Dungeon Finder group: the leader cannot open the rift for it (RiftEnter) and a member cannot follow
+    -- into one (RiftMayTravel)
+    if A.InDungeonFinderGroup() then
+        return "Leave the Dungeon Finder group first."
+    end
     -- a follower goes after the party once alive, out of combat and free (the follow path, before the leader's rules)
     if P.IsFollower() then
         return selfBusy() and P.FOLLOW_BUSY or nil
     end
-    -- the leader's opening: never a Dungeon Finder group, the leader alive, out of combat and free, and every
-    -- member, near or far, at the rift's level (the members' combat is left to the server: only those within 100
-    -- yards go in)
-    if A.InDungeonFinderGroup() then
-        return "Leave the Dungeon Finder group first."
-    end
+    -- the leader's opening: the leader alive, out of combat and free, and every online member, near or far, at the
+    -- rift's level (the members' combat is left to the server: only those within 100 yards go in)
     local busy = selfBusy()
     if busy then
         return busy
@@ -219,10 +220,13 @@ function P.EnterBlock()
     if r.known and (r.minLevel or 0) > 0 then
         for i = 1, GetNumPartyMembers and GetNumPartyMembers() or 0 do
             local unit = "party" .. i
-            local lvl = UnitLevel and UnitLevel(unit) or 0
-            if lvl > 0 and lvl < r.minLevel then
-                local name = UnitName and UnitName(unit)
-                return U.Safe(name or "A party member") .. " needs to be level " .. r.minLevel .. "."
+            -- RiftEnter takes in and level-checks only the members in the world: an offline one keeps its last level
+            if not (UnitIsConnected and not UnitIsConnected(unit)) then
+                local lvl = UnitLevel and UnitLevel(unit) or 0
+                if lvl > 0 and lvl < r.minLevel then
+                    local name = UnitName and UnitName(unit)
+                    return U.Safe(name or "A party member") .. " needs to be level " .. r.minLevel .. "."
+                end
             end
         end
     end

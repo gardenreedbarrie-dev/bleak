@@ -191,6 +191,22 @@ test("legacy O and X: the keystone's start, the end of a run (no new U comes the
     H.eq(said[#said], ".rift enter")
 end)
 
+test("legacy O: a Mythic 0 that starts by itself (MPS level 0) keeps the keystone's start; a keystone run uses it up",
+    function(M, ns)
+    FX.connect(M, H)
+    local L = ns.Legacy
+    bhmp(M, "O;602;8;1800;10;8;8;1,3,4;Halls of Lightning")
+    H.ok(L.SocketArmed(), "the keystone opened the start")
+    -- Mythic difficulty starts a Mythic 0 once everyone is out of combat (TryAutoMythic); the server keeps the start
+    -- (ClearPendingSocket follows only a keystone StartRun) and StartRun's fromMythic0 still takes the keystone
+    H.send(M, "MPS", { { 7001, 602, 0, {}, 7, 0, 0 } })
+    H.ok(L.SocketArmed(), "a Mythic 0 keeps the start")
+    H.ok(L.mplus.socket and L.mplus.socket.level == 8, "the keystone's start as O opened it")
+    -- Start keystone: the keystone run's countdown
+    H.send(M, "MPS", { { 7002, 602, 8, { 1, 3, 4 }, 7, 10000, 1800 } })
+    H.ok(not L.SocketArmed(), "the keystone run used it up")
+end)
+
 test("legacy A: A;journey opens Activities on the Dungeon Journey; a page that does not exist opens nothing",
     function(M, ns)
     bhmp(M, "A;nonsense")

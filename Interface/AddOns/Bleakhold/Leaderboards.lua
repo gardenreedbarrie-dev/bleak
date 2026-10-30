@@ -447,7 +447,10 @@ function LB.Query()
             ns.Arena.Ask(false)     -- the season choice comes from ARENA S
         end
     else
-        Comm.Send("LBQ", LB.board, season, LB.dungeon or 0, LB.class or 0, LB.page)
+        -- the dungeon filter is the Mythic Keys board's alone (the only one showing it): the server filters every
+        -- board by it (BleakholdData.cpp AnswerLeaderboard), and Rift and Raid Echoes rows carry no dungeon. LB.dungeon
+        -- stays, for the way back to Mythic Keys.
+        Comm.Send("LBQ", LB.board, season, LB.board == "K" and (LB.dungeon or 0) or 0, LB.class or 0, LB.page)
     end
 end
 

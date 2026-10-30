@@ -315,7 +315,9 @@ test("journey: the queue panel from QUEUE and the old H; Leave queue is QLEAVE",
     H.eq(q.status:GetText(), "In queue: Veteran Shadowfang Keep")
     H.contains(q.timer:GetText(), "Starts in 01:40")
     H.contains(q.timer:GetText(), "or at 5 players", "a Journey queue starts at 5 players or its timer")
-    H.eq(q.band:GetText(), "Levels 29-39  -  3 of 5 players")
+    -- QUEUE carries no player count, and H's is a snapshot from the last .act journey: not shown beside QUEUE
+    H.eq(q.band:GetText(), "Levels 29-39")
+    H.eq(P.queueStat:GetText(), "|cff1aff1aqueued|r", "no count from H")
     M.Advance(2.2)
     H.contains(q.timer:GetText(), "Starts in 01:3", "it counts down")
     H.ok(q.leave:IsVisible())
@@ -465,11 +467,12 @@ test("mythic+: Start keystone as the server takes it (its dungeon, the keystone 
     P:Refresh()
     H.ok(not P.start:IsEnabled(), "inside another dungeon")
     H.eq(P.startHint:GetText(), "Use your keystone inside Halls of Lightning.")
-    -- its own dungeon, alone: a keystone is a 5-player run (StartRun, KeyMinPlayers)
+    -- its own dungeon, alone: the players inside are StartRun's to count (live, KeyMinPlayers, staff exempt), so
+    -- no count greys the button; the keystone is still to be used
     M.zone = "Halls of Lightning"
     P:Refresh()
     H.ok(not P.start:IsEnabled(), "alone")
-    H.eq(P.startHint:GetText(), "A keystone needs 5 players inside the dungeon.")
+    H.contains(P.startHint:GetText(), "Right-click your keystone")
     H.contains(tipText(P.start.tooltip()), "needs 5 players inside")
     H.contains(P.desc:GetText(), "with a group of 5")
     -- a group of 5, the keystone not used yet
@@ -477,11 +480,13 @@ test("mythic+: Start keystone as the server takes it (its dungeon, the keystone 
     P:Refresh()
     H.ok(not P.start:IsEnabled(), "the keystone has not opened the start")
     H.contains(P.startHint:GetText(), "Right-click your keystone")
-    -- right-clicked with only 3 of them inside: OpenSocket's G says so
+    -- right-clicked with only 3 of them inside: G is sent once, at the right-click, never again as the others zone
+    -- in; StartRun counts the players on the map at KSTART, so the button stays usable (a short count comes back as
+    -- the server's ERR)
     feed(ns, { "G;Me:1:1:1:1|Ann:2:1:0:1|Bo:5:1:0:1|Cy:8:0:0:1|Di:4:0:0:1", SOCKET })
     P:Refresh()
-    H.ok(not P.start:IsEnabled(), "3 inside")
-    H.eq(P.startHint:GetText(), "A keystone needs 5 players inside the dungeon - 3 are here now.")
+    H.ok(P.start:IsEnabled(), "3 inside at the right-click")
+    H.eq(P.startHint:GetText(), "")
     -- right-clicked with all 5 inside: the server's G and O
     feed(ns, { "G;Me:1:1:1:1|Ann:2:1:0:1|Bo:5:1:0:1|Cy:8:1:0:1|Di:4:1:0:1", SOCKET })
     P:Refresh()
@@ -837,9 +842,15 @@ test("difficulty and starts: refused in a battleground; a Dungeon Finder group l
     M.Advance(0.3)
     local Hp = ns.Heroic
     H.ok(Hp.modes[3]:IsEnabled(), "Mythic outside a Dungeon Finder group")
-    -- a Dungeon Finder group after its run (GetLFGInfoServer's inParty, FrameXML's "lfgparty")
+    -- a plain party (/invite): GetLFGInfoServer's first value is true for any party or raid, IsPartyLFG is not set
     M.SetGroup("PARTY", 5, true)
     M.env.GetLFGInfoServer = function() return true, false, false end
+    M.env.IsPartyLFG = function() return nil end
+    Hp:Refresh()
+    H.ok(Hp.modes[3]:IsEnabled(), "Mythic for a plain party")
+    H.eq(K.MythicBlock(), nil, "a plain party is no Dungeon Finder group")
+    -- a Dungeon Finder group after its run (IsPartyLFG: the party's LFG slot, sent only for Group::isLFGGroup)
+    M.env.IsPartyLFG = function() return 1 end
     Hp:Refresh()
     H.ok(Hp.modes[1]:IsEnabled() and Hp.modes[2]:IsEnabled(), "Normal and Heroic stay")
     H.ok(not Hp.modes[3]:IsEnabled(), "not Mythic")
@@ -867,9 +878,22 @@ test("difficulty and starts: refused in a battleground; a Dungeon Finder group l
     local R = ns.Rift
     H.ok(not R.enter:IsEnabled())
     H.eq(R.note:GetText(), "Leave the Dungeon Finder group first.")
-    M.env.GetLFGInfoServer = function() return false, false, false end
+    -- a member of it as well: the leader can never open the rift for it, and RiftMayTravel turns a follow away
+    M.SetGroup("PARTY", 5, false)
+    R:Refresh()
+    H.ok(not R.enter:IsEnabled(), "no follow into a Dungeon Finder group")
+    H.eq(R.note:GetText(), "Leave the Dungeon Finder group first.", "a member")
+    H.ok(R.note:GetText() ~= R.FOLLOW_NOTE)
+    M.SetGroup("PARTY", 5, true)
+    -- a plain party again: still in a party (GetLFGInfoServer's inParty), not a Dungeon Finder one
+    M.env.IsPartyLFG = function() return nil end
     R:Refresh()
     H.ok(R.enter:IsEnabled(), "a plain party again")
+    H.eq(K.MythicBlock(), nil)
+    M.playerLevel = 20
+    ns.UI.Open("dungeons")
+    M.Advance(0.3)
+    H.ok(D.hint:GetText() ~= "Leave the Dungeon Finder group first.", "the Journey takes a plain party")
 end)
 
 test("rift: a party member under the rift's level keeps the leader from opening it", function(M, ns)
@@ -894,6 +918,14 @@ test("rift: a party member under the rift's level keeps the leader from opening 
     levels.party2 = 80
     P:Refresh()
     H.ok(P.enter:IsEnabled(), "all at level")
+    -- an offline member keeps its last level in UnitLevel; RiftEnter takes in and checks only those in the world
+    levels.party2 = 70
+    M.env.UnitIsConnected = function(u) return u ~= "party2" and 1 or nil end
+    P:Refresh()
+    H.ok(P.enter:IsEnabled(), "an offline member under the level does not block")
+    M.env.UnitIsConnected = function() return 1 end
+    P:Refresh()
+    H.eq(P.note:GetText(), "Friend needs to be level 80.", "online again: blocked")
 end)
 
 test("pages: no control sends an intent the server refuses (BCLAIM, TCLAIM, TREROLL, KCANCEL, QREPLY)",
@@ -1019,6 +1051,7 @@ test("journey and rift: dead, in combat, on a flight path or in the air, as the 
     M.playerLevel = 80
     feed(ns, BOARD)
     feed(ns, { "U;24;18;12;9;20;80;1;0;50" })
+    H.send(M, "BOARD", CUSTOM_BOARD)
     ns.UI.Open("dungeons")
     M.Advance(0.3)
     local D, R = ns.Dungeons, ns.Rift
@@ -1037,16 +1070,19 @@ test("journey and rift: dead, in combat, on a flight path or in the air, as the 
         H.eq(R.EnterBlock(), c[3], "RiftEnter's words")
         env[c[1]] = function() return false end
     end
-    -- flying (a flying mount): .act start's own refusal, the Rift takes it
+    -- flying (a flying mount): .act start's own refusal, the Rift takes it. Taking off and landing fire no event
+    -- (CONTROL_LOST/GAINED are the taxi's), so only the page's once-a-second recheck sees them.
     env.IsFlying = function() return 1 end
-    M.FireEvent("PLAYER_CONTROL_LOST")
-    M.Advance(0.3)
-    H.eq(D.hint:GetText(), "Land first: the run brings you back to where you start it.")
+    M.Advance(1.1)
+    H.eq(D.hint:GetText(), "Land first: the run brings you back to where you start it.", "took off: no event")
+    H.ok(not D.find:IsEnabled() and not D.enter:IsEnabled(), "flying: greyed")
+    H.ok(not D.customBox.enter:IsEnabled(), "flying: the custom run greyed too")
     H.eq(R.EnterBlock(), nil)
     env.IsFlying = function() return nil end
-    M.FireEvent("PLAYER_CONTROL_GAINED")
-    M.Advance(0.3)
+    M.Advance(1.1)
     H.ok(D.enter:IsEnabled(), "landed")
+    H.ok(D.hint:GetText() ~= "Land first: the run brings you back to where you start it.", "landed: the hint moved on")
+    H.ok(D.customBox.enter:IsEnabled(), "landed: the custom run lit again")
     -- the Rift page follows its events too
     ns.UI.Open("rift")
     M.Advance(0.3)

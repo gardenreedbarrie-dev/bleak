@@ -365,9 +365,25 @@ test("Leaderboards: podium, table, paging, tabs, your best, firsts, site", funct
     H.ok(texts(M, "Hesper") > 0, "rank 4 in the table")
     LB.table.next:Click()
     H.eq(H.lastIntent(M, "LBQ").payload, "K,1,0,0,2")
+    -- a Key board dungeon filter is the Key board's alone: hidden on the others, and the server would drop every Rift
+    -- and Raid Echoes row by it (they carry no dungeon)
+    local dd = LB.filters.dungeon
+    H.ok(#dd.items > 1, "dungeons to pick")
+    local dungeon = dd.items[2].value
+    dd:SetValue(dungeon)
+    H.eq(H.lastIntent(M, "LBQ").payload, "K,1," .. dungeon .. ",0,1")
     LB.tabs[2]:Click()
-    H.eq(H.lastIntent(M, "LBQ").payload, "R,1,0,0,1")
+    H.eq(H.lastIntent(M, "LBQ").payload, "R,1,0,0,1", "no hidden dungeon filter on the Rift board")
+    H.ok(not dd:IsShown(), "the dungeon filter is hidden there")
     LB.filters.class:SetValue(2)
+    H.eq(H.lastIntent(M, "LBQ").payload, "R,1,0,2,1")
+    M.Advance(2)      -- past Comm's send throttle
+    LB.tabs[3]:Click()
+    H.eq(LB.tabs[3].key, "E")
+    H.eq(H.lastIntent(M, "LBQ").payload, "E,1,0,2,1", "nor on the Raid Echoes board")
+    LB.tabs[1]:Click()
+    H.eq(H.lastIntent(M, "LBQ").payload, "K,1," .. dungeon .. ",2,1", "kept for the way back to Mythic Keys")
+    LB.tabs[2]:Click()
     H.eq(H.lastIntent(M, "LBQ").payload, "R,1,0,2,1")
     local firstsTab
     for _, t in ipairs(LB.tabs) do

@@ -101,12 +101,17 @@ function Toast.Fit(fs, s, sizes, w)
     for _, px in ipairs(sizes) do
         size = px
         fs:SetFont(path or UI.FONT_BODY, px, "")
-        UI.OneLine(fs, w)
+        -- unbounded: with a width and a height set, GetStringWidth measures the client's "..." cut, not the line
+        -- (SetWidth and SetHeight also drop the cached width, so the same text is measured again)
+        fs:SetWidth(0)
+        fs:SetHeight(0)
         UI.SetText(fs, s)
         if (fs:GetStringWidth() or 0) <= w then
             break
         end
     end
+    -- bound at the chosen size (height = size + 3); past the smallest the client cuts it
+    UI.OneLine(fs, w)
     return size
 end
 
@@ -195,7 +200,35 @@ f:SetScript("OnLeave", function()
     end
 end)
 
-local function showNext()
+-- The keystone countdown (Countdown.lua: 420 x 270 from TOP -80, DIALOG strata) covers the toast's slot with its head
+-- and bar while it shows: a toast waits for it to go (polled, one wait at a time) rather than show unread under it.
+Toast.WAIT_POLL = 0.5
+function Toast.Covered()
+    local cd = ns.Countdown and ns.Countdown.frame
+    return cd and cd:IsShown() and true or false
+end
+
+local showNext
+local waiting
+local function waitForSlot()
+    if waiting then
+        return
+    end
+    waiting = ns.After(Toast.WAIT_POLL, function()
+        waiting = nil
+        if not current then
+            showNext()
+        end
+    end)
+end
+
+function showNext()
+    if #queue > 0 and Toast.Covered() then
+        current = nil
+        f:Hide()
+        waitForSlot()
+        return
+    end
     current = table.remove(queue, 1)
     if not current then
         f:Hide()
@@ -216,6 +249,20 @@ end
 
 f:SetScript("OnUpdate", function(self)
     if not current or not shownAt then
+        return
+    end
+    -- the countdown came up over the toast showing: it goes back to the head of the queue (the oldest, so dropped when
+    -- the queue is full, as Toast.Push drops it) and shows again whole once the countdown is gone
+    if Toast.Covered() then
+        if #queue < Toast.MAX_QUEUE then
+            table.insert(queue, 1, current)
+        end
+        current = nil
+        if #queue > 0 then
+            showNext()
+        else
+            self:Hide()
+        end
         return
     end
     local t = GetTime() - shownAt
@@ -262,6 +309,23 @@ end
 
 function Toast.Pending()
     return #queue + (current and 1 or 0)
+end
+
+-- Drops the toasts, showing or waiting, that target `target` (and are titled `title`, when given): a toast that has
+-- gone stale ("Keystone ready: press Start keystone" once the keystone counts down, CD.Start). The next one shows.
+function Toast.Dismiss(target, title)
+    local function stale(d)
+        return d.target == target and (title == nil or d.title == title)
+    end
+    for i = #queue, 1, -1 do
+        if stale(queue[i]) then
+            table.remove(queue, i)
+        end
+    end
+    if current and stale(current) then
+        current = nil
+        showNext()
+    end
 end
 
 -- A long reward name ("Claim 2x Mythical Cache of the Eclipse in Activities") drops "in Activities" first, then the

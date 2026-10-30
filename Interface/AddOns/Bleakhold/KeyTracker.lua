@@ -88,6 +88,10 @@ end
 f.title = UI.Text(f, 14, C.gold)
 f.title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -6)
 UI.OneLine(f.title, T.W - 82)
+-- a key's level, right after the name: only the name is cut to the room left ("Scarlet Monastery: Cathedral +12"
+-- is wider than the title), so the level always shows
+f.titleLevel = UI.Text(f, 14, C.gold)
+f.titleLevel:SetPoint("LEFT", f.title, "RIGHT", 4, 0)
 f.deaths = CreateFrame("Frame", nil, f)
 f.deaths:SetSize(64, 16)
 f.deaths:SetPoint("TOPRIGHT", f, "TOPRIGHT", -10, -6)
@@ -646,14 +650,12 @@ local function layoutResult(m)
     end
     if r.score then lines[#lines + 1] = "Score " .. U.Commas(r.score) end
     for _, rw in ipairs(r.rewards) do lines[#lines + 1] = "+ " .. rw end
+    -- a long line ("Keystone +2: Scarlet Monastery: Cathedral +12", a member's "+ Thrall's keystone: ...") wraps:
+    -- the next one goes under all of it
     local y = -74
     for i, l in ipairs(f.resultLines) do
         if lines[i] then
-            UI.SetText(l, lines[i])
-            l:ClearAllPoints()
-            l:SetPoint("TOPLEFT", f, "TOPLEFT", 12, y)
-            l:Show()
-            y = y - T.LINE_H
+            y = placeWrapped(l, lines[i], y)
         end
     end
     f.closeBtn:ClearAllPoints()
@@ -733,14 +735,21 @@ function T.Refresh()
         return
     end
     if m.rift then
+        f.titleLevel:SetText("")
+        f.title:SetWidth(T.W - 82)
         UI.SetText(f.title, "Eclipse Rift - Floor " .. m.floor)
         local d = m.rf and m.rf.deaths
         f.deaths.text:SetText(d and (d .. (d == 1 and " death" or " deaths")) or "")
         layoutRift(m)
         T.UpdateTimer()
     else
-        local level = (m.level or 0) > 0 and (" +" .. m.level) or ""
-        UI.SetText(f.title, (m.title or ns.DungeonName(m.dungeonId)) .. level)
+        -- the name in the room the level leaves (the client ends it with "..."), the level right after it
+        local lvl = (m.level or 0) > 0 and ("+" .. m.level) or ""
+        f.titleLevel:SetText(lvl)
+        local room = T.W - 82 - (lvl ~= "" and (ceil(f.titleLevel:GetStringWidth()) + 4) or 0)
+        f.title:SetWidth(room)
+        UI.SetText(f.title, m.title or ns.DungeonName(m.dungeonId))
+        f.title:SetWidth(min(room, ceil(f.title:GetStringWidth()) + 1))
         local d = m.deaths or 0
         f.deaths.text:SetText(d .. (d == 1 and " death" or " deaths"))
         if m.result then

@@ -44,6 +44,8 @@ CD.DBM_PIZZA_PREFIX = "DBMv4-Pizza"
 CD.DBM_OLD_BELOW = 1e6
 CD.KEY_KICKER = "Mythic+ Keystone"
 CD.M0_KICKER = "Mythic 0 - untimed"
+-- the bridge's toast for the keystone right-clicked at its dungeon (bh_ui_bridge.cpp), stale once the countdown starts
+CD.READY_TOAST = "Keystone ready"
 CD.W, CD.H = 420, 270
 CD.MAX_AFFIXES = 6
 -- DBM-Core's DBT defaults: DBTBarTemplate 195 x 20, GameFontHighlightSmall, StartColor, EndColor, Flash below 7.75 s;
@@ -547,6 +549,11 @@ function CD.Start(m)
     end
     claimBar()
     f:Show()
+    -- the right-click's "Keystone ready: press Start keystone" (bh_ui_bridge.cpp) is done; it sat under the head and
+    -- the bar (after f:Show, so the toasts waiting behind it wait for the countdown too: Toast.Covered)
+    if ns.Toast and ns.Toast.Dismiss then
+        ns.Toast.Dismiss("keys", CD.READY_TOAST)
+    end
     CD.Update()
 end
 

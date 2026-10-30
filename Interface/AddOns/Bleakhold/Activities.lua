@@ -255,15 +255,12 @@ function A.InDungeon()
     return (inInstance and (kind == "party" or kind == "raid")) and true or false
 end
 
--- In a Dungeon Finder group (GetLFGInfoServer's first value, which FrameXML's GetLFGMode reads as "lfgparty"): the
--- server lets it enter only its own dungeon (bh_dungeon.cpp CanLaunch, bh_rift.cpp RiftEnter), never on Mythic
--- (bh_mplus.cpp SetDifficulty).
+-- In a Dungeon Finder group: IsPartyLFG (the party's LFG slot from SMSG_GROUP_LIST, which the server sends only for
+-- Group::isLFGGroup). GetLFGInfoServer's first value means any party or raid, not this. The server lets such a group
+-- enter only its own dungeon (bh_dungeon.cpp CanLaunch, bh_rift.cpp RiftEnter) and never on Mythic (bh_mplus.cpp
+-- SetDifficulty).
 function A.InDungeonFinderGroup()
-    if not GetLFGInfoServer then
-        return false
-    end
-    local inParty = GetLFGInfoServer()
-    return inParty and true or false
+    return (IsPartyLFG and IsPartyLFG()) and true or false
 end
 
 -- The Bleakhold Royale or the 1v1 arena queue the player is in (our QUEUE, kind B or A), worded as the bridge refuses a
@@ -1027,7 +1024,7 @@ function P:RefreshWeek(e)
     local rows = {
         { "Keys Timed", w and tostring(w.keysTimed) or "-" },
         { "Raid Echoes", w and tostring(w.echoes) or "-" },
-        { "Rift Best", w and ("Floor " .. w.riftBestFloor) or "-" },
+        { "Rift Best", w and w.riftBestFloor > 0 and ("Floor " .. w.riftBestFloor) or "-" },
         { "Mythic Coins", w and (U.Commas(w.coins) .. (w.coinsCap > 0 and (" / " .. U.Commas(w.coinsCap)) or ""))
             or "-" },
     }

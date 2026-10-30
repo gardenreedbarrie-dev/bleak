@@ -621,8 +621,8 @@ function L.SeasonDungeons()
 end
 
 -- Whether the keystone has opened the start here (O), so the server takes Start keystone: TakePendingSocket wants
--- the same instance within 300 s. Gone on X (out of the dungeon), on a loading screen, once the countdown starts
--- (MPS) and after L.SOCKET_SECONDS.
+-- the same instance within 300 s. Gone on X (out of the dungeon), on a loading screen, once a keystone countdown
+-- starts (MPS above level 0) and after L.SOCKET_SECONDS.
 L.SOCKET_SECONDS = 300
 function L.SocketArmed()
     local s = L.mplus.socket
@@ -640,8 +640,12 @@ ns.RegisterEvent("PLAYER_ENTERING_WORLD", function()
     L.mplus.socket = nil
     L.mplus.group = nil
 end)
-ns.On("MPLUS_START", function()
-    L.mplus.socket = nil
+ns.On("MPLUS_START", function(m)
+    -- only a keystone run uses up the start (ClearPendingSocket after a MODE_KEY StartRun); a Mythic 0 (MPS level 0)
+    -- still takes the keystone (StartRun's fromMythic0)
+    if type(m) == "table" and (m.level or 0) > 0 then
+        L.mplus.socket = nil
+    end
 end)
 
 -- A loading screen ends the run's state (the server's X may be lost with a logout). On PLAYER_LEAVING_WORLD, not on

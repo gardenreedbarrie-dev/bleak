@@ -559,19 +559,30 @@ function P:RefreshDungeons()
 end
 
 -- Inside the keystone's own dungeon: the instance's name (GetInstanceInfo) is in the key dungeon's ("Scarlet
--- Monastery" in "Scarlet Monastery: Armory", "Blackrock Spire" in "Lower Blackrock Spire").
+-- Monastery" in "Scarlet Monastery: Armory", "Blackrock Spire" in "Lower Blackrock Spire"), or the wing after its hub
+-- is ("Shadow Labyrinth" for "Auchindoun: Shadow Labyrinth").
 function P.InKeyDungeon(keyName)
     if not A.InDungeon() or type(keyName) ~= "string" then
         return false
     end
     local here = GetInstanceInfo and GetInstanceInfo()
-    return type(here) == "string" and here ~= "" and keyName:find(here, 1, true) ~= nil
+    if type(here) ~= "string" or here == "" then
+        return false
+    end
+    -- Map.dbc names some wings with their hub ("Auchindoun: Shadow Labyrinth", "Coilfang: The Steamvault"); the key
+    -- dungeon's own name may be just the wing's
+    local short = here:match(":%s*(.+)$")
+    return keyName:find(here, 1, true) ~= nil
+        or (short ~= nil and (keyName:find(short, 1, true) ~= nil or short:find(keyName, 1, true) ~= nil))
 end
 
 -- StartRun's and KeyStartBlock's refusal on a Heroic instance (bh_mplus.cpp, bh_mplus_scripts.cpp): Mythic mode is
 -- Normal difficulty, Heroic is not.
 P.NORMAL_ONLY = "Mythic 0 and keystones run on Normal difficulty. Set your dungeon difficulty to Normal, leave and "
     .. "enter again."
+-- Theirs in a Dungeon Journey run's instance (bh_mplus_scripts.cpp KeyStartBlock, bh_mplus.cpp StartRun), checked
+-- after the difficulty as they do.
+P.JOURNEY_RUN = "A Dungeon Journey run is active in this instance."
 
 -- The same rule before the group enters (the dungeon difficulty is Heroic, the player outside the key's dungeon).
 function P.HeroicOutsideText(name)
@@ -601,6 +612,8 @@ end
 P.endedRun = nil
 ns.On("MPLUS_END", function(res)
     P.endedRun = type(res) == "table" and res.runId or nil
+    -- the server sends no new L when a run ends (only E, then KEY/WEEK): ask again so the season bests follow
+    L.Request(true)
 end)
 ns.RegisterEvent("PLAYER_ENTERING_WORLD", function()
     P.endedRun = nil
@@ -635,16 +648,29 @@ end
 -- Mythic mode starts one on entry, StartAutoMythic); a Mythic 0 counting down (the Font of Power) or a key run does
 -- not; a run finished here (P.FinishedBlock) does not either.
 function P.RunBlock()
-    local done = P.FinishedBlock()
+    -- the server refuses a keystone outside its own dungeon first (OnKeyStart, the keystone's OnUse): a finished run
+    -- or a Mythic 0 here only blocks the key of this dungeon
+    local _, keyName = P.Keystone()
+    local here = Comm.demo or L.SocketArmed() or P.InKeyDungeon(keyName)
+    local done = here and P.FinishedBlock()
     if done then
         return done
+    end
+    -- an Eclipse Rift floor here (bh_rift.cpp RiftSetupFloor: MODE_RIFT on this instance's run): KeyStartBlock
+    -- refuses every run but a fresh Mythic 0, so the keystone and the Font of Power never open the start
+    local run = L.Run()
+    if here and not Comm.demo and ((run and run.mode == L.MODE.RIFT)
+        or (ns.Rift and ns.Rift.RunFloor and ns.Rift.RunFloor())) then
+        return "This instance already had a run. Leave, reset the dungeon and enter again."
     end
     local m = S.mplus
     if not m or m.result or (m.state or 0) > 1 then
         return nil
     end
     if (m.level or 0) == 0 and (m.dungeonId or 0) > 0 then
-        if (m.state or 0) == 0 then
+        if not here then
+            return nil
+        elseif (m.state or 0) == 0 then
             return "Mythic 0: " .. U.Safe(ns.DefName("D", m.dungeonId, nil) or ns.DungeonName(m.dungeonId))
                 .. " - in progress."
         elseif (m.bossBits or 0) ~= 0 then
@@ -688,9 +714,8 @@ end
 
 -- What keeps Start keystone from working, as the server checks KSTART, or nil: a keystone, no countdown or run going
 -- (a fresh Mythic 0 aside), the group leader (or no group; mod-bleakhold-ui BleakholdMgr.cpp), the key's own dungeon on
--- Normal difficulty, nobody under the level or in combat, 5 players inside, and a start the keystone or the Font of
--- Power opened here (the server's O: PeekPendingSocket wants it, in the key's own dungeon, within 5 minutes;
--- Legacy.lua).
+-- Normal difficulty, nobody under the level or in combat, and a start the keystone or the Font of Power opened here
+-- (the server's O: PeekPendingSocket wants it, in the key's own dungeon, within 5 minutes; Legacy.lua).
 -- The demo has no dungeon to be in: there the button starts its sample run from anywhere.
 function P.StartBlock()
     if not (Comm.ready or Comm.demo) then
@@ -707,7 +732,6 @@ function P.StartBlock()
     if Comm.demo then
         return nil
     end
-    local raid, party = GetNumRaidMembers and GetNumRaidMembers() or 0, GetNumPartyMembers and GetNumPartyMembers() or 0
     if not P.LeadsGroup() then
         return "Only the group leader can start the keystone."
     end
@@ -726,19 +750,19 @@ function P.StartBlock()
     if inside and P.InstanceDifficulty() == 2 then
         return P.NORMAL_ONLY
     end
+    -- a Dungeon Journey run in this instance (the bridge's QUEUE state 3 kind D, BuildOwnQueue): the keystone's
+    -- right-click, the Font of Power and StartRun all refuse it (P.JOURNEY_RUN)
+    local q = S.queue
+    if inside and q and q.state == 3 and q.kind == "D" then
+        return P.JOURNEY_RUN
+    end
     local member = armed and P.MemberBlock()
     if member then
         return member
     end
-    -- 5 players inside (StartRun): the group the keystone saw inside when it opened the start (G), else its size
-    local seen = armed and L.GroupInside()
-    if (seen or (raid > 0 and raid or 1 + party)) < P.KEY_MIN_PLAYERS then
-        local text = "A keystone needs " .. P.KEY_MIN_PLAYERS .. " players inside the dungeon"
-        if seen then
-            return text .. " - " .. seen .. (seen == 1 and " is" or " are") .. " here now."
-        end
-        return text .. "."
-    end
+    -- the players inside are StartRun's to count (live, Bleakhold.MythicPlus.KeyMinPlayers, staff exempt): G is a
+    -- snapshot from the right-click and the minimum is not sent, so no count greys the button; a refusal comes back
+    -- as ERR (the Activities strip)
     if not armed then
         return "Right-click your keystone (or use the Font of Power), then press Start keystone."
     end

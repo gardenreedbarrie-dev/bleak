@@ -361,8 +361,8 @@ test("keys page: StartRun's members below the level or in combat, of those insid
     H.eq(P.startHint:GetText(), "Bo is in combat.")
     combat.party2, combat.party3 = nil, true
     P:Refresh()
-    H.eq(P.startHint:GetText(), "A keystone needs 5 players inside the dungeon - 4 are here now.",
-        "Cy is not inside: the count, not Cy's combat")
+    H.eq(P.startHint:GetText(), "", "Cy was not inside at the right-click: not Cy's combat, and no count (StartRun's)")
+    H.ok(P.start:IsEnabled())
     combat.player = true
     P:Refresh()
     H.eq(P.startHint:GetText(), M.playerName .. " is in combat.", "the leader too")

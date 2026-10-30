@@ -483,3 +483,18 @@ test("tasks page: before the server answers, the era block says so and the stats
     H.eq(P.week.rows[1].value:GetText(), "-")
     H.ok(not P.bonus:IsShown(), "no weekly bonus yet")
 end)
+
+test("tasks page: no Rift floor cleared this week is '-', never 'Floor 0'", function(M, ns)
+    FX.connect(M, H)
+    -- WEEK's riftBestFloor 0: nothing cleared yet (the Eclipse Rift page shows "-" too)
+    H.send(M, "WEEK", { { 2, 4, 1, 0, 2140, 5500, 1260 } })
+    ns.UI.Open("tasks")
+    M.Advance(0.5)
+    local P = ns.Activities.tasksPage
+    H.eq(P.week.rows[3].label:GetText(), "Rift Best")
+    H.eq(P.week.rows[3].value:GetText(), "-")
+    H.send(M, "WEEK", { { 3, 4, 1, 1, 2140, 5500, 1260 } })
+    M.Advance(0.5)
+    P:RefreshWeek()
+    H.eq(P.week.rows[3].value:GetText(), "Floor 1")
+end)

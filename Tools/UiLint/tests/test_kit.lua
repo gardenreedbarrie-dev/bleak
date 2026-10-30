@@ -489,3 +489,51 @@ test("kit: Title Case labels, column headers, wrapped text with leading", functi
     colorIs({ 1, 1, 1 }, "white body", p:GetTextColor())
     H.ok(UI.Text(M.env.UIParent, 12):GetSpacing() > 0, "no wrapped lines touching")
 end)
+
+-- In the client a FontString with a width and a height measures the text GetDisplayText already cut with "..."
+-- (CSimpleFontString::GetStringWidth); M.clientCut has the mock do the same. A label measured after it is bounded
+-- would never be wider than its box, so nothing would grow.
+test("kit: buttons, tabs and dropdown lists grow to the whole label, measured before it is bounded", function(M, ns)
+    M.clientCut = true
+    local UI = ns.UI
+    local probe = UI.OneLine(UI.Text(M.env.UIParent, 12), 40)
+    probe:SetText("Claim 20 Mythic Coins")
+    H.eq(probe:GetStringWidth(), 40, "the mock measures the client's cut")
+    -- the whole label, measured on an unbounded line of its size
+    local function whole(fs)
+        local p = UI.Text(M.env.UIParent, select(2, fs:GetFont()))
+        p:SetText(fs:GetText())
+        return p:GetStringWidth()
+    end
+    local narrow = UI.Button(M.env.UIParent, 40, 22, "Claim 20 Mythic Coins", "teal", 12)
+    H.ok(narrow:GetWidth() >= whole(narrow.label) + 24, "a panel button grows to its whole label")
+    H.ok(narrow.label:GetWidth() >= whole(narrow.label), "and its label is not cut")
+    local w = narrow:GetWidth()
+    narrow:SetLabel("Claim 2x Mythical Cache of the Eclipse")
+    H.ok(narrow:GetWidth() > w and narrow.label:GetWidth() >= whole(narrow.label), "a longer label grows it again")
+    local dialog = UI.Button(M.env.UIParent, 60, 21, "Leave the queue", "dialog")
+    H.ok(dialog.label:GetWidth() >= whole(dialog.label), "a dialog button too")
+    -- Collections' "Looks of Later Ages" strip tab, 100 px
+    local tab = UI.Button(M.env.UIParent, 100, 24, "Looks of Later Ages", "strip")
+    H.ok(tab:GetWidth() >= whole(tab.label) + 32, "a tab grows to its whole label")
+    H.ok(tab.label:GetWidth() >= whole(tab.label), "its label bounded at the new width, not the old one")
+    -- a short label keeps the button's width, bounded inside it
+    local short = UI.Button(M.env.UIParent, 120, 22, "Go", "gold")
+    H.eq(short:GetWidth(), 120)
+    H.eq(short.label:GetWidth(), 108)
+    -- the Custom Run's dungeon list (160 px): the list widens to its widest entry
+    local dd = UI.Dropdown(M.env.UIParent, 160, function() end)
+    dd:SetItems({ { value = 1, text = "Uldaman" }, { value = 2, text = "Scarlet Monastery: Cathedral" } })
+    dd:SetValue(1, true)
+    dd:Click()
+    local rows = {}
+    for _, o in ipairs(M.objects) do
+        if o.__otype == "Button" and o.__parent == dd.menu and o:IsShown() then rows[#rows + 1] = o end
+    end
+    H.eq(#rows, 2)
+    local need = whole(rows[2].label)
+    H.ok(need > 160 - 16 - 20 - 4, "an entry wider than the box's rows")
+    H.ok(dd.menu:GetWidth() >= need + 20 + 4 + 16, "the list widens to it")
+    H.ok(rows[2].label:GetWidth() >= need, "the entry whole")
+    dd:Close()
+end)

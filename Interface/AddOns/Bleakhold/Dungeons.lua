@@ -367,6 +367,7 @@ function P:RefreshButtons()
     local j = L.journey
     local o = P.Selected()
     local block = P.StartBlock()
+    P.lastBlock = block
     local ok = o and o.status == 0 and j.on and not block and canCommand()
     P.find:SetActive(ok and true or false)
     P.enter:SetActive(ok and true or false)
@@ -485,8 +486,11 @@ end
 function P:RefreshQueue()
     local st, qs = P.QueueState()
     local j = L.journey
+    -- the old H's count only without QUEUE: QUEUE carries none, and H is a snapshot from the last .act journey (the
+    -- server sends no H when others join or the player leaves), so beside QUEUE it can be another queue's
+    local fromH = not qs and j.queuedKey ~= 0 and j.queuedPlayers > 0
     -- the stat (old :281): queued (players) / in a run / -
-    local players = j.queuedKey ~= 0 and j.queuedPlayers > 0 and (" (" .. j.queuedPlayers .. ")") or ""
+    local players = fromH and (" (" .. j.queuedPlayers .. ")") or ""
     if st == 1 or st == 2 then
         P.queueStat:SetText("|cff1aff1aqueued|r" .. players)
     elseif st == 3 then
@@ -509,7 +513,7 @@ function P:RefreshQueue()
     if qs and qs.bandMin and qs.bandMax then
         band = "Levels " .. qs.bandMin .. "-" .. qs.bandMax
     end
-    if j.queuedKey ~= 0 and j.queuedPlayers > 0 and (not qs or qs.kind == "D") then
+    if fromH then
         band = band .. (band ~= "" and "  -  " or "") .. j.queuedPlayers .. " of " .. P.MAX_PARTY .. " players"
     end
     q.band:SetText(band)
@@ -616,6 +620,19 @@ function P.PartySize()
     return 1 + (GetNumPartyMembers and GetNumPartyMembers() or 0)
 end
 
+-- The party members the bridge counts for a start (bh_ui_bridge.cpp PartyOf: online and in the world), the player
+-- first: an offline member is left out of the run, so Enter Dungeon sends this size and the run starts (StartNow)
+-- instead of queueing. Find Group keeps P.PartySize(): JoinLobby's seats count offline members too.
+function P.OnlinePartySize()
+    local n = 1
+    for i = 1, GetNumPartyMembers and GetNumPartyMembers() or 0 do
+        if not UnitIsConnected or UnitIsConnected("party" .. i) then
+            n = n + 1
+        end
+    end
+    return n
+end
+
 -- The roles the player picked in the game's Dungeon Finder (GetLFGRoles: leader, tank, healer, damage), else damage.
 function P.Roles()
     local _, tank, healer, dps
@@ -636,7 +653,7 @@ local function customJoin(size, sound)
     end
 end
 cr.enter:SetScript("OnClick", function()
-    customJoin(P.PartySize(), "Sound\\Interface\\lfg_dungeonready.wav")
+    customJoin(P.OnlinePartySize(), "Sound\\Interface\\lfg_dungeonready.wav")
 end)
 cr.find:SetScript("OnClick", function()
     customJoin(P.MAX_PARTY, "Sound\\Interface\\lfg_rolecheck.wav")
@@ -752,11 +769,26 @@ function P:Tick()
     local left = L.BoardChangesIn()
     P.rot:SetText(left and U.Clock(left) or "-")
     P:QueueTick()
+    -- flying has no event in 3.3.5a (takeoff and landing fire nothing): read the start checks again every second, and
+    -- rebuild the buttons and the custom run's lists only when what blocks a start changed
+    if P.StartBlock() ~= P.lastBlock then
+        P:RefreshButtons()
+        P:RefreshCustom()
+    end
     -- the board changed: ask for the new one (at most every few seconds)
     if left == 0 then
         L.Request()
     end
 end
+
+-- a QUEUE that is over, or not a Journey's, ends the old H's queued run: its key and count would outlive it (the
+-- server sends no H then)
+ns.On("STATE", function(topic)
+    local qs = S.queue
+    if topic == "QUEUE" and qs and (qs.state == 0 or qs.kind ~= "D") then
+        L.journey.queuedKey, L.journey.queuedPlayers = 0, 0
+    end
+end)
 
 function P:OnOpen()
     L.Request()

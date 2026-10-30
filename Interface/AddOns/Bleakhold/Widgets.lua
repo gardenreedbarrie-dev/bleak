@@ -1262,14 +1262,17 @@ end
 -- fit it with room on both sides: { the label's insets, the padding it grows to }.
 local GROW = { panel = { 12, 24 }, tab = { 20, 32 }, dialog = { 12, 24 } }
 local function fitLabel(b, look)
-    UI.OneLine(b.label, max(1, (b:GetWidth() or 0) - 12))
     local pad = GROW[look]
     if pad then
+        -- with a width set, GetStringWidth measures the text GetDisplayText already cut with "..." (CSimpleFontString
+        -- GetStringWidth); at width 0 it returns the whole text, so measure first and bound after
+        b.label:SetWidth(0)
         local tw = b.label:GetStringWidth() or 0
         if tw + pad[1] > (b:GetWidth() or 0) then
             b:SetWidth(ceil(tw + pad[2]))
         end
     end
+    UI.OneLine(b.label, max(1, (b:GetWidth() or 0) - 12))
 end
 
 local function applyStyle(b)
@@ -2137,6 +2140,8 @@ function UI.Dropdown(parent, w, onSelect)
         for _, it in ipairs(self.items) do
             local r = rows:Acquire()
             r:SetLabel(it.text)
+            -- unbounded, so it measures the whole label, not the row's "..." cut (bounded again below)
+            r.label:SetWidth(0)
             widest = max(widest, r.label:GetStringWidth() or 0)
             shown[#shown + 1] = r
             r:SetStyle(it.value == self.value and "rowOn" or "row")

@@ -92,7 +92,13 @@ for n, name in ipairs({ "Normal", "Heroic", "Mythic" }) do
         if m0 and m0.text then
             text = U.Safe(m0.text)
         end
-        return { name, { text, C.text, true }, { "The party leader sets it, outside dungeons.", C.dim, true } }
+        local lines = { name, { text, C.text, true }, { "The party leader sets it, outside dungeons.", C.dim, true } }
+        -- why it is greyed now, as P:Refresh greys it (Mythic alone is refused to a Dungeon Finder group)
+        local block = ns.Keys and (n == 3 and ns.Keys.MythicBlock() or ns.Keys.DifficultyBlock())
+        if block then
+            lines[#lines + 1] = { block, C.orange, true }
+        end
+        return lines
     end
     P.modes[n] = b
 end
@@ -125,6 +131,7 @@ function P:Refresh()
         b:SetStyle(n == now and "tabOn" or "tab")
         b:SetActive(commands and not (n == 3 and mythicBlock or block) and true or false)
     end
+    -- without a block on every mode, the Dungeon Finder's on Mythic is the one said (a leader outside a dungeon)
     self.diff:SetText("Current: " .. L.DifficultyName(now, true) .. "  -  "
-        .. (block and block or "the party leader sets it, outside dungeons"))
+        .. (block or mythicBlock or "the party leader sets it, outside dungeons"))
 end

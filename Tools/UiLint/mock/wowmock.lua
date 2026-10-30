@@ -485,9 +485,16 @@ return function(opts)
     end
     function IMPL.SetFormattedText(self, fmt, ...) IMPL.SetText(self, string.format(fmt, ...)) end
     function IMPL.GetText(self) return self.__text end
+    -- M.clientCut: as in game, a FontString with both a width and a height measures the text GetDisplayText already
+    -- cut with "..." (CSimpleFontString::GetStringWidth), so never more than its width. Off by default, so the tests
+    -- that check a line is not cut can still measure the whole of it.
     function IMPL.GetStringWidth(self)
         local size = self.__font and self.__font[2] or 12
-        return #(self.__text or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "") * size * 0.52
+        local full = #(self.__text or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "") * size * 0.52
+        if M.clientCut and self.__w > 0 and self.__h > 0 then
+            return math.min(full, self.__w)
+        end
+        return full
     end
     function IMPL.GetStringHeight(self) return self.__font and self.__font[2] or 12 end
     function IMPL.SetTextColor(self, r, g, b, a) self.__tcolor = { num(r, "SetTextColor"), num(g, "x"), num(b, "x"), a } end
@@ -841,6 +848,15 @@ return function(opts)
     env.UnitName = function(unit) if unit == "player" then return M.playerName end end
     env.UnitClass = function(unit) if unit == "player" then return "Warrior", M.playerClass end end
     env.UnitLevel = function(unit) if unit == "player" then return M.playerLevel end return 0 end
+    -- the player and every member M.SetGroup made are online (1); a test stubs an offline one
+    env.UnitIsConnected = function(unit)
+        local kind, n = tostring(unit):match("^(%a+)(%d*)$")
+        n = tonumber(n) or 0
+        local count = kind == "party" and M.party or kind == "raid" and M.raid or 0
+        if unit == "player" or (n >= 1 and n <= count) then
+            return 1
+        end
+    end
     env.UnitRace = function(unit) if unit == "player" then return "Human", "Human" end end
     env.GetRealmName = function() return "Bleakhold" end
     env.GetLocale = function() return "enUS" end

@@ -93,3 +93,39 @@ test("rift toast: one toast at a time keeps its own sizes", function(M, ns)
     H.eq(t.sub:GetText(), "Find and defeat Loken")
     H.eq(size(t.sub), 11)
 end)
+
+-- In the client a FontString with a width and a height measures the text it already cut with "..." (M.clientCut), so
+-- Fit measures each size on the unbounded line and bounds it once, at the size it picked.
+test("rift toast: the steps hold in the client, where a bounded line measures its own cut", function(M, ns)
+    M.clientCut = true
+    local T = ns.Toast
+    local f = T.frame
+    local w = T.TEXT_W
+    local probe = ns.UI.Text(M.env.UIParent, 13)
+    local function fits(px, s)
+        probe:SetFont(ns.UI.FONT_BODY, px, "")
+        probe:SetText(s)
+        return probe:GetStringWidth() <= w
+    end
+    local fits12, fits11
+    for n = 10, 60 do
+        local s = string.rep("x", n)
+        if not fits12 and not fits(13, s) and fits(12, s) then fits12 = s end
+        if not fits11 and not fits(12, s) and fits(11, s) then fits11 = s end
+    end
+    H.ok(fits12 and fits11)
+    T.Fit(f.title, "Short", T.TITLE_SIZES, w)
+    H.eq(f.title:GetStringWidth() <= w, true)
+    H.eq(T.Fit(f.title, fits12, T.TITLE_SIZES, w), 12, "a title too wide at 13 steps to 12")
+    H.eq(T.Fit(f.title, fits11, T.TITLE_SIZES, w), 11, "and to 11")
+    H.eq(f.title:GetWidth(), w, "bounded in the band")
+    H.eq(f.title:GetHeight(), 14, "one line at the size used")
+    -- a sub that fits at 10 px only (as the SUB_FIXES wordings: SubFits measures at the smallest size) is drawn at 10
+    local sub = string.rep("y", 36)
+    H.ok(not fits(11, sub) and fits(10, sub), "a line that fits at 10 only")
+    T.Push({ kicker = "Bleakhold", title = "Keystone ready", sub = sub })
+    H.eq(f.sub:GetText(), sub)
+    H.eq(size(f.sub), 10, "drawn at 10, whole")
+    H.eq(f.sub:GetWidth(), w)
+    H.eq(f.sub:GetHeight(), 13)
+end)
