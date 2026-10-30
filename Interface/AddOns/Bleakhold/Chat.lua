@@ -2,8 +2,8 @@
 -- [Queue], [Record], [Case], [Royale], [War], [Caf\195\169]) and let each chat window hide a tag. The server
 -- sends these as plain system text that reads fine without the addon; links in the message are left exactly as the
 -- server sent them.
--- Also /w2 for whispers to two-word character names (the server's mod-two-names), quoted names in /w,
--- two-word names in /friend and name boxes long enough for them.
+-- Also /w2 for whispers to two-word character names (the server's mod-two-names), quoted names in /w, two-word
+-- names in /w once seen this session, two-word names in /friend and name boxes long enough for them.
 local ADDON, ns = ...
 local Data = ns.Data
 
@@ -120,7 +120,8 @@ SlashCmdList["BLEAKHOLDTELL"] = Chat.Whisper2
 
 -- Typed /w with a two-word name. The stock extraction keeps a two-word target only when it is on the autocomplete
 -- list, so `/w Arthas Menethil hi` whispers "Arthas" (who may be someone else). A quoted name is taken whole:
--- /w "Arthas Menethil" hi. The first time a /w takes a one-word target, a hint names the quoted form and /w2.
+-- /w "Arthas Menethil" hi, and so is a two-word name seen this session (below). The first time a /w takes a one-word
+-- target, a hint names the quoted form and /w2.
 local stockExtractTellTarget = ChatEdit_ExtractTellTarget
 
 local function hintTwoNames()
@@ -132,23 +133,235 @@ local function hintTwoNames()
     ns.Print('two-word names: /w "First Last" message, or /w2 First Last message')
 end
 
+-- Two-word names seen this session: chat senders, the guild roster, friends, /who results and the group. An
+-- unquoted /w keeps typing while a seen name starts with the words typed so far and takes "First Last" whole once it
+-- is a seen name; anything else goes to the stock rules, so one-word names (valid on this realm) work as before.
+-- Kept for the session only; past SEEN_CAP names the one seen longest ago is dropped.
+Chat.SEEN_CAP = 500
+
+local seen = {}         -- "first last" (lower case) -> { key =, name = "First Last", first = "first", seq = }
+local seenByFirst = {}  -- "first" -> { ["first last"] = entry }
+local seenCount, seenSeq = 0, 0
+-- One slot per sighting, oldest first; a slot whose seq is no longer its entry's is stale (seen again since).
+local queueKey, queueSeq, queueHead, queueTail = {}, {}, 1, 0
+
+local function forget(key)
+    local e = seen[key]
+    seen[key] = nil
+    seenCount = seenCount - 1
+    local group = seenByFirst[e.first]
+    group[key] = nil
+    if not next(group) then
+        seenByFirst[e.first] = nil
+    end
+end
+
+local function compactQueue()
+    local live = {}
+    for _, e in pairs(seen) do
+        live[#live + 1] = e
+    end
+    table.sort(live, function(a, b) return a.seq < b.seq end)
+    queueKey, queueSeq = {}, {}
+    for i, e in ipairs(live) do
+        queueKey[i], queueSeq[i] = e.key, e.seq
+    end
+    queueHead, queueTail = 1, #live
+end
+
+function Chat.RememberName(name)
+    if type(name) ~= "string" or name:find("|", 1, true) then
+        return
+    end
+    local first, last = (name:match("^([^%-]+)") or ""):match("^(%S+) (%S+)$")    -- no realm part; two words
+    if not first then
+        return
+    end
+    local full = first .. " " .. last
+    local key = full:lower()
+    seenSeq = seenSeq + 1
+    local e = seen[key]
+    if e then
+        e.name, e.seq = full, seenSeq
+    else
+        e = { key = key, name = full, first = first:lower(), seq = seenSeq }
+        seen[key] = e
+        seenCount = seenCount + 1
+        local group = seenByFirst[e.first]
+        if not group then
+            group = {}
+            seenByFirst[e.first] = group
+        end
+        group[key] = e
+    end
+    queueTail = queueTail + 1
+    queueKey[queueTail], queueSeq[queueTail] = key, seenSeq
+    local cap = math.max(1, Chat.SEEN_CAP)
+    while seenCount > cap do
+        local k, s = queueKey[queueHead], queueSeq[queueHead]
+        queueKey[queueHead], queueSeq[queueHead] = nil, nil
+        queueHead = queueHead + 1
+        local old = seen[k]
+        if old and old.seq == s then
+            forget(k)
+        end
+    end
+    if queueTail - queueHead + 1 > 2 * cap + 64 then
+        compactQueue()
+    end
+end
+
+-- The seen spelling of "First Last" (any case), or nil.
+function Chat.SeenName(name)
+    local e = type(name) == "string" and seen[name:lower()]
+    return e and e.name or nil
+end
+
+-- Whether a seen name starting with "first " runs on past `prefix` ("first" .. " " .. part of the second word).
+local function seenRunsPast(first, prefix)
+    for key in pairs(seenByFirst[first]) do
+        if #key > #prefix and key:sub(1, #prefix) == prefix then
+            return true
+        end
+    end
+    return false
+end
+
+-- The seen-name rule for a /w target. nil: not a seen name, use the stock rules; false: keep typing; or the name and
+-- the message after it. The stock box parses on every key (ChatEdit_OnTextChanged), a typed space twice
+-- (OnSpacePressed, then OnTextChanged) and once more on Enter (ChatEdit_SendText); nothing tells the addon which.
+-- `parses` is how many times in a row the box has parsed this same text: text ending in whitespace is parsed twice by
+-- its space, so a third parse is Enter; text without it once by its last key, so a second parse is Enter. On Enter the
+-- rule never says "keep typing": the stock box would close and drop the line (processChatType, send == 1).
+function Chat.SeenTellTarget(msg, parses)
+    parses = tonumber(parses) or 1
+    local w1, s1, w2, s2, rest = (msg or ""):match("^%s*([^%s|]%S*)(%s*)(%S*)(%s*)(.*)$")
+    if not w1 or s1 == "" then
+        return nil
+    end
+    local first = w1:lower()
+    if not seenByFirst[first] then
+        return nil
+    end
+    if w2 == "" then
+        if parses >= 3 then
+            return nil    -- "/w First " + Enter: the one-word name First, as stock
+        end
+        return false    -- "First ": a seen name goes on
+    end
+    local key = first .. " " .. w2:lower()
+    local e = seen[key]
+    if s2 ~= "" then
+        if e then
+            return e.name, rest
+        end
+        return nil
+    end
+    if parses >= 2 then
+        if e then
+            return e.name, ""    -- "/w First Last" + Enter
+        end
+        return nil    -- "/w First ok" + Enter: as stock, "ok" to First
+    end
+    if e or seenRunsPast(first, key) then
+        return false
+    end
+    return nil
+end
+
+-- edit box -> the text it last parsed, and how many times in a row (reset once a target is taken)
+local lastParsed = setmetatable({}, { __mode = "k" })
+local parsedTimes = setmetatable({}, { __mode = "k" })
+
+local function rememberGroup()
+    for i = 1, (GetNumPartyMembers and GetNumPartyMembers() or 0) do
+        Chat.RememberName((UnitName("party" .. i)))
+    end
+    for i = 1, (GetNumRaidMembers and GetNumRaidMembers() or 0) do
+        Chat.RememberName((UnitName("raid" .. i)))
+    end
+end
+
+for _, event in ipairs({ "CHAT_MSG_SAY", "CHAT_MSG_YELL", "CHAT_MSG_EMOTE", "CHAT_MSG_TEXT_EMOTE", "CHAT_MSG_WHISPER",
+    "CHAT_MSG_WHISPER_INFORM", "CHAT_MSG_PARTY", "CHAT_MSG_PARTY_LEADER", "CHAT_MSG_RAID", "CHAT_MSG_RAID_LEADER",
+    "CHAT_MSG_RAID_WARNING", "CHAT_MSG_BATTLEGROUND", "CHAT_MSG_BATTLEGROUND_LEADER", "CHAT_MSG_GUILD",
+    "CHAT_MSG_OFFICER", "CHAT_MSG_CHANNEL" }) do
+    ns.RegisterEvent(event, function(_, _, sender)
+        Chat.RememberName(sender)
+    end)
+end
+ns.RegisterEvent("GUILD_ROSTER_UPDATE", function()
+    if not (GetNumGuildMembers and GetGuildRosterInfo) then
+        return
+    end
+    for i = 1, (GetNumGuildMembers(true) or 0) do
+        local name, _, _, _, _, _, _, _, online = GetGuildRosterInfo(i)
+        if online then
+            Chat.RememberName(name)
+        end
+    end
+end)
+ns.RegisterEvent("FRIENDLIST_UPDATE", function()
+    if not (GetNumFriends and GetFriendInfo) then
+        return
+    end
+    for i = 1, (GetNumFriends() or 0) do
+        Chat.RememberName((GetFriendInfo(i)))
+    end
+end)
+ns.RegisterEvent("WHO_LIST_UPDATE", function()
+    if not (GetNumWhoResults and GetWhoInfo) then
+        return
+    end
+    for i = 1, ((GetNumWhoResults()) or 0) do
+        Chat.RememberName((GetWhoInfo(i)))
+    end
+end)
+ns.RegisterEvent("PARTY_MEMBERS_CHANGED", rememberGroup)
+ns.RegisterEvent("RAID_ROSTER_UPDATE", rememberGroup)
+ns.RegisterEvent("PLAYER_ENTERING_WORLD", rememberGroup)
+
+local function setTell(editBox, name, rest)
+    lastParsed[editBox], parsedTimes[editBox] = nil, nil
+    editBox:SetAttribute("tellTarget", name)
+    editBox:SetAttribute("chatType", "WHISPER")
+    editBox:SetText(rest)
+    ChatEdit_UpdateHeader(editBox)
+end
+
 function Chat.ExtractTellTarget(editBox, msg)
     msg = msg or ""
+    local parses = 1
+    if type(editBox) == "table" then
+        if lastParsed[editBox] == msg then
+            parses = (parsedTimes[editBox] or 1) + 1
+        end
+        lastParsed[editBox], parsedTimes[editBox] = msg, parses
+    end
     local name, rest = msg:match('^%s*"([^"]+)"%s(.*)$')
     name = name and name:match("^%s*(.-)%s*$")
     if name and name ~= "" then
-        editBox:SetAttribute("tellTarget", name)
-        editBox:SetAttribute("chatType", "WHISPER")
-        editBox:SetText(rest)
-        ChatEdit_UpdateHeader(editBox)
+        setTell(editBox, name, rest)
         return true
     end
     if msg:match('^%s*"') then
         return false    -- the quoted name is still being typed
     end
+    name, rest = Chat.SeenTellTarget(msg, parses)
+    if name == false then
+        return false
+    elseif name then
+        setTell(editBox, name, rest)
+        return true
+    end
     local taken = stockExtractTellTarget and stockExtractTellTarget(editBox, msg)
-    if taken and not (editBox:GetAttribute("tellTarget") or ""):find(" ", 1, true) then
-        hintTwoNames()
+    if taken then
+        if type(editBox) == "table" then
+            lastParsed[editBox], parsedTimes[editBox] = nil, nil
+        end
+        if not (editBox:GetAttribute("tellTarget") or ""):find(" ", 1, true) then
+            hintTwoNames()
+        end
     end
     return taken
 end

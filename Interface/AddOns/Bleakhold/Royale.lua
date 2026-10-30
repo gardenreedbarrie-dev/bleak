@@ -786,75 +786,51 @@ ns.On("STATE", function(topic)
 end)
 
 ------------------------------------------------------------------------------------------------------
--- Activities: the Royale page (the mode's card, the last match). The kill announcer's settings are on the Tasks page
--- (Activities.lua): the announcer plays in every battleground, Royale or not.
+-- Activities: the Royale page, in the old window's page anatomy (Activities.lua A.Page): the title and what the mode
+-- is; the island map as the page's picture on the right; the last match in the stat column (place, eliminations,
+-- time survived) with the matches running now; the island card (its thumbnail, "Last one standing" and the facts);
+-- how it works; the last match's rewards; bottom right the queue's state over Queue / Leave queue, bottom left why
+-- this client cannot queue. The kill announcer's settings are on the Tasks page (Activities.lua): the announcer plays
+-- in every battleground, Royale or not.
 ------------------------------------------------------------------------------------------------------
-local function buildPage()
-    local P = A.NewPage()
-    A.AddPage("royale", P)
-    R.page = P
+R.PAGE_ART_ALPHA = 0.45           -- the island behind the page: bright art, so dimmed like the dense pages' pictures
 
-    local HERO_H = 268
-    local THUMB = 236
-    local TEXT_X = THUMB + 34
-    local TEXT_W = A.PW - TEXT_X - 18
+-- "#1 Victory" or "#7 of 32".
+function R.PlaceText(placement, total)
+    if placement == 1 then
+        return "#1 Victory"
+    end
+    return "#" .. placement .. (total and (" of " .. total) or "")
+end
 
-    local hero = UI.Box(P, A.PW, HERO_H, C.eraBg, C.eraBorder)
-    hero:SetPoint("TOPLEFT", P, "TOPLEFT", 0, 0)
-    P.hero = hero
-    hero.thumbFrame = UI.Box(hero, THUMB, THUMB, C.bg, C.eraBorder)
-    hero.thumbFrame:SetPoint("TOPLEFT", hero, "TOPLEFT", 16, -16)
-    hero.thumb = hero.thumbFrame:CreateTexture(nil, "ARTWORK")
-    hero.thumb:SetPoint("TOPLEFT", hero.thumbFrame, "TOPLEFT", 1, -1)
-    hero.thumb:SetPoint("BOTTOMRIGHT", hero.thumbFrame, "BOTTOMRIGHT", -1, 1)
-    hero.thumb:SetTexture(R.THUMB_TEX)
-    hero.kicker = UI.Text(hero, 11, C.purple)
-    hero.kicker:SetPoint("TOPLEFT", hero, "TOPLEFT", TEXT_X, -22)
-    hero.kicker:SetText(R.KICKER)
-    hero.title = UI.Text(hero, 26, C.goldPale, "title")
-    hero.title:SetPoint("TOPLEFT", hero.kicker, "BOTTOMLEFT", 0, -4)
+-- The island map, cropped to the page picture's shape (Activities.lua A.ART_W x A.ART_H).
+function R.PageArt()
+    local trim = max(0, (1 - A.ART_W / A.ART_H) / 2)
+    return { file = R.MAP_TEX, coords = { trim, 1 - trim, 0, 1 } }
+end
+
+-- The island card (the old pages' keystone block): the map's thumbnail as an icon, the motto, the facts.
+local function buildIsland(P)
+    local hero = CreateFrame("Frame", nil, P)
+    hero:SetPoint("TOPLEFT", P, "TOPLEFT", A.PAD, A.BODY_Y)
+    hero:SetSize(A.DESC_W, 52)
+    hero.thumb = UI.Icon(hero, 52, R.THUMB_TEX)
+    hero.thumb:SetPoint("TOPLEFT", hero, "TOPLEFT", 0, 0)
+    hero.title = UI.Text(hero, 16, C.text)
+    hero.title:SetPoint("TOPLEFT", hero.thumb, "TOPRIGHT", 10, -7)
+    UI.OneLine(hero.title, A.DESC_W - 62)
     hero.title:SetText("Last one standing")
-    hero.facts = UI.Text(hero, 13, C.goldLight)
-    hero.facts:SetPoint("TOPLEFT", hero.title, "BOTTOMLEFT", 0, -6)
+    hero.facts = UI.Text(hero, 11, C.dim)
+    hero.facts:SetPoint("TOPLEFT", hero.title, "BOTTOMLEFT", 0, -5)
+    UI.OneLine(hero.facts, A.DESC_W - 62)
     hero.facts:SetText("Solo · Level 80 · 20-40 players")
-    hero.text = UI.Text(hero, 12, C.mid)
-    hero.text:SetPoint("TOPLEFT", hero.facts, "BOTTOMLEFT", 0, -10)
-    hero.text:SetWidth(TEXT_W)
-    hero.text:SetJustifyV("TOP")
-    hero.text:SetHeight(48)
-    hero.text:SetText("Drop onto the island with up to 39 others, loot crates and orbs and outlast the storm. "
-        .. "One life: the last player standing wins. Your own gear counts; the island's loot is yours for the match.")
-    hero.status = UI.Text(hero, 15, C.text)
-    hero.status:SetPoint("TOPLEFT", hero.text, "BOTTOMLEFT", 0, -10)
-    UI.OneLine(hero.status, TEXT_W)
-    hero.detail = UI.Text(hero, 12, C.dim)
-    hero.detail:SetPoint("TOPLEFT", hero.status, "BOTTOMLEFT", 0, -4)
-    UI.OneLine(hero.detail, TEXT_W)
-    hero.join = UI.Button(hero, 200, 36, "Queue", "gold", 14)
-    hero.join:SetPoint("BOTTOMLEFT", hero, "BOTTOMLEFT", TEXT_X, 18)
-    hero.notice = UI.Text(hero, 12, C.red)
-    hero.notice:SetPoint("LEFT", hero.join, "RIGHT", 14, 0)
-    UI.OneLine(hero.notice, TEXT_W - 214)
-    P.join = hero.join
+    return hero
+end
 
-    hero.join:SetScript("OnClick", function()
-        local q = royaleQueue()
-        if q and (q.state == 1 or q.state == 2) then
-            R.Leave()
-        else
-            R.Join()
-        end
-    end)
-
-    local CARD_W = floor((A.PW - 12) / 2)
-    local CARD_H = A.PH - HERO_H - 12
-
-    local how = UI.Box(P, CARD_W, CARD_H, C.card, C.border)
-    how:SetPoint("TOPLEFT", hero, "BOTTOMLEFT", 0, -12)
-    how.label = UI.Text(how, 11, C.dim)
-    how.label:SetPoint("TOPLEFT", how, "TOPLEFT", 12, -12)
-    how.label:SetText("HOW IT WORKS")
-    how.lines = {}
+-- How it works: five numbered steps, the number in gold.
+local HOW_Y, HOW_PITCH, HOW_W = -194, 34, 370
+local function buildHow(P)
+    local how = { title = P:Section("How it works", A.PAD, HOW_Y), lines = {}, numbers = {} }
     local HOW = {
         "Queue alone. At 20 players a ready check goes out; answer it within 15 seconds.",
         "Brawl on Sunwatch Overlook while the others arrive, and click the island map to set your landing pin.",
@@ -863,45 +839,89 @@ local function buildPage()
         "Eliminated players watch the rest, queue again or leave. Honor and Shards by placement.",
     }
     for i, line in ipairs(HOW) do
-        local num = UI.Text(how, 13, C.purple, "title")
-        num:SetPoint("TOPLEFT", how, "TOPLEFT", 12, -34 - (i - 1) * 38)
-        num:SetText(tostring(i))
-        local t = UI.Text(how, 12, C.mid)
-        t:SetPoint("TOPLEFT", how, "TOPLEFT", 32, -34 - (i - 1) * 38)
-        t:SetWidth(CARD_W - 44)
-        t:SetJustifyV("TOP")
-        t:SetHeight(34)
+        local y = HOW_Y - 24 - (i - 1) * HOW_PITCH
+        local num = UI.Text(P, 12, C.gold)
+        num:SetPoint("TOPLEFT", P, "TOPLEFT", A.PAD, y)
+        num:SetText(i .. ".")
+        local t = UI.Para(P, 12, C.text, HOW_W)
+        t:SetPoint("TOPLEFT", P, "TOPLEFT", A.PAD + 20, y)
         t:SetText(line)
-        how.lines[i] = t
+        how.numbers[i], how.lines[i] = num, t
     end
-    P.how = how
+    return how
+end
 
-    local last = UI.Box(P, CARD_W, CARD_H, C.card, C.border)
-    last:SetPoint("TOPRIGHT", hero, "BOTTOMRIGHT", 0, -12)
-    last.label = UI.Text(last, 11, C.dim)
-    last.label:SetPoint("TOPLEFT", last, "TOPLEFT", 12, -12)
-    last.label:SetText("YOUR LAST MATCH")
-    last.place = UI.Text(last, 22, C.goldPale, "title")
-    last.place:SetPoint("TOPLEFT", last.label, "BOTTOMLEFT", 0, -6)
-    UI.OneLine(last.place, CARD_W - 24)
+-- The last match: its place, eliminations and time in the stat column (with the matches running now), its rewards
+-- under a heading of their own.
+local LAST_Y = -398
+local function buildLast(P)
+    local last = {}
+    last.place = P:Stat(1, "Last Match")
+    last.kills = P:Stat(2, "Eliminations")
+    last.survived = P:Stat(3, "Survived")
+    last.running = P:Stat(4, "Matches Running")
+    last.title = P:Section("Last Match Rewards", A.PAD, LAST_Y)
+    last.none = UI.Text(P, 12, C.dim)
+    last.none:SetPoint("TOPLEFT", P, "TOPLEFT", A.PAD, LAST_Y - 24)
+    UI.OneLine(last.none, HOW_W + 20)
     last.lines = {}
     for i = 1, 4 do
-        local l = UI.Text(last, 12, i == 1 and C.text or C.mid)
-        l:SetPoint("TOPLEFT", last, "TOPLEFT", 12, -64 - (i - 1) * 18)
-        UI.OneLine(l, CARD_W - 24)
-        last.lines[i] = l
+        local rw = UI.Reward(P, 16, 12)
+        rw:SetPoint("TOPLEFT", P, "TOPLEFT", A.PAD, LAST_Y - 24 - (i - 1) * 20)
+        rw:Hide()
+        last.lines[i] = rw
     end
-    P.last = last
+    return last
+end
 
-    local QUEUE_STATUS = { [1] = "In the queue", [2] = "Match found - answer the ready check", [3] = "In a match" }
-
-    -- "#1 Victory" or "#7 of 32".
-    function R.PlaceText(placement, total)
-        if placement == 1 then
-            return "#1 Victory"
+-- The queue, bottom right (as the other pages' actions): its state over its detail over Queue / Leave queue; why the
+-- client cannot queue bottom left.
+local function buildQueue(P, hero)
+    hero.join = UI.Button(P, 200, 30, "Queue", "red", 12)
+    hero.join:SetPoint("BOTTOMRIGHT", P, "BOTTOMRIGHT", -18, 18)
+    hero.detail = UI.Text(P, 11, C.dim, "body", "RIGHT")
+    hero.detail:SetPoint("BOTTOMRIGHT", hero.join, "TOPRIGHT", -2, 8)
+    UI.OneLine(hero.detail, 340)
+    hero.status = UI.Text(P, 14, C.text, "body", "RIGHT")
+    hero.status:SetPoint("BOTTOMRIGHT", hero.detail, "TOPRIGHT", 0, 4)
+    UI.OneLine(hero.status, 340)
+    hero.notice = UI.Text(P, 12, C.red)
+    hero.notice:SetPoint("BOTTOMLEFT", P, "BOTTOMLEFT", A.PAD, 26)
+    UI.OneLine(hero.notice, 360)
+    hero.join:SetScript("OnClick", function()
+        local q = royaleQueue()
+        if q and (q.state == 1 or q.state == 2) then
+            R.Leave()
+        else
+            R.Join()
         end
-        return "#" .. placement .. (total and (" of " .. total) or "")
-    end
+    end)
+end
+
+-- One reward line of the last match: its icon and name, then the server's reason ("400 Honor - Placement").
+local function setRewardLine(rw, e)
+    rw:SetReward(e.kind, e.amount, e.itemId, e.text)
+    UI.SetText(rw.text, e.line or "")
+    rw:Show()
+end
+
+local QUEUE_STATUS = { [1] = "In the queue", [2] = "Match found - answer the ready check", [3] = "In a match" }
+
+local function buildPage()
+    local P = A.Page("royale", {
+        title = "Bleakhold Royale",
+        desc = "Drop onto the island with up to 39 others, loot crates and orbs and outlast the storm. One life: the "
+            .. "last player standing wins. Your own gear counts; the island's loot is yours for the match.",
+        art = R.PageArt(), artAlpha = R.PAGE_ART_ALPHA,
+    })
+    R.page = P
+    local hero = buildIsland(P)
+    P.hero = hero
+    P.how = buildHow(P)
+    local last = buildLast(P)
+    P.last = last
+    buildQueue(P, hero)
+    P.join = hero.join
 
     function P:Tick()
         local q = royaleQueue()
@@ -922,16 +942,15 @@ local function buildPage()
         end
     end
 
-    function P:Refresh()
+    function P:RefreshQueue()
         local q = royaleQueue()
         local st = q and q.state or 0
         local block = R.QueueBlock()
         if st == 1 or st == 2 then
             local n = q.queued and q.minPlayers and (q.queued .. " / " .. q.minPlayers .. " queued") or QUEUE_STATUS[st]
             hero.status:SetText(st == 2 and QUEUE_STATUS[2] or n)
-            UI.SetColor(hero.status, st == 2 and C.teal or C.goldLight)
+            UI.SetColor(hero.status, st == 2 and C.teal or C.gold)
             hero.join:SetLabel("Leave queue")
-            hero.join:SetStyle("dark")
             hero.join:SetActive(true)
         elseif st == 3 or R.Match() then
             hero.status:SetText(QUEUE_STATUS[3])
@@ -940,7 +959,6 @@ local function buildPage()
             local m = R.Match()
             local spectator = m and (m.me == R.ME.SPECTATING or m.me == R.ME.LEFT)
             hero.join:SetLabel(spectator and "Queue again" or "In a match")
-            hero.join:SetStyle("gold")
             hero.join:SetActive(spectator and not block)
         else
             local status = "Not queued"
@@ -951,39 +969,50 @@ local function buildPage()
             UI.SetColor(hero.status, C.text)
             hero.detail:SetText("")
             hero.join:SetLabel("Queue")
-            hero.join:SetStyle("gold")
             hero.join:SetActive(block == nil)
         end
         UI.SetText(hero.notice, block or "")
-        P:Tick()
-        -- the last match (this session, or the one saved for this character)
+        local running = q and q.matchesRunning
+        last.running:SetText(running and tostring(running) or "-")
+    end
+
+    -- The last match: this session's, or the one saved for this character (place, eliminations and time only).
+    function P:RefreshLast()
         local res = S.royaleResult
         local saved = ns.cdb.royaleLast
-        for _, l in ipairs(last.lines) do
-            l:SetText("")
+        for _, rw in ipairs(last.lines) do
+            rw:Hide()
         end
+        last.none:SetText("")
         if res and res.placement then
             last.place:SetText(R.PlaceText(res.placement, res.total))
-            local kills = res.kills .. (res.kills == 1 and " elimination" or " eliminations")
-            local lines = { kills .. "  -  survived " .. U.Clock(res.survivedSec) }
-            for _, rw in ipairs(res.rewards) do
-                if #lines < #last.lines then
-                    lines[#lines + 1] = "+ " .. rw.line
+            last.kills:SetText(tostring(res.kills or 0))
+            last.survived:SetText(U.Clock(res.survivedSec or 0))
+            for i, rw in ipairs(last.lines) do
+                if res.rewards[i] then
+                    setRewardLine(rw, res.rewards[i])
                 end
             end
-            for i, l in ipairs(last.lines) do
-                if lines[i] then
-                    UI.SetText(l, lines[i])
-                end
+            if #res.rewards == 0 then
+                last.none:SetText(res.rewarded and "No rewards this time." or "No rewards. You left early or saw no fight.")
             end
         elseif type(saved) == "table" and type(saved.placement) == "number" then
             last.place:SetText(R.PlaceText(saved.placement, type(saved.total) == "number" and saved.total or nil))
-            if type(saved.kills) == "number" then
-                last.lines[1]:SetText(saved.kills .. (saved.kills == 1 and " elimination" or " eliminations"))
-            end
+            last.kills:SetText(type(saved.kills) == "number" and tostring(saved.kills) or "-")
+            last.survived:SetText(type(saved.survivedSec) == "number" and U.Clock(saved.survivedSec) or "-")
+            last.none:SetText("Your rewards went to your bags and your mail.")
         else
             last.place:SetText("No match yet")
+            last.kills:SetText("-")
+            last.survived:SetText("-")
+            last.none:SetText("Play a match: your place, eliminations and rewards show here.")
         end
+    end
+
+    function P:Refresh()
+        P:RefreshQueue()
+        P:Tick()
+        P:RefreshLast()
     end
 
     function P:OnOpen()
@@ -1004,9 +1033,10 @@ local function buildPage()
         end
     end)
 
-    -- The last result, kept per character for the card after a relog.
+    -- The last result, kept per character for the page after a relog.
     ns.On("ROYALE_RESULT", function(res)
-        ns.cdb.royaleLast = { placement = res.placement, total = res.total, kills = res.kills, matchId = res.matchId }
+        ns.cdb.royaleLast = { placement = res.placement, total = res.total, kills = res.kills,
+            survivedSec = res.survivedSec, matchId = res.matchId }
     end)
 end
 buildPage()

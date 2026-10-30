@@ -1184,3 +1184,73 @@ L["Bleakhold"] = true
 L["Classic (DragonUI)"] = true
 L["Bleakhold dresses AddicatUI like the rest of Bleakhold: dark slate surfaces and muted gold borders on unit frames, action bars, micro menu, minimap, bags, cast and XP bars, buff borders, tooltips, menus, loot windows, chat and nameplates, with the client's own fonts. Icons, portraits and health, mana and class colours are left alone. Classic keeps the original DragonUI look and its Dark Mode. Colours switch at once; fonts follow after a /reload."] = true
 L["The Bleakhold theme sets these colours itself. Choose the Classic theme above to use Dark Mode."] = true
+
+-- ============================================================================
+-- BLEAKHOLD UI (UI by Addicated): quest log and PvP skins, the mark, /bhui
+-- ============================================================================
+L["Quest Log"] = true
+L["Retail-style quest log (L): quest list with objectives, search and track boxes, the quest on parchment"] = true
+L["Shift-click: link / track"] = true
+L["No quests match"] = true
+L["Quest log skin skipped:"] = true
+L["PvP Window"] = true
+L["Retail-style PvP and battleground windows: team cards, battlegrounds on their own art"] = true
+L["PvP window skin skipped:"] = true
+L["Battlemaster window skin skipped:"] = true
+L["Bleakhold Mark"] = true
+L["Show the BLEAKHOLD mark under the minimap (UI by Addicated)."] = true
+L["/bhui for the interface options"] = true
+L["Built in"] = true
+L["UI by Addicated."] = true
+L["WoW's own"] = true
+L["not available in this build:"] = true
+L["talent window:"] = true
+L["quest log:"] = true
+L["PvP windows:"] = true
+L["minimap mark shown."] = true
+L["minimap mark hidden."] = true
+L["/bhui talents blizzard | addicatui - WoW's talent window or AddicatUI's"] = true
+L["/bhui dock - the bottom-right dock of micro menu and bags, on or off"] = true
+L["/bhui mark - show or hide the BLEAKHOLD mark under the minimap"] = true
+L["/bhui quests bleakhold | classic - the quest log in the retail look or WoW's own"] = true
+L["/bhui pvp bleakhold | classic - the PvP windows in the retail look or WoW's own"] = true
+L["/bhui help - this list"] = true
+
+-- ============================================================================
+-- BLEAKHOLD UI (UI by Addicated): WoW's talent window, the micro menu dock
+-- ============================================================================
+L["%d points"] = true
+L["Specializations"] = true
+L["1st"] = true
+L["2nd"] = true
+L["3rd"] = true
+L["Glyphs"] = true
+L["major and minor"] = true
+L["Major socket"] = true
+L["Minor socket"] = true
+L["Unlocks at level %d"] = true
+L["Glyph"] = true
+L["Shift + right-click to remove"] = true
+L["Other specialization"] = true
+L["Empty major socket"] = true
+L["Empty minor socket"] = true
+L["Use a glyph from your bags, then click here"] = true
+L["Empty major"] = true
+L["Empty minor"] = true
+L["Major Glyphs"] = true
+L["Minor Glyphs"] = true
+L["Click a glyph in your bags, then the socket"] = true
+L["Use a glyph from your bags, then click a socket.  Shift + right-click removes."] = true
+L["glyph page: the list of sockets."] = true
+L["glyph page: WoW's round page with names."] = true
+L["/bhui talents blizzard | addicatui | glyphs round | glyphs list - the talent window and its glyph page"] = true
+L["WoW's Talent Window"] = true
+L["With the talent window above turned off, WoW's own window shows one tree at a time, with the Bleakhold spec panel (1st, 2nd and 3rd tree and Glyphs), each talent's rank under it and the glyph names under the sockets. UI by Addicated."] = true
+L["Glyph List"] = true
+L["Show the six glyph sockets as a list over WoW's glyph page: click to place, Shift + right-click to remove, Shift-click to link."] = true
+L["MicroDock"] = "Micro Menu and Bags"
+L["Bottom-Right Dock"] = true
+L["The micro menu in even rows beside the action bar's gryphon, the bag bar on top, in one box at the bottom right (Bleakhold UI)."] = true
+L["Bag Scale"] = true
+L["bottom-right dock on."] = true
+L["bottom-right dock off: the micro menu and the bag bar each at their own place."] = true

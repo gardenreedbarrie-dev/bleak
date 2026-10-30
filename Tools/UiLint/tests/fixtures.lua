@@ -135,7 +135,7 @@ end
 FX.REV = { WEEK = true, ERA = true, TASKS = true, TASK = true, KEY = true, BOARD = true, QUEUE = true, COLL = true, LIDX = true, LCOL = true, SEASON = true }
 
 function FX.openEverything(M, ns)
-    for _, k in ipairs({ "tasks", "dungeons", "keys", "rift" }) do
+    for _, k in ipairs({ "tasks", "dungeons", "keys", "rift", "heroic", "group" }) do
         ns.UI.Open(k)
         M.Advance(0.3)
     end

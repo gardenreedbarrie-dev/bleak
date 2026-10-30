@@ -85,9 +85,15 @@ function ns.ToggleGlyphs()
     end
 end
 
+-- /talents opens the talent window in use: AddicatUI's while this module runs, WoW's own otherwise (the default, with
+-- the Bleakhold spec panel of modules/talents_classic.lua), as the talent key does.
 _G.SLASH_ADDICATUI_TALENTS1 = "/talents"
 SlashCmdList["ADDICATUI_TALENTS"] = function()
-    ns.ToggleTalents()
+    if TM.applied then
+        ns.ToggleTalents()
+    elseif ToggleTalentFrame then
+        ToggleTalentFrame()
+    end
 end
 
 -- Key bindings: the stock keys click our hidden button instead of Blizzard's frame ----------------

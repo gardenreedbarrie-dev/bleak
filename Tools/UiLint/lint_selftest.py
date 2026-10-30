@@ -22,6 +22,7 @@ BAD = {
         "local x = NoSuchGlobalFunction()",             # unknown global read
         "local cls = 'MONK'",                           # content
         "local tex = 'Interface\\\\AddOns\\\\Bleakhold\\\\Art\\\\Nope'",
+        "local j = 'Interface\\\\AddOns\\\\Bleakhold\\\\Art\\\\Journal\\\\Oops'",  # not bg_/btn_<KEY>
     ]) + "\n",
     "Unlisted.lua": "local a = 1\n",
     "Broken.lua": "local x = = 1\n",
@@ -47,6 +48,7 @@ EXPECT = [
     ("events", "NOT_AN_EVENT"),
     ("content", "Pandaren/Monk"),
     ("art", "texture not found"),
+    ("art", "a Journal picture is bg_<KEY> or btn_<KEY>"),
     ("art", "not power-of-two"),
 ]
 

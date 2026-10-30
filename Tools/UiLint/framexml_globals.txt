@@ -35,6 +35,10 @@ GetMinimapShape
 ChatEdit_ExtractTellTarget
 ChatEdit_UpdateHeader
 StaticPopupDialogs
+# StaticPopup.lua (3.3.5a): show / hide a dialog of StaticPopupDialogs (the mock has StaticPopup1..4 and
+# M.StaticPopupClick)
+StaticPopup_Show
+StaticPopup_Hide
 SendMailNameEditBox
 TogglePVPFrame
 # the stock Dungeon Finder (LFDFrame.xml/.lua; UIParent.lua's ShowUIPanel): Activities > Dungeons opens it

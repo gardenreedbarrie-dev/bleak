@@ -639,6 +639,24 @@ local function BuildTalentsSubTab(scroll)
         disabled = function() return not IsEnabled("talents") end,
         requiresReload = false,
     })
+
+    -- Bleakhold UI: WoW's own talent window while the one above is off (modules/talents_classic.lua)
+    local classicSection = C:AddSection(scroll, addon.L["WoW's Talent Window"])
+
+    C:AddDescription(classicSection, addon.L["With the talent window above turned off, WoW's own window shows one tree at a time, with the Bleakhold spec panel (1st, 2nd and 3rd tree and Glyphs), each talent's rank under it and the glyph names under the sockets. UI by Addicated."])
+
+    C:AddToggle(classicSection, {
+        label = addon.L["Glyph List"],
+        desc = addon.L["Show the six glyph sockets as a list over WoW's glyph page: click to place, Shift + right-click to remove, Shift-click to link."],
+        getFunc = function() return TalentSettings().glyph_list == true end,
+        setFunc = function(val)
+            TalentSettings().glyph_list = val
+            local classic = addon.ClassicTalents
+            if classic and classic.RefreshGlyphs then classic.RefreshGlyphs() end
+        end,
+        disabled = function() return IsEnabled("talents") end,
+        requiresReload = false,
+    })
 end
 
 -- ============================================================================

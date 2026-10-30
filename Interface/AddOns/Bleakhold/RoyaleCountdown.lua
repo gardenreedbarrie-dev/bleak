@@ -1,18 +1,32 @@
--- Bleakhold: Bleakhold Royale's drop countdown (frame BleakholdRoyaleCountdown; docs/BleakholdProtocol.md section 17):
--- the last 15 s of the lobby in an engraved bronze ring, one forged metal numeral per second, then DROP!.
+-- Bleakhold: Bleakhold Royale's drop countdown (frame BleakholdRoyaleCountdown; docs/BleakholdProtocol.md section 17),
+-- in the look players know from DBM (Deadly Boss Mods): a timer bar through the last 15 s of the lobby, the big
+-- numerals of the classic pull countdown for its last five seconds, then DROP! as a special warning.
 --
 --   trigger    phase 1 and R.PhaseLeft <= 15.25 (the server sends an exact ROYS at 15000 ms: revealing circle 1 marks
 --              every player dirty). It ends at the drop (ROYS me 1 or phase 2, or the local clock's zero, whichever
 --              comes first: DROP! shows either way) or when the phase leaves 1; a cancelled match shows MATCH CANCELLED
 --              instead, with no gong. A late arrival (me 1 without the lobby) never sees it.
 --   the clock  the target time comes from every phase-1 ROYS: within 0.35 s of the running one it is kept (a ROYS's
---              arrival jitter would otherwise move every second's beat); beyond that the next numeral change jumps to
---              the right second, and the numbers in between are skipped without animation. It never restarts and never
---              counts up (the old centre countdown restarted whenever the drift passed 0.5 s).
---   rhythm     three tiers, so the beat builds: 15-11 calm (a short drop, tick.wav), 10-4 heavier (a longer drop with
---              a punch, a dust ring at the baseline, a gold flash), 3-2-1 the hero (bigger, an ember flare, two shock
---              rings, hammer hits rising in pitch). While n shows, the first n notches of the ring (from the top,
---              clockwise) are lit: one goes dark each second, and the last three burn ember.
+--              arrival jitter would otherwise move every second's beat); beyond that the bar and the next numeral
+--              jump to the right second, and the numbers in between are skipped without animation. It never restarts
+--              and never counts up (the old centre countdown restarted whenever the drift passed 0.5 s).
+--   the bar    DBM's default timer bar (DBM-Core's DBT): a 195x20 status bar, the icon left of it, "Drop in" on the
+--              left and the time on the right (whole seconds above 10 s, then one decimal, as DBM writes it), a spark
+--              at the fill's end. It fills up as the drop nears and its colour runs from DBM's start colour
+--              (1, 0.7, 0) to its end colour (1, 0, 0) over the countdown; from 7.75 s its fill flashes like DBM's.
+--              The fill is the stock UI-StatusBar on a dark back with a 1-px black edge. Two lines under it name
+--              the circle and the landing.
+--   numerals   5, 4, 3, 2, 1: one big numeral a second (Art\Royale\Pull, bright gold with a black outline), popping
+--              in at 1.6 times its size and settling in 0.3 s while its gold glow flares and settles to a halo; the
+--              outgoing one fades in 0.1 s (outCubic: mostly gone in the pop's first frames, never a doubled digit).
+--              Every second also ticks: tick.wav for 15-4, tick3/tick2/tick1.
+--   DROP!      the special warning: the numerals go at once (the word lands on their spot), the word slams in from
+--              1.6 times its size with a gold flare, the screen's edge flashes DBM's warning yellow, the gong; the
+--              frame fades out from 0.8 s (gone 1.1 s after it showed).
+--   DBM        when DBM is loaded, its own bar counts the drop: DBM:CreatePizzaTimer(seconds, "Drop in", false), a
+--              local timer (never a sync message to the group), and ours hides, so one bar shows. A correction of
+--              the clock restarts DBM's bar; an early end (cancelled, the server's drop, the match left) cancels it.
+--              When DBM is missing or its call fails, ours shows.
 --   T-3.6      during the "4", away from the loud beats: the pin locks locally (RC.Locked, ROYALE_PIN_LOCKED for the
 --              map), an open lobby map closes with no sound, and a docked countdown glides to the centre, done at
 --              T-3.3, before the "3" lands. The server's own lock at T-3 (PinLockSec) stays the authority.
@@ -21,11 +35,12 @@
 --              the centre; else it is centred, and a map that opened by itself closes when the countdown starts.
 --              Computed when the countdown starts, when the map opens or closes, and on a new screen size or HUD
 --              scale, never during a glide.
---   one clock  RC.OwnsClock(m): the top bar shows no time of its own while the countdown runs.
+--   one clock  RC.OwnsClock(m): the top bar shows no time of its own while the countdown runs (the bar, ours or
+--              DBM's, is the one clock).
 -- Timing is driven by the frame's own OnUpdate while it shows (each numeral changes on the frame it is due), the
--- motion by RS.Tween; with reduced motion every tween jumps to its end and the holds keep their length.
--- Sounds: tick.wav for 15-4, tick3/tick2/tick1, the gong at DROP!. The freefall wind is RoyaleDrop.lua's: it starts
--- 0.5 s after ROYALE_DROP_WORD, which this module fires when DROP! shows.
+-- motion by RS.Tween; with reduced motion every tween jumps to its end, the bar does not flash, and the holds keep
+-- their length. The freefall wind is RoyaleDrop.lua's: it starts 0.5 s after ROYALE_DROP_WORD, which this module
+-- fires when DROP! shows.
 local ADDON, ns = ...
 local U, UI = ns.U, ns.UI
 local S = ns.S
@@ -33,70 +48,85 @@ local R = ns.Royale
 local RS = ns.RoyaleStyle
 local DATA = ns.RoyaleArt
 
-local floor, ceil, max, min, abs, cos, sin, sqrt, pi = math.floor, math.ceil, math.max, math.min, math.abs, math.cos,
-    math.sin, math.sqrt, math.pi
+local floor, ceil, max, min, abs, sqrt = math.floor, math.ceil, math.max, math.min, math.abs, math.sqrt
 local strformat = string.format
 
 local RC = {}
 ns.RoyaleCountdown = RC
 
-RC.FROM = 15                     -- the first number (the server reveals circle 1 and sends ROYS at 15000 ms)
+RC.FROM = 15                     -- the first second (the server reveals circle 1 and sends ROYS at 15000 ms)
 RC.EARLY = 0.25                  -- s before T-15 the countdown may start (its 15 shows a little longer, never a 16)
 RC.MIN_LEFT = 0.25               -- no countdown for less time than this: the drop is already there
-RC.W, RC.H = 420, 372
+RC.W, RC.H = 420, 244
 RC.TOP = 112                     -- the frame's top, under the top bar's tab (-98; lower at a HUD scale over 1.14)
-RC.RING = DATA.countdown.ringUnits or 280
-RC.RING_Y = -174                 -- the ring's centre from the frame's top
-RC.NOTCH = 22                    -- a notch's visual size (its square region is that x sqrt 2)
-RC.STAGE_FROM = 0.92             -- the ring grows from this to 1 as it assembles
 RC.DOCK_GAP, RC.DOCK_MARGIN = 24, 16
 RC.LOCK_AT = 3.6                 -- s before the drop: the local pin lock, the silent map close, the glide
 RC.REMIND = 2.5                  -- s line 2 names the locked landing after M during the lock (RC.Remind)
 RC.GLIDE = 0.3
 RC.DRIFT = 0.35                  -- s: a server time this far off the running one moves the count
-RC.CAP_TWO = DATA.countdown.twoDigitCap or 112   -- 15-10: the widest fills at most 88 % of the ring's inner disc
-RC.CAP_ONE, RC.CAP_HERO = 150, 172               -- 9-4, 3-1
-RC.DROP_CAP = 96
+
+-- The bar: DBM-Core's DBT defaults (DBTBarTemplate 195x20, the icon left, GameFontHighlightSmall, StartColor and
+-- EndColor, DynamicColor, FillUpBars, Flash below 7.75 s).
+RC.BAR_W, RC.BAR_H = 195, 20
+RC.BAR_TEXT = "Drop in"          -- our bar's name and DBM's pizza timer (16 characters at most there)
+RC.BAR_FONT = 10
+RC.BAR_ICONS = { "Interface\\Icons\\Spell_Magic_FeatherFall", "Interface\\Icons\\INV_Misc_QuestionMark" }
+RC.BAR_FILL = "Interface\\TargetingFrame\\UI-StatusBar"
+RC.BAR_SPARK = "Interface\\CastingBar\\UI-CastingBar-Spark"
+RC.BAR_START, RC.BAR_END = { 1, 0.7, 0 }, { 1, 0, 0 }
+RC.BAR_DECIMALS = 10             -- s: one decimal from here down
+RC.BAR_FLASH, RC.BAR_FLASH_PERIOD, RC.BAR_FLASH_LOW = 7.75, 1.25, 0.25
+RC.LINES_Y = -(RC.BAR_H + 6)     -- the lines' top under the bar (at the frame's top when DBM has the bar)
+
+-- The numerals and the special warning, centred NUM_Y under the frame's top.
+RC.BIG_FROM = 5                  -- the big numerals count 5 to 1
+RC.BIG_CAP = 110
+RC.NUM_Y = -176
+RC.POP, RC.POP_DUR = 1.6, 0.3    -- a numeral pops in at this size and settles to 1 over this
+RC.GLOW_COLOR = "FFC23A"
+RC.GLOW_PEAK, RC.GLOW_REST, RC.GLOW_DUR = 1, 0.4, 0.5
+RC.OUT_DUR = 0.1                 -- s the outgoing numeral takes to fade (outCubic: mostly gone at once)
+RC.DROP_CAP = 80
 RC.DROP_HOLD, RC.DROP_FADE = 0.8, 0.3            -- DROP! holds, then the frame fades (gone 1.1 s after it showed)
+RC.FLASH_COLOR, RC.FLASH_ALPHA, RC.FLASH_IN, RC.FLASH_OUT = "FFE14D", 0.55, 0.08, 0.5
 RC.CANCEL_CAP, RC.CANCEL_HOLD, RC.OUT_FADE = 22, 1.5, 0.25
-RC.LIT, RC.DARK, RC.HOT, RC.DARK_ALPHA = "bronzeHi", "bronzeDeep", "ember", 0.9
 RC.GONG = "Gong (Non-Looping)"
 
--- The three tiers: rise = units the incoming numeral drops from, dur = its fall (s), punch = the size it lands from
--- (outBack), glow = its flash { colour, alpha, s }, dust = a ring kicked up at its baseline, shocks = shock rings from
--- the ring's centre.
-RC.TIERS = {
-    { name = "calm", rise = 24, dur = 0.18 },
-    { name = "heavy", rise = 60, dur = 0.22, punch = 1.12, glow = { "gold", 0.35, 0.4 }, dust = true },
-    { name = "hero", rise = 90, dur = 0.22, punch = 1.18, glow = { "ember", 0.8, 0.5 }, shocks = 2 },
-}
-
-function RC.Tier(n)
-    if n <= 3 then
-        return RC.TIERS[3]
-    elseif n <= 10 then
-        return RC.TIERS[2]
-    end
-    return RC.TIERS[1]
-end
-
-function RC.Cap(n)
-    if n >= 10 then
-        return RC.CAP_TWO
-    elseif n > 3 then
-        return RC.CAP_ONE
-    end
-    return RC.CAP_HERO
-end
-
--- The sound (Sounds\Royale) of a number landing.
+-- The sound (Sounds\Royale) of a second's turn.
 function RC.Sound(n)
     return n <= 3 and ("tick" .. n) or "tick"
 end
 
--- The number shown with `left` seconds to go: 15 from 15.25 down to just above 14, ..., 1 in the last second.
+-- The second shown with `left` seconds to go: 15 from 15.25 down to just above 14, ..., 1 in the last second.
 function RC.ValueFor(left)
     return U.Clamp(ceil(left - 1e-6), 1, RC.FROM)
+end
+
+-- The bar's time: whole seconds above 10 s (never 16 in the early quarter second), then tenths, both rounded up, so
+-- the bar reads 5.0 as the 5 lands and 0.1 in the last tenth.
+function RC.BarText(left)
+    if left > RC.BAR_DECIMALS then
+        return tostring(RC.ValueFor(left))
+    end
+    return strformat("%.1f", max(0, ceil(left * 10 - 1e-6) / 10))
+end
+
+-- The bar's colour at `p` (0 = the start, 1 = the drop): DBM's DynamicColor from StartColor to EndColor.
+function RC.BarColor(p)
+    p = U.Clamp(p, 0, 1)
+    local a, b = RC.BAR_START, RC.BAR_END
+    return a[1] + (b[1] - a[1]) * p, a[2] + (b[2] - a[2]) * p, a[3] + (b[3] - a[3]) * p
+end
+
+-- The fill's alpha with `left` seconds to go: DBM's Flash (1.25 s cycles from 7.75 s: down for 0.25 s, back up in
+-- 0.25 s, then held), never under RC.BAR_FLASH_LOW; steady with reduced motion.
+function RC.BarFlash(left)
+    if left > RC.BAR_FLASH or not RS.Motion() then
+        return 1
+    end
+    local t = (RC.BAR_FLASH - left) % RC.BAR_FLASH_PERIOD
+    local dip = t < 0.25 and t / 0.25 or (t < 0.5 and (0.5 - t) / 0.25 or 0)
+    return 1 - (1 - RC.BAR_FLASH_LOW) * dip
 end
 
 -- The countdown runs (phase 1, at most 15.25 s left): the bar's middle cell shows no time of its own then.
@@ -122,147 +152,239 @@ RC.frame = f
 RS.RegisterRoot(f)
 local base = f:GetFrameLevel()
 
--- the kicker: an engraved tab over the ring
-local kick = CreateFrame("Frame", nil, f)
-kick:SetSize(200, 26)
-kick:SetPoint("TOP", f, "TOP", 0, 0)
-kick:SetFrameLevel(base + 1)
-RS.Plate(kick, "PlateTab")
-kick.text = RS.Text(kick, "label", 13, "bronzeHi", "CENTER")
-kick.text:SetPoint("CENTER", kick, "CENTER", 0, 0)
-kick.text:SetText("DROP IN")
-f.kick = kick
-
--- the stage: the ring and its notches in one frame, so the entrance grows them together
-local stage = CreateFrame("Frame", nil, f)
-stage:SetSize(RC.RING, RC.RING)
-stage:SetFrameLevel(base + 1)
-f.stage = stage
-
--- k: the stage's size factor (its offsets are in its own scale, so the centre stays where it is)
-local function placeStage(k)
-    stage:SetScale(k)
-    stage:ClearAllPoints()
-    stage:SetPoint("CENTER", f, "TOP", 0, RC.RING_Y / k)
+-- The timer bar: the icon and the status bar on one 1-px black edge.
+local function buildBar()
+    local bar = CreateFrame("Frame", nil, f)
+    bar:SetSize(RC.BAR_H + 1 + RC.BAR_W, RC.BAR_H)
+    bar:SetPoint("TOP", f, "TOP", 0, -1)
+    bar:SetFrameLevel(base + 2)
+    bar.edge = UI.Solid(bar, "000000", "BACKGROUND", 0.9)
+    bar.edge:SetPoint("TOPLEFT", bar, "TOPLEFT", -1, 1)
+    bar.edge:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 1, -1)
+    local icon = bar:CreateTexture(nil, "ARTWORK")
+    icon:SetSize(RC.BAR_H, RC.BAR_H)
+    icon:SetPoint("LEFT", bar, "LEFT", 0, 0)
+    icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    for _, path in ipairs(RC.BAR_ICONS) do
+        if icon:SetTexture(path) then
+            break
+        end
+    end
+    bar.icon = icon
+    local sb = CreateFrame("StatusBar", nil, bar)
+    sb:SetSize(RC.BAR_W, RC.BAR_H)
+    sb:SetPoint("RIGHT", bar, "RIGHT", 0, 0)
+    sb.bg = sb:CreateTexture(nil, "BACKGROUND")
+    sb.bg:SetTexture(RC.BAR_FILL)
+    sb.bg:SetAllPoints(sb)
+    sb.bg:SetVertexColor(0.16, 0.16, 0.16, 0.75)
+    sb:SetStatusBarTexture(RC.BAR_FILL)
+    sb:SetMinMaxValues(0, 1)
+    sb:SetValue(0)
+    sb:SetStatusBarColor(RC.BarColor(0))
+    sb.spark = sb:CreateTexture(nil, "OVERLAY")
+    sb.spark:SetTexture(RC.BAR_SPARK)
+    sb.spark:SetBlendMode("ADD")
+    sb.spark:SetSize(24, RC.BAR_H * 2)
+    sb.spark:Hide()
+    bar.spark = sb.spark
+    -- the texts over the spark
+    local top = CreateFrame("Frame", nil, sb)
+    top:SetAllPoints(sb)
+    top:SetFrameLevel(sb:GetFrameLevel() + 1)
+    bar.name = RS.Text(top, "body", RC.BAR_FONT, "safe", "LEFT")
+    bar.name:SetPoint("LEFT", sb, "LEFT", 6, 0)
+    bar.name:SetWidth(RC.BAR_W - 52)
+    bar.name:SetNonSpaceWrap(false)
+    bar.name:SetText(RC.BAR_TEXT)
+    bar.time = RS.Text(top, "body", RC.BAR_FONT, "safe", "RIGHT")
+    bar.time:SetPoint("RIGHT", sb, "RIGHT", -4, 0)
+    bar.sb = sb
+    return bar
 end
-placeStage(1)
+f.bar = buildBar()
 
-stage.ring = RS.Art(stage, "CountRing", RC.RING, RC.RING, "BACKGROUND")
-stage.ring:SetPoint("CENTER", stage, "CENTER", 0, 0)
-stage.notches = {}
-for i, sock in ipairs(DATA.ring.sockets) do
-    local t = RS.Rotatable(stage, "Notch", RC.NOTCH, "BORDER")
-    t:SetPoint("CENTER", stage, "CENTER", cos(sock.angle) * sock.r * RC.RING, sin(sock.angle) * sock.r * RC.RING)
-    t:SetAngle(sock.angle - pi / 2)   -- the art's tick stands upright: turned to face the centre
-    stage.notches[i] = t
+-- The two lines under the bar, on a soft dark pill: the island is bright sand and water at noon.
+local function buildLines()
+    local lines = CreateFrame("Frame", nil, f)
+    lines:SetSize(RC.W - 20, 52)
+    lines:SetFrameLevel(base + 1)
+    lines.back = RS.Plate(lines, "LabelHalo", { corner = 10 })
+    lines.back:SetAlpha(0.85)
+    local function line(size, y)
+        local fs = RS.Text(lines, "body", size, "parchment", "CENTER")
+        fs:SetPoint("TOP", lines, "TOP", 0, y)
+        fs:SetWidth(RC.W - 20)
+        fs:SetHeight(size + 4)
+        fs:SetNonSpaceWrap(false)
+        return fs
+    end
+    f.line1 = line(13, -6)
+    f.line2 = line(12, -28)
+    return lines
 end
-
--- shock and dust rings, above the ring and under the numerals (the digits stand in them)
-local fx = CreateFrame("Frame", nil, f)
-fx:SetAllPoints(f)
-fx:SetFrameLevel(base + 2)
-f.fx = fx
-local function newShock(parent, art)
-    local t = RS.Art(parent, art or "Shock", 96, 96, "ARTWORK")
-    t:SetAlpha(0)
-    t:Hide()
-    return t
-end
-f.shocks = { newShock(fx), newShock(fx) }
-f.bigShock = newShock(fx)
--- the dust ring is the small ring squashed to a ground plane: its height stays within the 2.2x minification rule
-f.dust = newShock(fx, "ShockSmall")
-
--- the numeral, its cap's middle on the ring's centre (explicit levels: glow over the digits, outgoing under them)
-local num = RS.Numeral(f, { cap = RC.CAP_TWO, glowColor = "gold" })
-num:SetPoint("CENTER", f, "TOP", 0, RC.RING_Y)
-num:SetFrameLevel(base + 3)
-num.old:SetFrameLevel(base + 5)
-num.cur:SetFrameLevel(base + 6)
-num:SetGlowOver(true)
-f.num = num
-
--- DROP! and MATCH CANCELLED, on the ring's centre
-local drop = RS.DropWord(f, RC.DROP_CAP)
-drop:SetPoint("CENTER", f, "TOP", 0, RC.RING_Y)
-drop:SetFrameLevel(base + 8)
-drop:Hide()
-f.drop = drop
-
-local cancel = RS.Title(f, "MATCH CANCELLED", RC.CANCEL_CAP, "blood")
-cancel:SetPoint("CENTER", f, "TOP", 0, RC.RING_Y)
-cancel:SetFrameLevel(base + 8)
-cancel:Hide()
-f.cancel = cancel
-
--- the two lines under the ring, on a soft dark pill: the island is bright sand and water at noon
-local lines = CreateFrame("Frame", nil, f)
-lines:SetSize(RC.W - 20, 52)
-lines:SetPoint("TOP", f, "TOP", 0, -318)
-lines:SetFrameLevel(base + 1)
-lines.back = RS.Plate(lines, "LabelHalo", { corner = 10 })
-lines.back:SetAlpha(0.85)
-f.lines = lines
-local function line(size, y)
-    local fs = RS.Text(lines, "body", size, "parchment", "CENTER")
-    fs:SetPoint("TOP", f, "TOP", 0, y)
-    fs:SetWidth(RC.W - 20)
-    fs:SetHeight(size + 4)
-    fs:SetNonSpaceWrap(false)
-    return fs
-end
-f.line1 = line(13, -324)
-f.line2 = line(12, -346)
+f.lines = buildLines()
 RC.LINES_PAD, RC.LINES_MIN = 48, 220   -- the pill: the longer line plus this, at least this wide
+
+-- The lines under our bar, or at the top when DBM draws the bar.
+local function placeLines(dbm)
+    f.lines:ClearAllPoints()
+    f.lines:SetPoint("TOP", f, "TOP", 0, dbm and 0 or RC.LINES_Y)
+end
+placeLines(false)
 
 -- The pill hugs the longer line (only when a text changes).
 local function fitLines()
     local w = max(f.line1:GetStringWidth() or 0, f.line2:GetStringWidth() or 0) + RC.LINES_PAD
-    lines:SetWidth(U.Clamp(floor(w + 0.5), RC.LINES_MIN, RC.W - 10))
+    f.lines:SetWidth(U.Clamp(floor(w + 0.5), RC.LINES_MIN, RC.W - 10))
 end
+
+-- A glyph of the Pull atlas (a numeral or DROP!) at `cap` units, centred NUM_Y under the frame's top, its gold glow
+-- behind it (ADD, alpha 0 until tweened): d:SetGlyph(text), d:SetZoom(f) (a factor on its size, for RS.Tween zoom).
+local PULL = DATA.atlases.Pull
+
+local function bigSetZoom(d, z)
+    d.rsZoom = z
+    local g = PULL.glyphs[d.glyph]
+    if g then
+        local c = d.cap * z
+        d.tex:SetSize(g.w * c, g.h * c)
+        d.glow:SetSize(g.w * c, g.h * c)
+    end
+end
+
+local function bigSetGlyph(d, text)
+    local g = PULL.glyphs[text]
+    assert(g, "RoyaleCountdown: no Pull glyph " .. tostring(text))
+    d.glyph = text
+    d.tex:SetTexCoord(g.u0, g.u1, g.v0, g.v1)
+    d.glow:SetTexCoord(g.u0, g.u1, g.v0, g.v1)
+    d:SetSize((g.inkW + 2 * g.stroke) * d.cap, (1 + 2 * g.stroke) * d.cap)
+    bigSetZoom(d, d.rsZoom or 1)
+end
+
+local function newBig(level, cap, text)
+    local d = CreateFrame("Frame", nil, f)
+    d:SetFrameLevel(base + level)
+    d:SetPoint("CENTER", f, "TOP", 0, RC.NUM_Y)
+    d.cap, d.rsZoom = cap, 1
+    d.glow = RS.Art(d, "PullGlow", 1, 1, "BACKGROUND")
+    d.glow:SetPoint("CENTER", d, "CENTER", 0, 0)
+    d.glow:SetBlendMode("ADD")
+    d.glow:SetVertexColor(RS.Rgb(RC.GLOW_COLOR))
+    d.glow:SetAlpha(0)
+    d.tex = RS.Art(d, "Pull", 1, 1, "ARTWORK")
+    d.tex:SetPoint("CENTER", d, "CENTER", 0, 0)
+    d.SetZoom, d.SetGlyph = bigSetZoom, bigSetGlyph
+    d:SetGlyph(text)
+    d:Hide()
+    return d
+end
+f.numOld = newBig(3, RC.BIG_CAP, "1")
+f.num = newBig(4, RC.BIG_CAP, "1")
+f.drop = newBig(6, RC.DROP_CAP, "DROP!")
+
+-- MATCH CANCELLED where the numerals stand
+local cancel = RS.Title(f, "MATCH CANCELLED", RC.CANCEL_CAP, "blood")
+cancel:SetPoint("CENTER", f, "TOP", 0, RC.NUM_Y)
+cancel:SetFrameLevel(base + 6)
+cancel:Hide()
+f.cancel = cancel
+
+-- the special warning's flash: the storm edge's art over the whole screen, in DBM's warning yellow
+local flash = RS.Art(f, "Vignette", nil, nil, "BACKGROUND")
+flash:SetAllPoints(UIParent)
+flash:SetBlendMode("ADD")
+flash:SetVertexColor(RS.Rgb(RC.FLASH_COLOR))
+flash:SetAlpha(0)
+flash:Hide()
+f.flash = flash
 
 ------------------------------------------------------------------------------------------------------
 -- A run: one countdown from its entrance to DROP! (or its exit)
 ------------------------------------------------------------------------------------------------------
--- mode: nil (idle), "count", "drop", "cancel" or "out"; endsAt: GetTime() of the drop; shown: the number shown;
--- x: the frame's centre, in UIParent units from the screen's centre.
+-- mode: nil (idle), "count", "drop", "cancel" or "out"; endsAt: GetTime() of the drop; total: the seconds the bar
+-- spans; shown: the second shown; x: the frame's centre, in UIParent units from the screen's centre; dbm: DBM draws
+-- the bar.
 local run = {}
 RC.run = run
 local serial = 0
--- keys of the run's number tweens: the ring's growth and the docking glide run side by side
-local stageKey, glideKey = {}, {}
-
-local function rgba(token, alpha)
-    return { RS.Rgb(token, alpha) }
-end
+-- the key of the docking glide's number tween
+local glideKey = {}
 
 local function stopAll()
-    RS.Stop(stageKey)
     RS.Stop(glideKey)
-    RS.Stop(f)
-    RS.Stop(stage)
-    RS.Stop(kick)
-    RS.Stop(num)
-    RS.Stop(num.cur)
-    RS.Stop(num.glow)
-    RS.Stop(num.old)
-    RS.Stop(drop)
-    RS.Stop(drop.glow)
-    RS.Stop(cancel)
-    RS.Stop(lines)
-    for _, t in ipairs(stage.notches) do
-        RS.Stop(t)
+    for _, r in ipairs({ f, f.bar, f.lines, f.line2, f.num, f.num.glow, f.numOld, f.numOld.glow, f.drop, f.drop.glow,
+        cancel, flash }) do
+        RS.Stop(r)
     end
-    for _, t in ipairs({ f.shocks[1], f.shocks[2], f.bigShock, f.dust }) do
-        RS.Stop(t)
-        t:Hide()
+end
+
+------------------------------------------------------------------------------------------------------
+-- DBM's own bar
+------------------------------------------------------------------------------------------------------
+-- DBM's bar module (DBM.Bars, DBM-Core's DBT) when DBM is loaded.
+local function dbmBars()
+    local d = DBM
+    return type(d) == "table" and type(d.Bars) == "table" and d.Bars or nil
+end
+
+-- Starts DBM's own timer bar for the drop, `left` seconds: a local pizza timer (broadcast false: no sync to the
+-- group). True when DBM took it; any error inside DBM leaves the bar to us.
+function RC.StartDbm(left)
+    local d = DBM
+    if type(d) ~= "table" or type(d.CreatePizzaTimer) ~= "function" then
+        return false
     end
+    local secs = floor(left * 10 + 0.5) / 10
+    if not pcall(d.CreatePizzaTimer, d, secs, RC.BAR_TEXT, false) then
+        return false
+    end
+    -- a DBM that can look its bars up must show this one
+    local bars = dbmBars()
+    if bars and type(bars.GetBar) == "function" then
+        local ok, b = pcall(bars.GetBar, bars, RC.BAR_TEXT)
+        if ok and not b then
+            return false
+        end
+    end
+    return true
+end
+
+-- Cancels DBM's bar for the drop (DBT:CancelBar, by the pizza timer's name).
+function RC.StopDbm()
+    local bars = dbmBars()
+    if bars and type(bars.CancelBar) == "function" then
+        pcall(bars.CancelBar, bars, RC.BAR_TEXT)
+    end
+end
+
+local function dropDbm()
+    if run.dbm then
+        run.dbm = nil
+        RC.StopDbm()
+    end
+end
+
+-- Hands the bar to DBM (`left` seconds), or shows ours when DBM cannot take it.
+local function claimBar(left)
+    run.dbm = RC.StartDbm(left) or nil
+    if run.dbm then
+        f.bar:Hide()
+    else
+        f.bar:Show()
+    end
+    placeLines(run.dbm)
 end
 
 local function finish()
     stopAll()
-    drop:Hide()
+    dropDbm()
+    f.num:Hide()
+    f.numOld:Hide()
+    f.drop:Hide()
     cancel:Hide()
+    flash:Hide()
     f:Hide()
     wipe(run)
 end
@@ -271,24 +393,20 @@ end
 local function resetVisuals()
     stopAll()
     f:SetAlpha(1)
-    kick:SetAlpha(1)
-    stage:SetAlpha(1)
-    placeStage(1)
-    lines:SetAlpha(1)
-    num:SetAlpha(1)
-    num:ClearOld()
-    num:SetZoom(1)
-    num.cur:SetAlpha(1)
-    num.glow:SetAlpha(0)
-    num:Show()
-    for _, t in ipairs(stage.notches) do
-        t:SetVertexColor(RS.Rgb(RC.DARK, RC.DARK_ALPHA))
+    f.bar:SetAlpha(1)
+    f.lines:SetAlpha(1)
+    f.line2:SetAlpha(1)
+    for _, d in ipairs({ f.num, f.numOld, f.drop }) do
+        d:SetAlpha(1)
+        d:SetZoom(1)
+        d.glow:SetAlpha(0)
+        d:Hide()
     end
-    drop:Hide()
-    drop:SetZoom(1)
-    drop.glow:SetAlpha(0)
     cancel:Hide()
     cancel:SetAlpha(1)
+    cancel:SetZoom(1)
+    flash:SetAlpha(0)
+    flash:Hide()
 end
 
 ------------------------------------------------------------------------------------------------------
@@ -363,7 +481,7 @@ local function closeMap()
 end
 
 ------------------------------------------------------------------------------------------------------
--- The lines under the ring
+-- The lines under the bar
 ------------------------------------------------------------------------------------------------------
 -- The place a pin lands near: RoyaleMap.lua's MP.NearestPlace, or the same rule (a landmark or crossing whose circle,
 -- r x 1.5, holds the point; the nearest centre wins; else "the wilds").
@@ -427,8 +545,8 @@ local function refreshLines(m)
 end
 
 -- M while the lock keeps the map shut (RoyaleMap.lua's MP.Open answers "locked"): line 2 names the locked landing for
--- RC.REMIND s with a soft flash, where the player already looks, rather than an error line across the ring. False
--- when no countdown counts (DROP! holds the centre for a moment more: the map opens once the drop starts).
+-- RC.REMIND s with a soft flash, where the player already looks, rather than an error line across the numerals.
+-- False when no countdown counts (DROP! holds the centre for a moment more: the map opens once the drop starts).
 function RC.Remind(m)
     m = m or R.Match()
     if run.mode ~= "count" or not m or m.matchId ~= run.matchId then
@@ -465,104 +583,67 @@ local function lock(m)
 end
 
 ------------------------------------------------------------------------------------------------------
--- Motion
+-- The bar and the numerals
 ------------------------------------------------------------------------------------------------------
--- Runs `fn` after `delay` s (at once for none) while the same run still counts.
-local function later(delay, fn)
-    if not delay or delay <= 0 then
-        fn()
+-- The bar at `left` seconds to go: fill, colour, spark, time and flash.
+local function updateBar(left)
+    if run.dbm then
         return
     end
-    local id = run.id
-    ns.After(delay, function()
-        if run.id == id and run.mode == "count" then
-            fn()
-        end
-    end)
-end
-
--- A ring of `t` from `size0` to `size1` units ({ w, h }), fading out from `alpha`, centred `dy` units under the
--- ring's centre (nothing shows before it starts).
-local function ring(t, size0, size1, alpha, dur, color, blend, dy)
-    RS.Stop(t)
-    t:ClearAllPoints()
-    t:SetPoint("CENTER", f, "TOP", 0, RC.RING_Y + (dy or 0))
-    t:SetBlendMode(blend or "ADD")
-    t:SetVertexColor(RS.Rgb(color))
-    t:Show()
-    RS.Tween(t, "size", size0, size1, dur, "outCubic")
-    -- the alpha holds and goes late, so a ring still reads once it has grown past the digits
-    RS.Tween(t, "alpha", alpha, 0, dur, "inCubic", { onDone = function(r) r:Hide() end })
-end
-
--- The numeral `n` lands: its tier's fall, punch, flash, rings and sound, after `delay` s.
-local function arrive(n, delay)
-    local tier = RC.Tier(n)
-    local opts = { delay = delay > 0 and delay or nil }
-    RS.Tween(num.cur, "offset", { 0, tier.rise }, { 0, 0 }, tier.dur, "outCubic", opts)
-    RS.Tween(num.cur, "alpha", 0, 1, 0.10, "linear", opts)
-    if tier.punch then
-        RS.Tween(num, "zoom", tier.punch, 1, tier.dur, "outBack", opts)
+    local bar, sb = f.bar, f.bar.sb
+    local p = U.Clamp(1 - left / max(run.total or RC.FROM, 0.01), 0, 1)
+    sb:SetValue(p)
+    sb:SetStatusBarColor(RC.BarColor(p))
+    local text = RC.BarText(left)
+    if bar.timeText ~= text then
+        bar.timeText = text
+        bar.time:SetText(text)
+    end
+    local a = RC.BarFlash(left)
+    local fill = sb:GetStatusBarTexture()
+    if fill then
+        fill:SetAlpha(a)
+    end
+    if p > 0.005 and p < 0.995 then
+        sb.spark:ClearAllPoints()
+        sb.spark:SetPoint("CENTER", sb, "LEFT", p * RC.BAR_W, 0)
+        sb.spark:SetAlpha(a)
+        sb.spark:Show()
     else
-        num:SetZoom(1)
+        sb.spark:Hide()
     end
+end
+
+-- The big numeral `n` pops in (from 1.6 times its size, settling with its gold glow); the one before fades.
+local function pop(n)
+    local num, old = f.num, f.numOld
+    if num:IsShown() and num.glyph then
+        RS.Stop(old)
+        RS.Stop(old.glow)
+        old:SetGlyph(num.glyph)
+        old:SetZoom(num.rsZoom or 1)
+        old:SetAlpha(num:GetAlpha())
+        old.glow:SetAlpha(num.glow:GetAlpha())
+        old:Show()
+        RS.Tween(old, "alpha", nil, 0, RC.OUT_DUR, "outCubic", { onDone = function(r) r:Hide() end })
+    end
+    RS.Stop(num)
     RS.Stop(num.glow)
-    num.glow:SetAlpha(0)
-    if tier.glow then
-        num:SetGlowColor(tier.glow[1])
-        later(delay, function()
-            RS.Tween(num.glow, "alpha", tier.glow[2], 0, tier.glow[3], "outCubic")
-        end)
-    end
-    -- the rings when the digits touch down (most of the fall is in its first half: outCubic)
-    local land = delay + tier.dur * 0.6
-    if tier.dust then
-        -- a flat dust ring where the digits stand
-        local cap = RC.Cap(n)
-        later(land, function()
-            ring(f.dust, { 96, 48 }, { 200, 100 }, 0.35, 0.3, "bronzeHi", "ADD", -cap / 2)
-        end)
-    end
-    for i = 1, tier.shocks or 0 do
-        later(land + (i - 1) * 0.08, function()
-            ring(f.shocks[i], { 96, 96 }, { 240, 240 }, 0.5, 0.35, i == 1 and "ember" or "gold", "ADD", 0)
-        end)
-    end
-    later(delay, function()
-        RS.PlayFile(RC.Sound(n))
-    end)
+    num:SetGlyph(tostring(n))
+    num:Show()
+    RS.Tween(num, "alpha", 0, 1, 0.08, "linear")
+    RS.Tween(num, "zoom", RC.POP, 1, RC.POP_DUR, "outCubic")
+    RS.Tween(num.glow, "alpha", RC.GLOW_PEAK, RC.GLOW_REST, RC.GLOW_DUR, "outCubic")
 end
 
--- Notch i lit (`hot`: ember) or dark, over `dur` s after `delay`.
-local function notch(i, lit, hot, dur, delay)
-    local t = stage.notches[i]
-    if not t then
-        return
-    end
-    local to = lit and rgba(hot and RC.HOT or RC.LIT, 1) or rgba(RC.DARK, RC.DARK_ALPHA)
-    RS.Tween(t, "vertexColor", nil, to, dur or 0.2, "outCubic", { delay = delay })
-end
-
--- From the number shown to `n` (lower): the old digits fall away, the notches between go dark, `n` lands. Numbers
--- skipped by a correction are never animated.
+-- To the second `n` (lower than the one shown): its tick, and its big numeral in the last five. Seconds skipped by a
+-- correction are never animated.
 local function change(n)
-    local from = run.shown
-    RS.Stop(num, nil, true)
-    RS.Stop(num.cur, nil, true)
-    num:Swap(n)
-    num:SetCap(RC.Cap(n))
-    RS.Tween(num.old, "alpha", 1, 0, 0.15, "inCubic", { onDone = function() num:ClearOld() end })
-    RS.Tween(num.old, "zoom", num.old.rsZoom or 1, 0.85, 0.15, "inCubic")
-    for i = n + 1, from do
-        notch(i, false)
-    end
-    if n <= 3 and (from > 3 or from - n > 1) then
-        for i = 1, n do
-            notch(i, true, true)
-        end
-    end
     run.shown = n
-    arrive(n, 0)
+    if n <= RC.BIG_FROM then
+        pop(n)
+    end
+    RS.PlayFile(RC.Sound(n))
 end
 
 ------------------------------------------------------------------------------------------------------
@@ -574,6 +655,7 @@ function RC.Start(m, left)
     wipe(run)
     run.id, run.mode, run.matchId = serial, "count", m.matchId
     run.endsAt = GetTime() + left
+    run.total = left
     run.mapUp = mapUp(m)
     -- docking: beside the map when it fits, else centred (and a map that opened by itself goes now)
     local x = wantedX(m)
@@ -585,54 +667,56 @@ function RC.Start(m, left)
         end
     end
     place(x)
+    claimBar(left)
+    f.bar.timeText = nil
+    updateBar(left)
     refreshLines(m)
-    local n = RC.ValueFor(left)
-    run.shown = n
-    num:ClearOld()
-    num:SetCap(RC.Cap(n))
-    num:SetValue(n)
-    num.cur:SetAlpha(0)
     f:SetAlpha(0)
     f:Show()
     RS.Tween(f, "alpha", 0, 1, 0.2, "outCubic")
-    RS.Tween(stageKey, "number", RC.STAGE_FROM, 1, 0.3, "outCubic", { set = placeStage })
-    local hot = n <= 3
-    for i = 1, n do
-        notch(i, true, hot, 0.12, (i - 1) * 0.02)
-    end
-    arrive(n, 0.15)
+    change(RC.ValueFor(left))
     if left <= RC.LOCK_AT then
         lock(m)
     end
 end
 
--- DROP!: the ring goes, the word slams in with the gong (RoyaleDrop.lua starts the wind 0.5 s later and its plate
--- 0.8 s later, from ROYALE_DROP_WORD), the frame fades out from 0.8 s to 1.1 s.
+-- DROP!: the bar and the lines fade, the numerals go at once, the special warning slams in with its flash and the gong
+-- (RoyaleDrop.lua starts the wind 0.5 s later and its plate 0.8 s later, from ROYALE_DROP_WORD), the frame fades out
+-- from 0.8 s to 1.1 s.
 local function showDrop(m)
     run.mode = "drop"
     run.dropAt = GetTime()
     RC.dropFor, RC.dropShownAt = run.matchId, run.dropAt
-    RS.Stop(stageKey)
+    dropDbm()
     RS.Stop(glideKey)
-    placeStage(1)
     if run.gliding then
         run.gliding = nil
         place(0)
     end
-    for _, r in ipairs({ stage, kick, lines, num }) do
+    for _, r in ipairs({ f.bar, f.lines }) do
         RS.Tween(r, "alpha", nil, 0, 0.2, "outCubic")
     end
+    -- the numerals go at once: DROP! lands on their spot, and a fading 1 would show through it
+    for _, d in ipairs({ f.num, f.numOld }) do
+        RS.Stop(d)
+        RS.Stop(d.glow)
+        d:Hide()
+    end
+    local drop = f.drop
     drop:SetAlpha(0)
     drop:Show()
     RS.Tween(drop, "alpha", 0, 1, 0.06, "linear")
-    RS.Tween(drop, "zoom", 0.6, 1.12, 0.12, "outBack", {
-        onDone = function()
-            RS.Tween(drop, "zoom", 1.12, 1, 0.12, "outBack")
+    RS.Tween(drop, "zoom", RC.POP, 1, 0.18, "outBack")
+    RS.Tween(drop.glow, "alpha", RC.GLOW_PEAK, RC.GLOW_REST, 0.6, "outCubic")
+    flash:Show()
+    RS.Tween(flash, "alpha", 0, RC.FLASH_ALPHA, RC.FLASH_IN, "linear", {
+        onDone = function(t)
+            RS.Tween(t, "alpha", RC.FLASH_ALPHA, 0, RC.FLASH_OUT, "inCubic")
         end,
     })
-    drop:SetGlowColor("gold")
-    RS.Tween(drop.glow, "alpha", 1, 0, 0.6, "outCubic")
-    ring(f.bigShock, { 96, 96 }, { 400, 400 }, 0.7, 0.45, "gold", "BLEND", 0)   -- over bright terrain: a gold ring
+    if not RS.Motion() then
+        flash:SetAlpha(0)
+    end
     RS.Play(RC.GONG)
     ns.Fire("ROYALE_DROP_WORD", m)
 end
@@ -646,10 +730,10 @@ end
 local function showCancel()
     run.mode = "cancel"
     run.cancelAt = GetTime()
-    RS.Stop(stageKey)
+    dropDbm()
     RS.Stop(glideKey)
     run.gliding = nil
-    for _, r in ipairs({ stage, kick, lines, num }) do
+    for _, r in ipairs({ f.bar, f.lines, f.num, f.numOld }) do
         RS.Tween(r, "alpha", nil, 0, 0.2, "outCubic")
     end
     cancel:SetAlpha(0)
@@ -660,12 +744,30 @@ end
 
 local function leave()
     run.mode = "out"
+    dropDbm()
     fadeOut(RC.OUT_FADE)
 end
 
 ------------------------------------------------------------------------------------------------------
 -- The clock
 ------------------------------------------------------------------------------------------------------
+-- Docking follows the map until the lock; a new screen or HUD scale is laid out once no glide runs.
+local function follow(m)
+    if not run.locked and not run.gliding then
+        local up = mapUp(m)
+        if up ~= run.mapUp then
+            run.mapUp = up
+            glideTo(wantedX(m))
+        elseif run.relayout then
+            place(wantedX(m))
+        end
+        run.relayout = nil
+    elseif run.relayout and not run.gliding then
+        place(wantedX(m))
+        run.relayout = nil
+    end
+end
+
 function RC.Update()
     local mode = run.mode
     if not mode then
@@ -725,23 +827,11 @@ function RC.Update()
     if n < run.shown then
         change(n)
     end
+    updateBar(left)
     if not run.locked and left <= RC.LOCK_AT then
         lock(m)
     end
-    -- docking follows the map until the lock; a new screen or HUD scale is laid out once no glide runs
-    if not run.locked and not run.gliding then
-        local up = mapUp(m)
-        if up ~= run.mapUp then
-            run.mapUp = up
-            glideTo(wantedX(m))
-        elseif run.relayout then
-            place(wantedX(m))
-        end
-        run.relayout = nil
-    elseif run.relayout and not run.gliding then
-        place(wantedX(m))
-        run.relayout = nil
-    end
+    follow(m)
     refreshLines(m)
 end
 
@@ -750,7 +840,7 @@ f:SetScript("OnUpdate", function()
 end)
 
 -- Starts a countdown when one is due (phase 1, at most 15.25 s left, no DROP! yet for this match); a running one takes
--- every phase-1 ROYS's time when it is more than 0.35 s off.
+-- every phase-1 ROYS's time when it is more than 0.35 s off (and DBM's bar follows it).
 function RC.Check()
     local m = R.Match()
     if run.mode == "count" then
@@ -758,6 +848,10 @@ function RC.Check()
             local endsAt = (m.recvAt or GetTime()) + m.phaseMsLeft / 1000
             if abs(endsAt - run.endsAt) > RC.DRIFT then
                 run.endsAt = endsAt
+                if run.dbm then
+                    RC.StopDbm()
+                    claimBar(endsAt - GetTime())
+                end
             end
         end
         RC.Update()
@@ -773,14 +867,14 @@ function RC.Check()
 end
 
 -- True while the countdown holds the screen's centre, from its lock at T-3.6 through DROP!: RoyaleMap.lua keeps the
--- lobby map shut then (it closed at the lock; opened again it would dock under the centred ring).
+-- lobby map shut then (it closed at the lock; opened again it would dock under the centred countdown).
 function RC.HoldsCentre(m)
     m = m or R.Match()
     return m ~= nil and run.matchId == m.matchId and (run.mode == "drop" or (run.mode == "count" and run.locked))
         and true or false
 end
 
--- The value shown now (nil when no countdown runs), for tests and previews.
+-- The second shown now (nil when no countdown counts), for tests and previews.
 function RC.Shown()
     return run.mode == "count" and run.shown or nil
 end

@@ -954,6 +954,17 @@ local function IsDurabilityCustomPlaced()
     return durabilityMover ~= nil and cfg ~= nil and cfg.custom_position == true
 end
 
+-- The Bleakhold mark (bleakmark.lua) sits right under the map, so the figure goes below it: the band it takes, in
+-- Minimap units, turned into the figure's own.
+local function BleakMarkDrop(durabilityFrame)
+    local mark = addon.BleakMark
+    local band = mark and mark.Band and mark.Band() or 0
+    if band <= 0 then return 0 end
+    local own = durabilityFrame:GetEffectiveScale()
+    if not own or own <= 0 then return band end
+    return math.ceil(band * Minimap:GetEffectiveScale() / own)
+end
+
 local function ApplyDurabilityPosition()
     local durabilityFrame = DurabilityFrame
     if not durabilityFrame or durabilityFrame.AddicatUI_SettingPoint then return end
@@ -962,15 +973,22 @@ local function ApplyDurabilityPosition()
     if IsDurabilityCustomPlaced() then
         durabilityFrame:SetPoint("CENTER", durabilityMover, "CENTER", 0, 0)
     elseif durabilityCaptureBarActive then
-        durabilityFrame:SetPoint("TOP", Minimap, "BOTTOM", -15, -35)
+        durabilityFrame:SetPoint("TOP", Minimap, "BOTTOM", -15, -35 - BleakMarkDrop(durabilityFrame))
     else
-        durabilityFrame:SetPoint("TOP", Minimap, "BOTTOM", -15, -5)
+        durabilityFrame:SetPoint("TOP", Minimap, "BOTTOM", -15, -5 - BleakMarkDrop(durabilityFrame))
     end
     durabilityFrame.AddicatUI_SettingPoint = nil
+end
+-- bleakmark.lua re-places the figure when the mark shows or hides (only once this module laid it out).
+MinimapModule.ApplyDurabilityPosition = function()
+    if MinimapModule.applied then ApplyDurabilityPosition() end
 end
 
 local function UpdateDurabilityPosition(captureBarVisible)
     durabilityCaptureBarActive = captureBarVisible and true or false
+    if addon.BleakMark and addon.BleakMark.SetCaptureBar then
+        addon.BleakMark.SetCaptureBar(durabilityCaptureBarActive)
+    end
     ApplyDurabilityPosition()
 end
 

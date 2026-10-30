@@ -284,14 +284,14 @@ CP.orb = ns.Orbs.Add({
         if cd and cd >= 1 then
             b.cd:SetText(U.Clock(cd))
             b.cd:Show()
-            b.glyph:SetVertexColor(UI.Rgb(C.mute))
         else
             b.cd:Hide()
-            b.glyph:SetVertexColor(UI.Rgb(C.goldLight))
         end
+        -- the stock buttons grey a picture that cannot be used now
+        b.glyph:SetDesaturated(cd and cd >= 1 or false)
     end,
 })
-CP.orb.cd = UI.Text(CP.orb, 10, C.goldLight, "body", "CENTER")
+CP.orb.cd = UI.Text(CP.orb, 10, C.text, "body", "CENTER")
 CP.orb.cd:SetPoint("TOP", CP.orb, "BOTTOM", 0, -1)
 CP.orb.cd:Hide()
 
@@ -338,34 +338,31 @@ end
 ------------------------------------------------------------------------------------------------------
 -- The Camp frame: shown while the player is at a campfire (state R or C)
 ------------------------------------------------------------------------------------------------------
+-- The look: the tooltip frame (UI-Tooltip-Background and -Border, tinted dark as the old window's panels), the title
+-- gold, the state on the right (green while camping), the timers white and grey, the camp objects as item slots
+-- (ItemButtonTemplate: the icon in UI-Quickslot2), red panel buttons.
 local f = CreateFrame("Frame", "BleakholdCampFrame", UIParent)
 f:SetSize(CP.W, 160)
 f:SetFrameStrata("MEDIUM")
-UI.Backdrop(f, "101216", C.chipBorder, 0.92)
+UI.Backdrop(f, C.panel, C.border, nil, "panel")
 f:Hide()
 CP.frame = f
 local fpos = positioning(f, "TOPRIGHT", -40, -470)
 
-f.title = UI.Text(f, 15, C.goldPale, "title")
+f.title = UI.Heading(f, "Campfire", 14)
 f.title:SetPoint("TOPLEFT", f, "TOPLEFT", 12, -10)
-f.title:SetText("Campfire")
-f.state = UI.Text(f, 13, C.goldLight, "body", "RIGHT")
-f.state:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, -12)
+f.state = UI.Text(f, 12, C.gold, "body", "RIGHT")
+f.state:SetPoint("TOPRIGHT", f, "TOPRIGHT", -12, -11)
 
-f.settle = UI.Text(f, 12, C.mid)
+f.settle = UI.Text(f, 12, C.text)
 f.fire = UI.Text(f, 12, C.dim)
-f.warmth = UI.Text(f, 12, C.goldLight)
+f.warmth = UI.Text(f, 12, C.gold)
 
-f.objLabel = UI.Text(f, 11, C.mute)
+f.objLabel = UI.Label(f, nil, 11)
 f.objs = {}
 for i = 1, CP.MAX_OBJECTS do
-    local o = CreateFrame("Frame", nil, f)
-    o:SetSize(26, 26)
+    local o = UI.ItemButton(f, 26)
     o:EnableMouse(true)
-    UI.Backdrop(o, C.chip, C.chipBorder)
-    o.icon = o:CreateTexture(nil, "ARTWORK")
-    o.icon:SetSize(22, 22)
-    o.icon:SetPoint("CENTER")
     o.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
     o:SetScript("OnEnter", function(self)
         local e = self.obj
@@ -374,7 +371,7 @@ for i = 1, CP.MAX_OBJECTS do
         end
         local lines = objectLines(e)
         if e.mine then
-            lines[#lines + 1] = { "Placed by you", C.goldLight }
+            lines[#lines + 1] = { "Placed by you", C.gold }
         end
         UI.ShowTooltip(self, lines)
     end)
@@ -390,12 +387,17 @@ end
 f.place = {}
 for i = 1, CP.MAX_PLACE do
     local b = UI.Button(f, CP.W - 24, 22, "", "dark", 11)
+    -- the object's icon clear of the red button's 12 px left cap, in the 1 px black edge of a square icon
     b.picon = b:CreateTexture(nil, "ARTWORK")
-    b.picon:SetSize(16, 16)
-    b.picon:SetPoint("LEFT", b, "LEFT", 4, 0)
+    b.picon:SetSize(14, 14)
+    b.picon:SetPoint("LEFT", b, "LEFT", 8, 0)
     b.picon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    b.pedge = b:CreateTexture(nil, "BORDER")
+    b.pedge:SetTexture(0, 0, 0, 1)
+    b.pedge:SetPoint("TOPLEFT", b.picon, "TOPLEFT", -1, 1)
+    b.pedge:SetPoint("BOTTOMRIGHT", b.picon, "BOTTOMRIGHT", 1, -1)
     b.label:ClearAllPoints()
-    b.label:SetPoint("LEFT", b, "LEFT", 24, 0)
+    b.label:SetPoint("LEFT", b, "LEFT", 26, 0)
     b.label:SetPoint("RIGHT", b, "RIGHT", -6, 0)
     b:SetScript("OnClick", function(self)
         if self.skill then
@@ -423,7 +425,7 @@ f.repairBtn.tooltip = function()
     return { "Repair", { "Repairs everything you wear and carry, at the usual price (blacksmiths pay less).", C.mid, true } }
 end
 f.repairBtn:Hide()
-f.packBtn = UI.Button(f, (CP.W - 30) / 2, 24, "Pack up", "ghost", 12)
+f.packBtn = UI.Button(f, (CP.W - 30) / 2, 24, "Pack up", "gold", 12)
 f.packBtn:SetScript("OnClick", function()
     CP.PackUp()
 end)
@@ -480,7 +482,7 @@ function CP.Refresh()
         return
     end
     f.state:SetText(c.state == "C" and "Camping" or "Resting")
-    UI.SetColor(f.state, c.state == "C" and C.teal or C.goldLight)
+    UI.SetColor(f.state, c.state == "C" and C.teal or C.gold)
     local y = -32
     if c.state == "R" then
         f.settle:ClearAllPoints()
@@ -504,7 +506,7 @@ function CP.Refresh()
     end
     -- the camp objects at this fire
     if #c.objs > 0 then
-        f.objLabel:SetText("Camp objects")
+        f.objLabel:SetLabel("Camp objects")
         f.objLabel:ClearAllPoints()
         f.objLabel:SetPoint("TOPLEFT", f, "TOPLEFT", 12, y - 4)
         f.objLabel:Show()
@@ -518,14 +520,14 @@ function CP.Refresh()
         if e then
             setIcon(o.icon, CP.Profession(e.skill).icon)
             o:ClearAllPoints()
-            o:SetPoint("TOPLEFT", f, "TOPLEFT", 12 + (i - 1) * 29, y)
+            o:SetPoint("TOPLEFT", f, "TOPLEFT", 14 + (i - 1) * 31, y - 2)
             o:Show()
         else
             o:Hide()
         end
     end
     if #c.objs > 0 then
-        y = y - 30
+        y = y - 34
     end
     -- what the player may place here
     for i, b in ipairs(f.place) do
@@ -566,7 +568,7 @@ function CP.Refresh()
         f.repairBtn:Hide()
         f.packBtn:Hide()
     end
-    f:SetHeight(-y + 10)
+    f:SetHeight(-y + 12)
     CP.UpdateTimers()
     if not f:IsShown() then
         fpos.Anchor()
@@ -590,18 +592,20 @@ end)
 ------------------------------------------------------------------------------------------------------
 -- The Warmth/Food indicator: a small chip while the bonus runs and the player is not at a fire
 ------------------------------------------------------------------------------------------------------
+-- (a one-line tooltip frame: the campfire's icon and the time in gold)
+CP.WARMTH_ICON = "Spell_Fire_Fire"
 local ind = CreateFrame("Frame", "BleakholdCampStatus", UIParent)
 ind:SetSize(150, 30)
 ind:SetFrameStrata("MEDIUM")
-UI.Backdrop(ind, "101216", C.chipBorder, 0.92)
+UI.Backdrop(ind, C.panel, C.border, nil, "panel")
 ind:EnableMouse(true)
 ind:Hide()
 CP.indicator = ind
 local ipos = positioning(ind, "TOP", 0, -200)
 
-ind.flame = UI.Glyph(ind, "flame", 16, C.orange)
-ind.flame:SetPoint("LEFT", ind, "LEFT", 8, 0)
-ind.text = UI.Text(ind, 12, C.goldLight)
+ind.flame = UI.Icon(ind, 18, CP.WARMTH_ICON)
+ind.flame:SetPoint("LEFT", ind, "LEFT", 7, 0)
+ind.text = UI.Text(ind, 12, C.gold)
 ind.text:SetPoint("LEFT", ind.flame, "RIGHT", 6, 0)
 
 ind:SetScript("OnEnter", function(self)
@@ -651,7 +655,7 @@ function CP.RefreshIndicator()
     else
         ind.text:SetText("Well fed" .. xp)
     end
-    ind:SetWidth(floor(38 + ind.text:GetStringWidth() + 0.5))
+    ind:SetWidth(floor(44 + ind.text:GetStringWidth() + 0.5))
     if not ind:IsShown() then
         ipos.Anchor()
         ind:Show()
@@ -688,23 +692,29 @@ function CP.WordGroundError()
     end
 end
 
+-- (ActionButtonTemplate's art: the icon in UI-Quickslot2, ButtonHilight-Square under the cursor, UI-Quickslot-Depress
+-- while pressed; grey with the time on it while it cools down)
 local gb = CreateFrame("Button", "BleakholdGlideButton", UIParent)
 gb:SetSize(36, 36)
 gb:SetFrameStrata("MEDIUM")
-UI.Backdrop(gb, C.chip, C.gold)
 gb:RegisterForClicks("LeftButtonUp")
 gb:Hide()
 CP.glideButton = gb
 local gpos = positioning(gb, "BOTTOM", 0, 190)
 
-gb.icon = gb:CreateTexture(nil, "ARTWORK")
-gb.icon:SetSize(32, 32)
-gb.icon:SetPoint("CENTER")
-gb.icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+UI.SlotArt(gb, 36)
+-- the icon in BACKGROUND (as ActionButtonTemplate's): the pushed overlay is in ARTWORK, and one layer's batch is drawn
+-- in texture order, not creation order, so an icon in ARTWORK could cover the Depress overlay
+gb.icon:SetDrawLayer("BACKGROUND")
+gb.icon:SetPoint("CENTER", gb, "CENTER", 0, 0)
 setIcon(gb.icon, CP.GLIDE_ICON)
-gb.cd = UI.Text(gb, 12, C.text, "body", "CENTER", "OVERLAY")
-gb.cd:SetPoint("CENTER")
+gb.cd = gb:CreateFontString(nil, "OVERLAY")
+gb.cd:SetFont(UI.FONT_BODY, 13, "OUTLINE")
+gb.cd:SetTextColor(1, 0.82, 0)
+gb.cd:SetPoint("CENTER", gb, "CENTER", 0, 0)
 gb.cd:Hide()
+gb:SetPushedTexture("Interface\\Buttons\\UI-Quickslot-Depress")
+gb:GetPushedTexture():SetAllPoints(gb.icon)
 
 gb:SetScript("OnClick", function()
     CP.Glide()
@@ -742,12 +752,10 @@ end
 CP.GLIDE_BAR_W = 150
 CP.GLIDE_AIR_SEC = 1.0
 -- (a child of UIParent, placed over the button: it stays when the button makes way for the spellbook's Walk on Air)
-local bar = UI.Bar(UIParent, CP.GLIDE_BAR_W, 14, C.teal)
+-- (the breath bar's look: UI.TimerBar, in the stock green)
+local bar = UI.TimerBar(UIParent, CP.GLIDE_BAR_W, C.bar)
 bar:SetFrameStrata("MEDIUM")
-bar:SetPoint("BOTTOM", gb, "TOP", 0, 6)
-UI.Backdrop(bar, C.chip, C.chipBorder)
-bar.text = UI.Text(bar, 11, C.text, "body", "CENTER", "OVERLAY")
-bar.text:SetPoint("CENTER")
+bar:SetPoint("BOTTOM", gb, "TOP", 0, 14)
 bar:Hide()
 CP.glideBar = bar
 CP.glide = { recvAt = nil, last = 0, total = 0, fallSince = nil, air = false, landed = false }

@@ -26,7 +26,6 @@ ns.WarMode = WM
 WM.GAP = 2.1                      -- s between two WARMODE (the server allows one per WarModeIntervalMs, 2 s)
 WM.PENDING = 6                    -- s the button waits for the server's answer
 WM.COLOR = "E0604A"               -- the [War] tag's colour
-WM.KICKER = "WAR MODE"
 WM.ICONS = "Interface\\Icons\\"
 WM.UNKNOWN_ICON = "INV_Misc_QuestionMark"
 WM.TEAM = {
@@ -347,60 +346,54 @@ ns.On("WARMODE_CHANGED", function(wm)
 end)
 
 ------------------------------------------------------------------------------------------------------
--- Activities: the War Mode page
+-- Activities: the War Mode page, in the old window's page anatomy (Activities.lua A.Page): the state as the gold
+-- title ("War Mode is off"), what War Mode is, and under it the hunt, the cooldown or where to change it; Turn War
+-- Mode on / off top right with why it is grey under it; then tooltip panels with gold headings and gold labels with
+-- white values: the bonuses in the open world, today's caps (achievement progress bars) and fights, and the War
+-- Fronts with the zones in a table (WhoFrame column headers). A dense page: its picture (Hellfire, the nav entry's)
+-- shows at low alpha behind the panels.
 ------------------------------------------------------------------------------------------------------
-local P = A.NewPage()
-A.AddPage("warmode", P)
+local P = A.Page("warmode", { title = "War Mode", desc = WM.TEXT })
 WM.page = P
 
-local HERO_H = 150
-local CARD_H = 170
-local CARD_W = floor((A.PW - 12) / 2)
-local FRONT_H = A.PH - HERO_H - CARD_H - 24
+local PANEL_Y = -128
+local PANEL_W = floor((A.CW - 2 * A.PAD - 12) / 2)
+local PANEL_H = 200
+local FRONT_Y = PANEL_Y - PANEL_H - 10
+local FRONT_H = A.CH + FRONT_Y - 16
+local FRONT_W = A.CW - 2 * A.PAD
+local INNER_W = FRONT_W - 24
 local VALUE_W = 220
 
-local hero = UI.Box(P, A.PW, HERO_H, C.eraBg, C.eraBorder)
-hero:SetPoint("TOPLEFT", P, "TOPLEFT", 0, 0)
+-- The head: the title and the description are the page's own (A.Page); the state line under them; the toggle and
+-- why it is grey top right.
+local hero = { title = P.title, text = P.desc }
 P.hero = hero
-hero.badge = UI.Badge(hero, 64, "shield", C.active, C.gold)
-hero.badge:SetPoint("TOPLEFT", hero, "TOPLEFT", 16, -18)
-hero.kicker = UI.Text(hero, 11, WM.COLOR)
-hero.kicker:SetPoint("TOPLEFT", hero, "TOPLEFT", 96, -18)
-hero.kicker:SetText(WM.KICKER)
-hero.title = UI.Text(hero, 22, C.goldPale, "title")
-hero.title:SetPoint("TOPLEFT", hero.kicker, "BOTTOMLEFT", 0, -4)
-UI.OneLine(hero.title, 400)
-hero.text = UI.Text(hero, 12, C.mid)
-hero.text:SetPoint("TOPLEFT", hero.title, "BOTTOMLEFT", 0, -6)
-hero.text:SetWidth(440)
-hero.text:SetHeight(46)
-hero.text:SetJustifyV("TOP")
-hero.text:SetText(WM.TEXT)
-hero.status = UI.Text(hero, 13, C.goldLight)
-hero.status:SetPoint("BOTTOMLEFT", hero, "BOTTOMLEFT", 96, 14)
-UI.OneLine(hero.status, 440)
-hero.toggle = UI.Button(hero, 200, 36, "Turn War Mode on", "gold", 14)
-hero.toggle:SetPoint("TOPRIGHT", hero, "TOPRIGHT", -18, -26)
+hero.status = UI.Text(P, 13, C.gold)
+hero.status:SetPoint("TOPLEFT", P, "TOPLEFT", A.PAD, -102)
+UI.OneLine(hero.status, 480)
+hero.toggle = UI.Button(P, 210, 30, "Turn War Mode on", "red", 12)
+hero.toggle:SetPoint("TOPRIGHT", P, "TOPRIGHT", -A.PAD, -20)
 hero.toggle:SetScript("OnClick", function()
     WM.Toggle()
 end)
-hero.reason = UI.Text(hero, 12, C.red, "body", "RIGHT")
-hero.reason:SetPoint("TOPRIGHT", hero.toggle, "BOTTOMRIGHT", 0, -8)
-hero.reason:SetWidth(260)
-hero.reason:SetHeight(32)
+hero.reason = UI.Text(P, 11, C.red, "body", "RIGHT")
+hero.reason:SetPoint("TOPRIGHT", hero.toggle, "BOTTOMRIGHT", -2, -8)
+hero.reason:SetWidth(340)
+hero.reason:SetHeight(30)
 hero.reason:SetJustifyV("TOP")
 P.toggle = hero.toggle
 
--- A card with a label and rows of label / value (`ys`: each row's offset from the top, else 22 px apart).
-local function card(w, h, title, rows, ys)
-    local c = UI.Box(P, w, h, C.card, C.border)
-    c.label = UI.Text(c, 11, C.dim)
+-- A tooltip panel with a gold heading and rows of a gold label and a white value (`ys`: each row's offset from the
+-- top, else 22 px apart).
+local function panel(w, h, title, rows, ys)
+    local c = UI.Box(P, w, h, C.panel, C.border, nil, "panel")
+    c.label = UI.Heading(c, title, 14)
     c.label:SetPoint("TOPLEFT", c, "TOPLEFT", 12, -12)
-    c.label:SetText(title)
     c.rows = {}
-    for i = 1, rows do
-        local y = ys and ys[i] or (-34 - (i - 1) * 22)
-        local l = UI.Text(c, 12, C.mid)
+    for i = 1, rows or 0 do
+        local y = ys and ys[i] or (-38 - (i - 1) * 22)
+        local l = UI.Label(c, nil, 12)
         l:SetPoint("TOPLEFT", c, "TOPLEFT", 12, y)
         UI.OneLine(l, w - VALUE_W - 30)
         local v = UI.Text(c, 12, C.text, "body", "RIGHT")
@@ -410,6 +403,7 @@ local function card(w, h, title, rows, ys)
     end
     return c
 end
+WM.Panel = panel
 
 local function setRow(row, label, value, color)
     UI.SetText(row.label, label or "")
@@ -417,46 +411,60 @@ local function setRow(row, label, value, color)
     UI.SetColor(row.value, color or C.text)
 end
 
-local bonus = card(CARD_W, CARD_H, "BONUSES IN THE OPEN WORLD", 5)
-bonus:SetPoint("TOPLEFT", hero, "BOTTOMLEFT", 0, -12)
+local bonus = panel(PANEL_W, PANEL_H, "Bonuses in the Open World", 5)
+bonus:SetPoint("TOPLEFT", P, "TOPLEFT", A.PAD, PANEL_Y)
 bonus.icon = bonus:CreateTexture(nil, "ARTWORK")
 bonus.icon:SetSize(16, 16)
 bonus.icon:Hide()
 P.bonus = bonus
 
--- the honor row, its bar, the Shards row, its bar, then the streak, the kills and the bounty
-local today = card(CARD_W, CARD_H, "TODAY", 5, { -32, -76, -110, -130, -150 })
-today:SetPoint("TOPRIGHT", hero, "BOTTOMRIGHT", 0, -12)
-today.honorBar = UI.Bar(today, CARD_W - 24, 5, WM.COLOR, C.deep)
-today.honorBar:SetPoint("TOPLEFT", today, "TOPLEFT", 12, -51)
-today.shardBar = UI.Bar(today, CARD_W - 24, 5, C.teal, C.deep)
-today.shardBar:SetPoint("TOPLEFT", today, "TOPLEFT", 12, -95)
+-- the honor row, its bar, the Shards row, its bar, then the streak, the kills and the bounty (the bars are the
+-- achievement progress bar, 14 tall with a 5 px rim, so the rows under them sit lower)
+local today = panel(PANEL_W, PANEL_H, "Today", 5, { -38, -82, -126, -146, -166 })
+today:SetPoint("TOPRIGHT", P, "TOPRIGHT", -A.PAD, PANEL_Y)
+today.honorBar = UI.Bar(today, PANEL_W - 34, 14, WM.COLOR)
+today.honorBar:SetPoint("TOPLEFT", today, "TOPLEFT", 17, -57)
+today.shardBar = UI.Bar(today, PANEL_W - 34, 14)
+today.shardBar:SetPoint("TOPLEFT", today, "TOPLEFT", 17, -101)
 P.today = today
 
-local fronts = UI.Box(P, A.PW, FRONT_H, C.card, C.border)
-fronts:SetPoint("TOPLEFT", bonus, "BOTTOMLEFT", 0, -12)
-fronts.label = UI.Text(fronts, 11, C.dim)
-fronts.label:SetPoint("TOPLEFT", fronts, "TOPLEFT", 12, -12)
-fronts.label:SetText("WAR FRONTS")
+-- The War Fronts: the Bleak Front, the next one and the Levelling Front, then every zone with objectives in a table.
+local fronts = panel(FRONT_W, FRONT_H, "War Fronts")
+fronts:SetPoint("TOPLEFT", P, "TOPLEFT", A.PAD, FRONT_Y)
 fronts.lines = {}
 for i = 1, 3 do
-    local l = UI.Text(fronts, 13, i == 1 and C.goldPale or C.mid)
-    l:SetPoint("TOPLEFT", fronts, "TOPLEFT", 12, -32 - (i - 1) * 20)
-    UI.OneLine(l, A.PW - 24)
+    local l = UI.Text(fronts, i == 1 and 13 or 12, i == 1 and C.text or C.dim)
+    l:SetPoint("TOPLEFT", fronts, "TOPLEFT", 12, -38 - (i - 1) * 20)
+    UI.OneLine(l, INNER_W)
     fronts.lines[i] = l
 end
+-- zone, front, outposts held, levels, state
+WM.ZONE_COLS = { { "Zone", 240 }, { "Front", 140 }, { "Outposts", 150 }, { "Levels", 124 }, { "State", 100 } }
+fronts.headers = {}
 fronts.zones = {}
-local ZONE_COLS = { 0, 260, 400, 560, 680 }
+local colX = {}
+do
+    local x = 12
+    for k, col in ipairs(WM.ZONE_COLS) do
+        colX[k] = x
+        local h = UI.ColumnHeader(fronts, col[2], col[1])
+        h:SetPoint("TOPLEFT", fronts, "TOPLEFT", x, -104)
+        fronts.headers[k] = h
+        x = x + col[2]
+    end
+end
 for i = 1, 4 do
     local row = {}
-    for k, x in ipairs(ZONE_COLS) do
-        local t = UI.Text(fronts, 11, k == 1 and C.text or C.mid)
-        t:SetPoint("TOPLEFT", fronts, "TOPLEFT", 12 + x, -100 - (i - 1) * 18)
-        UI.OneLine(t, (ZONE_COLS[k + 1] or (A.PW - 24)) - x - 8)
+    for k, col in ipairs(WM.ZONE_COLS) do
+        local t = UI.Text(fronts, k == 1 and 12 or 11, k == 1 and C.text or C.dim)
+        t:SetPoint("TOPLEFT", fronts, "TOPLEFT", colX[k] + 8, -136 - (i - 1) * 22)
+        UI.OneLine(t, col[2] - 12)
         row[k] = t
     end
     fronts.zones[i] = row
 end
+fronts.none = UI.Text(fronts, 11, C.dim)
+fronts.none:SetPoint("TOPLEFT", fronts, "TOPLEFT", 20, -136)
 P.fronts = fronts
 
 local function zoneLine(label, zoneId, state, sec, recvAt)
@@ -473,6 +481,16 @@ local function zoneLine(label, zoneId, state, sec, recvAt)
     return txt
 end
 
+local function showZoneTable(on)
+    for _, h in ipairs(fronts.headers) do
+        if on then
+            h:Show()
+        else
+            h:Hide()
+        end
+    end
+end
+
 function P:RefreshFronts()
     for _, l in ipairs(fronts.lines) do
         l:SetText("")
@@ -482,15 +500,19 @@ function P:RefreshFronts()
             t:SetText("")
         end
     end
+    fronts.none:SetText("")
     if not WM.ObjectivesLive() then
         fronts.lines[1]:SetText("World PvP objectives are not open on this realm right now.")
+        showZoneTable(false)
         return
     end
     local m = S.wpMap
     if not m then
         fronts.lines[1]:SetText(Comm.ready and "Waiting for the realm..." or "Not connected to the realm.")
+        showZoneTable(false)
         return
     end
+    showZoneTable(true)
     UI.SetText(fronts.lines[1], zoneLine("Bleak Front", m.frontZone, m.frontState, m.secondsLeft, m.recvAt))
     if m.nextZone and m.nextZone > 0 then
         local starts = ns.WarLeft(m.nextStartsSec, m.recvAt) or 0
@@ -511,6 +533,9 @@ function P:RefreshFronts()
         end
         return a.zoneId < b.zoneId
     end)
+    if #list == 0 then
+        fronts.none:SetText("No zone has outposts right now.")
+    end
     for i, row in ipairs(fronts.zones) do
         local z = list[i]
         if z then
@@ -525,17 +550,13 @@ function P:RefreshFronts()
             end
             UI.SetText(row[4], band)
             UI.SetText(row[5], WM.ZONE_STATE[z.state] or "")
+            UI.SetColor(row[5], z.state == 1 and C.teal or C.dim)
         end
     end
 end
 
-function P:Refresh()
-    local wm = WM.State()
-    local code, why = WM.Block()
-    -- the hero: state, the hunt, the button and why it is grey
-    hero.badge.ring:SetVertexColor(UI.Rgb(wm and wm.on and WM.COLOR or C.gold))
-    hero.badge.glyph:SetVertexColor(UI.Rgb(wm and wm.on and WM.COLOR or C.goldLight))
-    UI.SetColor(hero.title, wm and wm.on and WM.COLOR or C.goldPale)
+-- The head: the state, the hunt, the button and why it is grey.
+function P:RefreshHead(wm, code, why)
     if not WM.Live() then
         hero.title:SetText("War Mode is not available")
         UI.SetText(hero.status, ns.ErrorText({ code = "wm_off" }))
@@ -543,6 +564,7 @@ function P:Refresh()
         hero.toggle:SetLabel("Turn War Mode on")
         hero.toggle:SetActive(false)
         hero.reason:SetText("")
+        return
     elseif not wm then
         hero.title:SetText("War Mode")
         UI.SetText(hero.status, why or "Waiting for the realm...")
@@ -550,98 +572,109 @@ function P:Refresh()
         hero.toggle:SetLabel("Turn War Mode on")
         hero.toggle:SetActive(false)
         hero.reason:SetText("")
-    else
-        hero.title:SetText(wm.on and "War Mode is on" or "War Mode is off")
-        local status, color = "", C.goldLight
-        if wm.wantedState > 0 then
-            status = (WM.WANTED[wm.wantedState] or "Wanted") .. "  -  " .. WM.Clock(WM.WantedLeft(wm)) .. " left"
-            if wm.bountyHonor > 0 then
-                status = status .. "  -  bounty " .. U.Commas(wm.bountyHonor) .. " honor"
-            end
-            color = C.red
-        elseif WM.CooldownLeft(wm) >= 1 then
-            status = "You can change War Mode again in " .. WM.Clock(WM.CooldownLeft(wm))
-            color = C.mid
-        elseif wm.on then
-            status = "Flagged for PvP. Streak " .. wm.streak .. (wm.streak == 1 and " kill" or " kills")
-        else
-            status = "Change it at an inn or in a city."
-            color = C.mid
-        end
-        UI.SetText(hero.status, status)
-        UI.SetColor(hero.status, color)
-        hero.toggle:SetLabel(wm.on and "Turn War Mode off" or "Turn War Mode on")
-        hero.toggle:SetStyle(wm.on and "dark" or "gold")
-        local busy = WM.Pending()
-        hero.toggle:SetActive(not code and not why and not busy)
-        if busy then
-            hero.reason:SetText("Waiting for the realm...")
-            UI.SetColor(hero.reason, C.mid)
-        else
-            local last = WM.lastError
-            local err = last and GetTime() - (last.warAt or 0) < 30 and last.shown or nil
-            UI.SetText(hero.reason, why or err or "")
-            UI.SetColor(hero.reason, C.red)
-        end
+        return
     end
-    -- the bonuses
+    hero.title:SetText(wm.on and "War Mode is on" or "War Mode is off")
+    local status, color = "", C.gold
+    if wm.wantedState > 0 then
+        status = (WM.WANTED[wm.wantedState] or "Wanted") .. "  -  " .. WM.Clock(WM.WantedLeft(wm)) .. " left"
+        if wm.bountyHonor > 0 then
+            status = status .. "  -  bounty " .. U.Commas(wm.bountyHonor) .. " honor"
+        end
+        color = C.red
+    elseif WM.CooldownLeft(wm) >= 1 then
+        status = "You can change War Mode again in " .. WM.Clock(WM.CooldownLeft(wm))
+        color = C.text
+    elseif wm.on then
+        status = "Flagged for PvP. Streak " .. wm.streak .. (wm.streak == 1 and " kill" or " kills")
+    else
+        status = "Change it at an inn or in a city."
+        color = C.text
+    end
+    UI.SetText(hero.status, status)
+    UI.SetColor(hero.status, color)
+    hero.toggle:SetLabel(wm.on and "Turn War Mode off" or "Turn War Mode on")
+    local busy = WM.Pending()
+    hero.toggle:SetActive(not code and not why and not busy)
+    if busy then
+        hero.reason:SetText("Waiting for the realm...")
+        UI.SetColor(hero.reason, C.dim)
+    else
+        local last = WM.lastError
+        local err = last and GetTime() - (last.warAt or 0) < 30 and last.shown or nil
+        UI.SetText(hero.reason, why or err or "")
+        UI.SetColor(hero.reason, C.red)
+    end
+end
+
+function P:RefreshBonus(wm)
     local rows = bonus.rows
     for _, row in ipairs(rows) do
         setRow(row, "", "")
     end
     bonus.icon:Hide()
-    if wm then
-        local base = WM.BonusText(wm)
-        setRow(rows[1], "War Mode", base ~= "" and base or "none", wm.on and C.goldLight or C.mute)
-        local mine = WM.MyTeam()
-        if wm.underdogTeam and wm.underdogPct > 0 then
-            local you = mine and wm.underdogTeam == mine
-            setRow(rows[2], "Underdog", "+" .. wm.underdogPct .. "% for the " .. WM.TeamName(wm.underdogTeam)
-                .. (you and " (you)" or ""), you and C.teal or C.mid)
-            WM.SetIcon(bonus.icon, WM.TEAM[wm.underdogTeam].icon)
-            bonus.icon:ClearAllPoints()
-            bonus.icon:SetPoint("RIGHT", rows[2].value, "RIGHT", -floor(rows[2].value:GetStringWidth() + 6), 0)
-            bonus.icon:Show()
-        else
-            setRow(rows[2], "Underdog", "none", C.mute)
-        end
-        setRow(rows[3], "War Mode players", wm.wmAlliance .. " Alliance  -  " .. wm.wmHorde .. " Horde")
-        local z = WM.ObjectivesLive() and S.wpZone
-        if z and (z.dominionStacks or 0) > 0 and z.dominionTeam then
-            setRow(rows[4], "Dominion here", "x" .. z.dominionStacks .. "  " .. ns.WarZoneName(z.zoneId),
-                WM.TeamColor(z.dominionTeam))
-        elseif WM.ObjectivesLive() then
-            setRow(rows[4], "Dominion here", "none", C.mute)
-        end
-        local last = S.warEvent
-        if last and last.kind == "R" then
-            setRow(rows[5], "Last reward", WM.RewardText(last), C.goldLight)
-        end
-    else
+    if not wm then
         setRow(rows[1], "War Mode", "-", C.mute)
+        return
     end
-    -- today
-    local t = today.rows
-    if wm then
-        setRow(t[1], "Bonus honor", U.Commas(wm.todayBonusHonor) .. " / " .. U.Commas(wm.bonusHonorCap))
-        today.honorBar:SetProgress(wm.bonusHonorCap > 0 and wm.todayBonusHonor / wm.bonusHonorCap or 0)
-        setRow(t[2], "War Mode Shards", U.Commas(wm.todayShards) .. " / " .. U.Commas(wm.shardsCap))
-        today.shardBar:SetProgress(wm.shardsCap > 0 and wm.todayShards / wm.shardsCap or 0)
-        setRow(t[3], "Streak", wm.streak .. "  (best " .. wm.bestStreak .. ")")
-        setRow(t[4], "Kills / deaths", U.Commas(wm.kills) .. " / " .. U.Commas(wm.deaths))
-        if wm.bountyHonor > 0 then
-            setRow(t[5], "Bounty on you", U.Commas(wm.bountyHonor) .. " honor", C.red)
-        else
-            setRow(t[5], "", "")
-        end
+    local base = WM.BonusText(wm)
+    setRow(rows[1], "War Mode", base ~= "" and base or "none", wm.on and C.gold or C.mute)
+    local mine = WM.MyTeam()
+    if wm.underdogTeam and wm.underdogPct > 0 then
+        local you = mine and wm.underdogTeam == mine
+        setRow(rows[2], "Underdog", "+" .. wm.underdogPct .. "% for the " .. WM.TeamName(wm.underdogTeam)
+            .. (you and " (you)" or ""), you and C.teal or C.text)
+        WM.SetIcon(bonus.icon, WM.TEAM[wm.underdogTeam].icon)
+        bonus.icon:ClearAllPoints()
+        bonus.icon:SetPoint("RIGHT", rows[2].value, "RIGHT", -floor(rows[2].value:GetStringWidth() + 6), 0)
+        bonus.icon:Show()
     else
+        setRow(rows[2], "Underdog", "none", C.mute)
+    end
+    setRow(rows[3], "War Mode Players", wm.wmAlliance .. " Alliance  -  " .. wm.wmHorde .. " Horde")
+    local z = WM.ObjectivesLive() and S.wpZone
+    if z and (z.dominionStacks or 0) > 0 and z.dominionTeam then
+        setRow(rows[4], "Dominion Here", "x" .. z.dominionStacks .. "  " .. ns.WarZoneName(z.zoneId),
+            WM.TeamColor(z.dominionTeam))
+    elseif WM.ObjectivesLive() then
+        setRow(rows[4], "Dominion Here", "none", C.mute)
+    end
+    local last = S.warEvent
+    if last and last.kind == "R" then
+        setRow(rows[5], "Last Reward", WM.RewardText(last), C.gold)
+    end
+end
+
+function P:RefreshToday(wm)
+    local t = today.rows
+    if not wm then
         for _, row in ipairs(t) do
             setRow(row, "", "")
         end
-        setRow(t[1], "Bonus honor", "-", C.mute)
+        setRow(t[1], "Bonus Honor", "-", C.mute)
         today.honorBar:SetProgress(0)
         today.shardBar:SetProgress(0)
+        return
     end
+    setRow(t[1], "Bonus Honor", U.Commas(wm.todayBonusHonor) .. " / " .. U.Commas(wm.bonusHonorCap))
+    today.honorBar:SetProgress(wm.bonusHonorCap > 0 and wm.todayBonusHonor / wm.bonusHonorCap or 0)
+    setRow(t[2], "War Mode Shards", U.Commas(wm.todayShards) .. " / " .. U.Commas(wm.shardsCap))
+    today.shardBar:SetProgress(wm.shardsCap > 0 and wm.todayShards / wm.shardsCap or 0)
+    setRow(t[3], "Streak", wm.streak .. "  (best " .. wm.bestStreak .. ")")
+    setRow(t[4], "Kills / Deaths", U.Commas(wm.kills) .. " / " .. U.Commas(wm.deaths))
+    if wm.bountyHonor > 0 then
+        setRow(t[5], "Bounty on You", U.Commas(wm.bountyHonor) .. " honor", C.red)
+    else
+        setRow(t[5], "", "")
+    end
+end
+
+function P:Refresh()
+    local wm = WM.State()
+    local code, why = WM.Block()
+    P:RefreshHead(wm, code, why)
+    P:RefreshBonus(wm)
+    P:RefreshToday(wm)
     P:RefreshFronts()
 end
 

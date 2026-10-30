@@ -24,6 +24,11 @@ local WINDOW_MAX_WIDTH, WINDOW_MAX_HEIGHT = 1400, 1000
 local SCALE_STEPS = { 0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2 }
 
 local ADDICATUI_ICON = { icon = "Interface\\AddOns\\AddicatUI_Art\\Textures\\UI\\INV_Misc_Head_Dragon_01", crop = true }
+
+-- Never turned off from this window: AddicatUI runs it, and Bleakhold is the realm's own addon, built into the game.
+-- What they need to load stays on with them (AlwaysOn): AddicatUI.toc requires AddicatUI_Art, and with the art off
+-- AddicatUI, and so this window, would not load at the next login.
+local ALWAYS_ON = { AddicatUI = true, Bleakhold = true }
 local FALLBACK_ICON = { icon = "Interface\\Icons\\INV_Box_01" }
 
 -- ============================================================================
@@ -521,10 +526,51 @@ local function ApplyFilter()
     end
 end
 
-local function TakeSnapshot()
-    wipe(snapshot)
+-- The always-on addons and every addon they require (GetAddOnDependencies, followed down), by name. Read from the
+-- client each time: a handful of calls.
+local function AlwaysOn()
+    local set = {}
+    local function add(name)
+        if type(name) ~= "string" or set[name] then return end
+        set[name] = true
+        if GetAddOnDependencies then
+            for _, dep in ipairs({ GetAddOnDependencies(name) }) do add(dep) end
+        end
+    end
+    for name in pairs(ALWAYS_ON) do add(name) end
+    return set
+end
+
+AddonManagerModule.AlwaysOn = AlwaysOn
+
+-- The list shows the always-on addons as on; one an older Disable All (or the stock list) turned off is put back.
+local function KeepAlwaysOn()
+    for name in pairs(AlwaysOn()) do
+        local _, _, _, enabled, _, reason = GetAddOnInfo(name)
+        if not enabled and reason ~= "MISSING" then EnableAddOn(name) end
+    end
+end
+
+AddonManagerModule.KeepAlwaysOn = KeepAlwaysOn
+
+-- Disable All: every addon but the always-on ones. The settings addon is part of AddicatUI, not one of the addons
+-- this button is for ruling out.
+function AddonManagerModule.DisableAll()
+    local keep = AlwaysOn()
     for i = 1, GetNumAddOns() do
-        if GetAddOnInfo(i) == "AddicatUI" then
+        local n = GetAddOnInfo(i)
+        if not keep[n] and n ~= "AddicatUI_Options" then
+            DisableAddOn(i)
+        end
+    end
+end
+
+local function TakeSnapshot()
+    KeepAlwaysOn()
+    wipe(snapshot)
+    local keep = AlwaysOn()
+    for i = 1, GetNumAddOns() do
+        if keep[GetAddOnInfo(i)] then
             snapshot[i] = true
         else
             snapshot[i] = select(4, GetAddOnInfo(i)) and true or false
@@ -536,8 +582,9 @@ end
 
 local function RestoreSnapshot()
     if applied then return end
+    local keep = AlwaysOn()
     for i, wasEnabled in ipairs(snapshot) do
-        if GetAddOnInfo(i) ~= "AddicatUI" then
+        if not keep[GetAddOnInfo(i)] then
             if wasEnabled then EnableAddOn(i) else DisableAddOn(i) end
         end
     end
@@ -656,11 +703,11 @@ local function FillRow(row, data)
         end
     end
 
-    if name == "AddicatUI" then
+    if AlwaysOn()[name] then
         check:Disable()
         check:SetChecked(true)
         row.Text:SetTextColor(1, 0.82, 0)
-        row.Status:SetText(L["Protected"])
+        row.Status:SetText(name == "Bleakhold" and L["Built in"] or L["Protected"])
         row.Status:SetTextColor(0.5, 0.5, 0.5)
     elseif not enabled then
         check:Enable()
@@ -848,13 +895,7 @@ local function BuildWindow()
     local btnDisableAll = FUI.CreateButton(AddonListFrame, L["Disable All"], 110, 22)
     btnDisableAll:SetPoint("LEFT", btnEnableAll, "RIGHT", 5, 0)
     btnDisableAll:SetScript("OnClick", function()
-        -- The settings addon is part of AddicatUI, not one of the addons this button is for ruling out.
-        for i = 1, GetNumAddOns() do
-            local n = GetAddOnInfo(i)
-            if n ~= "AddicatUI" and n ~= "AddicatUI_Options" then
-                DisableAddOn(i)
-            end
-        end
+        AddonManagerModule.DisableAll()
         UpdateAddonList()
     end)
 

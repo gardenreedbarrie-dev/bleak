@@ -39,6 +39,10 @@ function addon.core:OnInitialize()
         defaultProfile = nil
     end
 
+    -- What the saved profiles hold before AceDB fills the defaults in: the migrations tell a stored value from a
+    -- default by it (core/api.lua)
+    if addon.NoteStoredProfiles then addon.NoteStoredProfiles(sv) end
+
     -- Replace the temporary addon.db with the real AceDB
     addon.db = LibStub("AceDB-3.0"):New("AddicatUIDB", addon.defaults, defaultProfile);
 
@@ -153,7 +157,13 @@ function addon:ToggleOptionsUI(msg)
 end
 
 -- Callback function that refreshes all modules when configuration changes
-function addon:RefreshConfig()
+function addon:RefreshConfig(event, db, sourceKey)
+    -- Copy From (AceDB fires OnProfileCopied with the db and the source profile's key): the current profile now holds
+    -- the source's saved values, so the migrations read the source's note of what it stored (core/api.lua)
+    if event == "OnProfileCopied" and addon.NoteCopiedProfile and type(db) == "table"
+        and type(db.GetCurrentProfile) == "function" then
+        addon.NoteCopiedProfile(db:GetCurrentProfile(), sourceKey)
+    end
     -- Also runs on profile switch: the newly-activated profile may be older than the current schema.
     addon:ApplyDatabaseMigrations()
 

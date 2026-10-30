@@ -221,12 +221,9 @@ test("royale style: every numeral, title, DROP!, icon, ring and rotatable size i
     for _, size in ipairs({ 12, 14, 16, 18, 22, 24, 26, 28, 40, 44 }) do
         RS.Icon(root, "storm", size)
     end
-    RS.Art(root, "CountRing", 280)
     RS.Art(root, "CountRingSmall", 72)
-    for _, size in ipairs({ 96, 200, 240, 400 }) do
-        RS.Art(root, "Shock", size)
-    end
     RS.Art(root, "ShockSmall", 60)
+    RS.Art(root, "ShockSmall", 72)
     RS.Art(root, "Gem", 12, 12, nil, ns.RoyaleArt.gem.socket)
     RS.Art(root, "Parachute", 44, 44, nil, ns.RoyaleArt.parachute.pack)
     RS.Rotatable(root, "Notch", 22):SetAngle(1.2)
@@ -525,8 +522,8 @@ test("royale style: no Royale texture is set before its root frame shows", funct
     H.eq(icon:GetTexture(), ns.RoyaleArt.icons.file)
     -- once shown, later textures are set at once (also while it is hidden again)
     root:Hide()
-    local late = RS.Art(inner, "Shock", 96)
-    H.eq(late:GetTexture(), ns.RoyaleArt.files.Shock)
+    local late = RS.Art(inner, "ShockSmall", 72)
+    H.eq(late:GetTexture(), ns.RoyaleArt.files.ShockSmall)
     -- a visible root sets them at once
     local shown = newRoot(M, true)
     H.eq(RS.Art(shown, "Gem", 12):GetTexture(), ns.RoyaleArt.files.Gem)

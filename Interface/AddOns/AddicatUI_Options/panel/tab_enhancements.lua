@@ -61,7 +61,7 @@ local function BuildEnhancementsTab(scroll)
             classic = L["Classic (DragonUI)"],
         },
         getFunc = function()
-            return addon.GetUITheme and addon.GetUITheme() or "bleakhold"
+            return addon.GetUITheme and addon.GetUITheme() or "classic"
         end,
         setFunc = function(val)
             if addon.SetUITheme then

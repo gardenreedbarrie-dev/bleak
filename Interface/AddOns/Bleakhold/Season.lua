@@ -1,78 +1,107 @@
--- Bleakhold: Season window. Server War Effort (progress bar of 20 segments, parts, your part and rank,
--- hand-in), the season rewards track and the seasons timeline. The hand-in is an intent (WEHANDIN):
--- the server counts the tokens and the points.
+-- Bleakhold: Season window. Server War Effort (a bar of 20 segments, the goals, your part and rank, hand-in), the
+-- season rewards track and the seasons timeline. The hand-in is an intent (WEHANDIN): the server counts the tokens
+-- and the points. Stock 3.3.5a look: tooltip panels, the segments as small UI-StatusBar bars, the goals and the
+-- rewards track as the achievement progress bar, rewards as ring portraits with the check when earned, the seasons
+-- as radio buttons.
 local ADDON, ns = ...
 local U, UI, Comm = ns.U, ns.UI, ns.Comm
 local C = UI.C
 local S = ns.S
 
-local floor, max, min = math.floor, math.max, math.min
+local floor, max = math.floor, math.max
 
 local SE = {}
 ns.Season = SE
 
 SE.W, SE.H = 900, 600
 
-local win = UI.Window("BleakholdSeasonFrame", SE.W, SE.H, "SEASON", "banner")
+local win = UI.Window("BleakholdSeasonFrame", SE.W, SE.H, "Season", "banner")
 SE.frame = win
 
-local CW = SE.W - 2 - 40
+local WCW, WCH = UI.ContentSize(SE.W, SE.H)
+local CW = WCW - 16
 local content = CreateFrame("Frame", nil, win.content)
-content:SetPoint("TOPLEFT", win.content, "TOPLEFT", 20, -16)
-content:SetSize(CW, SE.H - 4 - 46 - 32)
+content:SetPoint("TOPLEFT", win.content, "TOPLEFT", 8, -6)
+content:SetSize(CW, WCH - 14)
 
 ------------------------------------------------------------------------------------------------------
--- War effort
+-- War effort: the old window's page anatomy in a tooltip panel (a gold label and title, a white description,
+-- the share as a gold stat label with its white value on the right), the bar of 20 segments, the three goals
+-- as achievement progress bars, and your part
 ------------------------------------------------------------------------------------------------------
-local we = UI.Box(content, CW, 286, C.eraBg, C.eraBorder)
+local PAD = 16
+local we = UI.Box(content, CW, 290, C.panel, C.border, nil, "panel")
 we:SetPoint("TOPLEFT", content, "TOPLEFT", 0, 0)
-we.label = UI.Text(we, 11, C.dim)
-we.label:SetPoint("TOPLEFT", we, "TOPLEFT", 18, -16)
-we.label:SetText("SERVER WAR EFFORT")
-we.title = UI.Text(we, 24, C.goldPale, "title")
+we.label = UI.Label(we, "Server War Effort")
+we.label:SetPoint("TOPLEFT", we, "TOPLEFT", PAD + 4, -16)
+we.title = UI.Text(we, 22, C.gold)
 we.title:SetPoint("TOPLEFT", we.label, "BOTTOMLEFT", 0, -4)
-we.text = UI.Text(we, 12, C.mid)
+UI.OneLine(we.title, CW - 260)
+we.text = UI.Para(we, 12, C.text, CW - 260)
 we.text:SetPoint("TOPLEFT", we.title, "BOTTOMLEFT", 0, -4)
-we.text:SetWidth(CW - 220)
-we.pct = UI.Text(we, 32, C.goldLight, "title", "RIGHT")
-we.pct:SetPoint("TOPRIGHT", we, "TOPRIGHT", -18, -18)
-we.helpers = UI.Text(we, 12, C.dim, "body", "RIGHT")
+we.pctLabel = UI.Label(we, "War Effort")
+we.pctLabel:SetJustifyH("RIGHT")
+we.pctLabel:SetPoint("TOPRIGHT", we, "TOPRIGHT", -PAD - 4, -16)
+we.pct = UI.Text(we, 24, C.text, "body", "RIGHT")
+we.pct:SetFont(UI.FONT_BODY, 24, "OUTLINE")
+we.pct:SetPoint("TOPRIGHT", we.pctLabel, "BOTTOMRIGHT", 0, -4)
+we.helpers = UI.Text(we, 11, C.dim, "body", "RIGHT")
 we.helpers:SetPoint("TOPRIGHT", we.pct, "BOTTOMRIGHT", 0, -4)
 
-local SEGS = 20
-local segW = (CW - 36 - (SEGS - 1) * 4) / SEGS
+-- One segment of the war effort: a small status bar (TargetingFrame\UI-StatusBar in the cast bar's gold on black,
+-- in the old rows' 1 px edge), full, partly filled or empty.
+local function segment(parent, w, h)
+    local s = CreateFrame("StatusBar", nil, parent)
+    s:SetSize(w, h)
+    s:SetStatusBarTexture(UI.STOCK.statusBar)
+    s:SetStatusBarColor(UI.Rgb(UI.BAR_GOLD))
+    s:SetMinMaxValues(0, 1)
+    s:SetValue(0)
+    s.bg = s:CreateTexture(nil, "BACKGROUND")
+    s.bg:SetTexture(0, 0, 0, 0.6)
+    s.bg:SetAllPoints(s)
+    s.edge = CreateFrame("Frame", nil, s)
+    s.edge:SetPoint("TOPLEFT", s, "TOPLEFT", -1, 1)
+    s.edge:SetPoint("BOTTOMRIGHT", s, "BOTTOMRIGHT", 1, -1)
+    s.edge:SetBackdrop({ edgeFile = UI.STOCK.white, edgeSize = 1 })
+    s.edge:SetBackdropBorderColor(UI.Rgb(UI.ROW_EDGE))
+    return s
+end
+
+local SEGS, SEG_GAP = 20, 5
+local segW = floor((CW - 2 * PAD - 8 - (SEGS - 1) * SEG_GAP) / SEGS)
+local segX = floor((CW - (SEGS * segW + (SEGS - 1) * SEG_GAP)) / 2)
 we.segments = {}
 for i = 1, SEGS do
-    local s = UI.Box(we, segW, 18, C.rail, C.border)
-    s:SetPoint("TOPLEFT", we, "TOPLEFT", 18 + (i - 1) * (segW + 4), -96)
+    local s = segment(we, segW, 14)
+    s:SetPoint("TOPLEFT", we, "TOPLEFT", segX + (i - 1) * (segW + SEG_GAP), -100)
     we.segments[i] = s
 end
 
-local partW = floor((CW - 36 - 24) / 3)
+local partW = floor((CW - 2 * PAD - 8 - 24) / 3)
 we.parts = {}
 for i = 1, 3 do
-    local p = UI.Box(we, partW, 62, C.panel, C.border)
-    p:SetPoint("TOPLEFT", we, "TOPLEFT", 18 + (i - 1) * (partW + 12), -126)
-    p.ring = UI.Ring(p, 42, 5)
-    p.ring:SetPoint("LEFT", p, "LEFT", 10, 0)
-    p.name = UI.Text(p, 13, C.text)
-    p.name:SetPoint("TOPLEFT", p.ring, "TOPRIGHT", 10, -6)
-    UI.OneLine(p.name, partW - 70)
-    p.value = UI.Text(p, 12, C.dim)
-    p.value:SetPoint("TOPLEFT", p.name, "BOTTOMLEFT", 0, -4)
+    local p = UI.Box(we, partW, 60, C.card, C.border, nil, "edge")
+    p:SetPoint("TOPLEFT", we, "TOPLEFT", PAD + 4 + (i - 1) * (partW + 12), -130)
+    p.name = UI.Text(p, 12, C.gold)
+    p.name:SetPoint("TOPLEFT", p, "TOPLEFT", 12, -10)
+    UI.OneLine(p.name, partW - 24)
+    -- the goal as the achievement frame's progress bar, its share inside ("80%")
+    p.bar = UI.Bar(p, partW - 34, 14)
+    p.bar:SetPoint("TOPLEFT", p, "TOPLEFT", 17, -34)
     we.parts[i] = p
 end
 
-local mine = UI.Box(we, CW - 36, 62, C.panel, C.border)
-mine:SetPoint("TOPLEFT", we, "TOPLEFT", 18, -202)
-mine.badge = UI.Badge(mine, 40, "shield", C.active, C.gold)
-mine.badge:SetPoint("LEFT", mine, "LEFT", 12, 0)
+local mine = UI.Box(we, CW - 2 * PAD - 8, 64, C.card, C.border, nil, "edge")
+mine:SetPoint("TOPLEFT", we, "TOPLEFT", PAD + 4, -204)
+mine.badge = UI.Badge(mine, 44, "shield", C.active, C.gold)
+mine.badge:SetPoint("LEFT", mine, "LEFT", 10, 0)
 mine.points = UI.Text(mine, 14, C.text)
-mine.points:SetPoint("TOPLEFT", mine.badge, "TOPRIGHT", 12, -4)
+mine.points:SetPoint("TOPLEFT", mine, "TOPLEFT", 66, -14)
 mine.rank = UI.Text(mine, 12, C.dim)
-mine.rank:SetPoint("TOPLEFT", mine.points, "BOTTOMLEFT", 0, -4)
-mine.handin = UI.Button(mine, 190, 34, "Hand in spare tokens", "gold", 13)
-mine.handin:SetPoint("RIGHT", mine, "RIGHT", -12, 0)
+mine.rank:SetPoint("TOPLEFT", mine.points, "BOTTOMLEFT", 0, -5)
+mine.handin = UI.Button(mine, 170, 22, "Hand in spare tokens", "gold", 12)
+mine.handin:SetPoint("RIGHT", mine, "RIGHT", -14, 0)
 mine.handin:SetScript("OnClick", function()
     local s = S.season
     local text = "Hand in your spare war effort tokens?"
@@ -89,62 +118,66 @@ SE.we = we
 ------------------------------------------------------------------------------------------------------
 -- Rewards track and timeline
 ------------------------------------------------------------------------------------------------------
-local TL_W = 360
-local trackW = CW - TL_W - 16
-local track = UI.Box(content, trackW, 210, C.card, C.border)
-track:SetPoint("TOPLEFT", we, "BOTTOMLEFT", 0, -14)
-track.title = UI.Text(track, 16, C.text, "title")
-track.title:SetPoint("TOPLEFT", track, "TOPLEFT", 16, -14)
-track.title:SetText("Season rewards")
+local TL_W = 316
+local trackW = CW - TL_W - 12
+local LOWER_H = WCH - 14 - 290 - 10
+local track = UI.Box(content, trackW, LOWER_H, C.panel, C.border, nil, "panel")
+track:SetPoint("TOPLEFT", we, "BOTTOMLEFT", 0, -10)
+track.title = UI.Heading(track, "Season Rewards")
+track.title:SetPoint("TOPLEFT", track, "TOPLEFT", PAD + 4, -16)
+-- each reward in a column of its own (its text never runs into the next); the achievement progress bar runs from
+-- the first ring to the last and fills up to the last reward earned
 local NODES = 4
-local lineL, lineR = 16 + 23, trackW - 16 - 23
-track.line = UI.Solid(track, C.track, "BORDER")
-track.line:SetPoint("TOPLEFT", track, "TOPLEFT", lineL, -71)
-track.line:SetSize(lineR - lineL, 4)
-track.fill = UI.Solid(track, C.teal, "ARTWORK")
-track.fill:SetPoint("TOPLEFT", track, "TOPLEFT", lineL, -71)
-track.fill:SetSize(1, 4)
+local colW = floor((trackW - 2 * PAD) / NODES)
+local function nodeX(i)
+    return PAD + colW * (i - 0.5)
+end
+local RING, RING_Y = 52, -50
+track.bar = UI.Bar(track, nodeX(NODES) - nodeX(1), 14)
+track.bar:SetPoint("TOPLEFT", track, "TOPLEFT", nodeX(1), RING_Y - RING / 2 + 7)
+track.fill = track.bar
 track.nodes = {}
 for i = 1, NODES do
-    local x = lineL + (lineR - lineL) * (i - 1) / (NODES - 1)
     local n = CreateFrame("Frame", nil, track)
-    n:SetSize(150, 140)
-    n:SetPoint("TOP", track, "TOPLEFT", x, -50)
-    n.dot = UI.Badge(n, 46, "check", C.panel, C.eraBorder)
+    n:SetSize(colW, LOWER_H + RING_Y - 8)
+    n:SetPoint("TOP", track, "TOPLEFT", nodeX(i), RING_Y)
+    n:SetFrameLevel(track.bar:GetFrameLevel() + 3)
+    n.dot = UI.Badge(n, RING, "check", C.panel, C.gold)
     n.dot:SetPoint("TOP", n, "TOP", 0, 0)
+    -- earned: the stock check on the ring; not yet: the picture greyed
+    n.check = UI.Check(UI.Marks(n.dot), 20)
+    n.check:SetPoint("TOPRIGHT", n.dot, "TOPRIGHT", 2, 2)
+    n.check:Hide()
     n.name = UI.Text(n, 13, C.text, "body", "CENTER")
     n.name:SetPoint("TOP", n.dot, "BOTTOM", 0, -6)
+    UI.OneLine(n.name, colW - 6)
     n.need = UI.Text(n, 11, C.dim, "body", "CENTER")
-    n.need:SetPoint("TOP", n.name, "BOTTOM", 0, -4)
-    n.need:SetWidth(140)
+    n.need:SetPoint("TOP", n.name, "BOTTOM", 0, -3)
+    n.need:SetWidth(colW - 8)
     n.state = UI.Text(n, 11, C.dim, "body", "CENTER")
     n.state:SetPoint("TOP", n.need, "BOTTOM", 0, -4)
     track.nodes[i] = n
 end
 SE.track = track
 
-local tl = UI.Box(content, TL_W, 210, C.card, C.border)
-tl:SetPoint("TOPRIGHT", we, "BOTTOMRIGHT", 0, -14)
-tl.title = UI.Text(tl, 16, C.text, "title")
-tl.title:SetPoint("TOPLEFT", tl, "TOPLEFT", 16, -14)
-tl.title:SetText("The seasons")
+local tl = UI.Box(content, TL_W, LOWER_H, C.panel, C.border, nil, "panel")
+tl:SetPoint("TOPRIGHT", we, "BOTTOMRIGHT", 0, -10)
+tl.title = UI.Heading(tl, "The Seasons")
+tl.title:SetPoint("TOPLEFT", tl, "TOPLEFT", PAD + 4, -16)
 tl.rows = {}
 for i = 1, 5 do
     local r = CreateFrame("Frame", nil, tl)
-    r:SetSize(TL_W - 32, 34)
-    r:SetPoint("TOPLEFT", tl, "TOPLEFT", 16, -42 - (i - 1) * 34)
-    r.dot = UI.Disc(r, 12, C.gold)
-    r.dot:SetPoint("TOPLEFT", r, "TOPLEFT", 0, -3)
-    r.ring = r:CreateTexture(nil, "OVERLAY")
-    r.ring:SetTexture(UI.ART .. "Ring")
-    r.ring:SetSize(12, 12)
-    r.ring:SetPoint("CENTER", r.dot, "CENTER")
-    r.ring:SetVertexColor(UI.Rgb(C.eraBorder))
+    r:SetSize(TL_W - 2 * PAD - 8, 34)
+    r:SetPoint("TOPLEFT", tl, "TOPLEFT", PAD + 4, -44 - (i - 1) * 36)
+    -- the current season is the checked radio button, the others unchecked
+    r.radio = UI.Radio(r, 16)
+    r.radio:SetPoint("TOPLEFT", r, "TOPLEFT", 0, -1)
     r.name = UI.Text(r, 13, C.text)
     r.name:SetPoint("TOPLEFT", r, "TOPLEFT", 22, 0)
+    UI.OneLine(r.name, TL_W - 2 * PAD - 30)
     r.text = UI.Text(r, 11, C.dim)
     r.text:SetPoint("TOPLEFT", r.name, "BOTTOMLEFT", 0, -2)
-    UI.OneLine(r.text, TL_W - 54)
+    UI.OneLine(r.text, TL_W - 2 * PAD - 30)
     tl.rows[i] = r
 end
 SE.timeline = tl
@@ -159,7 +192,7 @@ function SE.Refresh()
     local s = S.season
     local seasonId = (s and s.seasonId) or Comm.server.seasonId
     local seasonName = ns.DefName("S", seasonId, nil)
-    UI.SetText(win.title, string.upper(seasonName or "Season"))
+    UI.SetText(win.title, seasonName or "Season")
 
     if s then
         UI.SetText(we.title, s.title or "War Effort")
@@ -172,22 +205,16 @@ function SE.Refresh()
         we.pct:SetText("-")
         we.helpers:SetText("")
     end
+    -- 62% fills twelve segments and two fifths of the thirteenth
     local filled = (s and s.wePermille or 0) / 1000 * SEGS
     for i, seg in ipairs(we.segments) do
-        if i <= floor(filled) then
-            UI.Colors(seg, C.gold, C.goldLight)
-        elseif i - 1 < filled then
-            UI.Colors(seg, C.goldDark, C.goldLight)
-        else
-            UI.Colors(seg, C.rail, C.border)
-        end
+        seg:SetValue(U.Clamp(filled - (i - 1), 0, 1))
     end
     for i, p in ipairs(we.parts) do
         local part = s and s.parts[i]
         if part then
-            p.ring:SetProgress(part.permille / 1000, C.gold)
+            p.bar:SetProgress(part.permille / 1000, floor(part.permille / 10) .. "%")
             UI.SetText(p.name, part.name)
-            p.value:SetText(floor(part.permille / 10) .. "% of its goal")
             p:Show()
         else
             p:Hide()
@@ -222,22 +249,21 @@ function SE.Refresh()
             if earned then
                 lastEarned = i
             end
-            UI.SetText(n.state, (r and r.stateText) or (earned and "Earned" or ""))
+            UI.SetText(n.state, (r and r.stateText) or (earned and "Complete" or ""))
             UI.SetColor(n.state, earned and C.teal or C.dim)
-            n.dot.fill:SetVertexColor(UI.Rgb(earned and C.teal or C.panel))
-            n.dot.ring:SetVertexColor(UI.Rgb(earned and C.teal or C.eraBorder))
-            n.dot.glyph:SetVertexColor(UI.Rgb(earned and C.bg or C.goldLight))
             UI.SetGlyph(n.dot.glyph, ({ "check", "shirt", "mount", "banner" })[i] or "reward")
+            n.dot:SetLocked(not earned)
             if earned then
-                UI.SetGlyph(n.dot.glyph, "check")
+                n.check:Show()
+            else
+                n.check:Hide()
             end
             n:Show()
         else
             n:Hide()
         end
     end
-    local fillW = (lineR - lineL) * max(0, lastEarned - 1) / (NODES - 1)
-    track.fill:SetWidth(max(1, fillW))
+    track.bar:SetProgress(max(0, lastEarned - 1) / (NODES - 1))
 
     -- timeline
     local ids = ns.DefIds("S")
@@ -249,13 +275,7 @@ function SE.Refresh()
             UI.SetText(r.name, (d.name or ("Season " .. id)) .. (now and " (now)" or ""))
             UI.SetColor(r.name, now and C.goldPale or C.text)
             UI.SetText(r.text, d.text or "")
-            if now then
-                r.dot:Show()
-                r.ring:Hide()
-            else
-                r.dot:Hide()
-                r.ring:Show()
-            end
+            r.radio:SetChecked(now)
             r:Show()
         else
             r:Hide()

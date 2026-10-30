@@ -2,7 +2,9 @@
 -- (Engine/Source/BleakFx: ambient occlusion, light shafts, bloom, clarity, colour grading, FXAA, sharpening),
 -- draws water with reflections, refraction and colour by depth, and moves the grass in the wind; this window
 -- sets its bleakFx* console variables, with presets. The client saves them in Config.wtf. A stock
--- client has none of these variables: the window then only says so.
+-- client has none of these variables: the window then only says so. Stock 3.3.5a look, as the Video options: the
+-- Interface Options' boxes (General, Effects), UIDropDownMenu-dressed lists (preset, anti-aliasing), check buttons
+-- for the on/off variables, OptionsSliderTemplate's sliders, red panel buttons, Defaults at the bottom left.
 local ADDON, ns = ...
 local U, UI = ns.U, ns.UI
 local C = UI.C
@@ -48,10 +50,10 @@ G.SLIDERS = {
       help = "How strongly the wind moves the grass: 0 still, 1 a breeze, 2 a strong wind." },
 }
 
--- Buttons that step through a variable's states (on and off when a button names none): console variable, label,
--- states, help.
+-- Switches: console variable, label, states, help. One with states is a dropdown of them; one without is a check
+-- button (on and off).
 G.TOGGLES = {
-    { cvar = "bleakFxAA", label = "Anti-aliasing", states = { { 0, "off" }, { 1, "FXAA" }, { 2, "SMAA" } },
+    { cvar = "bleakFxAA", label = "Anti-aliasing", states = { { 0, "Off" }, { 1, "FXAA" }, { 2, "SMAA" } },
       help = "Smooths jagged edges after the world is drawn: FXAA is the fastest, SMAA the sharpest. Works with "
           .. "multisampling off." },
     { cvar = "bleakFxWater", label = "Modern water",
@@ -100,8 +102,8 @@ end
 
 local ON_OFF = { { 0, "off" }, { 1, "on" } }
 
--- The state of a button's variable (the first state when the value is none of them), and the next one. On/off
--- buttons read any value but 0 as on, like the client.
+-- The state of a switch's variable (the first state when the value is none of them), and the next one. On/off
+-- switches read any value but 0 as on, like the client.
 function G.ToggleState(t)
     local states = t.states or ON_OFF
     local value = cvarNumber(t.cvar, states[#states][1])
@@ -178,77 +180,132 @@ end
 ------------------------------------------------------------------------------------------------------
 -- Window
 ------------------------------------------------------------------------------------------------------
-local W, H = 640, 692
-local f = UI.Window("BleakholdGraphics", W, H, "Graphics", "star")
+-- the content (UI.ContentSize) holds the General box (two rows; a third for the note when there is one) and the 8
+-- rows of Effects; the window grows by the note's row while it shows
+local GENERAL_H, NOTE_H = 88, 32
+local W, H = 668, 672
+local f = UI.Window("BleakholdGraphics", W, H, "Graphics", "Interface\\Icons\\INV_Misc_Gear_01")
 f:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
 G.frame = f
 local content = f.content
+local CW = UI.ContentSize(W, H)
 local syncing = false
 
-local presetLabel = UI.Text(content, 12, C.mute)
-presetLabel:SetPoint("TOPLEFT", content, "TOPLEFT", 20, -18)
-presetLabel:SetText("PRESET")
-f.preset = UI.Dropdown(content, 190, function(value)
+-- An options box as the Interface Options draw them: a tooltip panel with its title above its top left corner.
+local BOX_W = CW - 32
+local function optionsBox(title, h)
+    local box = UI.Box(content, BOX_W, h, C.panel, C.border, nil, "panel")
+    box.title = UI.Text(content, 12, C.gold)
+    box.title:SetPoint("BOTTOMLEFT", box, "TOPLEFT", 6, 3)
+    box.title:SetText(title)
+    return box
+end
+
+local general = optionsBox("General", GENERAL_H)
+general:SetPoint("TOPLEFT", content, "TOPLEFT", 16, -26)
+f.general = general
+local presetLabel = UI.Text(general, 12, C.gold)
+presetLabel:SetPoint("TOPLEFT", general, "TOPLEFT", 16, -20)
+presetLabel:SetText("Preset")
+f.preset = UI.Dropdown(general, 190, function(value)
     if not syncing and value ~= "custom" then
         G.ApplyPreset(value)
     end
 end)
-f.preset:SetPoint("LEFT", presetLabel, "RIGHT", 10, 0)
+f.preset:SetPoint("LEFT", presetLabel, "RIGHT", 10, -1)
 
+local function hideHelp()
+    if GameTooltip then
+        GameTooltip:Hide()
+    end
+end
+
+-- the switches (f.toggles, in G.TOGGLES' order): anti-aliasing as a dropdown right of the preset, the on/off ones as
+-- check buttons on the row under them
 f.toggles = {}
+local CHECK_COL = 190
+local lastDropdown, checks = f.preset, 0
 for i, t in ipairs(G.TOGGLES) do
-    local b = UI.Button(content, 145, 26, "", "dark", 12)
-    b:SetPoint("TOPLEFT", content, "TOPLEFT", 20 + (i - 1) * 150, -50)
-    b:SetScript("OnClick", function()
-        local _, nextState = G.ToggleState(t)
-        G.Set(t.cvar, nextState[1])
-        G.Refresh()
-    end)
-    b.tooltip = function()
-        return { t.label, t.help }
+    local b
+    if t.states then
+        local label = UI.Text(general, 12, C.gold)
+        label:SetPoint("LEFT", lastDropdown, "RIGHT", 24, 1)
+        label:SetText(t.label)
+        b = UI.Dropdown(general, 110, function(value)
+            if not syncing then
+                G.Set(t.cvar, value)
+                G.Refresh()
+            end
+        end)
+        b:SetPoint("LEFT", label, "RIGHT", 10, -1)
+        local items = {}
+        for _, state in ipairs(t.states) do
+            items[#items + 1] = { value = state[1], text = state[2] }
+        end
+        b:SetItems(items)
+        b.title = label
+        b.tooltip = function()
+            return { t.label, t.help }
+        end
+        lastDropdown = b
+    else
+        b = UI.CheckButton(general, t.label, 24)
+        b:SetPoint("TOPLEFT", general, "TOPLEFT", 12 + checks * CHECK_COL, -50)
+        checks = checks + 1
+        b:SetScript("OnClick", function()
+            local state = G.ToggleState(t)
+            G.Set(t.cvar, state[1] ~= 0 and 0 or 1)
+            if PlaySound then
+                PlaySound(state[1] ~= 0 and "igMainMenuOptionCheckBoxOff" or "igMainMenuOptionCheckBoxOn")
+            end
+            G.Refresh()
+        end)
+        b:SetScript("OnEnter", function(self)
+            UI.ShowTooltip(self, { t.label, t.help })
+        end)
+        b:SetScript("OnLeave", hideHelp)
     end
     b.def = t
     f.toggles[i] = b
 end
 
-f.reset = UI.Button(content, 110, 26, "Defaults", "ghost", 12)
-f.reset:SetPoint("TOPRIGHT", content, "TOPRIGHT", -20, -12)
+f.note = UI.Text(general, 12, C.orange, "body", "LEFT")
+f.note:SetPoint("TOPLEFT", general, "TOPLEFT", 16, -84)
+f.note:SetPoint("TOPRIGHT", general, "TOPRIGHT", -16, -84)
+f.note:SetHeight(NOTE_H - 4)
+f.note:SetJustifyV("TOP")
+
+-- the Interface Options' buttons: Defaults at the bottom left, the window's own close at the bottom right
+f.reset = UI.Button(content, 110, 22, "Defaults", "dark", 12)
+f.reset:SetPoint("BOTTOMLEFT", content, "BOTTOMLEFT", 16, 12)
 f.reset:SetScript("OnClick", function()
     G.ApplyPreset("bleakhold")
 end)
+f.done = UI.Button(content, 110, 22, "Close", "dark", 12)
+f.done:SetPoint("BOTTOMRIGHT", content, "BOTTOMRIGHT", -16, 12)
+f.done:SetScript("OnClick", function()
+    f:Hide()
+end)
 
-f.note = UI.Text(content, 12, C.orange, "body", "LEFT")
-f.note:SetPoint("TOPLEFT", content, "TOPLEFT", 20, -84)
-f.note:SetPoint("TOPRIGHT", content, "TOPRIGHT", -20, -84)
-f.note:SetHeight(32)
-
+local COLS, COL_W, COL_GAP, ROW_H = 2, 268, 36, 50
+local rows = math.ceil(#G.SLIDERS / COLS)
+local effects = optionsBox("Effects", 28 + rows * ROW_H)
+effects:SetPoint("TOPLEFT", general, "BOTTOMLEFT", 0, -26)
+f.effects = effects
 f.sliders = {}
-local COLS, COL_W, ROW_H = 2, 280, 52
 for i, s in ipairs(G.SLIDERS) do
     local col, row = (i - 1) % COLS, floor((i - 1) / COLS)
-    local holder = CreateFrame("Frame", nil, content)
+    local holder = CreateFrame("Frame", nil, effects)
     holder:SetSize(COL_W, ROW_H)
-    holder:SetPoint("TOPLEFT", content, "TOPLEFT", 20 + col * (COL_W + 40), -124 - row * ROW_H)
-    holder.label = UI.Text(holder, 12, C.mid)
-    holder.label:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, 0)
-    holder.label:SetText(s.label)
-    holder.value = UI.Text(holder, 12, C.goldLight, "body", "RIGHT")
-    holder.value:SetPoint("TOPRIGHT", holder, "TOPRIGHT", 0, 0)
+    holder:SetPoint("TOPLEFT", effects, "TOPLEFT", 20 + col * (COL_W + COL_GAP), -18 - row * ROW_H)
 
-    local slider = CreateFrame("Slider", nil, holder)
-    slider:SetOrientation("HORIZONTAL")
-    slider:SetSize(COL_W, 16)
-    slider:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, -20)
+    -- the options slider: gold title above, the value in white beside it, the range under the ends
+    local slider = UI.Slider(holder, COL_W, s.label, format(s, s.min), format(s, s.max))
+    slider:SetPoint("TOPLEFT", holder, "TOPLEFT", 0, -16)
     slider:SetMinMaxValues(s.min, s.max)
     slider:SetValueStep(s.step)
-    slider:EnableMouse(true)
-    local track = UI.Solid(slider, C.track, "BACKGROUND")
-    track:SetPoint("LEFT", slider, "LEFT", 0, 0)
-    track:SetPoint("RIGHT", slider, "RIGHT", 0, 0)
-    track:SetHeight(4)
-    local thumb = UI.Solid(slider, C.gold, "OVERLAY")
-    thumb:SetSize(10, 16)
-    slider:SetThumbTexture(thumb)
+    holder.label = slider.title
+    holder.value = slider.value
     slider:SetScript("OnValueChanged", function(self, v)
         local snapped = G.Snap(s, v)
         holder.value:SetText(format(s, snapped))
@@ -302,17 +359,27 @@ function G.Refresh()
     f.preset:SetActive(available)
     f.reset:SetActive(available)
     for _, b in ipairs(f.toggles) do
+        local state = G.ToggleState(b.def)
+        if b.def.states then
+            b:SetValue(state[1], true)
+            UI.SetColor(b.title, on and C.gold or C.mute)
+        else
+            b:SetChecked(state[1] ~= 0)
+        end
         b:SetActive(on)
-        b:SetLabel(b.def.label .. ": " .. G.ToggleState(b.def)[2])
     end
+    local note = ""
     if not available then
-        f.note:SetText("This client has no Bleakhold graphics. Install the Bleakhold client to use them.")
+        note = "This client has no Bleakhold graphics. Install the Bleakhold client to use them."
     elseif on and (tonumber(GetCVar("gxMultisample") or "1") or 1) > 1 then
-        f.note:SetText("Ambient occlusion, contact shadows, light shafts and water reflections need multisampling "
-            .. "off: Video options, Multisampling 1x. Anti-aliasing here replaces it.")
-    else
-        f.note:SetText("")
+        note = "Ambient occlusion, contact shadows, light shafts and water reflections need multisampling off: "
+            .. "Video options, Multisampling 1x. Anti-aliasing here replaces it."
     end
+    f.note:SetText(note)
+    -- the General box holds the note's row only while there is a note; the window grows with it
+    local noteRow = note ~= "" and NOTE_H or 0
+    general:SetHeight(GENERAL_H + noteRow)
+    f:SetHeight(H + noteRow)
     syncing = false
 end
 

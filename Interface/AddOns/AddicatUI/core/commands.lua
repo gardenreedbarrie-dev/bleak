@@ -440,6 +440,109 @@ local function SlashCommandHandler(input)
 end
 
 -- ============================================================================
+-- /bhui: THE BLEAKHOLD UI COMMAND (UI by Addicated)
+-- ============================================================================
+-- The old Bleakhold UI addon's command, kept as a thin alias over AddicatUI's own options. Each subcommand is an
+-- entry here; another file can add one or take one over with addon.BleakholdCommands.Register(name, handler, usage).
+
+local BHUI = { handlers = {}, usage = {}, order = {} }
+addon.BleakholdCommands = BHUI
+
+local function BhuiSay(msg)
+    DEFAULT_CHAT_FRAME:AddMessage("|cffe6cc80Bleakhold UI|r " .. msg)
+end
+BHUI.Say = BhuiSay
+
+-- handler(arg) gets the rest of the line, lower case; usage is the help line. A nil handler keeps the name listed
+-- (with its usage) until a file fills it.
+function BHUI.Register(name, handler, usage)
+    name = name and name:lower()
+    if not name or name == "" then return end
+    if BHUI.usage[name] == nil then BHUI.order[#BHUI.order + 1] = name end
+    BHUI.handlers[name] = handler
+    BHUI.usage[name] = usage or BHUI.usage[name] or ("/bhui " .. name)
+end
+
+local function ModuleConfig(name)
+    local profile = addon.db and addon.db.profile
+    if not profile then return nil end
+    profile.modules = profile.modules or {}
+    profile.modules[name] = profile.modules[name] or {}
+    return profile.modules[name]
+end
+
+local RELOAD = " - |cffffd100/reload|r"
+
+local function BhuiHelp()
+    for _, name in ipairs(BHUI.order) do
+        BhuiSay(BHUI.usage[name])
+    end
+    BhuiSay(L["UI by Addicated."])
+end
+
+-- Talents: WoW's own window or AddicatUI's (the talents module, load-once, so a /reload applies it).
+BHUI.Register("talents", function(arg)
+    local cfg = ModuleConfig("talents")
+    if not cfg then return end
+    if arg == "blizzard" then
+        cfg.enabled = false
+    elseif arg == "addicatui" or arg == "dragon" then
+        cfg.enabled = true
+    else
+        BhuiSay(BHUI.usage.talents)
+        return
+    end
+    BhuiSay(L["talent window:"] .. " " .. (cfg.enabled and "AddicatUI" or "WoW") .. RELOAD)
+end, L["/bhui talents blizzard | addicatui - WoW's talent window or AddicatUI's"])
+
+-- The bottom-right dock is a micro menu layout; the file that lays it out registers the handler.
+BHUI.Register("dock", nil, L["/bhui dock - the bottom-right dock of micro menu and bags, on or off"])
+
+BHUI.Register("mark", function()
+    local profile = addon.db and addon.db.profile
+    local minimap = profile and profile.minimap
+    if not minimap then return end
+    minimap.bleakhold_mark = minimap.bleakhold_mark == false
+    if addon.BleakMark then addon.BleakMark.Refresh() end
+    BhuiSay(minimap.bleakhold_mark and L["minimap mark shown."] or L["minimap mark hidden."])
+end, L["/bhui mark - show or hide the BLEAKHOLD mark under the minimap"])
+
+-- quests / pvp: the window skins' module switches (load-once, so a /reload applies them)
+local function SkinSwitch(cmd, moduleName, label)
+    return function(arg)
+        if arg ~= "bleakhold" and arg ~= "classic" then
+            BhuiSay(BHUI.usage[cmd])
+            return
+        end
+        local cfg = ModuleConfig(moduleName)
+        if not cfg then return end
+        cfg.enabled = arg == "bleakhold"
+        BhuiSay(label .. " " .. (cfg.enabled and L["Bleakhold"] or L["WoW's own"]) .. RELOAD)
+    end
+end
+
+BHUI.Register("quests", SkinSwitch("quests", "questlog", L["quest log:"]),
+    L["/bhui quests bleakhold | classic - the quest log in the retail look or WoW's own"])
+BHUI.Register("pvp", SkinSwitch("pvp", "pvpframe", L["PvP windows:"]),
+    L["/bhui pvp bleakhold | classic - the PvP windows in the retail look or WoW's own"])
+BHUI.Register("help", BhuiHelp, L["/bhui help - this list"])
+
+local function BhuiCommandHandler(input)
+    local msg = strlower(strtrim(input or ""))
+    local cmd, arg = strsplit(" ", msg, 2)
+    arg = arg and strtrim(arg) or ""
+    local handler = BHUI.handlers[cmd]
+    if handler then
+        handler(arg)
+    elseif cmd ~= "" and BHUI.usage[cmd] then
+        BhuiSay(L["not available in this build:"] .. " /bhui " .. cmd)
+    else
+        BhuiHelp()
+    end
+end
+BHUI.Run = BhuiCommandHandler
+
+-- ============================================================================
 -- COMMAND REGISTRATION
 -- ============================================================================
 
@@ -457,6 +560,9 @@ function Commands:RegisterCommands()
         
         -- Quick reload
         addon.core:RegisterChatCommand("rl", ReloadUICommand)
+
+        -- The Bleakhold UI command
+        addon.core:RegisterChatCommand("bhui", BhuiCommandHandler)
     else
         -- Fallback to direct slash command registration
         SLASH_ADDICATUI1 = "/addicatui"
@@ -466,6 +572,9 @@ function Commands:RegisterCommands()
         
         SLASH_ADDICATUIRL1 = "/rl"
         SlashCmdList["ADDICATUIRL"] = ReloadUICommand
+
+        SLASH_ADDICATUIBHUI1 = "/bhui"
+        SlashCmdList["ADDICATUIBHUI"] = BhuiCommandHandler
     end
 end
 

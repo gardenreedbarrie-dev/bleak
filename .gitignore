@@ -428,3 +428,11 @@ Interface/AddOns/AddicatUI/modules/spellbook/trainerdata.lua
 Interface/AddOns/AddicatUI/data/aura_durations.lua
 Interface/AddOns/AddicatUI/data/companion_traits.lua
 Interface/AddOns/AddicatUI/data/mount_speeds.lua
+
+# The owner's dungeon pictures (bg_<KEY>, btn_<KEY>) reach players through the launcher's extra/ layer, never this
+# public repository; the addon probes for them and falls back to stock art
+Interface/AddOns/Bleakhold/Art/Journal/
+# Local art for UI previews (Tools/UiLint/preview/README.md): Blizzard's stock 3.3.5a files and the Journal pictures,
+# never committed
+Tools/UiLint/preview/stock
+Tools/UiLint/preview/journal

@@ -53,6 +53,9 @@
     <!-- Game Menu module -->
     <Script file="gamemenu_dragons.lua"/>
     <Script file="gamemenu.lua"/>
+
+    <!-- Bleakhold UI: the BLEAKHOLD mark under the minimap and the game menu's credit line (after minimap and gamemenu) -->
+    <Script file="bleakmark.lua"/>
     
     <!-- Editor Mode module -->
     <Script file="editor_mode.lua"/>
@@ -92,6 +95,10 @@
     <!-- Retail-style quest and gossip dialog reskin -->
     <Script file="questdialog.lua"/>
 
+    <!-- Bleakhold UI: the quest log (L) and the PvP / battlemaster windows in the retail look (utils\window_chrome.lua) -->
+    <Script file="questlog_skin.lua"/>
+    <Script file="pvpframe_skin.lua"/>
+
     <!-- Retail-style flight master map window reskin -->
     <Script file="taxiframe.lua"/>
 
@@ -129,6 +136,9 @@
 
     <!-- Talents module -->
     <Include file="talents\talents.xml"/>
+    <!-- Bleakhold UI: WoW's own talent window dressed (spec panel, node ranks, glyph names) while the talents module
+         is off, the default (after talents\, whose module switch it reads, and core\commands.lua's /bhui) -->
+    <Script file="talents_classic.lua"/>
 
     <!-- Version Check module (cross-player version broadcast) -->
     <Script file="versioncheck.lua"/>

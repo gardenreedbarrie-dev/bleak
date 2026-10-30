@@ -124,13 +124,21 @@ test("clicking every button of every window sends only valid intents (live mode)
     FX.all(M, H)
     local start = #M.sent
     local roots = {}
-    for _, k in ipairs({ "tasks", "dungeons", "keys", "rift" }) do
+    for _, k in ipairs({ "tasks", "dungeons", "keys", "rift", "heroic", "group" }) do
+        -- Start keystone is for inside the keystone's dungeon with a group of 5, once the keystone opened the start
+        -- (BHMP O)
+        M.inInstance, M.instanceType = k == "keys" or nil, k == "keys" and "party" or nil
+        M.SetGroup(k == "keys" and "PARTY" or "NONE", k == "keys" and 5 or 1, k == "keys")
+        if k == "keys" then
+            M.zone = "Halls of Lightning"
+            ns.Legacy.Receive("O;602;8;1800;10;8;8;1,3,4;Halls of Lightning")
+        end
         ns.UI.Open(k)
         M.Advance(0.3)
         clickAll(M, ns.Activities.pages[k])
     end
-    -- select a dungeon so the queue button is live, then join, then accept a proposal
-    ns.Dungeons.selected = 389
+    M.inInstance, M.instanceType = nil, nil
+    -- queued: the Dungeon Journey's queue panel has Leave queue
     ns.UI.Open("dungeons")
     clickAll(M, ns.Dungeons.queue)
     H.send(M, "QUEUE", FX.examples(M).QUEUE)
@@ -164,7 +172,9 @@ test("clicking every button of every window sends only valid intents (live mode)
         end
     end
     H.ok(n >= 10, "a good number of intents were exercised: " .. n)
-    for _, want in ipairs({ "TCLAIM", "TREROLL", "QJOIN", "QREPLY", "KMODE", "KSTART", "BCLAIM", "WEHANDIN", "LBQ", "GET" }) do
+    -- (the Dungeon Journey starts board runs with the server's own commands, .act start, and custom runs with QJOIN D;
+    -- QREPLY is the Royale page's (its own tests), BCLAIM the server refuses: no page offers it)
+    for _, want in ipairs({ "TCLAIM", "TREROLL", "QJOIN", "QLEAVE", "KMODE", "KSTART", "WEHANDIN", "LBQ", "GET" }) do
         H.ok(ops[want], want .. " was sent by some button")
     end
 end)

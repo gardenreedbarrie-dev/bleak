@@ -470,10 +470,10 @@ local LEFT, TOP = 16, 14
 local ENTRY_W, ENTRY_H, ENTRY_GAP = 270, 52, 6
 local GRID_W = A.GRID_COLS * ENTRY_W + (A.GRID_COLS - 1) * 10
 local RIGHT_X = LEFT + GRID_W + 18
-local RIGHT_W = CO.W - 2 - RIGHT_X - 16
+local RIGHT_W = CO.BW - RIGHT_X - 16
 
--- Header row: count and category filter.
-tab.count = UI.Text(tab, 12, C.dim)
+-- Header row: the category in gold with the count ("Dances  12 of 12"), and the category filter.
+tab.count = UI.Text(tab, 13, C.dim)
 tab.count:SetPoint("TOPLEFT", tab, "TOPLEFT", LEFT, -TOP - 6)
 local filterItems = { { value = "all", text = "All animations" } }
 for _, c in ipairs(Data.animationCategories) do
@@ -497,8 +497,12 @@ local HOW_EMOJI = "Click: preview. Double-click: show it above your head. Drag o
 local function entryTooltip(self)
     local e = self.entry
     if e then
-        UI.ShowTooltip(self, { e.name, { e.cmd .. "  -  " .. A.CategoryLabel(e.cat), C.dim },
-            e.emoji and HOW_EMOJI or HOW_EMOTE })
+        local lines = { e.name, { e.cmd .. "  -  " .. A.CategoryLabel(e.cat), C.dim } }
+        if A.OnWheel(e.key) then
+            lines[#lines + 1] = { "On your emote wheel.", C.teal }
+        end
+        lines[#lines + 1] = e.emoji and HOW_EMOJI or HOW_EMOTE
+        UI.ShowTooltip(self, lines)
     end
 end
 
@@ -508,29 +512,41 @@ local function hideTooltip()
     end
 end
 
+-- An animation in an action slot (ActionButtonTemplate's art on b, UI.SlotArt): the empty slot behind it, an emoji's
+-- picture filling the slot, an emote's glyph a little smaller inside it (the glyphs reach their cell's edges). The
+-- slot's light and check keep the slot's size whatever the picture's; setIcon sizes the picture.
+local GLYPH_FILL = 0.72
+local function emoteSlot(b, size)
+    UI.SlotArt(b, size, true)
+    b.icon.artSize, b.icon.glyphSize = size, floor(size * GLYPH_FILL + 0.5)
+    for _, t in ipairs({ b.slotGlow, b.slotCheck }) do
+        t:ClearAllPoints()
+        t:SetSize(size, size)
+        t:SetPoint("CENTER", b.icon, "CENTER", 0, 0)
+    end
+    return b.icon
+end
+
+-- The rows: the old window's dark rows (a 1 px edge), the animation in its slot, the name in white and the command
+-- in grey; the chosen one in the nav row's blue (UI.Select); the stock check on the ones already on the wheel.
+local ENTRY_SLOT = 36
 tab.entries = {}
 for i = 1, A.PAGE_SIZE do
     local b = CreateFrame("Button", nil, tab)
     b:SetSize(ENTRY_W, ENTRY_H)
     local col, row = (i - 1) % A.GRID_COLS, floor((i - 1) / A.GRID_COLS)
     b:SetPoint("TOPLEFT", tab, "TOPLEFT", LEFT + col * (ENTRY_W + 10), -TOP - 34 - row * (ENTRY_H + ENTRY_GAP))
-    UI.Backdrop(b, C.card, C.border)
-    b.badge = UI.Badge(b, 40, nil, C.chip, C.goldDark)
-    b.badge:SetPoint("LEFT", b, "LEFT", 6, 0)
-    b.icon = b.badge:CreateTexture(nil, "ARTWORK")
-    b.icon:SetSize(26, 26)
-    b.icon:SetPoint("CENTER", b.badge, "CENTER", 0, 0)
+    UI.Backdrop(b, C.card, C.border, nil, "edge")
+    emoteSlot(b, ENTRY_SLOT)
+    b.icon:SetPoint("CENTER", b, "LEFT", 8 + ENTRY_SLOT / 2, 0)
     b.name = UI.Text(b, 13, C.text)
     b.name:SetPoint("TOPLEFT", b, "TOPLEFT", 54, -10)
     UI.OneLine(b.name, ENTRY_W - 80)
     b.cmd = UI.Text(b, 11, C.mute)
     b.cmd:SetPoint("TOPLEFT", b.name, "BOTTOMLEFT", 0, -3)
     UI.OneLine(b.cmd, ENTRY_W - 80)
-    b.mark = b:CreateTexture(nil, "OVERLAY")
-    b.mark:SetSize(14, 14)
-    b.mark:SetPoint("TOPRIGHT", b, "TOPRIGHT", -8, -8)
-    UI.SetEmoteGlyph(b.mark, "wheel")
-    b.mark:SetVertexColor(UI.Rgb(C.teal))
+    b.mark = UI.Check(b, 18)
+    b.mark:SetPoint("TOPRIGHT", b, "TOPRIGHT", -4, -4)
     b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     b:RegisterForDrag("LeftButton")
     b:SetScript("OnClick", function(self, button)
@@ -560,19 +576,15 @@ for i = 1, A.PAGE_SIZE do
     tab.entries[i] = b
 end
 
--- Pager.
-tab.prev = UI.Button(tab, 28, 24, "", "dark")
-tab.prev.icon = UI.Glyph(tab.prev, "left", 14, C.text)
-tab.prev.icon:SetPoint("CENTER")
-tab.next = UI.Button(tab, 28, 24, "", "dark")
-tab.next.icon = UI.Glyph(tab.next, "right", 14, C.text)
-tab.next.icon:SetPoint("CENTER")
-tab.pageText = UI.Text(tab, 12, C.mid, "body", "CENTER")
+-- Pager: the spellbook's page arrows with "Page 1 / 13" between them.
+tab.prev = UI.PageButton(tab, "Prev")
+tab.next = UI.PageButton(tab, "Next")
+tab.pageText = UI.Text(tab, 12, C.text, "body", "CENTER")
 tab.pageText:SetWidth(110)
 local pagerY = -TOP - 34 - A.GRID_ROWS * (ENTRY_H + ENTRY_GAP) - 4
 tab.pageText:SetPoint("TOP", tab, "TOPLEFT", LEFT + GRID_W / 2, pagerY - 5)
-tab.prev:SetPoint("TOPRIGHT", tab, "TOPLEFT", LEFT + GRID_W / 2 - 58, pagerY)
-tab.next:SetPoint("TOPLEFT", tab, "TOPLEFT", LEFT + GRID_W / 2 + 58, pagerY)
+tab.prev:SetPoint("RIGHT", tab.pageText, "LEFT", -4, 0)
+tab.next:SetPoint("LEFT", tab.pageText, "RIGHT", 4, 0)
 tab.prev:SetScript("OnClick", function()
     A.SetPage(A.page - 1)
 end)
@@ -595,11 +607,11 @@ local Y_NAME, Y_CMD, Y_BUTTONS, Y_WHEEL_LABEL = -(MODEL_H + 10), -(MODEL_H + 35)
 local EDIT_RADIUS, EDIT_SLOT = 62, 34
 local editCenterY = Y_WHEEL_LABEL - 20 - EDIT_RADIUS - EDIT_SLOT / 2
 
-local modelBox = UI.Box(right, RIGHT_W, MODEL_H, "101216", C.border)
+local modelBox = UI.Box(right, RIGHT_W, MODEL_H, C.card, C.border, nil, "edge")
 modelBox:SetPoint("TOPLEFT", right, "TOPLEFT", 0, 0)
 local model = CreateFrame("PlayerModel", "BleakholdAnimationModel", modelBox)
-model:SetPoint("TOPLEFT", modelBox, "TOPLEFT", 2, -2)
-model:SetPoint("BOTTOMRIGHT", modelBox, "BOTTOMRIGHT", -2, 2)
+model:SetPoint("TOPLEFT", modelBox, "TOPLEFT", 1, -1)
+model:SetPoint("BOTTOMRIGHT", modelBox, "BOTTOMRIGHT", -1, 1)
 model:EnableMouse(true)
 model:SetScript("OnMouseDown", function(self)
     self.turning = true
@@ -663,15 +675,15 @@ function A.PopEmojiPreview()
     emojiPreview:SetScript("OnUpdate", popUpdate)
 end
 
-right.name = UI.Text(right, 18, C.goldPale, "title")
+right.name = UI.Text(right, 18, C.gold)
 right.name:SetPoint("TOPLEFT", right, "TOPLEFT", 0, Y_NAME)
 UI.OneLine(right.name, RIGHT_W)
 right.cmd = UI.Text(right, 11, C.dim)
 right.cmd:SetPoint("TOPLEFT", right, "TOPLEFT", 0, Y_CMD)
 UI.OneLine(right.cmd, RIGHT_W)
-right.play = UI.Button(right, (RIGHT_W - 8) / 2, 30, "Play", "gold", 13)
+right.play = UI.Button(right, (RIGHT_W - 8) / 2, 24, "Play", "gold")
 right.play:SetPoint("TOPLEFT", right, "TOPLEFT", 0, Y_BUTTONS)
-right.add = UI.Button(right, (RIGHT_W - 8) / 2, 30, "Add to Wheel", "dark", 13)
+right.add = UI.Button(right, (RIGHT_W - 8) / 2, 24, "Add to Wheel", "dark")
 right.add:SetPoint("TOPRIGHT", right, "TOPRIGHT", 0, Y_BUTTONS)
 right.play:SetScript("OnClick", function()
     A.Perform(A.selected)
@@ -682,21 +694,52 @@ right.add:SetScript("OnClick", function()
     end
 end)
 
-right.wheelLabel = UI.Text(right, 11, C.dim)
+right.wheelLabel = UI.Heading(right, "Emote Wheel")
 right.wheelLabel:SetPoint("TOPLEFT", right, "TOPLEFT", 0, Y_WHEEL_LABEL)
-right.wheelLabel:SetText("EMOTE WHEEL")
 
+-- The wheel's page as the wheel itself draws it (below): minimap-button rings round a dark round plate (the
+-- minimap button's own disc), the page number in the middle.
 local editor = CreateFrame("Frame", nil, right)
 editor:SetSize(2 * (EDIT_RADIUS + EDIT_SLOT), 2 * (EDIT_RADIUS + EDIT_SLOT))
 editor:SetPoint("CENTER", right, "TOPLEFT", RIGHT_W / 2, editCenterY)
-editor.ring = editor:CreateTexture(nil, "BACKGROUND")
-editor.ring:SetTexture(UI.ART .. "Ring")
-editor.ring:SetSize(2 * EDIT_RADIUS, 2 * EDIT_RADIUS)
-editor.ring:SetPoint("CENTER")
-editor.ring:SetVertexColor(UI.Rgb(C.border))
-editor.pageText = UI.Text(editor, 13, C.mid, "body", "CENTER")
+editor.plate = editor:CreateTexture(nil, "BACKGROUND")
+editor.plate:SetTexture(UI.STOCK.ringBg)
+editor.plate:SetSize(2 * EDIT_RADIUS + EDIT_SLOT + 24, 2 * EDIT_RADIUS + EDIT_SLOT + 24)
+editor.plate:SetPoint("CENTER")
+editor.plate:SetAlpha(0.8)
+editor.pageText = UI.Text(editor, 13, C.text, "body", "CENTER")
 editor.pageText:SetPoint("CENTER", editor, "CENTER", 0, 0)
 right.editor = editor
+
+-- A wheel slot: a ring portrait (MiniMap-TrackingBorder round the minimap button's disc) with the animation's
+-- picture in it, and the minimap button's light (UI-Common-MouseHilight, added) when it is pointed at or chosen;
+-- an empty slot's ring is greyed. f:SetLit(on), f:SetFilled(on).
+local function wheelSlot(f, size, iconSize)
+    f.badge = UI.Badge(f, size)
+    f.badge:SetPoint("CENTER", f, "CENTER", 0, 0)
+    f.icon = f.badge:CreateTexture(nil, "ARTWORK")
+    f.icon:SetSize(iconSize, iconSize)
+    f.icon:SetPoint("CENTER", f.badge, "CENTER", 0, 0)
+    f.glow = f.badge:CreateTexture(nil, "OVERLAY")
+    f.glow:SetTexture(UI.STOCK.arrowHighlight)
+    f.glow:SetBlendMode("ADD")
+    f.glow:SetSize(size * 1.2, size * 1.2)
+    f.glow:SetPoint("CENTER", f.badge, "CENTER", 1, 0)
+    f.glow:Hide()
+    function f:SetLit(on)
+        if on then
+            self.glow:Show()
+        else
+            self.glow:Hide()
+        end
+        self.lit = on and true or false
+    end
+    function f:SetFilled(on)
+        self.badge.ring:SetDesaturated(not on)
+        self.badge.ring:SetAlpha(on and 1 or 0.6)
+    end
+    return f
+end
 
 -- Slot positions: slot 1 at the top, then clockwise.
 local function slotOffset(slot, radius)
@@ -711,11 +754,7 @@ for s = 1, A.WHEEL_SLOTS do
     b:SetSize(EDIT_SLOT, EDIT_SLOT)
     local x, y = slotOffset(s, EDIT_RADIUS)
     b:SetPoint("CENTER", editor, "CENTER", x, y)
-    b.badge = UI.Badge(b, EDIT_SLOT, nil, C.chip, C.goldDark)
-    b.badge:SetAllPoints(b)
-    b.icon = b.badge:CreateTexture(nil, "ARTWORK")
-    b.icon:SetSize(22, 22)
-    b.icon:SetPoint("CENTER", b.badge, "CENTER", 0, 0)
+    wheelSlot(b, EDIT_SLOT, 22)
     b.slot = s
     b:RegisterForClicks("LeftButtonUp", "RightButtonUp")
     b:SetScript("OnClick", function(self, button)
@@ -729,6 +768,8 @@ for s = 1, A.WHEEL_SLOTS do
         end
     end)
     b:SetScript("OnEnter", function(self)
+        self.hovered = true
+        self.glow:Show()
         local e = A.WheelEntry(A.wheelPage, self.slot)
         if e then
             UI.ShowTooltip(self, { e.name, { e.cmd, C.dim }, "Click: preview. Right-click: empty the slot." })
@@ -736,17 +777,17 @@ for s = 1, A.WHEEL_SLOTS do
             UI.ShowTooltip(self, { "Empty slot", "Drag an animation here, or click to put the selected one in it." })
         end
     end)
-    b:SetScript("OnLeave", hideTooltip)
+    b:SetScript("OnLeave", function(self)
+        self.hovered = false
+        self:SetLit(self.lit)
+        hideTooltip()
+    end)
     editor.slots[s] = b
 end
-editor.prev = UI.Button(right, 24, 24, "", "dark")
-editor.prev.icon = UI.Glyph(editor.prev, "left", 12, C.text)
-editor.prev.icon:SetPoint("CENTER")
-editor.prev:SetPoint("CENTER", right, "TOPLEFT", 14, editCenterY)
-editor.next = UI.Button(right, 24, 24, "", "dark")
-editor.next.icon = UI.Glyph(editor.next, "right", 12, C.text)
-editor.next.icon:SetPoint("CENTER")
-editor.next:SetPoint("CENTER", right, "TOPLEFT", RIGHT_W - 14, editCenterY)
+editor.prev = UI.PageButton(right, "Prev")
+editor.prev:SetPoint("CENTER", right, "TOPLEFT", 16, editCenterY)
+editor.next = UI.PageButton(right, "Next")
+editor.next:SetPoint("CENTER", right, "TOPLEFT", RIGHT_W - 16, editCenterY)
 editor.prev:SetScript("OnClick", function()
     A.SetWheelPage(A.wheelPage - 1)
 end)
@@ -780,23 +821,27 @@ local function setIcon(texture, entry, color)
     if entry and entry.texture and setArt(texture, entry.texture) then
         texture:SetTexCoord(0, 1, 0, 1)
         texture:SetVertexColor(1, 1, 1, 1)
+        if texture.artSize then
+            texture:SetSize(texture.artSize, texture.artSize)
+        end
         return
     end
     UI.SetEmoteGlyph(texture, entry and entry.glyph or "plus")
     texture:SetVertexColor(UI.Rgb(color or (entry and C.goldLight or C.mute)))
+    if texture.glyphSize then
+        texture:SetSize(texture.glyphSize, texture.glyphSize)
+    end
 end
 A.SetIcon = setIcon
 
--- Drag and drop onto the wheel editor: an icon follows the cursor; releasing over a slot fills it.
+-- Drag and drop onto the wheel editor: the animation's slot follows the cursor, as a dragged action does;
+-- releasing over a slot fills it.
 local dragIcon = CreateFrame("Frame", "BleakholdAnimationDrag", UIParent)
-dragIcon:SetSize(36, 36)
+dragIcon:SetSize(ENTRY_SLOT, ENTRY_SLOT)
 dragIcon:SetFrameStrata("TOOLTIP")
 dragIcon:Hide()
-dragIcon.badge = UI.Badge(dragIcon, 36, nil, C.chip, C.gold)
-dragIcon.badge:SetAllPoints(dragIcon)
-dragIcon.icon = dragIcon.badge:CreateTexture(nil, "ARTWORK")
-dragIcon.icon:SetSize(24, 24)
-dragIcon.icon:SetPoint("CENTER", dragIcon.badge, "CENTER", 0, 0)
+emoteSlot(dragIcon, ENTRY_SLOT)
+dragIcon.icon:SetPoint("CENTER", dragIcon, "CENTER", 0, 0)
 dragIcon:SetScript("OnUpdate", function(self)
     local x, y = GetCursorPosition()
     local s = UIParent:GetEffectiveScale()
@@ -908,7 +953,11 @@ function A.RefreshWheelEditor()
         local e = A.WheelEntry(A.wheelPage, s)
         setIcon(b.icon, e)
         local on = e and A.selected and e.key == A.selected.key
-        b.badge.ring:SetVertexColor(UI.Rgb(on and C.gold or (e and C.goldDark or C.chipBorder)))
+        b:SetFilled(e ~= nil)
+        b:SetLit(on)
+        if b.hovered then
+            b.glow:Show()
+        end
     end
     editor.pageText:SetText(A.wheelPage .. " / " .. A.WHEEL_PAGES)
 end
@@ -926,8 +975,8 @@ function A.Refresh()
     local pages = A.Pages(#list)
     A.page = U.Clamp(A.page, 1, pages)
     local total = #A.Filtered("", A.filter)
-    tab.count:SetText(string.upper(A.CategoryLabel(A.filter ~= "all" and A.filter ~= "wheel" and A.filter or nil))
-        .. "  |cffECE7DD" .. #list .. "|r of " .. total)
+    tab.count:SetText("|cffFFD100" .. A.CategoryLabel(A.filter ~= "all" and A.filter ~= "wheel" and A.filter or nil)
+        .. "|r  |cffFFFFFF" .. #list .. "|r of " .. total)
     local first = (A.page - 1) * A.PAGE_SIZE
     for i, b in ipairs(tab.entries) do
         local e = list[first + i]
@@ -937,8 +986,8 @@ function A.Refresh()
             UI.SetText(b.name, e.name)
             UI.SetText(b.cmd, e.dance and A.DanceHasMusic(e) and (e.cmd .. "  with music") or e.cmd)
             local sel = A.selected and A.selected.key == e.key
-            UI.Colors(b, sel and C.active or C.card, sel and C.gold or C.border)
-            UI.SetColor(b.name, sel and C.goldPale or C.text)
+            UI.Select(b, sel)
+            UI.SetColor(b.name, sel and C.gold or C.text)
             if A.OnWheel(e.key) then
                 b.mark:Show()
             else
@@ -1033,19 +1082,19 @@ wheel:Hide()
 A.wheel = wheel
 UISpecialFrames[#UISpecialFrames + 1] = "BleakholdEmoteWheelFrame"
 
-wheel.bg = UI.Disc(wheel, WHEEL_SIZE, C.bg, "BACKGROUND", 0.82)
+-- Stock materials in the wheel's round layout: the minimap button's dark disc as the plate (a darker one in the
+-- middle, where no slot is chosen), and the slots as minimap-button rings (wheelSlot above).
+wheel.bg = wheel:CreateTexture(nil, "BACKGROUND")
+wheel.bg:SetTexture(UI.STOCK.ringBg)
+wheel.bg:SetSize(WHEEL_SIZE, WHEEL_SIZE)
 wheel.bg:SetPoint("CENTER")
-wheel.ring = wheel:CreateTexture(nil, "BORDER")
-wheel.ring:SetTexture(UI.ART .. "Ring")
-wheel.ring:SetSize(WHEEL_SIZE, WHEEL_SIZE)
-wheel.ring:SetPoint("CENTER")
-wheel.ring:SetVertexColor(UI.Rgb(C.goldDark))
+wheel.bg:SetAlpha(0.78)
 wheel.inner = wheel:CreateTexture(nil, "BORDER")
-wheel.inner:SetTexture(UI.ART .. "Ring")
-wheel.inner:SetSize(2 * A.DEAD_ZONE + 40, 2 * A.DEAD_ZONE + 40)
+wheel.inner:SetTexture(UI.STOCK.ringBg)
+wheel.inner:SetSize(2 * A.DEAD_ZONE + 56, 2 * A.DEAD_ZONE + 56)
 wheel.inner:SetPoint("CENTER")
-wheel.inner:SetVertexColor(UI.Rgb(C.border))
-wheel.title = UI.Text(wheel, 15, C.goldPale, "title", "CENTER")
+wheel.inner:SetAlpha(0.7)
+wheel.title = UI.Text(wheel, 15, C.gold, "body", "CENTER")
 wheel.title:SetPoint("CENTER", wheel, "CENTER", 0, 8)
 wheel.title:SetWidth(110)
 wheel.pageText = UI.Text(wheel, 11, C.dim, "body", "CENTER")
@@ -1061,11 +1110,7 @@ for s = 1, A.WHEEL_SLOTS do
     f:SetSize(WHEEL_SLOT, WHEEL_SLOT)
     local x, y = slotOffset(s, WHEEL_RADIUS)
     f:SetPoint("CENTER", wheel, "CENTER", x, y)
-    f.badge = UI.Badge(f, WHEEL_SLOT, nil, C.chip, C.goldDark)
-    f.badge:SetAllPoints(f)
-    f.icon = f.badge:CreateTexture(nil, "ARTWORK")
-    f.icon:SetSize(36, 36)
-    f.icon:SetPoint("CENTER", f.badge, "CENTER", 0, 0)
+    wheelSlot(f, WHEEL_SLOT, 36)
     f.name = UI.Text(f, 11, C.text, "body", "CENTER")
     f.name:SetPoint("TOP", f, "BOTTOM", 0, -2)
     UI.OneLine(f.name, 90)
@@ -1105,11 +1150,11 @@ function A.RefreshWheel(force)
     for s, f in ipairs(wheel.slots) do
         local e = A.WheelEntry(A.wheelPage, s)
         local on = hoveredEntry and s == hovered
-        setIcon(f.icon, e, on and C.goldPale or nil)
-        f.badge.fill:SetVertexColor(UI.Rgb(on and C.active or C.chip))
-        f.badge.ring:SetVertexColor(UI.Rgb(on and C.gold or (e and C.goldDark or C.chipBorder)))
+        setIcon(f.icon, e)
+        f:SetFilled(e ~= nil)
+        f:SetLit(on)
         UI.SetText(f.name, e and e.name or "")
-        UI.SetColor(f.name, on and C.goldPale or C.mid)
+        UI.SetColor(f.name, on and C.gold or C.text)
     end
     UI.SetText(wheel.title, hoveredEntry and hoveredEntry.name or "Emotes")
     wheel.pageText:SetText("Page " .. A.wheelPage .. " / " .. A.WHEEL_PAGES)

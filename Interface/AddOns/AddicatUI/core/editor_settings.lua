@@ -335,6 +335,9 @@ R.microVehicle = function()
     if addon.RefreshMicromenuVehicle then addon.RefreshMicromenuVehicle() end
     if addon.RefreshBagsVehicle then addon.RefreshBagsVehicle() end
 end
+R.microDock = function()
+    if addon.RefreshMicroDock then addon.RefreshMicroDock() end
+end
 R.skins = function()
     if addon.UF and addon.UF.RefreshSkins then addon.UF.RefreshSkins() end
 end
@@ -1383,8 +1386,23 @@ local function GrayscalePending()
     return E.IsReloadPending("micromenu.grayscale_icons")
 end
 
-E.Register("micromenu", { settings = {
+-- The micro menu's rows; the bottom-right dock (micromenu.layout, Bleakhold UI) shows them on its own mover, since
+-- the strip's mover stands aside while the dock is on. Columns reaches the 13 buttons (12 and Bleakhold's).
+local MICRO_COLUMNS_MAX = 13
+
+local function DockCheck()
+    return Check(T("Bottom-Right Dock"), "micromenu.layout", R.microDock, {
+        tooltip = T("The micro menu in even rows beside the action bar's gryphon, the bag bar on top, in one box at the bottom right (Bleakhold UI)."),
+        get = function() return GetDB("micromenu.layout") == "dock" end,
+        set = function(value)
+            SetDB("micromenu.layout", value and "dock" or "strip")
+            Immediate(R.microDock)
+        end })
+end
+
+local function MicroMenuSettings() return {
     Section(T("General"), false),
+    DockCheck(),
     ReloadCheck(T("Grayscale Icons"), "micromenu.grayscale_icons"),
     Slider(T("Scale"), "micromenu.scale_menu", 0.5, 3.0, 0.01, R.micromenu, {
         resize = true,
@@ -1402,7 +1420,7 @@ E.Register("micromenu", { settings = {
             SetDB(MicroPrefix() .. ".icon_spacing", value)
             Deferred(R.micromenu)
         end }),
-    Slider(T("Columns"), "micromenu.columns", 1, 12, 1, R.micromenu, {
+    Slider(T("Columns"), "micromenu.columns", 1, MICRO_COLUMNS_MAX, 1, R.micromenu, {
         resize = true,
         disabled = GrayscalePending,
         get = function() return GetNumber(MicroPrefix() .. ".columns", 12) end,
@@ -1421,7 +1439,13 @@ E.Register("micromenu", { settings = {
     Check(T("Hide on Vehicle"), "micromenu.hide_on_vehicle", R.microVehicle),
     Section(T("Latency Indicator"), true),
     ReloadCheck(T("Show Latency Indicator"), "micromenu.show_latency_indicator"),
-} })
+} end
+
+E.Register("micromenu", { settings = MicroMenuSettings() })
+-- the dock carries the bag bar too, so its mover has the bag scale as well
+local dockSettings = MicroMenuSettings()
+table.insert(dockSettings, 3, Slider(T("Bag Scale"), "bags.scale", 0.5, 2.0, 0.01, R.bags))
+E.Register("microdock", { settings = dockSettings })
 
 E.Register("bagsbar", { compact = true, settings = {
     Slider(T("Scale"), "bags.scale", 0.5, 2.0, 0.01, R.bags),

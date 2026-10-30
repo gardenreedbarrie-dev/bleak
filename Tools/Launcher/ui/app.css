@@ -30,7 +30,7 @@
 }
 
 :root {
-    /* Bleakhold palette (Interface/AddOns/Bleakhold/Widgets.lua) */
+    /* Bleakhold brand palette (the launcher's own; the addon's windows use stock WoW colours) */
     --bg: #0b0c0f;
     --panel: #15181d;
     --header: #1b1f25;

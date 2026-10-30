@@ -61,12 +61,13 @@ local MENU_ALPHA = 0.98
 -- CONFIGURATION
 -- ============================================================================
 
+-- "classic" (the DragonUI look) is the default; the flat Bleakhold theme only when chosen.
 local function GetStyle()
     local cfg = addon:GetModuleConfig("theme")
-    if cfg and cfg.style == "classic" then
-        return "classic"
+    if cfg and cfg.style == "bleakhold" then
+        return "bleakhold"
     end
-    return "bleakhold"
+    return "classic"
 end
 
 local function IsActive()
@@ -592,8 +593,8 @@ end
 
 -- Switch the theme at runtime; fonts reach text built from now on (all of it after a /reload).
 function addon.SetUITheme(style)
-    if style ~= "classic" then
-        style = "bleakhold"
+    if style ~= "bleakhold" then
+        style = "classic"
     end
     local modules = addon.db and addon.db.profile and addon.db.profile.modules
     if not modules then return end

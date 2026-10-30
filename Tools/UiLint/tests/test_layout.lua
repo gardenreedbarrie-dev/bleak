@@ -65,7 +65,7 @@ test("filter bar: dropdowns start right of the last tab (all five tabs, Arena on
     end
     H.eq(select(4, lastTab:GetPoint(1)), 16 + 4 * LB.TAB_STEP)
     local tabRight = 16 + 4 * LB.TAB_STEP + lastTab:GetWidth()
-    local barW = ns.Leaderboards.frame:GetWidth() - 2
+    local barW = ns.UI.ContentSize(ns.Leaderboards.frame:GetWidth(), ns.Leaderboards.frame:GetHeight())
     local used = 16 + LB.filters.class:GetWidth() + 6 + 34 + 14 + LB.filters.dungeon:GetWidth() + 6 + 56
     H.ok(barW - used >= tabRight, "filters overlap the tabs: " .. (barW - used) .. " < " .. tabRight)
 end)
