@@ -395,13 +395,13 @@ class Art(unittest.TestCase):
 
     @unittest.skipUnless(os.path.isfile(archive.MODELFORGE), "Tools/ModelForge not in this checkout")
     def test_modelforge_today(self):
-        """ModelForge's real build of the models it has today (EspressoSW): read, checked, shipped with the made-up
-        rest, and its bounds in the display row; with ModelForge's output alone a build refuses (M5 not done)."""
+        """ModelForge's real build of one model (EspressoSW, with its 14 icons): read, checked, shipped with the made-up
+        rest, and its bounds in the display row; a build of one model alone refuses (the patch needs all 24)."""
         out = os.path.join(self.tmp, "real")
         r = subprocess.run([sys.executable, "-I", CAFEFORGE, "art", "--out", out, "--only", "EspressoSW",
                             "--tex-scale", "0.125", "--jobs", "1"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
-        self.assertIn("(1 of 24 café models, 0 of 14 icons)", r.stdout)
+        self.assertIn("(1 of 24 café models, 14 of 14 icons)", r.stdout)
         self.assertIn("ModelForge built 1 of the 24 café models", r.stdout)
         real = os.path.join(out, "art")
         self.assertTrue(os.path.isfile(os.path.join(real, archive.MARKERS, "Marker.blp")))
