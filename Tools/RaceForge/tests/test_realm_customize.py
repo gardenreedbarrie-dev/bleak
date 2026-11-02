@@ -505,6 +505,23 @@ class RefusalTests(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("the curation is for ffffffffffff", result.stderr)
 
+    def test_a_big_table_is_not_the_package_by_hand(self):
+        schema = schema_access.get("CharSections")
+        pkg = DbcTable.from_bytes(sc.tables(True)["CharSections"], schema)
+        realm = DbcTable.from_bytes(sc.tables(False, realm=True)["CharSections"], schema)
+        top = realm.max_id()
+
+        for i in range(20001):
+            row = list(realm.rows[i % len(realm.rows)])
+            realm.set(row, "id", top + 1 + i)
+            realm.set(row, "raceID", 20 + i % 2)
+            realm.rows.append(row)
+
+        self.assertGreater(len(realm.rows), 20000)
+        self.assertIsNone(rc.looks_merged("CharSections", realm.to_bytes(), pkg), "an HD pack's or a race patch's")
+        self.assertIn("the package by hand", rc.looks_merged("CharSections", pkg.to_bytes(), pkg) or "")
+        self.assertIsNone(rc.looks_merged("CharSections", pkg.to_bytes()), "without the package's table: names only")
+
     def test_merged_tables_without_a_saved_base_are_refused(self):
         r = Realm(self.tmp.name)
         self.assertEqual(r.customize("out").returncode, 0)

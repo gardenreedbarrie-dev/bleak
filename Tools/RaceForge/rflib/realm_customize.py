@@ -59,7 +59,10 @@ OUT_ENTRIES = ("client", "server", "staging", "merged", "report.txt", "install.j
 # The server's price factors (Player::GetBarberShopCost): hair 1.0, facial hair 0.75, skin 0.75.
 COST = {0: 1.0, 2: 0.75, 3: 0.75}
 BARBER_TYPES = {0: "hair", 2: "features", 3: "skin"}
-PACKAGE_ROWS_LIMIT = 20000  # a CharSections with more rows than this, and no Character\Ascension\ name, is the package
+# a CharSections that holds this share of the package's own rows (races 1-11, same race, sex, section, variation, colour
+# and textures), and no Character\Ascension\ name, has the package put in by hand. A realm's own table holds only the
+# stock rows the package repeats; its size says nothing (an HD pack's CharSections is bigger than the package's).
+PACKAGE_SHARE_LIMIT = 0.9
 MARKER_FOLDER = "Bleakhold\\"  # files of our own archives the client never reads
 SKIP_PACKAGE_FOLDERS = ("goblin", "goblinold", "naga_", "naga")
 DEFAULT_ART = ("patch-6.MPQ", "patch-7.MPQ")
@@ -917,8 +920,23 @@ def _colour(data: bytes, where: str, settings: dict):
 # --- the saved base --------------------------------------------------------------------------------------------
 
 
-def looks_merged(name: str, data: bytes) -> str | None:
-    """Why a table read from the realm is not one from before the package, or None."""
+def _section_keys(table: DbcTable) -> set[tuple]:
+    out = set()
+
+    for row in table.rows:
+        if not 1 <= table.get(row, "raceID") <= 11:
+            continue
+
+        out.add((table.get(row, "raceID"), table.get(row, "sexID"), table.get(row, "baseSection"),
+                 table.get(row, "variationIndex"), table.get(row, "colorIndex"),
+                 *(table.get_str(row, f"textureName[{slot}]").replace("/", "\\").lower() for slot in range(3))))
+
+    return out
+
+
+def looks_merged(name: str, data: bytes, package_cs: DbcTable | None = None) -> str | None:
+    """Why a table read from the realm is not one from before the package, or None. package_cs: the package's
+    CharSections, to tell a package put in by hand (most of its rows there) from a realm's big table of its own."""
     if name != "CharSections":
         return None
 
@@ -934,8 +952,14 @@ def looks_merged(name: str, data: bytes) -> str | None:
             if table.get_str(row, f"textureName[{slot}]").replace("/", "\\").lower().startswith(asc):
                 return "it names Character\\Ascension\\ textures (an earlier customize run)"
 
-    if len(table.rows) > PACKAGE_ROWS_LIMIT:
-        return f"it has {len(table.rows)} rows (the package by hand)"
+    if package_cs is not None:
+        theirs = _section_keys(package_cs)
+
+        if theirs:
+            share = len(theirs & _section_keys(table)) / len(theirs)
+
+            if share >= PACKAGE_SHARE_LIMIT:
+                return f"it holds {share:.0%} of the package's own rows (the package by hand)"
 
     return None
 
@@ -1261,7 +1285,7 @@ def make_plan(opts: Options, config) -> Plan:
         for name in TABLES:
             holder = combo.holders[name]
             data = read_table(holder, name, combo.label)
-            why = looks_merged(name, data)
+            why = looks_merged(name, data, plan.package_tables.get("CharSections"))
 
             if why:
                 merged_now.append(f"{name} of {holder.name} ({why})")

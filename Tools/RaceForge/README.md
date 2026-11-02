@@ -930,7 +930,12 @@ can use every row).
   - `barbershopstyle`: SHA-1 over the rows in ascending id, each as five little-endian uint32: id, type, race, sex,
     data (`nixx...xiii`), and the SHA-1 of the whole file, which must be byte for byte the client's in every pack
     combination.
-  The world database's `charsections_dbc`, `barbershopstyle_dbc` and `creaturedisplayinfoextra_dbc` must be empty.
+  The world database's `charsections_dbc`, `barbershopstyle_dbc` and `creaturedisplayinfoextra_dbc` must be empty
+  once the server reads these files (their rows replace the files' by id): bleakserv's `customize.sh` keeps a copy of
+  their rows and empties them in the switch, and puts them back on an undo.
+- A CharSections that names `Character\Ascension\` textures, or holds 90% or more of the package's own rows (races
+  1-11), is merged already (the package by hand); its size says nothing (an HD pack's table is bigger than the
+  package's).
 
 ### Existing characters
 
