@@ -1157,6 +1157,20 @@ def load_package_tables(package_dir: str) -> dict[str, DbcTable]:
     return tables
 
 
+def realm_above(game, plan, combo, holder):
+    """The realm's own archive of holder's pack, loaded in combo, that loads above holder (a foreign archive), or None:
+    one that already takes another table of combo first, else the lowest such one."""
+    found = [a for a in game.patchset.active(combo.packs_on)
+             if a is not holder and not a.is_base and a.pack == holder.pack and a.rank() > holder.rank()
+             and archive_key(a) in plan.realm_owned]
+
+    if not found:
+        return None
+
+    taken = [a for a in found if any(t is a for t in combo.targets.values())]
+    return (taken or sorted(found, key=lambda a: a.rank()))[0]
+
+
 def archive_key(archive) -> str:
     """An archive's name as taken_patches.json lists it: its path below Data (enUS/patch-enUS-3.MPQ), any case."""
     rel = archive.rel or archive.client_path.split("\\", 1)[-1]
@@ -1247,6 +1261,13 @@ def make_plan(opts: Options, config) -> Plan:
 
             if name in TABLES:
                 why = not_ours(holder, plan.realm_owned, plan.foreign)
+                above = realm_above(game, plan, combo, holder) if why else None
+
+                if above is not None:
+                    # a mirrored pack's table (an HD pack's HelmetGeosetVisData): never rebuilt, the merged copy goes
+                    # into the realm's own archive of the same pack that loads above it (merged onto the pack's table)
+                    combo.targets[name] = above
+                    continue
 
                 if why:
                     # rebuilding it would put a copy of a mirror's archive on the VPS (served to every player of the

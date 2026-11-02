@@ -476,6 +476,38 @@ class RefusalTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(os.path.exists(r.out("out", "client", "Patch-Y.MPQ")), "the realm's Patch-Y is rebuilt")
 
+    def test_a_mirror_patch_table_goes_into_the_realms_own_patch_of_its_pack_above_it(self):
+        # the realm: Reforged's patch-A.MPQ (hd pack, mirrored) holds HelmetGeosetVisData.dbc, the realm's own
+        # Patch-Y.MPQ (hd pack) loads above it
+        r = self.pack_archive_with_npc_looks("Patch-Y.MPQ")
+        helmets = r.realm["stock"]["HelmetGeosetVisData"]
+        # as on the realm: Patch-R has no HelmetGeosetVisData (the game's copy is the base one)
+        old = rc.patches.PatchArchive(r.patch("Patch-R.MPQ"))
+
+        try:
+            keep = {n: old.read(n) for n in rc.patches.archive_contents(old, "Patch-R.MPQ")
+                    if n.lower() != rc.dbc_path("HelmetGeosetVisData").lower()
+                    and n not in rc.mpqpack.SPECIAL_FILES}
+        finally:
+            old.close()
+
+        sc.synth_skins.write_mpq(r.patch("Patch-R.MPQ"), keep)
+        sc.synth_skins.write_mpq(r.patch("patch-A.MPQ"), {rc.dbc_path("HelmetGeosetVisData"): helmets,
+                                                          "Character\\Hd\\Art.blp": b"made up"})
+        result = r.customize("out")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertFalse(os.path.exists(r.out("out", "client", "patch-A.MPQ")), "the mirror's archive is not rebuilt")
+
+        with open(r.out("out", "report.txt"), encoding="utf-8") as f:
+            self.assertIn("HelmetGeosetVisData patch-A.MPQ -> Patch-Y.MPQ", f.read())
+
+        y = rc.patches.PatchArchive(r.out("out", "client", "Patch-Y.MPQ"))
+
+        try:
+            self.assertTrue(y.has_file(rc.dbc_path("HelmetGeosetVisData")), "the merged copy is in Patch-Y")
+        finally:
+            y.close()
+
     def test_write_refuses_a_target_the_realm_does_not_own(self):
         class Archive:
             is_base, rel, client_path, pack, name = False, "patch-S.MPQ", "Data\\patch-S.MPQ", "hd", "patch-S.MPQ"
