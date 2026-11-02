@@ -1277,7 +1277,16 @@ def make_plan(opts: Options, config) -> Plan:
                         "rebuilds it; remove the table from that pack, or put the merged copy in a realm patch that "
                         "sorts above it")
 
-                combo.targets[name] = own if holder.is_base else holder
+                if holder.is_base or getattr(holder, "origin", "patches") == "client":
+                    # the game's own archives (base or its locale patches) are never rebuilt: the merged copy goes
+                    # into archives.own, which must load above them
+                    if not holder.is_base and own.rank() <= holder.rank():
+                        raise CustomizeError(f"{holder.name} (the game's) holds {name}.dbc above {own.name} for "
+                                             f"{combo.label}: customize never rebuilds the game's archives")
+
+                    combo.targets[name] = own
+                else:
+                    combo.targets[name] = holder
 
         races = DbcTable.from_bytes(read_table(combo.holders["ChrRaces"], "ChrRaces", combo.label),
                                     schema_access.get("ChrRaces"))
@@ -1585,7 +1594,7 @@ def plan_art(plan: Plan):
         own = plan.target_archives  # the table archives this plan rebuilds
 
         for key, holder in sorted(own.items()):
-            if holder.pack is not None or holder.is_base:
+            if holder.pack is not None or holder.is_base or getattr(holder, "origin", "patches") == "client":
                 continue
 
             for name in patches.archive_contents(holder.reader, holder.name):

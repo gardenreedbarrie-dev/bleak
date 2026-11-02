@@ -476,6 +476,31 @@ class RefusalTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertTrue(os.path.exists(r.out("out", "client", "Patch-Y.MPQ")), "the realm's Patch-Y is rebuilt")
 
+    def test_a_table_of_the_games_locale_patch_goes_into_patch_r(self):
+        # as on the realm: the game's enUS/patch-enUS-2.MPQ holds HelmetGeosetVisData.dbc (and other files, one of
+        # them a delete marker's name), Patch-R has none: Patch-R takes the merged copy, the game's patch is untouched
+        r = Realm(self.tmp.name)
+        old = rc.patches.PatchArchive(r.patch("Patch-R.MPQ"))
+
+        try:
+            keep = {n: old.read(n) for n in rc.patches.archive_contents(old, "Patch-R.MPQ")
+                    if n.lower() != rc.dbc_path("HelmetGeosetVisData").lower()
+                    and n not in rc.mpqpack.SPECIAL_FILES}
+        finally:
+            old.close()
+
+        sc.synth_skins.write_mpq(r.patch("Patch-R.MPQ"), keep)
+        sc.synth_skins.write_mpq(os.path.join(r.realm["data"], "enUS", "patch-enUS-2.MPQ"),
+                                 {rc.dbc_path("HelmetGeosetVisData"): r.realm["stock"]["HelmetGeosetVisData"],
+                                  "Interface\\GlueXML\\RaceSelect.lua": b"-- the game's"})
+        result = r.customize("out", "--move-art", "patch-O.MPQ")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+        with open(r.out("out", "report.txt"), encoding="utf-8") as f:
+            self.assertIn("HelmetGeosetVisData patch-enUS-2.MPQ -> Patch-R.MPQ", f.read())
+
+        self.assertFalse(os.path.exists(r.out("out", "client", "enUS", "patch-enUS-2.MPQ")), "the game's is untouched")
+
     def test_a_mirror_patch_table_goes_into_the_realms_own_patch_of_its_pack_above_it(self):
         # the realm: Reforged's patch-A.MPQ (hd pack, mirrored) holds HelmetGeosetVisData.dbc, the realm's own
         # Patch-Y.MPQ (hd pack) loads above it
