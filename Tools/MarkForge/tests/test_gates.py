@@ -68,5 +68,38 @@ class Gates(unittest.TestCase):
         self.assertGreaterEqual(int(rows[100]), 2)
 
 
+class SeamFadeTests(unittest.TestCase):
+    """An HD model whose charts end where a design does not: the design is faded out at that seam, not refused."""
+
+    def setUp(self):
+        import numpy as np
+        from types import SimpleNamespace
+        from mflib import atlas as AT, draw as DR
+        self.np, self.DR = np, DR
+        # a wrap seam: x = 100 on one side, x = 300 on the other, same 3D edge (rows 50-150)
+        seam = AT.Seam("wrap", ((100.0, 50.0), (100.0, 150.0)), ((300.0, 50.0), (300.0, 150.0)))
+        self.at = SimpleNamespace(seams=[seam])
+        self.core = np.zeros((512, 512))
+        self.core[40:160, 60:140] = 1.0   # ink across one side of the seam only: a hard line at x = 300's side
+        self.halo = np.zeros((512, 512))
+
+    def test_a_hard_seam_is_faded_under_the_limit(self):
+        np, DR = self.np, self.DR
+        before = DR.seam_report(self.at, np.clip(self.core, 0, 1))["max"]
+        self.assertGreater(before, 0.1)
+        core, halo, faded = DR.seam_fade(self.at, self.core, self.halo, ("wrap",), None, 0.1)
+        self.assertGreaterEqual(faded, 1)
+        self.assertLessEqual(DR.seam_report(self.at, np.clip(core + 0.45 * halo, 0, 1))["max"], 0.1)
+        self.assertTrue((core[40:160, 60:80] > 0.9).any(), "ink away from the seam stays")
+
+    def test_a_clean_seam_is_left_alone(self):
+        np, DR = self.np, self.DR
+        core = np.zeros((512, 512))
+        core[400:450, 400:450] = 1.0  # nowhere near the seam
+        out, _, faded = DR.seam_fade(self.at, core, self.halo, ("wrap",), None, 0.1)
+        self.assertEqual(faded, 0)
+        self.assertTrue(np.array_equal(out, core))
+
+
 if __name__ == "__main__":
     unittest.main()

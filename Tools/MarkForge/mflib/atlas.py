@@ -616,6 +616,21 @@ def garment_reference_pct(underwear_rgba: np.ndarray, skin_rgba: np.ndarray, flo
     return 100.0 * float(((d > floor + offset) & opaque).mean())
 
 
+def garment_reference_mask(underwear_rgba: np.ndarray, skin_rgba: np.ndarray, floor: float = 22.0) -> np.ndarray:
+    """The texels garment_reference_pct counts (everything that differs from the skin beyond its copy's offset), grown
+    by 2 like garment_from's mask: the conservative garment of an underwear whose cloth garment_from cannot single out
+    (marks stay off all of it)."""
+    opaque, _ = _opaque(underwear_rgba)
+    d = _difference(underwear_rgba, skin_rgba)
+    skin_like = opaque & (d <= 2.0 * floor)
+    offset = float(np.median(d[skin_like])) if skin_like.any() else 0.0
+    g = (d > floor + offset) & opaque
+    for _ in range(2):
+        pad = np.pad(g, 1)
+        g = g | pad[:-2, 1:-1] | pad[2:, 1:-1] | pad[1:-1, :-2] | pad[1:-1, 2:]
+    return g
+
+
 def place_section(mask: np.ndarray, name: str) -> np.ndarray:
     """A section-sized mask (any power-of-two size) in a full 512 atlas mask."""
     x, y, w, h = SECTIONS[name]

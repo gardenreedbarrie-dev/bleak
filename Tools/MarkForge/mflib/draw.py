@@ -223,6 +223,54 @@ def seam_report(at, field: np.ndarray, kinds=("wrap",), head_cuts: bool | None =
     return {"kinds": list(kinds), "samples": samples, "with_ink": inked, "max": round(worst, 4), "worst": worst_at}
 
 
+def _segment_distance(h: int, w: int, seg, x0: int, y0: int, x1: int, y1: int) -> np.ndarray:
+    """The distance (texels) of every texel centre in [y0, y1) x [x0, x1) to a UV segment ((u0, v0), (u1, v1))."""
+    (u0, v0), (u1, v1) = seg
+    ys, xs = np.mgrid[y0:y1, x0:x1]
+    px, py = xs + 0.5, ys + 0.5
+    dx, dy = u1 - u0, v1 - v0
+    ll = dx * dx + dy * dy
+    t = np.clip(((px - u0) * dx + (py - v0) * dy) / ll, 0.0, 1.0) if ll > 0 else np.zeros_like(px)
+    return np.hypot(px - (u0 + t * dx), py - (v0 + t * dy))
+
+
+def seam_fade(at, core: np.ndarray, halo: np.ndarray, kinds: tuple, head_cuts: bool | None, limit: float,
+              radius: float = 8.0, rounds: int = 4) -> tuple[np.ndarray, np.ndarray, int]:
+    """Fades a design out on both sides of every seam of the kinds where its glow still differs by more than limit
+    (a model whose charts end where the design's planes do not: an HD pack's), so it ends softly instead of in a hard
+    line; widens the fade each round until no seam is over the limit. Returns (core, halo, seams faded)."""
+    core, halo = core.copy(), halo.copy()
+    h, w = core.shape
+    faded = 0
+    r = radius
+    for _ in range(rounds):
+        glowf = np.clip(core + 0.45 * halo, 0, 1)
+        over = []
+        for sm in at.seams:
+            if sm.kind not in kinds or (head_cuts is not None and head_only(sm) != head_cuts):
+                continue
+            for f in (0.25, 0.5, 0.75):
+                vals = [bilinear(glowf, u0 + (u1 - u0) * f, v0 + (v1 - v0) * f) for (u0, v0), (u1, v1) in (sm.a, sm.b)]
+                if max(vals) > 0.05 and max(vals) - min(vals) > limit:
+                    over.append(sm)
+                    break
+        if not over:
+            break
+        for sm in over:
+            faded += 1
+            for seg in (sm.a, sm.b):
+                (u0, v0), (u1, v1) = seg
+                x0, x1 = max(0, int(min(u0, u1) - r - 1)), min(w, int(max(u0, u1) + r + 2))
+                y0, y1 = max(0, int(min(v0, v1) - r - 1)), min(h, int(max(v0, v1) + r + 2))
+                if x0 >= x1 or y0 >= y1:
+                    continue
+                m = np.clip(_segment_distance(h, w, seg, x0, y0, x1, y1) / r, 0.0, 1.0)
+                core[y0:y1, x0:x1] *= m
+                halo[y0:y1, x0:x1] *= m
+        r *= 1.5
+    return core, halo, faded
+
+
 def ink_inside(look: Look, mask: np.ndarray, levels: int = 3) -> list[int]:
     """Texels with alpha > 0 inside a mask, at the first `levels` mip levels (a coarse texel counts as inside when
     any of its texels is)."""

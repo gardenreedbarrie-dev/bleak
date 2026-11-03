@@ -219,6 +219,9 @@ def make_looks(p, rf, sex_name, race_data, report_rs, files, gates):
     for di, design in enumerate(race_data["designs"]["designs"]):
         core0, halo0 = D.paint_design(p.charts, design, sex_name)
         core, halo = W.design_fields(p.atlas, p.charts, core0, halo0, p.fade, p.dead)
+        # a seam where the design still ends in a hard line (an HD model's charts): fade it out there, then gate
+        core, halo, faded_wrap = W.seam_fade(p.atlas, core, halo, ("wrap",), None, SEAM_LIMIT)
+        core, halo, faded_cut = W.seam_fade(p.atlas, core, halo, ("cut",), False, SEAM_LIMIT)
         glowf = np.clip(core + 0.45 * halo, 0, 1)
         seam_glow = W.seam_report(p.atlas, glowf)
         seam_core = W.seam_report(p.atlas, np.clip(core, 0, 1))
@@ -228,7 +231,8 @@ def make_looks(p, rf, sex_name, race_data, report_rs, files, gates):
         gates["seam_max"] = max(gates["seam_max"], worst)
         drep = {"design": design["key"], "seam_wrap_glow": seam_glow, "seam_wrap_core": seam_core,
                 "seam_cut_glow": {k: seam_cut[k] for k in ("samples", "with_ink", "max")},
-                "seam_head_cut_glow": {k: seam_head[k] for k in ("samples", "with_ink", "max", "worst")}, "looks": []}
+                "seam_head_cut_glow": {k: seam_head[k] for k in ("samples", "with_ink", "max", "worst")},
+                "seams_faded": faded_wrap + faded_cut, "looks": []}
         if worst > SEAM_LIMIT:
             gates["failures"].append(f"{rf} {sex_name} {design['key']}: glow differs by {worst:.3f} across a wrap seam "
                                      f"(limit {SEAM_LIMIT})")

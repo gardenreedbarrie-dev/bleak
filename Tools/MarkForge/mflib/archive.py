@@ -450,7 +450,8 @@ def garment_union(source, rows, race: int, sex: int, log=None) -> tuple[np.ndarr
     An HD pack gives many skin colours one underwear texture, painted for one of them (colour 41 wears
     ...NakedPelvisSkin00_07, painted over skin 7): an underwear is compared with every skin that wears it and the
     best fit (the most cloth found against the yardstick) makes its mask; the other colours report that colour."""
-    from .atlas import N, SECTIONS, garment_from, garment_reference_pct, place_section, section_of
+    from .atlas import (N, SECTIONS, garment_from, garment_reference_mask, garment_reference_pct, place_section,
+                        section_of)
     union = np.zeros((N, N), bool)
     report = []
     skins = visible_skins(rows, rows_race(source, race), sex)
@@ -503,15 +504,17 @@ def garment_union(source, rows, race: int, sex: int, log=None) -> tuple[np.ndarr
                 cover, ref = 100 * float(g.mean()), garment_reference_pct(uw, sk)
                 fit = cover / ref if ref > 0 else 1.0
                 if best is None or fit > best[0]:
-                    best = (fit, entry, g, thr, cover, ref)
-            _, chosen, g, thr, cover, ref = best
-            union |= place_section(g, sec)
+                    best = (fit, entry, g, thr, cover, ref, uw, sk)
+            _, chosen, g, thr, cover, ref, uw, sk = best
             stats = {"texture": name, "cover_pct": round(cover, 1), "threshold": round(thr, 1),
                      "reference_pct": round(ref, 1)}
             if cover < GARMENT_GATE * ref:
-                # the mask lost the cloth even against its best skin: marks would be painted over the underwear (the
-                # gate's own check reads the same mask, so only this comparison sees it)
-                stats["short"] = True
+                # the mask lost the cloth even against its best skin (no skin of the realm is the one it was painted
+                # over): everything that differs from that skin is taken as garment instead, so marks stay off the
+                # cloth at the cost of some bare skin near it
+                g = g | garment_reference_mask(uw, sk)
+                stats["fallback_pct"] = round(100 * float(g.mean()), 1)
+            union |= place_section(g, sec)
             for entry, _, _ in group:
                 entry[part] = stats if entry is chosen else {"texture": name, "mask_of_colour": chosen["colour"]}
     return union, report

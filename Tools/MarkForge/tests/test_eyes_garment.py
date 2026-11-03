@@ -153,6 +153,25 @@ class Garment(unittest.TestCase):
         x, y, w, h = A.SECTIONS["TU"]
         self.assertTrue(union[y:y + h, x:x + w].any())
 
+    def test_cloth_no_skin_explains_takes_everything_that_differs(self):
+        # no skin of the realm is the one an underwear was painted over: the mask falls back to every texel that
+        # differs from the best skin, so marks stay off the cloth (no gate failure, a fallback_pct in the report)
+        d = common.temp_dir("pkg-fallback")
+        common.write_package(d)
+        src = AR.FolderSource(d)
+        rows = AR.char_sections(src)
+        import mflib.atlas as atlas_mod
+        real = atlas_mod.garment_from
+        try:
+            atlas_mod.garment_from = lambda uw, sk, floor=22.0: (np.zeros(uw.shape[:2], bool), 99.0)
+            union, rep = AR.garment_union(src, rows, 1, 0)
+        finally:
+            atlas_mod.garment_from = real
+        plain, _ = AR.garment_union(src, rows, 1, 0)
+        self.assertEqual(AR.garment_problems(rep), [], rep)
+        self.assertTrue(any("fallback_pct" in e.get("torso", {}) for e in rep if isinstance(e.get("torso"), dict)))
+        self.assertTrue((union & plain).sum() >= 0.8 * plain.sum(), "the fallback still covers the cloth")
+
 
 if __name__ == "__main__":
     unittest.main()
