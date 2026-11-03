@@ -9,6 +9,7 @@
 #include "Engine/Source/lua-5.1/src/lauxlib.h"
 #include "Engine/Source/lua-5.1/src/lua.h"
 #include "Engine/Source/Storm/H/storm.h"
+#include "WoW/Common/BleakholdRaces.h"
 #include "WoW/Common/ComponentCore/CharacterComponent.h"
 #include "WoW/Source/DB/DBClient/DBClient.h"
 #include "WoW/Source/DB/Rec/AreaTableRec.h"
@@ -268,6 +269,8 @@ static int32_t Script_GetSelectBackgroundModel(lua_State* L) {
         } else if (raceID == 8) {
             raceID = 2;
         }
+
+        raceID = BleakholdProxyRace(raceID); // BLEAKHOLD(races): Bleakhold races stand in their proxy race's scene
 
         raceRec = g_chrRacesDB.GetRecord(raceID);
     } else {

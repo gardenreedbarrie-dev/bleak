@@ -1,0 +1,58 @@
+{
+  "race": "Scourge",
+  "designs": [
+    {
+      "key": "SoulfireStitches", "name": "Soulfire Stitches",
+      "lore": "Where the Forsaken were sewn back together, the seams burn: a stitched ring round the neck and the waist, stitch bands at the shoulders, elbows and knees, a stitched scar across one cheek.",
+      "elements": [
+        {"on": "torso", "kind": "line", "pts": [[0.08, 0.0], [0.08, 1.0]], "w": 0.2},
+        {"on": "torso", "kind": "stripes", "from": [0.08, 0.02], "to": [0.08, 0.98], "count": 22, "len": 2.0, "angle": 90, "w": 0.16},
+        {"on": "torso", "kind": "line", "pts": [[1.95, 0.0], [1.95, 1.0]], "w": 0.2},
+        {"on": "torso", "kind": "stripes", "from": [1.95, 0.02], "to": [1.95, 0.98], "count": 24, "len": 2.0, "angle": 90, "w": 0.16},
+        {"on": "arm", "kind": "band", "t": 0.12, "motif": "crosses", "n": 12, "size": 1.0, "rails": 0.14, "gap": 0.0, "w": 0.16},
+        {"on": "arm", "kind": "band", "t": 1.0, "motif": "crosses", "n": 11, "size": 1.0, "rails": 0.14, "gap": 0.0, "w": 0.16},
+        {"on": "leg", "kind": "band", "t": 1.0, "motif": "crosses", "n": 12, "size": 1.1, "rails": 0.14, "gap": 0.0, "w": 0.16},
+        {"on": "face", "kind": "line", "pts": [[0.25, -0.5], [0.95, -0.3]], "w": 0.016},
+        {"on": "face", "kind": "stripes", "from": [0.3, -0.49], "to": [0.9, -0.32], "count": 6, "len": 0.09, "angle": 74, "w": 0.014}
+      ]
+    },
+    {
+      "key": "ValkyrSigil", "name": "Val'kyr Sigil",
+      "lore": "The mark of those raised by the Val'kyr: a winged sigil spread across the back, feather strokes on the forearms, a small diamond on the sternum, two thin tear lines under the eyes.",
+      "elements": [
+        {"on": "torso", "kind": "shape", "shape": "diamond", "at": [0.75, 1.0], "r": 2.6, "wid": 0.55, "fill": 0.55, "rim": 0.24},
+        {"on": "torso", "kind": "line", "pts": [[1.05, 1.0], [1.9, 1.0]], "taper": [0.3, 0.06]},
+        {"on": "torso", "kind": "line", "smooth": true, "pts": [[0.7, 0.96], [0.5, 0.86], [0.3, 0.72], [0.22, 0.6]], "taper": [0.4, 0.1]},
+        {"on": "torso", "kind": "line", "smooth": true, "pts": [[0.8, 0.95], [0.66, 0.84], [0.5, 0.72], [0.45, 0.62]], "taper": [0.36, 0.08]},
+        {"on": "torso", "kind": "line", "smooth": true, "pts": [[0.9, 0.95], [0.84, 0.84], [0.72, 0.74], [0.7, 0.65]], "taper": [0.32, 0.08]},
+        {"on": "torso", "kind": "line", "smooth": true, "pts": [[1.0, 0.96], [1.0, 0.86], [0.94, 0.77], [0.95, 0.69]], "taper": [0.28, 0.06]},
+        {"on": "arm", "kind": "stripes", "from": [1.2, 0.02], "to": [1.85, 0.02], "count": 5, "len": 3.4, "angle": 55, "taper": [0.3, 0.06]},
+        {"on": "torso", "kind": "shape", "shape": "diamond", "at": [0.5, 0.0], "r": 1.3, "wid": 0.55, "fill": 0.8},
+        {"on": "face", "kind": "line", "pts": [[0.42, -0.3], [0.38, -0.72]], "taper": [0.02, 0.006]},
+        {"on": "face", "kind": "line", "pts": [[0.6, -0.3], [0.62, -0.62]], "taper": [0.016, 0.006]}
+      ]
+    },
+    {
+      "key": "PlagueVeins", "name": "Plague Veins",
+      "lore": "The plague that made the Forsaken, still in their veins: branching veins from over the heart and up the neck, down the forearms and calves, along the jaw.",
+      "elements": [
+        {"on": "torso", "kind": "crack", "at": [0.7, 0.18], "dir": -60, "len": 14, "seed": 71, "branches": 3, "jag": 0.35, "w": 0.24},
+        {"on": "torso", "kind": "crack", "at": [0.7, 0.18], "dir": 110, "len": 12, "seed": 72, "branches": 2, "jag": 0.35, "w": 0.22},
+        {"on": "torso", "kind": "crack", "at": [0.25, 0.3], "dir": -90, "len": 8, "seed": 73, "branches": 2, "jag": 0.35, "w": 0.2},
+        {"on": "arm", "kind": "crack", "at": [1.1, 0.15], "dir": 80, "len": 18, "seed": 74, "branches": 3, "jag": 0.35, "w": 0.22},
+        {"on": "leg", "kind": "crack", "at": [1.1, 0.12], "dir": 92, "len": 18, "seed": 75, "branches": 3, "jag": 0.35, "w": 0.22},
+        {"on": "face", "kind": "crack", "at": [0.85, -1.05], "dir": 75, "len": 0.55, "seed": 76, "branches": 2, "jag": 0.35, "w": 0.016, "taper": [0.02, 0.008]}
+      ]
+    },
+    {
+      "key": "DeathRunes", "name": "Death Runes",
+      "lore": "Runes of the grave written on the dead flesh: a line of them down each outer forearm, a rune band round the upper arms, a column down the spine, one on the brow.",
+      "elements": [
+        {"on": "arm", "kind": "script", "from": [1.15, 0.0], "to": [1.9, 0.0], "count": 5, "h": 2.4, "wid": 1.6, "seed": 81, "w": 0.24},
+        {"on": "arm", "kind": "band", "t": 0.5, "motif": "runes", "n": 7, "size": 1.5, "rails": 0.14, "gap": 1.8, "seed": 82, "w": 0.22},
+        {"on": "torso", "kind": "script", "from": [0.3, 1.0], "to": [2.0, 1.0], "count": 6, "h": 2.4, "wid": 1.6, "seed": 83, "w": 0.24},
+        {"on": "face", "kind": "rune", "at": [0.0, 0.66], "h": 0.22, "wid": 0.16, "seed": 84, "w": 0.022}
+      ]
+    }
+  ]
+}

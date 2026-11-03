@@ -59,6 +59,7 @@
 #include "Engine/Source/Gxu/Gxu.h"
 #include "Engine/Source/Gx/CGxMatrixStack.h"
 #include "Engine/Source/Event/CMouseEvent.h"
+#include "WoW/Source/Ui/BleakholdStorm.h"
 
 // STATIC: 0x00ACEBAC
 int32_t CGMinimapFrame::s_scaleChanged = 1;
@@ -1789,6 +1790,9 @@ void CGMinimapFrame::Render() {
     if ((updated || s_scaleChanged) && !s_indoor.m_active) {
         this->UpdateQuads(center, scale);
         s_scaleChanged = 0;
+        // BLEAKHOLD(storm): the space the quads are built in, which the Royale storm is drawn in (center and scale
+        // are set only in the frames that rebuild the quads).
+        CGBleakholdStorm::SetMinimapSpace(position, center, scale, this->m_layoutScale, this->GetWidth());
     }
 
     static C3Vector s_normal(0.0f, 0.0f, 1.0f);
@@ -1853,6 +1857,10 @@ void CGMinimapFrame::Render() {
         for (uint32_t i = 0; i < 4; i++) {
             s_tiles[i].Render(i, &diffuse);
         }
+
+        // BLEAKHOLD(storm): the Bleakhold Royale storm over the terrain, in the tiles' space, under their mask and
+        // with the rotated view still set, before the blips and arrows.
+        CGBleakholdStorm::OnMinimapRender(TextureGetGxTex(s_maskTexture, 1, nullptr), diffuse.a);
     }
 
     if (g_rotateMinimapCVar->m_intValue) {

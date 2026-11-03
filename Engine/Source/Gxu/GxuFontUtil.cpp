@@ -278,7 +278,7 @@ bool SetProjection() {
 
 // VERIFY: 9a3a1eda manual
 // OFFSET: 0x006C0E80
-bool ParseEmbeddedTexture(const char* text, GXUEMBEDDEDTEXTUREINFO* info, float fontPixelHeight, float scale, float fontHeight) {
+static bool ParseEmbeddedTextureStock(const char* text, GXUEMBEDDEDTEXTUREINFO* info, float fontPixelHeight, float scale, float fontHeight) {
     CRect window;
     window.minY = 0.0f;
     window.minX = 0.0f;
@@ -497,6 +497,26 @@ bool ParseEmbeddedTexture(const char* text, GXUEMBEDDEDTEXTUREINFO* info, float 
     info->m_texCoords.maxY = bottom / imageHeightF;
 
     SStrChr(next + 1, ':');
+
+    return true;
+}
+
+// BLEAKHOLD(iconsnap): an icon in text (|T...|t) at any height but the font's own gets a size and an offset with
+// fractions of a pixel, so it lands between pixels and draws blurred or a pixel out of shape. Round them to whole
+// pixels, floor(x + 0.5), the size to at least one pixel, as the pixel snap of WotLK-Extensions does.
+bool ParseEmbeddedTexture(const char* text, GXUEMBEDDEDTEXTUREINFO* info, float fontPixelHeight, float scale, float fontHeight) {
+    if (!ParseEmbeddedTextureStock(text, info, fontPixelHeight, scale, fontHeight)) {
+        return false;
+    }
+
+    if (fontPixelHeight != fontHeight) {
+        float height = floorf(info->m_height + 0.5f);
+        float width = floorf(info->m_width + 0.5f);
+        info->m_height = height < 1.0f ? 1.0f : height;
+        info->m_width = width < 1.0f ? 1.0f : width;
+        info->m_offsetX = floorf(info->m_offsetX + 0.5f);
+        info->m_offsetY = floorf(info->m_offsetY + 0.5f);
+    }
 
     return true;
 }

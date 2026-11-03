@@ -42,6 +42,12 @@ static char s_addOnAccountName[1280];
 // STATIC: 0x00C24918
 static bool s_addOnsInitialized;
 
+// BLEAKHOLD(builtin): the realm's own addon is part of the game. It is always enabled, whatever AddOns.txt, the
+// AddOns list or DisableAddOn / DisableAllAddOns say; it still needs its toc and loads in the normal order.
+static bool IsBuiltInAddOn(const char* name) {
+    return name && !SStrCmpI(name, "Bleakhold", STORM_MAX_STR);
+}
+
 // VERIFY: e4678852 auto
 // OFFSET: 0x005F4910
 static void ReadDataInterfaceVersion() {
@@ -780,6 +786,10 @@ int32_t GetAddOnEnableState(const char* name, const char* character, bool comput
         return 0;
     }
 
+    if (IsBuiltInAddOn(name)) {
+        return 2; // BLEAKHOLD(builtin): enabled for every character
+    }
+
     uint32_t total = 0;
     uint32_t enabled = 0;
 
@@ -1430,7 +1440,7 @@ void InitializeAddOns(const char* accountName) {
 // VERIFY: ee1f2414 manual
 // OFFSET: 0x005F90B0
 void SetAddOnEnableState(const char* name, const char* character, int32_t state) {
-    bool enabled = state != 0;
+    bool enabled = state != 0 || IsBuiltInAddOn(name); // BLEAKHOLD(builtin): disabling it keeps it enabled
 
     for (ADDONSTATELIST* list = s_addOnStates.Head(); list; list = s_addOnStates.Next(list)) {
         if (character && SStrCmpI(list->m_name, character, STORM_MAX_STR)) {
@@ -1525,7 +1535,8 @@ void LoadAddOnEnableState(const char* character) {
             }
 
             if (*value) {
-                bool enabled = SStrCmpI(value, "disabled", STORM_MAX_STR) != 0;
+                // BLEAKHOLD(builtin): an old "Bleakhold: disabled" line counts as enabled (and is next saved so)
+                bool enabled = SStrCmpI(value, "disabled", STORM_MAX_STR) != 0 || IsBuiltInAddOn(line);
                 ADDONSTATE* state = list->m_states.Ptr(line);
 
                 if (!state) {

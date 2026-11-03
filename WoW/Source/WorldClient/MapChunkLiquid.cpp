@@ -483,8 +483,9 @@ void CChunkLiquid::Batch() {
     transform.Translate(s_batch.m_data[0]->m_topLeftCoords);
 
     Liquid::CInstance* instance = Liquid::CInstance::Create();
-    instance->m_material = Liquid::CMaterialBank::GetMaterial(this->m_type);
-    instance->m_settings = Liquid::CSettingsBank::GetSettings(this->m_type);
+    uint32_t renderType = Liquid::GetRenderLiquidType(this->m_type); // BLEAKHOLD(procwater)
+    instance->m_material = Liquid::CMaterialBank::GetMaterial(renderType);
+    instance->m_settings = Liquid::CSettingsBank::GetSettings(renderType);
     Liquid::CClientEnvironment* environment = Liquid::CClientEnvironment::Create(0);
     instance->m_geomFactory = factory;
     instance->m_environment = environment;

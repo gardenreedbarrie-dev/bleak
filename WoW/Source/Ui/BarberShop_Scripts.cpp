@@ -40,19 +40,35 @@ static int32_t Script_GetBarberShopStyleInfo(lua_State* L) {
         return 0;
     }
 
+    // BLEAKHOLD(customize): null checks
+    CGPlayer_C* player = ClntObjMgrGetActivePlayerObj();
+
+    if (!player) {
+        return 0;
+    }
+
     int32_t cost;
 
     if (index == 1) {
         lua_pushnil(L);
         lua_pushnil(L);
-        float value = GetGameTableValue(0, ClntObjMgrGetActivePlayerObj()->m_unit->m_unitFieldLevel - 1, 0) * 0.5f;
+        float value = GetGameTableValue(0, player->m_unit->m_unitFieldLevel - 1, 0) * 0.5f;
         cost = static_cast<int32_t>(value);
     } else {
         const BarberShopStyleRec* style = CGBarberShop::GetCurrentStyle(index);
-        lua_pushstring(L, style->m_displayName);
-        lua_pushstring(L, style->m_description);
-        float value = GetGameTableValue(0, ClntObjMgrGetActivePlayerObj()->m_unit->m_unitFieldLevel - 1, 0) * style->m_costModifier;
-        cost = static_cast<int32_t>(value);
+
+        // BLEAKHOLD(customize): a hair style or features value with no BarberShopStyle row has no name and no price
+        // (it read through null before)
+        if (style) {
+            lua_pushstring(L, style->m_displayName);
+            lua_pushstring(L, style->m_description);
+            float value = GetGameTableValue(0, player->m_unit->m_unitFieldLevel - 1, 0) * style->m_costModifier;
+            cost = static_cast<int32_t>(value);
+        } else {
+            lua_pushnil(L);
+            lua_pushnil(L);
+            cost = 0;
+        }
     }
 
     lua_pushinteger(L, cost);
@@ -61,6 +77,19 @@ static int32_t Script_GetBarberShopStyleInfo(lua_State* L) {
         lua_pushnumber(L, 1.0);
     } else {
         lua_pushnil(L);
+    }
+
+    // BLEAKHOLD(customize): returns 5-7, the raw value previewed, its 1-based place in the walk this selector's arrows
+    // make (0 when they cannot come back to it) and how many values they reach (CGBarberShop::GetStyleWalk)
+    int32_t raw = 0;
+    int32_t position = 0;
+    int32_t count = 0;
+
+    if (CGBarberShop::GetStyleWalk(static_cast<int32_t>(index), &raw, &position, &count)) {
+        lua_pushnumber(L, raw);
+        lua_pushnumber(L, position);
+        lua_pushnumber(L, count);
+        return 7;
     }
 
     return 4;
@@ -112,6 +141,27 @@ static int32_t Script_SetNextBarberShopStyle(lua_State* L) {
     return 0;
 }
 
+// BLEAKHOLD(customize): ok = SetBarberShopStyleData(type, raw): jumps that selector's preview (types as
+// SetNextBarberShopStyle: 1 hair style, 2 hair colour, 3 features, 4 skin) to raw when its arrows reach it, as one
+// arrow press landing there would; nil and nothing changed otherwise.
+static int32_t Script_SetBarberShopStyleData(lua_State* L) {
+    if (!lua_isnumber(L, 1) || !lua_isnumber(L, 2)) {
+        luaL_error(L, "Usage: SetBarberShopStyleData(type, value)");
+        return 0;
+    }
+
+    int32_t index = static_cast<int32_t>(lua_tonumber(L, 1)) - 1;
+    int32_t raw = static_cast<int32_t>(lua_tonumber(L, 2));
+
+    if (CGBarberShop::SetBarberShopStyleData(index, raw)) {
+        lua_pushnumber(L, 1.0);
+    } else {
+        lua_pushnil(L);
+    }
+
+    return 1;
+}
+
 // VERIFY: 270ee40e auto
 // OFFSET: 0x0052E9B0
 static int32_t Script_GetHairCustomization(lua_State* L) {
@@ -137,6 +187,7 @@ static FrameScript_Method s_ScriptFunctions[] = {
     { "GetFacialHairCustomization", &Script_GetFacialHairCustomization },
     { "BarberShopReset", &Script_BarberShopReset },
     { "CanAlterSkin", &Script_CanAlterSkin },
+    { "SetBarberShopStyleData", &Script_SetBarberShopStyleData }, // BLEAKHOLD(customize)
 };
 
 // VERIFY: 5397546f auto

@@ -27,8 +27,10 @@ TEXTEMOTELOOKUP::TEXTEMOTELOOKUP() {
 int32_t SI2::GetTextEmoteSoundID(uint32_t emotesTextId, uint32_t race, uint32_t sex) {
     TEXTEMOTELOOKUP* lookup;
 
-    if (emotesTextId < s_textEmoteLookupById.Count() && (lookup = s_textEmoteLookupById[emotesTextId]) != nullptr && race < 22 && sex < 2) {
-        return lookup->m_soundIds[race][sex];
+    // BLEAKHOLD(races): was race < 22; a Bleakhold race without its own row speaks with its proxy race's voice
+    if (emotesTextId < s_textEmoteLookupById.Count() && (lookup = s_textEmoteLookupById[emotesTextId]) != nullptr && race < BLEAKHOLD_RACE_CAPACITY && sex < 2) {
+        int32_t soundId = lookup->m_soundIds[race][sex];
+        return soundId ? soundId : lookup->m_soundIds[BleakholdProxyRace(race)][sex];
     }
 
     return 0;
@@ -40,8 +42,13 @@ int32_t SI2::GetTextEmoteSoundIndex(uint32_t emotesTextId, uint32_t race, uint32
     TEXTEMOTELOOKUP* lookup;
     int32_t soundKitId;
 
-    if (emotesTextId < s_textEmoteLookupById.Count() && (lookup = s_textEmoteLookupById[emotesTextId]) != nullptr && race < 22 && sex < 2) {
+    // BLEAKHOLD(races): as in GetTextEmoteSoundID
+    if (emotesTextId < s_textEmoteLookupById.Count() && (lookup = s_textEmoteLookupById[emotesTextId]) != nullptr && race < BLEAKHOLD_RACE_CAPACITY && sex < 2) {
         soundKitId = lookup->m_soundIds[race][sex];
+
+        if (!soundKitId) {
+            soundKitId = lookup->m_soundIds[BleakholdProxyRace(race)][sex];
+        }
     } else {
         soundKitId = 0;
     }
@@ -81,6 +88,10 @@ void SI2::InitEmoteSounds() {
 
     s_numTextEmotes = count;
 
+    // BLEAKHOLD(races): New() below can move the array, and s_textEmoteLookupById keeps pointers into it; one
+    // entry per run of an emote id is at least one per distinct id, so nothing moves once this is reserved
+    s_textEmoteLookups.Reserve(count, 0);
+
     for (int32_t i = 0; i < g_emotesTextSoundDB.m_numRecords; i++) {
         EmotesTextSoundRec* rec = (i < 0 || i >= g_emotesTextSoundDB.m_numRecords) ? nullptr : &g_emotesTextSoundDB.m_records[i];
         uint32_t id = rec->m_emotesTextID;
@@ -96,7 +107,7 @@ void SI2::InitEmoteSounds() {
             (*slot)->m_emotesTextId = rec->m_emotesTextID;
         }
 
-        if (static_cast<uint32_t>(rec->m_raceID) < 22 && static_cast<uint32_t>(rec->m_sexID) < 2) {
+        if (static_cast<uint32_t>(rec->m_raceID) < BLEAKHOLD_RACE_CAPACITY && static_cast<uint32_t>(rec->m_sexID) < 2) { // BLEAKHOLD(races): was 22
             (*slot)->m_soundIds[rec->m_raceID][rec->m_sexID] = rec->m_soundID;
         }
     }

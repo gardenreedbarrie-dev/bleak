@@ -2,6 +2,7 @@
 #include <cmath>
 #include "Engine/Source/Base/Handle.h"
 #include "Engine/Source/Base/ObjectAlloc.h"
+#include "Engine/Source/BleakFx/BleakFx.h"
 #include "Engine/Source/Gx/CGxBuf.h"
 #include "Engine/Source/Gx/CGxMatrixStack.h"
 #include "Engine/Source/Gx/CGxPool.h"
@@ -21,6 +22,8 @@
 #include "Engine/Source/Tempest/CImVector.h"
 #include <cstring>
 #include "WoW/Source/DB/DBClient/DBClient.h"
+#include "WoW/Source/Object/ObjectClient/Player_C.h"
+#include "WoW/Source/ObjectMgrClient/ObjectMgrClient.h"
 #include "WoW/Source/WorldClient/CDetailDoodadData.h"
 #include "WoW/Source/WorldClient/DayNight.h"
 #include "WoW/Source/WorldClient/DayNight__DNInfo.h"
@@ -509,6 +512,8 @@ void CDetailDoodad::Initialize() {
         CDetailDoodad::s_bUseShaders = 0;
     } else if (CDetailDoodad::s_bUseShaders) {
         g_theGxDevicePtr->ShaderCreate(CDetailDoodad::s_vertexShader, GxSh_Vertex, "Shaders\\Vertex", "DetailDoodad", sizeof(CDetailDoodad::s_vertexShader) / sizeof(CDetailDoodad::s_vertexShader[0]));
+        // BLEAKHOLD(grasswind): wind in the grass (Engine/Source/Gx/BleakGrassWind.h).
+        BleakFx::PatchGrassShaders(CDetailDoodad::s_vertexShader, sizeof(CDetailDoodad::s_vertexShader) / sizeof(CDetailDoodad::s_vertexShader[0]));
         g_theGxDevicePtr->ShaderCreate(CDetailDoodad::s_pixelShader, GxSh_Pixel, "Shaders\\Pixel", "DetailDoodad", sizeof(CDetailDoodad::s_pixelShader) / sizeof(CDetailDoodad::s_pixelShader[0]));
     }
 }
@@ -600,6 +605,12 @@ int32_t CDetailDoodad::InitializeRenderState() {
         uint32_t shadow = CShadowCache::GetShadowValue();
         g_theGxDevicePtr->RsSet(GxRs_PixelShader, CDetailDoodad::s_pixelShader[4 * ((CWorld::enables2 >> 1) & 1) + shadow]);
         CDetailDoodad::InitializeShaderConstants();
+
+        // BLEAKHOLD(grasswind): this frame's wind, and the player the blades part around.
+        CGPlayer_C* player = ClntObjMgrGetActivePlayerObj();
+        C3Vector playerPos = player ? player->GetPosition() : C3Vector(0.0f, 0.0f, 0.0f);
+        BleakFx::SetGrassWind(*World::GetCamPos(), player ? &playerPos : nullptr);
+
         CShadowCache::SetShadowMapDetailDoodad();
         return 1;
     }

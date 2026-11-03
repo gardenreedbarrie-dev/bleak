@@ -14,6 +14,11 @@ else ()
     set(WOW_OUTPUT_NAME Wow32)
 endif ()
 
+set(WOW_OUTPUT_OVERRIDE "" CACHE STRING "Wow executable name instead of Wow64/Wow32")
+if (WOW_OUTPUT_OVERRIDE)
+    set(WOW_OUTPUT_NAME ${WOW_OUTPUT_OVERRIDE})
+endif ()
+
 set_target_properties(Wow PROPERTIES
     OUTPUT_NAME ${WOW_OUTPUT_NAME}
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin/Win
@@ -35,6 +40,7 @@ target_link_libraries(Wow
     PRIVATE
         BLPFile
         Base
+        BleakFx
         BlizzardCore
         ComSat
         ConsoleBase
@@ -48,6 +54,8 @@ target_link_libraries(Wow
         Gxu
         Images
         Model2
+        ModernAssets
+        WarcraftXL
         Os
         Scrn
         Services

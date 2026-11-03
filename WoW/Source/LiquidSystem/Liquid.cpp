@@ -22,6 +22,9 @@ char Liquid::s_shaderPath[256];
 // STATIC: 0x00D43AF0
 int32_t Liquid::s_shadersEnabled;
 
+// BLEAKHOLD(procwater): set by the proceduralWater CVar (see Liquid::GetRenderLiquidType).
+int32_t Liquid::s_proceduralWater;
+
 // STATIC: 0x00D43AF4
 int32_t Liquid::s_useCameraRelativeCoords;
 

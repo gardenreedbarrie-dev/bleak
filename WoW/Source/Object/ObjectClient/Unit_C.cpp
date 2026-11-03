@@ -15,6 +15,7 @@
 #include "Engine/Source/Tempest/C33Matrix.h"
 #include "Engine/Source/Tempest/CMath.h"
 #include "Engine/Source/Tempest/CRandom.h"
+#include "WoW/Common/ComponentCore/BleakMarkOwners.h"
 #include "WoW/Common/ComponentCore/CharacterComponent.h"
 #include "WoW/Source/DB/DBClient/CreatureStats_C.h"
 #include "WoW/Source/DB/DBClient/DBCacheInstances.h"
@@ -9793,6 +9794,18 @@ void CGUnit_C::InitializeActivePlayerComponent() {
         this->SetCharacterModel(CCharacterComponent::m_activePlayerComponent->m_data.m_model);
         this->m_characterComponent = component;
         CCharacterComponent::m_activePlayerComponent = nullptr;
+
+        // BLEAKHOLD(marks): the body built at character select (owner 0) is the player's now, so it shows the marks
+        // of the player's GUID; rebuilt at once only when the map already has them (an empty map changes nothing).
+        uint64_t owner = this->m_obj->m_guid.m_guid;
+
+        if (component->m_bleakMarkOwner != owner) {
+            component->SetBleakMarkOwner(owner);
+
+            if (CCharacterComponent::BleakMarkOwnerMap().Mark(owner) || CCharacterComponent::BleakMarkOwnerMap().Eye(owner)) {
+                CCharacterComponent::BleakMarksChanged(owner);
+            }
+        }
     } else {
         CCharacterComponent::FreeComponent(CCharacterComponent::m_activePlayerComponent);
         CCharacterComponent::m_activePlayerComponent = nullptr;
@@ -13826,6 +13839,13 @@ void CGUnit_C::SetLocalClientControl(bool control) {
 // OFFSET: 0x0071D010
 int32_t CGUnit_C::InitializeExtendedDisplay(CGPlayer_C* player, int32_t hasDisplayInfo) {
     this->m_characterComponent = CCharacterComponent::AllocComponent();
+
+    // BLEAKHOLD(marks): a player's own body shows the marks of its GUID (Init below reads them); NPCs and their baked
+    // skins none.
+    if (this->m_characterComponent && player && (this->m_obj->m_type & TYPEMASK_PLAYER)) {
+        this->m_characterComponent->SetBleakMarkOwner(this->m_obj->m_guid.m_guid);
+    }
+
     ComponentData data;
 
     if (hasDisplayInfo) {
@@ -23787,6 +23807,12 @@ void CGUnit_C::OnReceiveMirrorImageDataFromServer(CDataStore* msg) {
             }
         }
     } else if (this->m_displayInfoExtra) {
+        // BLEAKHOLD(mirrorfix): the same free as the race-data branch above.
+        if (this->m_characterComponent) {
+            CCharacterComponent::FreeComponent(this->m_characterComponent);
+            this->m_characterComponent = nullptr;
+        }
+
         this->m_characterComponent = CCharacterComponent::AllocComponent();
         const char* bakeName = this->GetDisplayBakeName();
 

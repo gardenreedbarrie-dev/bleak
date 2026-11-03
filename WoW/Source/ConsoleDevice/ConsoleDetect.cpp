@@ -82,6 +82,23 @@ void ConsoleDetectSetDefaults(DefaultSettings& defaults, const Hardware& hardwar
     defaults.unk_0019 = true;
     defaults.m_numChannels = 0;
     defaults.m_fivePointOne = false;
+
+    // BLEAKHOLD(defaults): the hardware table (VideoHardware.dbc) knows no graphics card newer than the client, so
+    // a fresh install starts at its best settings on any machine instead; the Video options still lower them. The
+    // screen format stays the detected one.
+    defaults.m_farClip = 1277.0f;
+    defaults.m_terrainShadowLOD = 0;
+    defaults.m_detailDoodadDensity = 128;
+    defaults.m_animatingDoodads = true;
+    defaults.m_trilinear = true;
+    defaults.m_specular = true;
+    defaults.m_specularity = true;
+    defaults.m_waterLOD = 1;
+    defaults.m_particleDensity = 1.0f;
+    defaults.m_unitDrawDist = 300.0f;
+    defaults.m_smallCull = 0.04f;
+    defaults.m_distCull = 500.0f;
+    defaults.m_baseMipLevel = 0;
 }
 
 // VERIFY: 2f86cffe auto
@@ -106,8 +123,7 @@ static void SetVideoIdx(Hardware& hardware) {
 // VERIFY: b9267b57 manual
 // OFFSET: 0x0076B5A0
 static void ShowFatalMessageBox(int32_t stringID, const char* message) {
-    Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(1);
-    const char* caption = titleRec ? titleRec->m_message : "World of Warcraft";
+    const char* caption = "Bleakhold"; // BLEAKHOLD(branding)
     Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(stringID);
 
     OsGuiMessageBox(OsGuiGetWindow(2), 0, rec ? rec->m_message : message, caption);
@@ -143,8 +159,7 @@ void ConsoleDetectSaveHardware(const Hardware& hardware, bool& changed) {
     if (hardware.m_cpuIdx == cpuIdx && hardware.m_memIdx == memIdx && (genericVideo || hardware.m_videoID == videoID) && hardware.m_soundIdx == soundIdx) {
         changed = false;
     } else {
-        Startup_StringsRec* titleRec = g_startup_StringsDB.GetRecord(1);
-        const char* caption = titleRec ? titleRec->m_message : "World of Warcraft";
+        const char* caption = "Bleakhold"; // BLEAKHOLD(branding)
         Startup_StringsRec* rec = g_startup_StringsDB.GetRecord(5);
         const char* message = rec ? rec->m_message : "Hardware changed.  Reload default settings?";
 

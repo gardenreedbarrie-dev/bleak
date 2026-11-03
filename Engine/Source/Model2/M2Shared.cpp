@@ -15,7 +15,10 @@
 #include "Engine/Source/Gx/CGxTexFlags.h"
 #include "Engine/Source/Gx/Gx.h"
 #include "Engine/Source/Model2/M2Cache.h"
+#include "Engine/Source/Model2/M2Dance.h"
+#include "Engine/Source/Model2/M2Glow.h"
 #include "Engine/Source/Model2/M2Model.h"
+#include "Engine/Source/Model2/M2Modern.h"
 #include "Engine/Source/Os/TimeManager.h"
 #include "Engine/Source/Services/AsyncFile.h"
 #include "Engine/Source/Services/Texture.h"
@@ -357,7 +360,7 @@ int32_t CM2Shared::SetIndices() {
 
         for (uint32_t i = 0; i < this->m_skinData->m_skinSections.m_count; i++) {
             M2SkinSection* section = &this->m_skinSections[i];
-            uint32_t start = this->m_skinData->m_skinSections[i].m_indexStart;
+            uint32_t start = M2SkinSectionIndexStart(this->m_skinData->m_skinSections[i], this->m_skinData->m_indices.m_count); // BLEAKHOLD(modernassets)
             uint16_t offset = sharedVertices ? 0 : static_cast<uint16_t>(-section->m_vertexStart);
 
             for (uint32_t instance = 0; instance < this->m_instances; instance++) {
@@ -369,7 +372,7 @@ int32_t CM2Shared::SetIndices() {
                 offset += sharedVertices ? static_cast<uint16_t>(this->m_skinData->m_vertices.m_count) : section->m_vertexCount;
             }
 
-            section->m_indexStart = static_cast<uint16_t>(indexStart);
+            M2SetBuiltSectionIndexStart(*section, indexStart); // BLEAKHOLD(modernassets): starts past 65535
             indexStart += this->m_instances * section->m_indexCount;
         }
 
@@ -741,7 +744,9 @@ CShaderEffect* CM2Shared::GetEffect(M2Batch* batch) {
                 alphaOp = static_cast<EGxTexOp>(3);
                 break;
             default:
-                break;
+                // BLEAKHOLD(modernassets): modern skins carry effect indices past 3; with no shader pair the
+                // name below would be built from null pointers. Such a batch is not drawn.
+                return nullptr;
         }
 
         char effectName[256];
@@ -764,6 +769,85 @@ CShaderEffect* CM2Shared::GetEffect(M2Batch* batch) {
     }
 
     return effect;
+}
+
+// BLEAKHOLD(glow): the component sections each batch's texture coordinates touch (M2Glow::UvBounds), so that a glow
+// only covering the face does not draw the legs again. A batch whose coordinates cannot be read gets every section.
+const uint16_t* CM2Shared::GetGlowBatchSections() {
+    M2Data* data = this->m_data;
+    M2SkinProfile* skin = this->m_skinData;
+
+    if (!data || !skin || !skin->m_batches.m_count) {
+        return nullptr;
+    }
+
+    uint32_t batchCount = skin->m_batches.m_count;
+
+    if (this->m_bleakGlowBatchSections && this->m_bleakGlowSkin == skin && this->m_bleakGlowBatchCount == batchCount) {
+        return this->m_bleakGlowBatchSections;
+    }
+
+    if (this->m_bleakGlowBatchSections) {
+        SMemFree(this->m_bleakGlowBatchSections, __FILE__, __LINE__, 0);
+        this->m_bleakGlowBatchSections = nullptr;
+    }
+
+    size_t bytes = sizeof(uint16_t) * batchCount;
+    uint16_t* sections = static_cast<uint16_t*>(SMemAlloc(bytes, __FILE__, __LINE__, 0));
+
+    if (!sections) {
+        return nullptr;
+    }
+
+    for (uint32_t i = 0; i < batchCount; i++) {
+        const M2Batch& batch = skin->m_batches[i];
+        sections[i] = static_cast<uint16_t>(M2Glow::kAllSections);
+
+        if (batch.m_skinSectionIndex >= skin->m_skinSections.m_count) {
+            continue;
+        }
+
+        if (batch.m_textureCoordComboIndex >= data->m_textureCoordCombos.m_count) {
+            continue;
+        }
+
+        uint32_t uvSet = data->m_textureCoordCombos[batch.m_textureCoordComboIndex];
+
+        if (uvSet > 1) {
+            continue;
+        }
+
+        const M2SkinSection& section = skin->m_skinSections[batch.m_skinSectionIndex];
+        uint32_t first = section.m_vertexStart;
+        uint32_t count = section.m_vertexCount;
+
+        if (first + count > skin->m_vertices.m_count) {
+            continue;
+        }
+
+        M2Glow::UvBounds bounds;
+        bool readable = true;
+
+        for (uint32_t k = 0; k < count && readable; k++) {
+            uint32_t vertex = skin->m_vertices[first + k];
+
+            if (vertex >= data->m_vertices.m_count) {
+                readable = false;
+            } else {
+                const C2Vector& uv = data->m_vertices[vertex].m_texcoord[uvSet];
+                bounds.Add(uv.x, uv.y);
+            }
+        }
+
+        if (readable) {
+            sections[i] = static_cast<uint16_t>(bounds.Sections());
+        }
+    }
+
+    this->m_bleakGlowBatchSections = sections;
+    this->m_bleakGlowSkin = skin;
+    this->m_bleakGlowBatchCount = batchCount;
+    return sections;
 }
 
 // VERIFY: 02384724 auto
@@ -1315,6 +1399,8 @@ int32_t CM2Shared::FinishLoadingSkinProfile(uint32_t size) {
         return 0;
     }
 
+    M2ModernFinalizeSkin(this, size); // BLEAKHOLD(modernassets)
+
     if (!this->InitializeSkinProfile()) {
         DebugLog("Failed to initialize model skin profile: %s", this->m_fileName);
         return 0;
@@ -1527,6 +1613,11 @@ CM2Shared::CM2Shared(CM2Cache* cache) {
     this->m_billboardBoneCount = 0;
     this->m_lastUsedTime = 0;
     this->m_fileName[0] = '\0';
+    this->m_modernFlags = 0;
+    this->m_bleakDanceRig = nullptr;
+    this->m_bleakGlowBatchSections = nullptr; // BLEAKHOLD(glow)
+    this->m_bleakGlowSkin = nullptr;
+    this->m_bleakGlowBatchCount = 0;
 }
 
 // INLINED
@@ -1642,6 +1733,16 @@ int32_t CM2Shared::LoadSkinProfile(uint32_t profile) {
 
 // INLINED
 uint32_t CM2Shared::GetSkinProfileIndex(uint32_t maxBones) {
+    // BLEAKHOLD(x64): s_skinProfileBoneCounts holds the bone budgets of the last four profiles, and 3.3.5a models
+    // have at most four. Models converted from later expansions list up to eight (their LOD skins counted too):
+    // for them the original reads in front of the table, which the 32-bit client survived, while here the
+    // negative index wraps as a uint32 and the read crashes (Dalaran, Blackrock Spire). Such a model takes its
+    // full skin, profile 0: M2ModernFinalizeSkin clamps its bone budget and splits any section over the device's
+    // bones per draw.
+    if (this->m_data->m_numSkinProfiles > 4) {
+        return 0;
+    }
+
     for (uint32_t i = 0; i < this->m_data->m_numSkinProfiles; i++) {
         if (s_skinProfileBoneCounts[4 - this->m_data->m_numSkinProfiles + i] <= maxBones) {
             return i;
@@ -1730,6 +1831,8 @@ int32_t CM2Shared::FinishLoading() {
     if (this->m_flags & 1) {
         return 1;
     }
+
+    M2ModernPrepareModel(this); // BLEAKHOLD(modernassets)
 
     if (!M2Init(reinterpret_cast<uint8_t*>(this->m_data), this->m_fileSize, *this->m_data)) {
         DebugLog("Corrupt model data: %s", this->m_fileName);
@@ -1848,6 +1951,16 @@ void CM2Shared::CancelAllDeferredSequences() {
 // OFFSET: 0x0083D5B0
 CM2Shared::~CM2Shared() {
     this->CancelAllDeferredSequences();
+
+    // BLEAKHOLD(dance)
+    M2DanceReleaseRig(this->m_bleakDanceRig);
+    this->m_bleakDanceRig = nullptr;
+
+    // BLEAKHOLD(glow)
+    if (this->m_bleakGlowBatchSections) {
+        SMemFree(this->m_bleakGlowBatchSections, __FILE__, __LINE__, 0);
+        this->m_bleakGlowBatchSections = nullptr;
+    }
 
     int32_t pending = 0;
 

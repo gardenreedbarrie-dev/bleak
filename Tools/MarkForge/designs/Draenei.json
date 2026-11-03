@@ -1,0 +1,49 @@
+{
+  "race": "Draenei",
+  "designs": [
+    {
+      "key": "NaaruLightmarks", "name": "Naaru Lightmarks",
+      "lore": "Marks of the naaru's blessing: crystal facets clustered on the shoulders, an eight-pointed star on the sternum, small diamonds over the brow, facets down the forearms.",
+      "elements": [
+        {"on": "arm", "kind": "shape", "shape": "diamond", "at": [0.3, 0.0], "r": 2.4, "wid": 0.55, "fill": 0.5, "rim": 0.24},
+        {"on": "arm", "kind": "shape", "shape": "diamond", "at": [0.42, 0.06], "r": 1.6, "wid": 0.55, "fill": 0.5, "rim": 0.2},
+        {"on": "arm", "kind": "shape", "shape": "diamond", "at": [0.4, -0.06], "r": 1.4, "wid": 0.55, "fill": 0.5, "rim": 0.2},
+        {"on": "torso", "kind": "shape", "shape": "star", "at": [0.6, 0.0], "r": 3.2, "n": 8, "inner": 0.4, "fill": 0.55, "rim": 0.24},
+        {"on": "arm", "kind": "column", "from": [1.2, 0.0], "to": [1.85, 0.0], "count": 4, "scale": [1.0, 0.6], "shape": {"shape": "diamond", "r": 1.2, "wid": 0.5, "fill": 0.6}},
+        {"on": "face", "kind": "shape", "shape": "diamond", "at": [0.3, 0.42], "r": 0.06, "wid": 0.55, "fill": 0.9},
+        {"on": "face", "kind": "shape", "shape": "diamond", "at": [0.62, 0.44], "r": 0.05, "wid": 0.55, "fill": 0.9}
+      ]
+    },
+    {
+      "key": "VindicatorRunes", "name": "Vindicator Runes",
+      "lore": "Litanies of the Vindicators: columns of glyphs down the outer arms and either side of the spine, a single glyph on the brow.",
+      "elements": [
+        {"on": "arm", "kind": "script", "from": [0.15, 0.0], "to": [1.9, 0.0], "count": 9, "h": 2.4, "wid": 1.6, "seed": 141, "w": 0.24},
+        {"on": "torso", "kind": "script", "from": [0.3, 0.88], "to": [2.2, 0.88], "count": 8, "h": 2.4, "wid": 1.6, "seed": 142, "w": 0.24},
+        {"on": "face", "kind": "rune", "at": [0.0, 0.62], "h": 0.22, "wid": 0.16, "seed": 143, "w": 0.022}
+      ]
+    },
+    {
+      "key": "ArgusStarChart", "name": "Argus Star-Chart",
+      "lore": "The sky over lost Argus, remembered: a star chart across the back with orbits round a bright star, small stars on the upper arms, star freckles under the eyes.",
+      "elements": [
+        {"on": "torso", "kind": "constellation", "area": [[0.3, 0.68], [2.0, 0.98]], "count": 9, "seed": 151, "r": 0.85, "w": 0.13},
+        {"on": "torso", "kind": "shape", "shape": "star", "at": [1.0, 1.0], "r": 1.6, "n": 6, "inner": 0.35, "fill": 1.0},
+        {"on": "torso", "kind": "arc", "at": [1.0, 1.0], "r": 4.0, "from": 0, "to": 360, "w": 0.12},
+        {"on": "torso", "kind": "arc", "at": [1.0, 1.0], "r": 6.5, "from": 0, "to": 360, "w": 0.1},
+        {"on": "arm", "kind": "constellation", "area": [[0.2, -0.1], [0.75, 0.1]], "count": 4, "seed": 152, "r": 0.8, "w": 0.12},
+        {"on": "face", "kind": "constellation", "area": [[0.4, -0.6], [0.9, -0.34]], "count": 4, "seed": 153, "r": 0.03, "link": false}
+      ]
+    },
+    {
+      "key": "CrystalVeins", "name": "Crystal Veins",
+      "lore": "Veins of crystal light like the Exodar's walls: straight-faceted veins up the forearms and calves, a crystal at each wrist, a vein along each cheekbone.",
+      "elements": [
+        {"on": "arm", "kind": "crack", "at": [1.95, 0.05], "dir": -90, "len": 18, "seed": 161, "branches": 2, "jag": 0.25, "w": 0.26},
+        {"on": "arm", "kind": "shape", "shape": "diamond", "at": [1.95, 0.05], "r": 1.4, "wid": 0.5, "fill": 0.7},
+        {"on": "leg", "kind": "crack", "at": [1.9, 0.1], "dir": -90, "len": 20, "seed": 162, "branches": 2, "jag": 0.25, "w": 0.28},
+        {"on": "face", "kind": "crack", "at": [0.4, -0.42], "dir": 10, "len": 0.5, "seed": 163, "branches": 1, "jag": 0.2, "w": 0.018, "taper": [0.022, 0.008]}
+      ]
+    }
+  ]
+}

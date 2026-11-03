@@ -1,0 +1,226 @@
+{
+  "_readme": "The Bleakhold appearance catalogue (Tools/RaceForge/README.md, 'Bleakhold appearance data contract'). Per ChrRaces clientFileString: 4 mark designs, 3 mark colours (colour 3 is the paint colour: glow false) and 3 eye colours, in the order of the features look number (look = 3 * (design - 1) + colour) and the face eye number (1-3). Keys (letters and digits) are used in texture paths, names are shown to players. Both sexes of a race share its entries. MarkForge draws these; raceforge.py picker-data and customize take the names from here. Changing a key or the order renames or renumbers live looks: do not, once marks are live.",
+  "version": 1,
+  "death_knight_eyes": [
+    {"eye": 4, "key": "BloodRed", "name": "Blood Red", "hex": "#FF1E1E"},
+    {"eye": 5, "key": "UnholyGreen", "name": "Unholy Green", "hex": "#7CFF3A"}
+  ],
+  "races": {
+    "Human": {
+      "designs": [
+        {"key": "TidesageKnots", "name": "Tidesage Knots"},
+        {"key": "KirinTorWards", "name": "Kirin Tor Wards"},
+        {"key": "LightsOath", "name": "Light's Oath"},
+        {"key": "HighlandWoad", "name": "Highland Woad"}
+      ],
+      "colours": [
+        {"key": "ArcaneViolet", "name": "Arcane Violet", "hex": "#A070FF", "glow": true},
+        {"key": "HolyGold", "name": "Holy Gold", "hex": "#FFD25A", "glow": true},
+        {"key": "BlackInk", "name": "Black Ink", "hex": "#1A1A1F", "glow": false}
+      ],
+      "eyes": [
+        {"key": "ArcaneViolet", "name": "Arcane Violet", "hex": "#A070FF"},
+        {"key": "HolyGold", "name": "Holy Gold", "hex": "#FFD25A"},
+        {"key": "TidalTeal", "name": "Tidal Teal", "hex": "#2FD3C2"}
+      ]
+    },
+    "Orc": {
+      "designs": [
+        {"key": "BloodOathPaint", "name": "Blood-Oath Paint"},
+        {"key": "ElementalShamanRunes", "name": "Elemental Shaman Runes"},
+        {"key": "FelScars", "name": "Fel Scars"},
+        {"key": "AncestorLines", "name": "Ancestor Lines"}
+      ],
+      "colours": [
+        {"key": "WarEmber", "name": "War Ember", "hex": "#FF4A1E", "glow": true},
+        {"key": "FelGreen", "name": "Fel Green", "hex": "#6CFF2E", "glow": true},
+        {"key": "AshWhite", "name": "Ash White", "hex": "#E8E2D8", "glow": false}
+      ],
+      "eyes": [
+        {"key": "FelRed", "name": "Fel Red", "hex": "#FF2A1A"},
+        {"key": "SpiritBlue", "name": "Spirit Blue", "hex": "#63C7FF"},
+        {"key": "Lava", "name": "Lava", "hex": "#FF8C1A"}
+      ]
+    },
+    "Dwarf": {
+      "designs": [
+        {"key": "TitanRunes", "name": "Titan Runes"},
+        {"key": "EmberCracks", "name": "Ember Cracks"},
+        {"key": "WildhammerKnotwork", "name": "Wildhammer Knotwork"},
+        {"key": "AnvilSigil", "name": "Anvil Sigil"}
+      ],
+      "colours": [
+        {"key": "TitanBlue", "name": "Titan Blue", "hex": "#4FB0FF", "glow": true},
+        {"key": "Molten", "name": "Molten", "hex": "#FF7A1A", "glow": true},
+        {"key": "WoadInk", "name": "Woad Ink", "hex": "#22305A", "glow": false}
+      ],
+      "eyes": [
+        {"key": "MoltenRed", "name": "Molten Red", "hex": "#FF3B1E"},
+        {"key": "TitanBlue", "name": "Titan Blue", "hex": "#4FB0FF"},
+        {"key": "ForgeGold", "name": "Forge Gold", "hex": "#FFC24A"}
+      ]
+    },
+    "NightElf": {
+      "designs": [
+        {"key": "MoonwellSigils", "name": "Moonwell Sigils"},
+        {"key": "CenarionVines", "name": "Cenarion Vines"},
+        {"key": "SentinelTalon", "name": "Sentinel Talon"},
+        {"key": "Starfall", "name": "Starfall"}
+      ],
+      "colours": [
+        {"key": "EluneBlue", "name": "Elune Blue", "hex": "#5FB4FF", "glow": true},
+        {"key": "MoonwellTeal", "name": "Moonwell Teal", "hex": "#3FE0C5", "glow": true},
+        {"key": "MidnightInk", "name": "Midnight Ink", "hex": "#2A2350", "glow": false}
+      ],
+      "eyes": [
+        {"key": "MoonlightSilver", "name": "Moonlight Silver", "hex": "#CFE3FF"},
+        {"key": "DruidAmber", "name": "Druid Amber", "hex": "#FFB43A"},
+        {"key": "DreamEmerald", "name": "Dream Emerald", "hex": "#4CFF8A"}
+      ]
+    },
+    "Scourge": {
+      "designs": [
+        {"key": "SoulfireStitches", "name": "Soulfire Stitches"},
+        {"key": "ValkyrSigil", "name": "Val'kyr Sigil"},
+        {"key": "PlagueVeins", "name": "Plague Veins"},
+        {"key": "DeathRunes", "name": "Death Runes"}
+      ],
+      "colours": [
+        {"key": "Soulfire", "name": "Soulfire", "hex": "#C8FF5A", "glow": true},
+        {"key": "SpiritBlue", "name": "Spirit Blue", "hex": "#7FD7FF", "glow": true},
+        {"key": "GraveInk", "name": "Grave Ink", "hex": "#1E2420", "glow": false}
+      ],
+      "eyes": [
+        {"key": "SoulfireYellow", "name": "Soulfire Yellow", "hex": "#F0FF5A"},
+        {"key": "SpiritBlue", "name": "Spirit Blue", "hex": "#7FD7FF"},
+        {"key": "PlagueGreen", "name": "Plague Green", "hex": "#8CFF3A"}
+      ]
+    },
+    "Tauren": {
+      "designs": [
+        {"key": "EarthmotherPaint", "name": "Earthmother Paint"},
+        {"key": "TotemicStripes", "name": "Totemic Stripes"},
+        {"key": "SunwalkerRays", "name": "Sunwalker Rays"},
+        {"key": "ThunderLines", "name": "Thunder Lines"}
+      ],
+      "colours": [
+        {"key": "SunGold", "name": "Sun Gold", "hex": "#FFC44A", "glow": true},
+        {"key": "SpiritTeal", "name": "Spirit Teal", "hex": "#4FE0C8", "glow": true},
+        {"key": "Ochre", "name": "Ochre", "hex": "#D9542B", "glow": false}
+      ],
+      "eyes": [
+        {"key": "SunGold", "name": "Sun Gold", "hex": "#FFC44A"},
+        {"key": "MoonSilver", "name": "Moon Silver", "hex": "#CFE0FF"},
+        {"key": "SpiritTeal", "name": "Spirit Teal", "hex": "#4FE0C8"}
+      ]
+    },
+    "Gnome": {
+      "designs": [
+        {"key": "ArcaneCircuitry", "name": "Arcane Circuitry"},
+        {"key": "GearSigils", "name": "Gear Sigils"},
+        {"key": "MechagonSeams", "name": "Mechagon Seams"},
+        {"key": "LeysparkDots", "name": "Leyspark Dots"}
+      ],
+      "colours": [
+        {"key": "ArcaneCyan", "name": "Arcane Cyan", "hex": "#3FE6FF", "glow": true},
+        {"key": "ManaPink", "name": "Mana Pink", "hex": "#FF6BD8", "glow": true},
+        {"key": "MachineOil", "name": "Machine Oil", "hex": "#23262B", "glow": false}
+      ],
+      "eyes": [
+        {"key": "ArcaneCyan", "name": "Arcane Cyan", "hex": "#3FE6FF"},
+        {"key": "SparkYellow", "name": "Spark Yellow", "hex": "#FFE34A"},
+        {"key": "ManaPink", "name": "Mana Pink", "hex": "#FF6BD8"}
+      ]
+    },
+    "Troll": {
+      "designs": [
+        {"key": "LoaMarks", "name": "Loa Marks"},
+        {"key": "DarkspearTribal", "name": "Darkspear Tribal"},
+        {"key": "HexCircles", "name": "Hex Circles"},
+        {"key": "ZandalariGoldScript", "name": "Zandalari Gold Script"}
+      ],
+      "colours": [
+        {"key": "VoodooPurple", "name": "Voodoo Purple", "hex": "#A64DFF", "glow": true},
+        {"key": "LoaGreen", "name": "Loa Green", "hex": "#5CFF7A", "glow": true},
+        {"key": "BoneWhite", "name": "Bone White", "hex": "#EDE6D6", "glow": false}
+      ],
+      "eyes": [
+        {"key": "LoaPurple", "name": "Loa Purple", "hex": "#A64DFF"},
+        {"key": "HexTeal", "name": "Hex Teal", "hex": "#3FE0D0"},
+        {"key": "ZandalariGold", "name": "Zandalari Gold", "hex": "#FFC845"}
+      ]
+    },
+    "BloodElf": {
+      "designs": [
+        {"key": "SunstriderFiligree", "name": "Sunstrider Filigree"},
+        {"key": "SunwellRays", "name": "Sunwell Rays"},
+        {"key": "FelBrand", "name": "Fel Brand"},
+        {"key": "PhoenixWarPaint", "name": "Phoenix War Paint"}
+      ],
+      "colours": [
+        {"key": "SunwellGold", "name": "Sunwell Gold", "hex": "#FFC845", "glow": true},
+        {"key": "FelGreen", "name": "Fel Green", "hex": "#7CFF2E", "glow": true},
+        {"key": "PhoenixRed", "name": "Phoenix Red", "hex": "#B3121B", "glow": false}
+      ],
+      "eyes": [
+        {"key": "SunwellGold", "name": "Sunwell Gold", "hex": "#FFC845"},
+        {"key": "PhoenixCrimson", "name": "Phoenix Crimson", "hex": "#FF4A3D"},
+        {"key": "ArcaneViolet", "name": "Arcane Violet", "hex": "#B06CFF"}
+      ]
+    },
+    "Draenei": {
+      "designs": [
+        {"key": "NaaruLightmarks", "name": "Naaru Lightmarks"},
+        {"key": "VindicatorRunes", "name": "Vindicator Runes"},
+        {"key": "ArgusStarChart", "name": "Argus Star-Chart"},
+        {"key": "CrystalVeins", "name": "Crystal Veins"}
+      ],
+      "colours": [
+        {"key": "NaaruCyan", "name": "Naaru Cyan", "hex": "#6FE8FF", "glow": true},
+        {"key": "HolyGold", "name": "Holy Gold", "hex": "#FFE07A", "glow": true},
+        {"key": "ExodarInk", "name": "Exodar Ink", "hex": "#3A2A5A", "glow": false}
+      ],
+      "eyes": [
+        {"key": "NaaruGold", "name": "Naaru Gold", "hex": "#FFE07A"},
+        {"key": "PrismWhite", "name": "Prism White", "hex": "#F4F8FF"},
+        {"key": "ExodarViolet", "name": "Exodar Violet", "hex": "#B88CFF"}
+      ]
+    },
+    "HighElf": {
+      "designs": [
+        {"key": "SilverCovenantSigils", "name": "Silver Covenant Sigils"},
+        {"key": "LeyLineTracery", "name": "Ley-Line Tracery"},
+        {"key": "FarstriderMarks", "name": "Farstrider Marks"},
+        {"key": "RunestoneWards", "name": "Runestone Wards"}
+      ],
+      "colours": [
+        {"key": "QueldoreiBlue", "name": "Quel'dorei Blue", "hex": "#4FA8FF", "glow": true},
+        {"key": "ArcaneViolet", "name": "Arcane Violet", "hex": "#A67CFF", "glow": true},
+        {"key": "SilverInk", "name": "Silver Ink", "hex": "#C9D3DE", "glow": false}
+      ],
+      "eyes": [
+        {"key": "Starlight", "name": "Starlight", "hex": "#F2F6FF"},
+        {"key": "ArcaneViolet", "name": "Arcane Violet", "hex": "#A67CFF"},
+        {"key": "WindrunnerTeal", "name": "Windrunner Teal", "hex": "#3FD8D0"}
+      ]
+    },
+    "Eredar": {
+      "designs": [
+        {"key": "LegionBrand", "name": "Legion Brand"},
+        {"key": "FelfireCracks", "name": "Felfire Cracks"},
+        {"key": "SargeriteRunes", "name": "Sargerite Runes"},
+        {"key": "ShadowCouncilScript", "name": "Shadow Council Script"}
+      ],
+      "colours": [
+        {"key": "FelGreen", "name": "Fel Green", "hex": "#6BFF2A", "glow": true},
+        {"key": "VoidPurple", "name": "Void Purple", "hex": "#9B4DFF", "glow": true},
+        {"key": "ManariBlack", "name": "Man'ari Black", "hex": "#141014", "glow": false}
+      ],
+      "eyes": [
+        {"key": "FelGreen", "name": "Fel Green", "hex": "#6BFF2A"},
+        {"key": "ManariRed", "name": "Man'ari Red", "hex": "#FF2D4A"},
+        {"key": "VoidPurple", "name": "Void Purple", "hex": "#9B4DFF"}
+      ]
+    }
+  }
+}

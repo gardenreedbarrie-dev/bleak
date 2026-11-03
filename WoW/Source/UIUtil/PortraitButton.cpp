@@ -1,8 +1,10 @@
 #include "PortraitButton.h"
+#include "Engine/Source/BlizzardCore/SFile2-Core.h"
 #include "Engine/Source/Gx/CGxDevice/CGxDevice.h"
 #include "Engine/Source/Gx/Gx.h"
 #include "Engine/Source/Tempest/CImVector.h"
 #include "Engine/Source/Tempest/CiRect.h"
+#include "WoW/Common/BleakholdRaces.h"
 #include "WoW/Source/Ui/ScriptEvents.h"
 #include "Engine/Source/Base/Status.h"
 #include "Engine/Source/Services/Texture.h"
@@ -418,8 +420,24 @@ void SetPortraitTexture(CSimpleTexture* texture, uint32_t race, uint32_t sex, WO
     }
 
     ChrRacesRec* raceRec = g_chrRacesDB.GetRecord(race);
+
+    // BLEAKHOLD(races): no row for the race used to crash here
+    if (!raceRec) {
+        return;
+    }
+
     char fileName[64];
     SStrPrintf(fileName, sizeof(fileName), "Interface\\CharacterFrame\\TemporaryPortrait-%s-%s", s_sexNames[sex], raceRec->m_clientFileString);
+
+    // BLEAKHOLD(races): a Bleakhold race without its own portrait art shows its proxy race's
+    char blpName[68];
+    SStrPrintf(blpName, sizeof(blpName), "%s.blp", fileName);
+    ChrRacesRec* proxyRec = BleakholdProxyRace(race) != race ? g_chrRacesDB.GetRecord(BleakholdProxyRace(race)) : nullptr;
+
+    if (proxyRec && !SFile::FileExists(blpName)) {
+        SStrPrintf(fileName, sizeof(fileName), "Interface\\CharacterFrame\\TemporaryPortrait-%s-%s", s_sexNames[sex], proxyRec->m_clientFileString);
+    }
+
     texture->SetTexture(fileName, 0, 0, CSimpleTexture::s_textureFilterMode, ImageMode_Normal);
 }
 

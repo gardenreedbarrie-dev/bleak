@@ -18,6 +18,10 @@ class CShaderEffect;
 class CTexture;
 class SFileImpl;
 
+namespace BleakDance {
+struct Rig;
+}
+
 class TextureComboList {
     public:
     /* 0000 */ uint32_t m_count;
@@ -72,6 +76,17 @@ class CM2Shared {
     /* 0198 */ uint16_t m_billboardBoneCount;
     /* 019C */ uint32_t m_lastUsedTime;
     /* 01A0 */ TSLink<CM2Shared> m_updateLink;
+    // BLEAKHOLD(modernassets): M2MODERN_* flags (M2Modern.h), set when the model is parsed.
+    uint32_t m_modernFlags;
+    // BLEAKHOLD(dance): how the Bleakhold dances map onto this model's bones (M2Dance.h), built the first time one of
+    // its models dances; null until then.
+    BleakDance::Rig* m_bleakDanceRig;
+    // BLEAKHOLD(glow): for every batch of m_bleakGlowSkin (the skin profile it was read from), the component sections
+    // its texture coordinates touch (M2Glow.h); built the first time a model of this file draws a glow, null until
+    // then.
+    uint16_t* m_bleakGlowBatchSections;
+    M2SkinProfile* m_bleakGlowSkin;
+    uint32_t m_bleakGlowBatchCount;
 
     static void LoadFailedCallback(void* param);
     static void LoadSucceededCallback(void* param);
@@ -96,6 +111,7 @@ class CM2Shared {
     uint32_t GetSkinProfileIndex(uint32_t maxBones);
     CShaderEffect* GetEffect(M2Batch* batch);
     CShaderEffect* GetEffect(uint32_t textureCount, uint16_t shader, uint16_t textureCoordComboIndex);
+    const uint16_t* GetGlowBatchSections(); // BLEAKHOLD(glow)
     int32_t Initialize();
     int32_t InitializeSkinProfile();
     int32_t Load(SFileImpl* file, int32_t flags, CAaBox* boundingBox);

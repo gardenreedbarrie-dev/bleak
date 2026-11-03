@@ -1,0 +1,156 @@
+{
+    "_readme": "Bleakhold races for RaceForge. Every race clones its template race (models, sounds, class list) and joins the faction of faction_race (language, reputations, faction template, start zone). racials drops the template's racial skill lines and names the race's own racial spells; spells defines them (and the spells a server module casts or teaches) as Spell.dbc rows. id is the race id build gives (after the stock rows 1-21); realm_id is the race's id on the Bleakhold realm, whose own race patch (Patch-R.MPQ) put High Elf and Eredar in the stock slots 15 and 19: raceforge.py update works there. See README.md for every field.",
+    "races": [
+        {
+            "id": 22,
+            "realm_id": 15,
+            "name": "High Elf",
+            "names": {},
+            "name_female": null,
+            "name_male": null,
+            "client_file_string": "HighElf",
+            "template_race": 10,
+            "faction": "alliance",
+            "faction_race": 1,
+            "faction_template": null,
+            "classes": null,
+            "male_display_id": null,
+            "female_display_id": null,
+            "required_expansion": null,
+            "cinematic_sequence_id": 0,
+            "start": {"map": 0, "zone": 12, "x": -8949.95, "y": -132.493, "z": 83.5312, "o": 0.0, "comment": "Northshire Valley, Elwynn Forest (the Human start)"},
+            "death_knight_start": {"map": 609, "zone": 4298, "x": 2355.84, "y": -5664.77, "z": 426.028, "o": 3.65997, "comment": "Ebon Hold (the Blood Elf Death Knight start)"},
+            "stats": null,
+            "racials": {
+                "drop_template_skill_lines": [756],
+                "spells": [90500],
+                "comment": "No Blood Elf racials (756: Arcane Torrent, Magic Resistance, Arcane Affinity). Wind Blessed instead; the glide, Walk on Air (100801 in the spellbook, aura 100800), is mod-bleakhold-ui's, which teaches it."
+            }
+        },
+        {
+            "id": 23,
+            "realm_id": 19,
+            "name": "Eredar",
+            "names": {},
+            "name_female": null,
+            "name_male": null,
+            "client_file_string": "Eredar",
+            "template_race": 11,
+            "faction": "horde",
+            "faction_race": 2,
+            "faction_template": null,
+            "classes": null,
+            "male_display_id": null,
+            "female_display_id": null,
+            "required_expansion": null,
+            "cinematic_sequence_id": 0,
+            "start": {"map": 1, "zone": 14, "x": -618.518, "y": -4251.67, "z": 38.718, "o": 0.0, "comment": "Valley of Trials, Durotar (the Orc start)"},
+            "death_knight_start": {"map": 609, "zone": 4298, "x": 2358.17, "y": -5663.21, "z": 426.027, "o": 3.65997, "comment": "Ebon Hold (the Draenei Death Knight start)"},
+            "stats": null,
+            "racials": {
+                "drop_template_skill_lines": [760],
+                "spells": [90501, 90502],
+                "comment": "No Draenei racials (760: Gift of the Naaru, Heroic Presence, Shadow Resistance, Gemcutting). Elemental Insight and Read Ley Line instead."
+            }
+        }
+    ],
+    "spells": [
+        {
+            "id": 90500,
+            "name": "Wind Blessed",
+            "subtext": "Racial Passive",
+            "description": "Increases your melee, ranged and spell haste by $s1%.",
+            "aura_description": "Melee, ranged and spell haste increased by $s1%.",
+            "icon": 2837,
+            "icon_name": "Ability_Druid_GaleWinds",
+            "visual": 0,
+            "fields": {
+                "attributes": 80, "castingTimeIndex": 1, "durationIndex": 21, "rangeIndex": 1, "schoolMask": 1,
+                "effect[0]": 6, "effectDieSides[0]": 1, "effectBasePoints[0]": 2, "implicitTargetA[0]": 1,
+                "effectAura[0]": 193
+            },
+            "comment": "High Elf. Passive like Beast Slaying (attributes 0x50: ability, passive; endless duration 21, self). Aura 193 SPELL_AURA_MELEE_SLOW with +3 is Berserking's haste: melee, off-hand and ranged attack speed and cast speed, multiplying with other haste."
+        },
+        {
+            "id": 90501,
+            "name": "Elemental Insight",
+            "subtext": "Racial Passive",
+            "description": "Damage dealt versus Elementals increased by $s1%.",
+            "aura_description": "Damage dealt versus Elementals increased by $s1%.",
+            "icon": 2016,
+            "icon_name": "Spell_Nature_ElementalAbsorption",
+            "visual": 0,
+            "fields": {
+                "attributes": 80, "castingTimeIndex": 1, "durationIndex": 21, "rangeIndex": 1, "schoolMask": 1,
+                "effect[0]": 6, "effectDieSides[0]": 1, "effectBasePoints[0]": 4, "implicitTargetA[0]": 1,
+                "effectAura[0]": 168, "effectMiscValue[0]": 8
+            },
+            "comment": "Eredar. Beast Slaying's row with another creature type: aura 168 SPELL_AURA_MOD_DAMAGE_DONE_VERSUS, +5%, creature type mask 8 (1 << (4 Elemental - 1)); melee, ranged and spell damage."
+        },
+        {
+            "id": 90502,
+            "name": "Read Ley Line",
+            "subtext": "Racial",
+            "description": "Read the ley lines beneath you, increasing your health and mana regeneration by $s1% for $d. Lasts 2 min when used while resting at an inn, in a city or at a campfire.",
+            "aura_description": "Health and mana regeneration increased by $s1%.",
+            "icon": 2158,
+            "icon_name": "Spell_Arcane_StudentOfMagic",
+            "visual": 4279,
+            "fields": {
+                "attributes": 134217728, "castingTimeIndex": 1, "recoveryTime": 120000, "durationIndex": 9,
+                "rangeIndex": 1, "baseLevel": 1, "spellLevel": 1, "schoolMask": 64, "defenseType": 1,
+                "preventionType": 1, "effect[0]": 6, "effectDieSides[0]": 1, "effectBasePoints[0]": 99,
+                "implicitTargetA[0]": 1, "effectAura[0]": 88, "effect[1]": 6, "effectDieSides[1]": 1,
+                "effectBasePoints[1]": 99, "implicitTargetA[1]": 1, "effectAura[1]": 110, "effectMiscValue[1]": 0
+            },
+            "comment": "Eredar. Instant, 2 min cooldown, off the global cooldown, 30 s (duration 9); castable while sitting (0x08000000), so eating or drinking goes on. Aura 88 SPELL_AURA_MOD_HEALTH_REGEN_PERCENT and 110 SPELL_AURA_MOD_POWER_REGEN_PERCENT (mana), +100% each. Visual 4279 (Mana Tide's: a blue splash at the feet and glowing hands, then the mana swirl around the feet while it lasts; Nature Cast sound). mod-bleakhold makes it last 2 min when cast while resting."
+        },
+        {
+            "id": 100800,
+            "name": "Walk on Air",
+            "subtext": "Racial",
+            "description": "Glide through the air for $d, steering your descent. Does not gain altitude.",
+            "aura_description": "Gliding on the air. Turn to steer; you do not gain altitude.",
+            "icon": 1931,
+            "icon_name": "Spell_Nature_EyeOfTheStorm",
+            "visual": 63,
+            "cast_by": "server",
+            "server_row": "Server/mod-bleakhold-ui/data/sql/db-world/02_bleakhold_walk_on_air.sql",
+            "text_locales": ["enUS"],
+            "fields": {
+                "attributes": 262160, "castingTimeIndex": 1, "durationIndex": 1, "rangeIndex": 1, "schoolMask": 1,
+                "effect[0]": 6, "effectDieSides[0]": 1, "implicitTargetA[0]": 1, "effectAura[0]": 105,
+                "effectBonusCoefficient[0]": 1.0
+            },
+            "comment": "The glide's aura (mod-bleakhold-ui, BleakholdUi.Glide.Spell): the module casts it when a glide starts (the spellbook racial 100801, /glide, the key binding or the Glide button), no race learns it. Its spell_dbc row is the module's own SQL (server_row; RaceForge checks it field for field and writes none); only enUS texts, as that row. Feather fall (aura 105) on the caster for 10 s (duration 1), instant, self; attributes 0x40010 (ability, no sheathe). visual is the glide's look, set here and in that row together: 63 is Slow Fall's (130): a light at the hands and a soft flash at the head when the glide starts, nothing that stays on the character. Others: 0 none (the Wind Shear gust of BleakholdUi.Glide.StartVisualKit alone), 12114 Guardian Spirit's golden wings for the whole glide, 12724 Cyclone Fall's whirl with a floating pose, 6768 Levitate's swirl at the feet, 7370 Magic Wings (the old: wings at the head). Ids 100800-100809 are the camping spells."
+        },
+        {
+            "id": 100801,
+            "name": "Walk on Air",
+            "subtext": "Racial",
+            "description": "Glide through the air for $100800d, steering your descent by turning. Use it while falling or jumping. Does not gain altitude.",
+            "aura_description": "",
+            "icon": 505,
+            "icon_name": "Spell_Magic_FeatherFall",
+            "visual": 0,
+            "cast_by": "module",
+            "server_row": "Server/mod-bleakhold-ui/data/sql/db-world/02_bleakhold_walk_on_air.sql",
+            "text_locales": ["enUS"],
+            "fields": {
+                "attributes": 262160, "castingTimeIndex": 1, "recoveryTime": 90000, "rangeIndex": 1, "schoolMask": 1,
+                "effect[0]": 3, "effectDieSides[0]": 1, "implicitTargetA[0]": 1
+            },
+            "comment": "The High Elf glide in the spellbook (mod-bleakhold-ui, BleakholdUi.Glide.CastSpell): the module teaches it at login to the races of BleakholdUi.Glide.Races (15, the High Elf on the realm) and puts it on a free action bar slot once; casting it starts the module's glide (its rules, its aura 100800), sharing the cooldown with /glide, the key binding and the Glide button. Usable only in the air (falling or jumping; on the ground the cast fails with \"Cannot be used on the ground\", which the addon words for the glide, and costs nothing). Instant, off the global cooldown (no startRecovery), 90 s cooldown (recoveryTime 90000: the action bar shows it; the module sends BleakholdUi.Glide.Cooldown when that differs), self (range 1), physical school (no spell school lockout). A dummy effect on the caster (effect 3, target 1) that the module's spell script handles; no visual of its own (the aura's is the glide's look). Icon 505 Spell_Magic_FeatherFall (Slow Fall's feather)."
+        }
+    ],
+    "archives": {
+        "own": "patch-R.MPQ",
+        "optional_packs": {"hd": ["Data/patch-[ABCDEGIMNPSU].MPQ", "Data/Patch-Y.MPQ"]},
+        "comment": "raceforge.py update merges the changed tables into the archive whose copy each player's client reads, with and without each launcher pack (Tools/MapForge's rules); own takes a table no patch holds."
+    },
+    "policy": {
+        "faction_wide_masks": true,
+        "reputation_from": "faction_race",
+        "content_masks_from": "faction_race"
+    }
+}

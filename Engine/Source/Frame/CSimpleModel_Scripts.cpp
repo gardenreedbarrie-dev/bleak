@@ -3,6 +3,7 @@
 #include "Engine/Source/Frame/CSimpleModel.h"
 #include "Engine/Source/FrameScript/FrameScript.h"
 #include "Engine/Source/FrameScript/FrameScript_Object.h"
+#include "Engine/Source/Model2/M2Dance.h"
 #include "Engine/Source/Model2/M2Light.h"
 #include "Engine/Source/Model2/M2Model.h"
 #include "Engine/Source/Model2/M2Shared.h"
@@ -524,6 +525,35 @@ static int32_t Script_SetGlow(lua_State* L) {
     return 0;
 }
 
+// BLEAKHOLD(dance): model:SetBleakholdDance(id) plays Bleakhold dance `id` on the frame's model (the Collections
+// window's preview), model:SetBleakholdDance(nil) stops it. Returns true while the dance plays; nil when this client
+// has no such dance or the frame has no model yet. A new model (SetUnit, SetModel) starts without a dance.
+static int32_t Script_SetBleakholdDance(lua_State* L) {
+    CSimpleModel* model = static_cast<CSimpleModel*>(FrameScript_GetObjectThis(L, CSimpleModel::GetObjectType()));
+
+    if (!model->m_model) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    if (!lua_isnumber(L, 2)) {
+        M2DanceStop(model->m_model, 200);
+        lua_pushnil(L);
+        return 1;
+    }
+
+    const BleakDance::Clip* clip = M2DanceFindClip(static_cast<uint32_t>(lua_tonumber(L, 2)));
+
+    if (!clip) {
+        lua_pushnil(L);
+        return 1;
+    }
+
+    M2DanceStart(model->m_model, clip, 200, 0);
+    lua_pushboolean(L, 1);
+    return 1;
+}
+
 // VERIFY: 7cc86a8e auto
 // OFFSET: 0x00961540
 void CSimpleModel::CreateScriptMetaTable() {
@@ -556,6 +586,7 @@ static FrameScript_Method s_ScriptMethods[] = {
     { "GetFogFar", &Script_GetFogFar },
     { "ClearFog", &Script_ClearFog },
     { "SetGlow", &Script_SetGlow },
+    { "SetBleakholdDance", &Script_SetBleakholdDance },
 };
 
 // VERIFY: 89102caf auto

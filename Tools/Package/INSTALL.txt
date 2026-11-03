@@ -1,0 +1,81 @@
+BLEAKHOLD CLIENT - HOW TO INSTALL
+=================================
+
+This package holds everything Bleakhold adds to a World of Warcraft 3.3.5a (12340) client. It contains no
+Blizzard game files: you need your own 3.3.5a client.
+
+
+PLAYERS
+-------
+1. Copy everything in this folder into your WoW 3.3.5a folder (the one with Wow.exe and the Data folder).
+   Say yes if Windows asks to merge folders.
+2. Set your realm in Data\enUS\realmlist.wtf (or your language folder), for example:
+       set realmlist 185.217.124.41
+3. Start Bleakhold.exe.
+
+What you get:
+- the Bleakhold login and character creation with High Elf and Eredar (Data\Interface\Bleakhold\Glue).
+  The login screen is the classic 3D one: put a login patch such as WoW Forever's patch-J.MPQ into Data and
+  it shows. BLEAKHOLD_LOGIN_SCREEN = "bleakhold" in Data\Interface\Bleakhold\Glue\BleakholdStrings.lua
+  switches to the Bleakhold painting
+- First Name and Last Name boxes in character creation; the server needs the mod-two-names module for
+  two-word names (the last name can be left empty). In game, whisper a two-word name by clicking it, with /r,
+  with /w "First Last" message or with /w2 First Last message; /friend First Last adds a two-word friend
+- the Bleakhold interface (Interface\AddOns\Bleakhold): type /bh in game, /bh help for commands,
+  /bh demo to look at every window with sample data
+- AddicatUI, the retail-style interface (Interface\AddOns\AddicatUI): it needs its art, the AddicatUI_Art
+  addon, which comes separately (your server gives it to you); without it the game leaves AddicatUI off.
+  /aui opens its settings, /aui edit moves the frames. Do not use it together with DragonUI
+- the emote wheel: hold Ctrl+G, point at an emote and let go (a short tap keeps it open for clicking);
+  set it up in Collections > Animations (/bh animations). Ctrl+G is only taken when it is free; any key
+  can be set in Key Bindings > Bleakhold
+- emoji bubbles: pick an emoji in Collections > Animations > Emojis (double-click or Play), or on page 4 of the
+  emote wheel; everyone nearby sees it pop up over your head (art in Data\Interface\Bleakhold\Emoji).
+  /bh emoji joy sends one, /bh emojis off hides all emoji bubbles. The realm needs the mod-bleakhold-ui module.
+- Bleakhold dances: pick one in Collections > Animations (Dances), put it on the emote wheel, or type its
+  command (/stringswing, /runningman, ... /bh dance list shows them all); everyone nearby sees it until you
+  move. Each dance can have music: put <key>.mp3 into Data\Interface\Bleakhold\Dances\Music (the README
+  there lists the keys). The realm needs the mod-bleakhold-ui module; others need Bleakhold.exe to see the
+  dance (stock clients see the stock dance). /console bleakDanceMusic 0 turns the music off.
+- Bleakhold graphics: ambient occlusion, contact shadows, light shafts, bloom, colour grading, anti-aliasing
+  and sharpening on the 3D world, water with reflections, refraction and colour by depth, and grass that moves
+  in the wind and bends away from you. /bh graphics opens the settings with presets (Off, Classic+, Bleakhold,
+  Cinematic). Ambient occlusion, contact shadows, light shafts and the water's reflections of the world need
+  Multisampling 1x in the Video options (the graphics anti-aliasing replaces it). They need a graphics card
+  with shader model 3 and the Direct3D 9 renderer (the default).
+- High Elf and Eredar characters also need the race file patch-R.MPQ in Data (see below; your server
+  gives it to you)
+
+
+SERVER OWNER: THE RACE FILES (ONCE)
+-----------------------------------
+High Elf and Eredar must exist in the same game data on the server and in every client.
+
+1. Double-click Tools\BleakholdRaceForge.exe.
+2. Drag your server's data\dbc folder into the window and press Enter.
+   (Or drag the dbc folder onto BleakholdRaceForge.exe.)
+3. A folder "Bleakhold-RaceForge-Output" appears next to the dbc folder:
+   - client\patch-R.MPQ             give this to every player: it goes into their game's Data folder
+   - server\dbc\*.dbc               copy into the server's data\dbc folder (keep a backup first)
+   - server\sql\bleakhold_races.sql run on the world database
+   - report.txt                     every check RaceForge ran; all must say PASS
+4. Restart the server.
+
+Use the dbc folder your server really runs with, so your own changes are kept. Run RaceForge again
+whenever you change those files.
+
+More faces, hair, skins, tattoos and HD models: after the dbc folder, drag a character customization
+package folder (for example Ascension Character Customization, your own download) into the window when
+RaceForge asks for it. High Elf and Eredar get every option too. The output then also has
+client\patch-6.MPQ (and patch-7, patch-8, patch-9 for a large package) with the package's models and
+textures: give those to every player as well (they go into the Data folder next to patch-R.MPQ). Keep
+their names: almost every letter is already a patch of the realm. Packing the art takes a few minutes.
+
+
+SERVER OWNER: THE SERVER MODULE
+-------------------------------
+The Bleakhold interface shows data only when the server runs the mod-bleakhold-ui AzerothCore module
+(Server/mod-bleakhold-ui in the source repository). Its README explains the install and how to connect your
+own Mythic+, Dungeon Journey, Eclipse Rift and task systems. In game, ".bleakhold test all" (GM) fills
+every window with sample data. Emoji bubbles are on by default (BleakholdUi.Emoji.Enable,
+BleakholdUi.Emoji.CooldownMs).

@@ -1,0 +1,54 @@
+{
+  "race": "BloodElf",
+  "designs": [
+    {
+      "key": "SunstriderFiligree", "name": "Sunstrider Filigree",
+      "lore": "The court filigree of Silvermoon: gilded feather lines along the collarbones and the outer forearms, small arcs over the shoulder blades, fine sweeps from the outer corner of each eye.",
+      "elements": [
+        {"on": "torso", "kind": "vine", "pts": [[0.32, 0.03], [0.22, 0.14], [0.26, 0.26], [0.36, 0.33]], "amp": 0.5, "period": 7, "w": 0.18,
+         "leaf": {"len": 1.8, "wid": 0.6, "every": 0.5, "fill": 0.5}},
+        {"on": "arm", "kind": "vine", "pts": [[1.15, 0.02], [1.5, 0.0], [1.88, 0.02]], "amp": 0.6, "period": 8, "w": 0.18,
+         "leaf": {"len": 1.9, "wid": 0.65, "every": 0.5, "fill": 0.5}},
+        {"on": "torso", "kind": "arc", "at": [0.6, 0.82], "r": 3.6, "from": 200, "to": 320, "taper": [0.1, 0.3]},
+        {"on": "torso", "kind": "arc", "at": [0.6, 0.82], "r": 2.6, "from": 210, "to": 310, "taper": [0.08, 0.22]},
+        {"on": "face", "kind": "line", "smooth": true, "pts": [[0.86, 0.04], [0.96, 0.16], [1.02, 0.34]], "taper": [0.022, 0.006]},
+        {"on": "face", "kind": "line", "smooth": true, "pts": [[0.85, -0.06], [0.96, -0.02], [1.04, 0.1]], "taper": [0.016, 0.005]}
+      ]
+    },
+    {
+      "key": "SunwellRays", "name": "Sunwell Rays",
+      "lore": "The restored Sunwell's light: a radiant sun on the sternum, ray bands round the upper arms, a line of light down the spine, a small radiant star on the brow.",
+      "elements": [
+        {"on": "torso", "kind": "sunburst", "at": [0.62, 0.0], "rays": 16, "r0": 2.0, "r1": 5.8, "disc": 1.4, "fill": 0.6, "w": 0.24},
+        {"on": "arm", "kind": "band", "t": 0.5, "motif": "chevrons", "n": 8, "size": 1.4, "rails": 0.12, "gap": 1.8, "w": 0.2},
+        {"on": "torso", "kind": "line", "pts": [[0.3, 1.0], [2.1, 1.0]], "taper": [0.06, 0.32]},
+        {"on": "torso", "kind": "column", "from": [0.6, 1.0], "to": [1.8, 1.0], "count": 4, "shape": {"shape": "star", "n": 4, "inner": 0.3, "r": 1.0, "fill": 1.0}},
+        {"on": "face", "kind": "shape", "shape": "star", "at": [0.0, 0.66], "r": 0.075, "n": 8, "inner": 0.4, "fill": 1.0}
+      ]
+    },
+    {
+      "key": "FelBrand", "name": "Fel Brand",
+      "lore": "The brand of those who drank fel magic: jagged sigils burned into the forearms and the small of the back, a fel rune on the brow, cracks up the outer thighs.",
+      "elements": [
+        {"on": "arm", "kind": "crack", "at": [1.2, 0.0], "dir": 90, "len": 16, "seed": 121, "branches": 2, "jag": 0.9, "w": 0.3},
+        {"on": "arm", "kind": "rune", "at": [1.62, 0.12], "h": 3.0, "wid": 2.0, "seed": 122, "w": 0.26},
+        {"on": "torso", "kind": "rune", "at": [2.2, 1.0], "h": 4.2, "wid": 3.0, "seed": 123, "w": 0.32},
+        {"on": "torso", "kind": "crack", "at": [2.2, 0.9], "dir": 200, "len": 12, "seed": 124, "branches": 2, "jag": 0.9, "w": 0.28},
+        {"on": "leg", "kind": "crack", "at": [0.75, 0.0], "dir": -90, "len": 14, "seed": 125, "branches": 2, "jag": 0.9, "w": 0.3},
+        {"on": "face", "kind": "rune", "at": [0.0, 0.64], "h": 0.22, "wid": 0.16, "seed": 126, "w": 0.022}
+      ]
+    },
+    {
+      "key": "PhoenixWarPaint", "name": "Phoenix War Paint",
+      "lore": "Paint of the Phoenix Guard going to war: hands and forearms dipped to the elbow in red, flame-feather strokes on the shoulders and a pair of wings over the shoulder blades, one slash across the eye.",
+      "elements": [
+        {"on": "arm", "kind": "dip", "t": 1.42, "ragged": 1.4, "freq": 4, "seed": 131, "drips": 5, "drip_len": 5.0, "fill": 1.0, "rim": 0.2},
+        {"on": "arm", "kind": "stripes", "from": [0.22, -0.06], "to": [0.22, 0.06], "count": 3, "len": 6.0, "angle": 100, "taper": [0.55, 0.06]},
+        {"on": "torso", "kind": "line", "smooth": true, "pts": [[0.4, 0.98], [0.42, 0.84], [0.32, 0.7], [0.18, 0.62]], "taper": [0.6, 0.1]},
+        {"on": "torso", "kind": "line", "smooth": true, "pts": [[0.55, 0.98], [0.6, 0.86], [0.52, 0.72], [0.42, 0.64]], "taper": [0.5, 0.08]},
+        {"on": "torso", "kind": "line", "smooth": true, "pts": [[0.7, 0.98], [0.78, 0.88], [0.74, 0.76], [0.68, 0.68]], "taper": [0.42, 0.08]},
+        {"on": "face", "kind": "line", "pts": [[0.36, 0.66], [0.68, -0.78]], "taper": [0.05, 0.085]}
+      ]
+    }
+  ]
+}

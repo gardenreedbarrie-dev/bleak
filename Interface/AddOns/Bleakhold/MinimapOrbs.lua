@@ -1,0 +1,452 @@
+-- Bleakhold: round buttons around the minimap (Activities, Collections, Season, Leaderboards, and the orbs other
+-- files add with Orbs.Add, such as Camp).
+-- Off by default while AddicatUI is loaded: its micro menu launcher (Integration.lua) lists the same windows and Make
+-- camp, and the I key opens Activities. Without AddicatUI they are on, the only launcher there is. /bh orbs on|off is
+-- the player's own choice (per character), which wins over the default either way.
+-- They live on BleakholdOrbHolder, a child of UIParent anchored to the Minimap's centre, never on the
+-- Minimap itself: AddicatUI (DragonUI) collects every button parented to Minimap/MinimapBackdrop into its drawer,
+-- and it moves and rescales the Minimap, which the holder follows. In AddicatUI's editor mode each orb has
+-- an outline of its own (the movers at the end); dropping one slides the orb to that angle, saved as before.
+local ADDON, ns = ...
+local U, UI = ns.U, ns.UI
+local C = UI.C
+
+local Orbs = {}
+ns.Orbs = Orbs
+
+local rad, cos, sin, atan2, deg = math.rad, math.cos, math.sin, math.atan2, math.deg
+
+-- The stock minimap button (Minimap.xml's MiniMapTracking): 32 x 32, the dark disc (UI-Minimap-Background), the
+-- picture (here the glyph's icon, cut round), MiniMap-TrackingBorder round it, UI-Minimap-ZoomButton-Highlight under
+-- the cursor, the picture pressed in while the button is held (its dark overlay, as MiniMapTracking's). A badge (a
+-- task to claim) is the stock indicator ball at its top right.
+Orbs.SIZE = 32
+Orbs.GAP = 7
+Orbs.HIGHLIGHT = "Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight"
+Orbs.list = {
+    { key = "activities", glyph = "star", title = "Activities", angle = 205 },
+    { key = "collections", glyph = "layers", title = "Collections", angle = 245 },
+    { key = "season", glyph = "banner", title = "Season", angle = 295 },
+    { key = "leaderboards", glyph = "trophy", title = "Leaderboards", angle = 335 },
+}
+
+local holder = CreateFrame("Frame", "BleakholdOrbHolder", UIParent)
+holder:SetSize(1, 1)
+holder:SetFrameStrata("MEDIUM")
+holder:SetFrameLevel(10)
+Orbs.holder = holder
+
+local lastW, lastScale, lastShape
+
+local function minimapGeometry()
+    if not Minimap then
+        return nil
+    end
+    local w = Minimap:GetWidth() or 0
+    local ms = Minimap:GetEffectiveScale() or 1
+    local hs = holder:GetEffectiveScale() or 1
+    if w <= 0 or hs <= 0 then
+        return nil
+    end
+    local shape = GetMinimapShape and GetMinimapShape() or "ROUND"
+    return w / 2 * ms / hs, shape, w, ms
+end
+
+local function angleOf(o)
+    local saved = ns.cdb.orbs[o.key]
+    if type(saved) == "number" and saved == saved then
+        return saved
+    end
+    return o.angle
+end
+
+-- Offset of an orb centre from the minimap centre, on the circle or on the square's edge.
+function Orbs.Offset(angleDeg, radius, shape)
+    local a = rad(angleDeg)
+    local x, y = cos(a), sin(a)
+    if shape == "SQUARE" then
+        local m = math.max(math.abs(x), math.abs(y))
+        if m > 0 then
+            x, y = x / m, y / m
+        end
+    end
+    return x * radius, y * radius
+end
+
+function Orbs.Layout(force)
+    local radius, shape, w, ms = minimapGeometry()
+    if not radius then
+        return
+    end
+    if not force and w == lastW and ms == lastScale and shape == lastShape then
+        return
+    end
+    lastW, lastScale, lastShape = w, ms, shape
+    holder:ClearAllPoints()
+    holder:SetPoint("CENTER", Minimap, "CENTER", 0, 0)
+    for _, o in ipairs(Orbs.list) do
+        if o.button then
+            local x, y = Orbs.Offset(angleOf(o), radius + Orbs.SIZE / 2 + Orbs.GAP - 8, shape)
+            o.button:ClearAllPoints()
+            o.button:SetPoint("CENTER", holder, "CENTER", x, y)
+        end
+    end
+end
+
+-- Turns orb o towards the screen point x, y (unscaled pixels, like GetCursorPosition) and saves the angle.
+function Orbs.SetAngleTowards(o, x, y)
+    if not (Minimap and x and y) then
+        return
+    end
+    local cx, cy = Minimap:GetCenter()
+    if not cx then
+        return
+    end
+    local s = Minimap:GetEffectiveScale() or 1
+    local a = deg(atan2(y - cy * s, x - cx * s)) % 360
+    ns.cdb.orbs[o.key] = math.floor(a + 0.5)
+    Orbs.Layout(true)
+end
+
+local function statusLines(key)
+    local S = ns.S
+    if key == "activities" then
+        local lines = { "Activities" }
+        local n = ns.ClaimableTasks()
+        if n > 0 then
+            lines[#lines + 1] = { n .. (n == 1 and " task" or " tasks") .. " ready to claim", C.teal }
+        end
+        local q = S.queue
+        if q and q.state == 1 then
+            local what = (q.kind == "B" and "In the Bleakhold Royale queue") or (q.kind == "A" and "In the 1v1 arena queue")
+                or "In queue"
+            lines[#lines + 1] = { what, C.goldLight }
+        elseif q and q.state == 2 then
+            local text = "Group found - accept in Dungeons"
+            if q.kind == "B" then
+                text = "Bleakhold Royale: answer the ready check"
+            end
+            lines[#lines + 1] = { text, C.teal }
+        end
+        lines[#lines + 1] = { "Click to open", C.mute }
+        return lines
+    elseif key == "collections" then
+        local c = S.coll
+        local lines = { "Collections" }
+        if c and c.setsOwned then
+            lines[#lines + 1] = { "Legacy sets: " .. c.setsOwned .. (c.setsTotal and (" / " .. c.setsTotal) or ""), C.mid }
+        end
+        lines[#lines + 1] = { "Click to open", C.mute }
+        return lines
+    elseif key == "season" then
+        local s = S.season
+        local lines = { U.Safe(ns.DefName("S", s and s.seasonId or (ns.Comm.server.seasonId), "Season")) }
+        if s then
+            lines[#lines + 1] = { "War Effort: " .. math.floor((s.wePermille or 0) / 10) .. "%", C.goldLight }
+        end
+        lines[#lines + 1] = { "Click to open", C.mute }
+        return lines
+    end
+    local me = S.lbme and S.lbme.K
+    local lines = { "Leaderboards" }
+    if me and me.value then
+        lines[#lines + 1] = { "Your best key: +" .. me.value .. (me.rank and (" - rank " .. me.rank) or ""), C.goldLight }
+    end
+    lines[#lines + 1] = { "Click to open", C.mute }
+    return lines
+end
+
+-- An orb is shown unless its available() says no (an orb of a feature the realm has off).
+local function orbAvailable(o)
+    return not o.available or o.available() and true or false
+end
+
+-- The picture keeps its icon's colours (a caller's tint is for a glyph without an icon), as UI.Badge's does.
+local function keepColours(t)
+    local setColor = t.SetVertexColor
+    t.SetVertexColor = function(self, r, g, b, a)
+        if self.showsIcon then
+            setColor(self, 1, 1, 1, a)
+        else
+            setColor(self, r, g, b, a)
+        end
+    end
+end
+
+-- the picture's place (MiniMapTracking's: 20 px at 6, -6 of 32), pressed in 1 px while held, with its dark overlay
+local function placeGlyph(b, down)
+    local s, d = Orbs.SIZE, down and 1 or 0
+    b.glyph:ClearAllPoints()
+    b.glyph:SetPoint("TOPLEFT", b, "TOPLEFT", s * 0.19 + d, -s * 0.19 - d)
+    if down then
+        b.pressed:Show()
+    else
+        b.pressed:Hide()
+    end
+end
+
+local function makeOrb(o)
+    local b = CreateFrame("Button", "BleakholdOrb_" .. o.key, holder)
+    local size = Orbs.SIZE
+    b:SetSize(size, size)
+    b:SetFrameLevel(holder:GetFrameLevel() + 2)
+    b.fill = b:CreateTexture(nil, "BACKGROUND")
+    b.fill:SetTexture(UI.STOCK.ringBg)
+    b.fill:SetSize(size * 0.78, size * 0.78)
+    b.fill:SetPoint("TOPLEFT", b, "TOPLEFT", size * 0.06, -size * 0.125)
+    b.glyph = b:CreateTexture(nil, "ARTWORK")
+    b.glyph:SetSize(size * 0.625, size * 0.625)
+    b.glyph.isPortrait = true
+    keepColours(b.glyph)
+    UI.SetGlyph(b.glyph, o.glyph)
+    if not b.glyph.showsIcon then
+        b.glyph:SetVertexColor(UI.Rgb(C.gold))
+    end
+    -- OVERLAY, not the picture's ARTWORK: the client does not draw one layer in creation order (Widgets.lua), so in
+    -- ARTWORK the shade could go under the picture; the ring shares OVERLAY, and its hole is clear where they meet
+    b.pressed = b:CreateTexture(nil, "OVERLAY")
+    b.pressed:SetTexture(UI.STOCK.ringBg)
+    b.pressed:SetVertexColor(0, 0, 0, 0.5)
+    b.pressed:SetAllPoints(b.glyph)
+    b.ring = b:CreateTexture(nil, "OVERLAY")
+    b.ring:SetTexture(UI.STOCK.ring)
+    b.ring:SetSize(size * 54 / 32, size * 54 / 32)
+    b.ring:SetPoint("TOPLEFT", b, "TOPLEFT", 0, 0)
+    b:SetHighlightTexture(Orbs.HIGHLIGHT, "ADD")
+    placeGlyph(b, false)
+    -- on a child frame: the ring is OVERLAY too, and one layer is not drawn in creation order
+    b.dot = UI.StatusDot(UI.Marks(b), 12, "green", "OVERLAY")
+    b.dot:SetPoint("TOPRIGHT", b, "TOPRIGHT", 3, 3)
+    b.dot:Hide()
+    b:SetScript("OnMouseDown", function(self, button)
+        if button ~= "RightButton" then
+            placeGlyph(self, true)
+        end
+    end)
+    b:SetScript("OnMouseUp", function(self)
+        placeGlyph(self, false)
+    end)
+    b:RegisterForClicks("LeftButtonUp")
+    b:RegisterForDrag("RightButton")
+    b:SetScript("OnClick", function()
+        if o.onClick then
+            o.onClick(b)
+        else
+            UI.Open(o.key, true)
+        end
+    end)
+    b:SetScript("OnEnter", function(self)
+        UI.ShowTooltip(self, o.lines and o.lines(self) or statusLines(o.key))
+    end)
+    b:SetScript("OnLeave", function(self)
+        placeGlyph(self, false)
+        if GameTooltip then
+            GameTooltip:Hide()
+        end
+    end)
+    -- Right-drag slides the orb along the ring (angle saved per character).
+    b:SetScript("OnDragStart", function(self)
+        self.dragging = true
+    end)
+    b:SetScript("OnDragStop", function(self)
+        self.dragging = false
+    end)
+    -- o.update(button) redraws what changes with time (a cooldown), a few times a second while the orb shows
+    local acc = 0
+    b:SetScript("OnUpdate", function(self, elapsed)
+        if o.update then
+            acc = acc + (elapsed or 0)
+            if acc >= 0.25 then
+                acc = 0
+                o.update(self)
+            end
+        end
+        if not self.dragging then
+            return
+        end
+        local mx, my = GetCursorPosition()
+        Orbs.SetAngleTowards(o, mx, my)
+    end)
+    o.button = b
+    if not orbAvailable(o) then
+        b:Hide()
+    end
+    return b
+end
+
+for _, o in ipairs(Orbs.list) do
+    makeOrb(o)
+end
+
+-- Shows or hides the orbs that depend on a feature (call when it may have changed).
+function Orbs.Refresh()
+    for _, o in ipairs(Orbs.list) do
+        if o.button then
+            if orbAvailable(o) then
+                o.button:Show()
+            else
+                o.button:Hide()
+            end
+        end
+    end
+end
+
+function Orbs.UpdateBadges()
+    local act = Orbs.list[1].button
+    if act then
+        if ns.ClaimableTasks() > 0 then
+            act.dot:Show()
+        else
+            act.dot:Hide()
+        end
+    end
+end
+
+local pulse = 0
+ns.Every(0.1, function()
+    local q = ns.S.queue
+    local act = Orbs.list[1].button
+    if act then
+        if q and (q.state == 1 or q.state == 2) then
+            pulse = pulse + 0.1
+            act.ring:SetAlpha(0.55 + 0.45 * math.abs(sin(pulse * 2)))
+        else
+            act.ring:SetAlpha(1)
+        end
+    end
+end)
+
+ns.Every(1, function()
+    Orbs.Layout(false)
+end)
+
+ns.On("STATE", function(topic)
+    if topic == "TASKS" or topic == "QUEUE" then
+        Orbs.UpdateBadges()
+    end
+end)
+
+-- AddicatUI lists the Bleakhold windows in its micro menu (the launcher Integration.lua registers): loaded, with
+-- the entry point, and (when it says) the launcher has its place in the strip.
+function Orbs.LauncherElsewhere()
+    local aui = _G.AddicatUI
+    if type(aui) ~= "table" or type(aui.RegisterMicroMenuLauncher) ~= "function" then
+        return false
+    end
+    if type(aui.MicroMenuLauncherAvailable) == "function" then
+        local ok, available = pcall(aui.MicroMenuLauncherAvailable)
+        if ok and available ~= nil then
+            return available and true or false
+        end
+    end
+    return true
+end
+
+-- The player's choice (ns.cdb.orbsHidden: true off, false on, nil none) or else the default.
+function Orbs.WantShown()
+    local hidden = ns.cdb.orbsHidden
+    if hidden == true then
+        return false
+    elseif hidden == false then
+        return true
+    end
+    return not Orbs.LauncherElsewhere()
+end
+
+function Orbs.Apply()
+    if Orbs.WantShown() then
+        holder:Show()
+        Orbs.Layout(true)
+    else
+        holder:Hide()
+    end
+end
+
+function Orbs.SetShown(show)
+    ns.cdb.orbsHidden = not show
+    Orbs.Apply()
+end
+
+Orbs.Apply()
+
+ns.On("DB_READY", Orbs.Apply)
+
+-- AddicatUI loaded after Bleakhold, or its micro menu settled by login: the default may change.
+ns.RegisterEvent("ADDON_LOADED", function(event, name)
+    if name == "AddicatUI" then
+        Orbs.Apply()
+    end
+end)
+ns.RegisterEvent("PLAYER_LOGIN", Orbs.Apply)
+
+if Minimap and Minimap.HookScript then
+    Minimap:HookScript("OnSizeChanged", function()
+        Orbs.Layout(true)
+    end)
+end
+
+ns.AddCommand("orbs", "minimap buttons: /bh orbs on|off|reset", function(args)
+    args = (args or ""):lower()
+    if args == "off" then
+        Orbs.SetShown(false)
+        ns.Print("Minimap buttons off (/bh orbs on brings them back).")
+    elseif args == "reset" then
+        wipe(ns.cdb.orbs)
+        Orbs.SetShown(true)
+        Orbs.Layout(true)
+        ns.Print("Minimap buttons on, at their first places.")
+    else
+        Orbs.SetShown(true)
+        ns.Print("Minimap buttons on (/bh orbs off hides them).")
+    end
+end)
+
+-- Editor mode (ns.Movers): an orb follows the outline's centre around the ring.
+local function addMover(o)
+    UI.AddMover({
+        name = "bleakhold_orb_" .. o.key,
+        title = o.title .. " orb",
+        frame = o.button,
+        begin = function()
+            Orbs.Layout(true)
+        end,
+        finish = function()
+            Orbs.Layout(true)
+        end,
+        move = function(region)
+            local x, y = region:GetCenter()
+            local s = region:GetEffectiveScale() or 1
+            if x then
+                Orbs.SetAngleTowards(o, x * s, y * s)
+            end
+        end,
+        reset = function()
+            ns.cdb.orbs[o.key] = nil
+            Orbs.Layout(true)
+        end,
+        isDefault = function()
+            return type(ns.cdb.orbs[o.key]) ~= "number"
+        end,
+        visible = function()
+            return holder:IsShown() and orbAvailable(o) or false
+        end,
+    })
+end
+
+for _, o in ipairs(Orbs.list) do
+    addMover(o)
+end
+
+-- An orb of another file (before Integration.lua, so it is in AddicatUI's editor too):
+--   o = { key, glyph, title, angle, onClick(button), lines(button), available(), update(button) }
+-- Without onClick it opens the window registered for o.key; without lines its tooltip is the title.
+function Orbs.Add(o)
+    o.lines = o.lines or function()
+        return { o.title }
+    end
+    Orbs.list[#Orbs.list + 1] = o
+    local b = makeOrb(o)
+    addMover(o)
+    Orbs.Layout(true)
+    return b
+end

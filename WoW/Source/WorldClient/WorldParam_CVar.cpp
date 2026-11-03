@@ -11,6 +11,7 @@
 #include "WoW/Source/WorldClient/Map.h"
 #include "WoW/Source/WorldClient/Types.h"
 #include "WoW/Source/WorldClient/World.h"
+#include "WoW/Source/LiquidSystem/Liquid.h"
 #include "Engine/Source/ConsoleBase/ConsoleVar.h"
 #include "Engine/Source/ConsoleBase/IConsole.h"
 #include "Engine/Source/Storm/H/storm.h"
@@ -51,6 +52,7 @@ CVar* CWorldParam::cvar_particleDensity;
 
 // STATIC: 0x00CD8598
 CVar* CWorldParam::cvar_waterLOD;
+CVar* CWorldParam::cvar_proceduralWater;
 
 // STATIC: 0x00CD859C
 CVar* CWorldParam::cvar_baseMip;
@@ -274,6 +276,13 @@ bool CWorldParam::WaterLodCallback(CVar* var, const char* oldValue, const char* 
 
         return false;
     }
+
+    return true;
+}
+
+// BLEAKHOLD(procwater): water already loaded keeps its look until its area is loaded again.
+bool CWorldParam::ProceduralWaterCallback(CVar* var, const char* oldValue, const char* value, void* arg) {
+    Liquid::s_proceduralWater = SStrToInt(value) != 0;
 
     return true;
 }
@@ -632,6 +641,9 @@ void CWorldParam::Initialize() {
     CWorldParam::cvar_mapObjLightLOD = CVar::Register("mapObjLightLOD", "Map object light LOD", 1, "0", CWorldParam::MapObjLightLODCallback, CATEGORY_GRAPHICS, false, nullptr, false);
     CWorldParam::cvar_particleDensity = CVar::Register("particleDensity", "Video option: Particle density", 1, "1.0", CWorldParam::ParticleDensityCallback, CATEGORY_GRAPHICS, false, nullptr, false);
     CWorldParam::cvar_waterLOD = CVar::Register("waterLOD", "Water geometry LOD", 1, "0", CWorldParam::WaterLodCallback, CATEGORY_GRAPHICS, false, nullptr, false);
+    // BLEAKHOLD(procwater)
+    CWorldParam::cvar_proceduralWater = CVar::Register("proceduralWater", "Draw water and ocean with the procedural water shader", 1, "0", CWorldParam::ProceduralWaterCallback, CATEGORY_GRAPHICS, false, nullptr, false);
+    Liquid::s_proceduralWater = CWorldParam::cvar_proceduralWater->m_intValue != 0;
     CWorldParam::cvar_baseMip = CVar::Register("baseMip", "base mipmap level", 1, "0", CWorldParam::BaseMipCallback, CATEGORY_GRAPHICS, false, nullptr, false);
     CWorldParam::cvar_horizonFarClip = CVar::Register("horizonFarclipScale", "Far clip plane scale for horizon", 1, "4.0", CWorldParam::HorizonFarClipScaleCallback, CATEGORY_GRAPHICS, false, nullptr, false);
     CWorldParam::cvar_horizonNearClip = CVar::Register("horizonNearclipScale", "Near clip plane scale for horizon", 1, "0.7", CWorldParam::HorizonNearClipScaleCallback, CATEGORY_GRAPHICS, false, nullptr, false);

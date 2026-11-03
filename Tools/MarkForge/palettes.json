@@ -1,0 +1,513 @@
+{
+  "_readme": "MarkForge's colours. Keys, names, hex values and their order are the appearance catalogue's (Tools/RaceForge/customize/catalogue.json, the contract in Tools/RaceForge/README.md): markforge.py build refuses to run when the two differ, and the tests check it. Per race: colours 1-3 (look = 3 x (design - 1) + colour; colour 3 is the paint, glow false, no _Glow file) and eyes 1-3; the Death Knight eyes 4 and 5 are the same for every race. MarkForge's own fields: opacity (paint colours: how much of the skin shows through the ink, 0..1), eye_core (how far an eye sprite's centre runs toward white, 0..1).",
+  "version": 1,
+  "death_knight_eyes": [
+    {
+      "eye": 4,
+      "key": "BloodRed",
+      "name": "Blood Red",
+      "hex": "#FF1E1E"
+    },
+    {
+      "eye": 5,
+      "key": "UnholyGreen",
+      "name": "Unholy Green",
+      "hex": "#7CFF3A"
+    }
+  ],
+  "eye_core": 0.55,
+  "races": {
+    "Human": {
+      "race_id": 1,
+      "colours": [
+        {
+          "key": "ArcaneViolet",
+          "name": "Arcane Violet",
+          "hex": "#A070FF",
+          "glow": true
+        },
+        {
+          "key": "HolyGold",
+          "name": "Holy Gold",
+          "hex": "#FFD25A",
+          "glow": true
+        },
+        {
+          "key": "BlackInk",
+          "name": "Black Ink",
+          "hex": "#1A1A1F",
+          "glow": false,
+          "opacity": 0.82
+        }
+      ],
+      "eyes": [
+        {
+          "key": "ArcaneViolet",
+          "name": "Arcane Violet",
+          "hex": "#A070FF"
+        },
+        {
+          "key": "HolyGold",
+          "name": "Holy Gold",
+          "hex": "#FFD25A"
+        },
+        {
+          "key": "TidalTeal",
+          "name": "Tidal Teal",
+          "hex": "#2FD3C2"
+        }
+      ]
+    },
+    "Orc": {
+      "race_id": 2,
+      "colours": [
+        {
+          "key": "WarEmber",
+          "name": "War Ember",
+          "hex": "#FF4A1E",
+          "glow": true
+        },
+        {
+          "key": "FelGreen",
+          "name": "Fel Green",
+          "hex": "#6CFF2E",
+          "glow": true
+        },
+        {
+          "key": "AshWhite",
+          "name": "Ash White",
+          "hex": "#E8E2D8",
+          "glow": false,
+          "opacity": 0.9
+        }
+      ],
+      "eyes": [
+        {
+          "key": "FelRed",
+          "name": "Fel Red",
+          "hex": "#FF2A1A"
+        },
+        {
+          "key": "SpiritBlue",
+          "name": "Spirit Blue",
+          "hex": "#63C7FF"
+        },
+        {
+          "key": "Lava",
+          "name": "Lava",
+          "hex": "#FF8C1A"
+        }
+      ]
+    },
+    "Dwarf": {
+      "race_id": 3,
+      "colours": [
+        {
+          "key": "TitanBlue",
+          "name": "Titan Blue",
+          "hex": "#4FB0FF",
+          "glow": true
+        },
+        {
+          "key": "Molten",
+          "name": "Molten",
+          "hex": "#FF7A1A",
+          "glow": true
+        },
+        {
+          "key": "WoadInk",
+          "name": "Woad Ink",
+          "hex": "#22305A",
+          "glow": false,
+          "opacity": 0.82
+        }
+      ],
+      "eyes": [
+        {
+          "key": "MoltenRed",
+          "name": "Molten Red",
+          "hex": "#FF3B1E"
+        },
+        {
+          "key": "TitanBlue",
+          "name": "Titan Blue",
+          "hex": "#4FB0FF"
+        },
+        {
+          "key": "ForgeGold",
+          "name": "Forge Gold",
+          "hex": "#FFC24A"
+        }
+      ]
+    },
+    "NightElf": {
+      "race_id": 4,
+      "colours": [
+        {
+          "key": "EluneBlue",
+          "name": "Elune Blue",
+          "hex": "#5FB4FF",
+          "glow": true
+        },
+        {
+          "key": "MoonwellTeal",
+          "name": "Moonwell Teal",
+          "hex": "#3FE0C5",
+          "glow": true
+        },
+        {
+          "key": "MidnightInk",
+          "name": "Midnight Ink",
+          "hex": "#2A2350",
+          "glow": false,
+          "opacity": 0.82
+        }
+      ],
+      "eyes": [
+        {
+          "key": "MoonlightSilver",
+          "name": "Moonlight Silver",
+          "hex": "#CFE3FF"
+        },
+        {
+          "key": "DruidAmber",
+          "name": "Druid Amber",
+          "hex": "#FFB43A"
+        },
+        {
+          "key": "DreamEmerald",
+          "name": "Dream Emerald",
+          "hex": "#4CFF8A"
+        }
+      ]
+    },
+    "Scourge": {
+      "race_id": 5,
+      "colours": [
+        {
+          "key": "Soulfire",
+          "name": "Soulfire",
+          "hex": "#C8FF5A",
+          "glow": true
+        },
+        {
+          "key": "SpiritBlue",
+          "name": "Spirit Blue",
+          "hex": "#7FD7FF",
+          "glow": true
+        },
+        {
+          "key": "GraveInk",
+          "name": "Grave Ink",
+          "hex": "#1E2420",
+          "glow": false,
+          "opacity": 0.82
+        }
+      ],
+      "eyes": [
+        {
+          "key": "SoulfireYellow",
+          "name": "Soulfire Yellow",
+          "hex": "#F0FF5A"
+        },
+        {
+          "key": "SpiritBlue",
+          "name": "Spirit Blue",
+          "hex": "#7FD7FF"
+        },
+        {
+          "key": "PlagueGreen",
+          "name": "Plague Green",
+          "hex": "#8CFF3A"
+        }
+      ]
+    },
+    "Tauren": {
+      "race_id": 6,
+      "colours": [
+        {
+          "key": "SunGold",
+          "name": "Sun Gold",
+          "hex": "#FFC44A",
+          "glow": true
+        },
+        {
+          "key": "SpiritTeal",
+          "name": "Spirit Teal",
+          "hex": "#4FE0C8",
+          "glow": true
+        },
+        {
+          "key": "Ochre",
+          "name": "Ochre",
+          "hex": "#D9542B",
+          "glow": false,
+          "opacity": 0.9
+        }
+      ],
+      "eyes": [
+        {
+          "key": "SunGold",
+          "name": "Sun Gold",
+          "hex": "#FFC44A"
+        },
+        {
+          "key": "MoonSilver",
+          "name": "Moon Silver",
+          "hex": "#CFE0FF"
+        },
+        {
+          "key": "SpiritTeal",
+          "name": "Spirit Teal",
+          "hex": "#4FE0C8"
+        }
+      ]
+    },
+    "Gnome": {
+      "race_id": 7,
+      "colours": [
+        {
+          "key": "ArcaneCyan",
+          "name": "Arcane Cyan",
+          "hex": "#3FE6FF",
+          "glow": true
+        },
+        {
+          "key": "ManaPink",
+          "name": "Mana Pink",
+          "hex": "#FF6BD8",
+          "glow": true
+        },
+        {
+          "key": "MachineOil",
+          "name": "Machine Oil",
+          "hex": "#23262B",
+          "glow": false,
+          "opacity": 0.82
+        }
+      ],
+      "eyes": [
+        {
+          "key": "ArcaneCyan",
+          "name": "Arcane Cyan",
+          "hex": "#3FE6FF"
+        },
+        {
+          "key": "SparkYellow",
+          "name": "Spark Yellow",
+          "hex": "#FFE34A"
+        },
+        {
+          "key": "ManaPink",
+          "name": "Mana Pink",
+          "hex": "#FF6BD8"
+        }
+      ]
+    },
+    "Troll": {
+      "race_id": 8,
+      "colours": [
+        {
+          "key": "VoodooPurple",
+          "name": "Voodoo Purple",
+          "hex": "#A64DFF",
+          "glow": true
+        },
+        {
+          "key": "LoaGreen",
+          "name": "Loa Green",
+          "hex": "#5CFF7A",
+          "glow": true
+        },
+        {
+          "key": "BoneWhite",
+          "name": "Bone White",
+          "hex": "#EDE6D6",
+          "glow": false,
+          "opacity": 0.9
+        }
+      ],
+      "eyes": [
+        {
+          "key": "LoaPurple",
+          "name": "Loa Purple",
+          "hex": "#A64DFF"
+        },
+        {
+          "key": "HexTeal",
+          "name": "Hex Teal",
+          "hex": "#3FE0D0"
+        },
+        {
+          "key": "ZandalariGold",
+          "name": "Zandalari Gold",
+          "hex": "#FFC845"
+        }
+      ]
+    },
+    "BloodElf": {
+      "race_id": 10,
+      "colours": [
+        {
+          "key": "SunwellGold",
+          "name": "Sunwell Gold",
+          "hex": "#FFC845",
+          "glow": true
+        },
+        {
+          "key": "FelGreen",
+          "name": "Fel Green",
+          "hex": "#7CFF2E",
+          "glow": true
+        },
+        {
+          "key": "PhoenixRed",
+          "name": "Phoenix Red",
+          "hex": "#B3121B",
+          "glow": false,
+          "opacity": 0.82
+        }
+      ],
+      "eyes": [
+        {
+          "key": "SunwellGold",
+          "name": "Sunwell Gold",
+          "hex": "#FFC845"
+        },
+        {
+          "key": "PhoenixCrimson",
+          "name": "Phoenix Crimson",
+          "hex": "#FF4A3D"
+        },
+        {
+          "key": "ArcaneViolet",
+          "name": "Arcane Violet",
+          "hex": "#B06CFF"
+        }
+      ]
+    },
+    "Draenei": {
+      "race_id": 11,
+      "colours": [
+        {
+          "key": "NaaruCyan",
+          "name": "Naaru Cyan",
+          "hex": "#6FE8FF",
+          "glow": true
+        },
+        {
+          "key": "HolyGold",
+          "name": "Holy Gold",
+          "hex": "#FFE07A",
+          "glow": true
+        },
+        {
+          "key": "ExodarInk",
+          "name": "Exodar Ink",
+          "hex": "#3A2A5A",
+          "glow": false,
+          "opacity": 0.82
+        }
+      ],
+      "eyes": [
+        {
+          "key": "NaaruGold",
+          "name": "Naaru Gold",
+          "hex": "#FFE07A"
+        },
+        {
+          "key": "PrismWhite",
+          "name": "Prism White",
+          "hex": "#F4F8FF"
+        },
+        {
+          "key": "ExodarViolet",
+          "name": "Exodar Violet",
+          "hex": "#B88CFF"
+        }
+      ]
+    },
+    "HighElf": {
+      "race_id": 15,
+      "colours": [
+        {
+          "key": "QueldoreiBlue",
+          "name": "Quel'dorei Blue",
+          "hex": "#4FA8FF",
+          "glow": true
+        },
+        {
+          "key": "ArcaneViolet",
+          "name": "Arcane Violet",
+          "hex": "#A67CFF",
+          "glow": true
+        },
+        {
+          "key": "SilverInk",
+          "name": "Silver Ink",
+          "hex": "#C9D3DE",
+          "glow": false,
+          "opacity": 0.9
+        }
+      ],
+      "eyes": [
+        {
+          "key": "Starlight",
+          "name": "Starlight",
+          "hex": "#F2F6FF"
+        },
+        {
+          "key": "ArcaneViolet",
+          "name": "Arcane Violet",
+          "hex": "#A67CFF"
+        },
+        {
+          "key": "WindrunnerTeal",
+          "name": "Windrunner Teal",
+          "hex": "#3FD8D0"
+        }
+      ]
+    },
+    "Eredar": {
+      "race_id": 19,
+      "colours": [
+        {
+          "key": "FelGreen",
+          "name": "Fel Green",
+          "hex": "#6BFF2A",
+          "glow": true
+        },
+        {
+          "key": "VoidPurple",
+          "name": "Void Purple",
+          "hex": "#9B4DFF",
+          "glow": true
+        },
+        {
+          "key": "ManariBlack",
+          "name": "Man'ari Black",
+          "hex": "#141014",
+          "glow": false,
+          "opacity": 0.82
+        }
+      ],
+      "eyes": [
+        {
+          "key": "FelGreen",
+          "name": "Fel Green",
+          "hex": "#6BFF2A"
+        },
+        {
+          "key": "ManariRed",
+          "name": "Man'ari Red",
+          "hex": "#FF2D4A"
+        },
+        {
+          "key": "VoidPurple",
+          "name": "Void Purple",
+          "hex": "#9B4DFF"
+        }
+      ]
+    }
+  }
+}

@@ -334,8 +334,10 @@ void CM2Lighting::SetupGxLights(const C3Vector* origin) {
 
     uint32_t index = 1;
 
-    for (uint32_t i = this->m_lightCount; i > 0 && index < 4; i--) {
-        CM2Light* point = this->m_lights[i - 1];
+    // BLEAKHOLD(lights): m_lights is sorted nearest first and only three point lights fit next to the sun. Stock
+    // counted down from the farthest, so a model with four lights lost its nearest one; take the nearest three.
+    for (uint32_t i = 0; i < this->m_lightCount && index < 4; i++) {
+        CM2Light* point = this->m_lights[i];
 
         if (origin) {
             light.m_dir = point->m_pos - *origin;

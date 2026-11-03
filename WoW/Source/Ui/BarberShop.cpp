@@ -19,6 +19,8 @@
 #include "WoW/Source/Magic/MagicClient/Spell_C.h"
 #include "Engine/Source/Model2/M2Model.h"
 #include "WoW/Source/Net/Types.h"
+#include "WoW/Common/BleakholdCustomize.h"
+#include "WoW/Source/Glue/BleakholdCustomizeTable.h"
 
 // STATIC: 0x00BD19B8
 uint8_t CGBarberShop::m_barberShopEnabled;
@@ -59,16 +61,95 @@ float CGBarberShop::GetMinCameraDistance() {
 // VERIFY: 8a411dd0 auto
 // OFFSET: 0x0052E490
 const BarberShopStyleRec* CGBarberShop::GetCurrentStyle(int32_t type) {
+    // BLEAKHOLD(customize): a value with no BarberShopStyle row has no style (it used to read through null)
     switch (type) {
         case 0:
-            return CGBarberShop::m_currentHairStyle->m_rec;
+            return CGBarberShop::m_currentHairStyle ? CGBarberShop::m_currentHairStyle->m_rec : nullptr;
         case 2:
-            return CGBarberShop::m_currentFacialHair->m_rec;
+            return CGBarberShop::m_currentFacialHair ? CGBarberShop::m_currentFacialHair->m_rec : nullptr;
         case 3:
-            return CGBarberShop::m_currentSkinColor->m_rec;
+            return CGBarberShop::m_currentSkinColor ? CGBarberShop::m_currentSkinColor->m_rec : nullptr;
     }
 
     return nullptr;
+}
+
+// BLEAKHOLD(customize): Reset's walk back to the style of the player's real value: from the current style on through
+// the list (wrapping), as the stock loop did, but at most once round. It looped for ever when the real value had no
+// row, and read through null when the current style was missing; then the style is looked up afresh (null when the
+// value has no row).
+static STYLEREC* BleakholdResetStyle(STYLEREC* current, int32_t type, int32_t race, int32_t sex, int32_t data) {
+    if (!current) {
+        return CGBarberShop::GetStyle(type, race, sex, data);
+    }
+
+    HASHKEY_NONE key;
+    USEABLESTYLE* useable = CGBarberShop::m_useableStyles.Ptr(current->m_rec->m_type, key);
+    STYLEREC* style = current;
+
+    for (uint32_t guard = 0; useable && style && guard < 0x10000; guard++) {
+        if (style->m_rec->m_data == data) {
+            return style;
+        }
+
+        STYLEREC* next = style->Next();
+
+        if (!next) {
+            next = useable->m_styles.Head();
+        }
+
+        style = next;
+
+        if (style == current) {
+            break;
+        }
+    }
+
+    return CGBarberShop::GetStyle(type, race, sex, data);
+}
+
+// BLEAKHOLD(customize): the barbershop's skin arrows skip skins that have no BarberShopStyle row
+// (BleakholdCustomize::StepToRow on the stock SetNextSkin / SetPrevSkin).
+namespace {
+class BleakholdBarberSkinStepper {
+    public:
+    BleakholdBarberSkinStepper(CCharacterComponent* component, int32_t race, int32_t sex)
+        : m_component(component)
+        , m_race(race)
+        , m_sex(sex) {
+    }
+
+    bool Step(bool forward) {
+        return forward ? this->m_component->SetNextSkin(COMPONENT_CONTEXT_1) : this->m_component->SetPrevSkin(COMPONENT_CONTEXT_1);
+    }
+
+    int32_t Value() const {
+        return static_cast<int32_t>(this->m_component->m_data.m_preferences.m_skinID);
+    }
+
+    bool HasRow(int32_t skinID) const {
+        return CGBarberShop::GetStyle(3, this->m_race, this->m_sex, skinID) != nullptr;
+    }
+
+    void Set(int32_t skinID) {
+        this->m_component->SetSkinColor(skinID, true, true, nullptr);
+    }
+
+    private:
+    CCharacterComponent* m_component;
+    int32_t m_race;
+    int32_t m_sex;
+};
+}  // namespace
+
+// BLEAKHOLD(customize): a hair style step that has to change the hair colour also resets the features
+// (SetNextHairStyle), which left the features style behind; it follows the component's value again.
+static void BleakholdFollowFacialHair(CCharacterComponent* component, int32_t race, int32_t sex) {
+    int32_t facialHairID = static_cast<int32_t>(component->m_data.m_preferences.m_facialHairId);
+
+    if (!CGBarberShop::m_currentFacialHair || CGBarberShop::m_currentFacialHair->m_rec->m_data != facialHairID) {
+        CGBarberShop::m_currentFacialHair = CGBarberShop::GetStyle(2, race, sex, facialHairID);
+    }
 }
 
 // VERIFY: 6b04b74f auto
@@ -115,30 +196,19 @@ void CGBarberShop::Reset() {
         return;
     }
 
-    HASHKEY_NONE key;
+    // BLEAKHOLD(customize): bounded and null-safe (BleakholdResetStyle), and the skin style goes back too: it stayed on
+    // the previewed skin, so the next purchase sent that skin while the preview showed the old one
+    int32_t race = player->m_unit->m_unitFieldBytes0[0];
+    int32_t sex = player->m_unit->m_unitFieldBytes0[2];
+    CGBarberShop::m_currentHairStyle = BleakholdResetStyle(CGBarberShop::m_currentHairStyle, 0, race, sex, player->m_player->m_playerBytes[2]);
+    CGBarberShop::m_currentFacialHair = BleakholdResetStyle(CGBarberShop::m_currentFacialHair, 2, race, sex, player->m_player->m_playerBytes2[0]);
 
-    while (player->m_player->m_playerBytes[2] != CGBarberShop::m_currentHairStyle->m_rec->m_data) {
-        STYLEREC* style = CGBarberShop::m_currentHairStyle;
-        USEABLESTYLE* useable = CGBarberShop::m_useableStyles.Ptr(style->m_rec->m_type, key);
-        STYLEREC* next = style->Next();
+    if (CGBarberShop::m_currentSkinColor) {
+        STYLEREC* skin = BleakholdResetStyle(CGBarberShop::m_currentSkinColor, 3, race, sex, player->m_player->m_playerBytes[0]);
 
-        if (!next) {
-            next = useable->m_styles.Head();
+        if (skin) {
+            CGBarberShop::m_currentSkinColor = skin;
         }
-
-        CGBarberShop::m_currentHairStyle = next;
-    }
-
-    while (player->m_player->m_playerBytes2[0] != CGBarberShop::m_currentFacialHair->m_rec->m_data) {
-        STYLEREC* style = CGBarberShop::m_currentFacialHair;
-        USEABLESTYLE* useable = CGBarberShop::m_useableStyles.Ptr(style->m_rec->m_type, key);
-        STYLEREC* next = style->Next();
-
-        if (!next) {
-            next = useable->m_styles.Head();
-        }
-
-        CGBarberShop::m_currentFacialHair = next;
     }
 
     CGBarberShop::ResetAppearance();
@@ -262,6 +332,7 @@ void CGBarberShop::SetNextBarberShopStyle(int32_t type, bool backward) {
             }
 
             CGBarberShop::m_currentHairStyle = CGBarberShop::GetStyle(0, player->m_unit->m_unitFieldBytes0[0], player->m_unit->m_unitFieldBytes0[2], component->m_data.m_preferences.m_hairStyleId);
+            BleakholdFollowFacialHair(component, player->m_unit->m_unitFieldBytes0[0], player->m_unit->m_unitFieldBytes0[2]); // BLEAKHOLD(customize)
             break;
         case 1:
             if (!backward) {
@@ -280,14 +351,113 @@ void CGBarberShop::SetNextBarberShopStyle(int32_t type, bool backward) {
 
             CGBarberShop::m_currentFacialHair = CGBarberShop::GetStyle(2, player->m_unit->m_unitFieldBytes0[0], player->m_unit->m_unitFieldBytes0[2], component->m_data.m_preferences.m_facialHairId);
             break;
-        case 3:
-            if (!backward) {
-                component->SetNextSkin(COMPONENT_CONTEXT_1);
-            } else {
-                component->SetPrevSkin(COMPONENT_CONTEXT_1);
-            }
+        case 3: {
+            // BLEAKHOLD(customize): step on past skins that have no BarberShopStyle row (the stock single step left
+            // m_currentSkinColor null on one, and GetTotalCost read through it: the Tauren barbershop crash)
+            BleakholdBarberSkinStepper stepper(component, player->m_unit->m_unitFieldBytes0[0], player->m_unit->m_unitFieldBytes0[2]);
+            BleakholdCustomize::StepToRow(stepper, !backward);
 
             CGBarberShop::m_currentSkinColor = CGBarberShop::GetStyle(3, player->m_unit->m_unitFieldBytes0[0], player->m_unit->m_unitFieldBytes0[2], component->m_data.m_preferences.m_skinID);
+            break;
+        }
+        default:
+            break;
+    }
+
+    component->m_data.m_model->IsDrawable(1, 1);
+    component->RenderPrep(1);
+}
+
+// BLEAKHOLD(customize): the walk one barbershop selector's arrows make (types as SetNextBarberShopStyle: 0 hair style,
+// 1 hair colour, 2 features, 3 skin), with the in-world flag rules; the skin walk keeps only skins with a
+// BarberShopStyle row, as the skin arrows now do. raw is the previewed value, position its 1-based place (0 when the
+// arrows cannot come back to it), count how many values the arrows reach.
+bool CGBarberShop::GetStyleWalk(int32_t type, int32_t* raw, int32_t* position, int32_t* count) {
+    if (!CGBarberShop::m_barberShopEnabled || type < 0 || type > 3) {
+        return false;
+    }
+
+    CGPlayer_C* player = ClntObjMgrGetActivePlayerObj();
+
+    if (!player || !player->m_characterComponent) {
+        return false;
+    }
+
+    CCharacterComponent* component = player->m_characterComponent;
+    BleakholdComponentTable table(component, COMPONENT_CONTEXT_1);
+
+    if (!table.Valid()) {
+        return false;
+    }
+
+    static const int32_t s_rows[4] = { BleakholdCustomize::ROW_HAIR_STYLE, BleakholdCustomize::ROW_HAIR_COLOR, BleakholdCustomize::ROW_FEATURES, BleakholdCustomize::ROW_SKIN };
+    BleakholdCustomize::Prefs look = BleakholdLookOf(component);
+    int32_t values[BleakholdCustomize::MAX_VALUES];
+    int32_t total = BleakholdCustomize::List(table, look, s_rows[type], 0, values, BleakholdCustomize::MAX_VALUES);
+
+    if (type == 3) {
+        BleakholdBarberSkinStepper stepper(component, player->m_unit->m_unitFieldBytes0[0], player->m_unit->m_unitFieldBytes0[2]);
+        total = BleakholdCustomize::Filter(values, total, BleakholdCustomize::MAX_VALUES, [&stepper](int32_t skinID) { return stepper.HasRow(skinID); });
+    }
+
+    BleakholdCustomize::Info info = BleakholdCustomize::InfoFromList(values, total, BleakholdCustomize::MAX_VALUES, BleakholdCustomize::RowValue(look, s_rows[type]));
+    *raw = info.raw;
+    *position = info.position;
+    *count = info.count;
+    return true;
+}
+
+// BLEAKHOLD(customize): jumps one selector's preview to raw when its arrows reach it (GetStyleWalk's list), with what
+// one arrow press landing there does, and follows it with the selector's style as SetNextBarberShopStyle does.
+bool CGBarberShop::SetBarberShopStyleData(int32_t type, int32_t raw) {
+    if (!CGBarberShop::m_barberShopEnabled || type < 0 || type > 3 || (type == 3 && !CGBarberShop::m_currentSkinColor)) {
+        return false;
+    }
+
+    CGPlayer_C* player = ClntObjMgrGetActivePlayerObj();
+
+    if (!player || !player->m_characterComponent) {
+        return false;
+    }
+
+    CCharacterComponent* component = player->m_characterComponent;
+    BleakholdComponentTable table(component, COMPONENT_CONTEXT_1);
+
+    if (!table.Valid()) {
+        return false;
+    }
+
+    int32_t race = player->m_unit->m_unitFieldBytes0[0];
+    int32_t sex = player->m_unit->m_unitFieldBytes0[2];
+
+    if (type == 3 && !CGBarberShop::GetStyle(3, race, sex, raw)) {
+        return false;
+    }
+
+    static const int32_t s_rows[4] = { BleakholdCustomize::ROW_HAIR_STYLE, BleakholdCustomize::ROW_HAIR_COLOR, BleakholdCustomize::ROW_FEATURES, BleakholdCustomize::ROW_SKIN };
+    BleakholdCustomize::Prefs look = BleakholdLookOf(component);
+    BleakholdCustomize::Plan plan;
+
+    if (!BleakholdCustomize::PlanJump(table, look, s_rows[type], raw, 0, &plan)) {
+        return false;
+    }
+
+    if (BleakholdCustomize::RowValue(look, s_rows[type]) == raw) {
+        return true;
+    }
+
+    BleakholdRunPlan(component, plan);
+
+    switch (type) {
+        case 0:
+            CGBarberShop::m_currentHairStyle = CGBarberShop::GetStyle(0, race, sex, component->m_data.m_preferences.m_hairStyleId);
+            BleakholdFollowFacialHair(component, race, sex);
+            break;
+        case 2:
+            CGBarberShop::m_currentFacialHair = CGBarberShop::GetStyle(2, race, sex, component->m_data.m_preferences.m_facialHairId);
+            break;
+        case 3:
+            CGBarberShop::m_currentSkinColor = CGBarberShop::GetStyle(3, race, sex, component->m_data.m_preferences.m_skinID);
             break;
         default:
             break;
@@ -295,6 +465,7 @@ void CGBarberShop::SetNextBarberShopStyle(int32_t type, bool backward) {
 
     component->m_data.m_model->IsDrawable(1, 1);
     component->RenderPrep(1);
+    return true;
 }
 
 // VERIFY: 1a363132 auto
@@ -386,6 +557,13 @@ void CGBarberShop::ResetAppearance() {
 // OFFSET: 0x0052E790
 bool CGBarberShop::IsCurrentStyle(int32_t type) {
     CGPlayer_C* player = ClntObjMgrGetActivePlayerObj();
+
+    // BLEAKHOLD(customize): null checks; a hair style or features value with no BarberShopStyle row is compared by the
+    // previewed value
+    if (!player) {
+        return true;
+    }
+
     CCharacterComponent* component = player->m_characterComponent;
 
     if (!component) {
@@ -394,11 +572,11 @@ bool CGBarberShop::IsCurrentStyle(int32_t type) {
 
     switch (type) {
         case 0:
-            return player->m_player->m_playerBytes[2] == CGBarberShop::m_currentHairStyle->m_rec->m_data;
+            return player->m_player->m_playerBytes[2] == (CGBarberShop::m_currentHairStyle ? CGBarberShop::m_currentHairStyle->m_rec->m_data : static_cast<int32_t>(component->m_data.m_preferences.m_hairStyleId));
         case 1:
             return player->m_player->m_playerBytes[3] == component->m_data.m_preferences.m_hairColorId;
         case 2:
-            return player->m_player->m_playerBytes2[0] == CGBarberShop::m_currentFacialHair->m_rec->m_data;
+            return player->m_player->m_playerBytes2[0] == (CGBarberShop::m_currentFacialHair ? CGBarberShop::m_currentFacialHair->m_rec->m_data : static_cast<int32_t>(component->m_data.m_preferences.m_facialHairId));
         case 3:
             return player->m_player->m_playerBytes[0] == component->m_data.m_preferences.m_skinID;
         default:
@@ -483,7 +661,8 @@ int32_t CGBarberShop::GetTotalCost() {
     int32_t cost = 0;
     CGPlayer_C* player = ClntObjMgrGetActivePlayerObj();
 
-    if (!player->m_characterComponent) {
+    // BLEAKHOLD(customize): null checks; a value with no BarberShopStyle row adds nothing (it cannot be bought)
+    if (!player || !player->m_characterComponent) {
         return 0;
     }
 
@@ -491,19 +670,21 @@ int32_t CGBarberShop::GetTotalCost() {
     int32_t baseCost = static_cast<int32_t>(base);
 
     if (!CGBarberShop::IsCurrentStyle(0)) {
-        float value = baseCost * CGBarberShop::m_currentHairStyle->m_rec->m_costModifier;
-        cost = static_cast<int32_t>(value);
+        if (CGBarberShop::m_currentHairStyle) {
+            float value = baseCost * CGBarberShop::m_currentHairStyle->m_rec->m_costModifier;
+            cost = static_cast<int32_t>(value);
+        }
     } else if (!CGBarberShop::IsCurrentStyle(1)) {
         float value = baseCost * 0.5f;
         cost = static_cast<int32_t>(value);
     }
 
-    if (!CGBarberShop::IsCurrentStyle(2)) {
+    if (!CGBarberShop::IsCurrentStyle(2) && CGBarberShop::m_currentFacialHair) {
         float value = baseCost * CGBarberShop::m_currentFacialHair->m_rec->m_costModifier;
         cost += static_cast<int32_t>(value);
     }
 
-    if (!CGBarberShop::IsCurrentStyle(3)) {
+    if (!CGBarberShop::IsCurrentStyle(3) && CGBarberShop::m_currentSkinColor) {
         float value = baseCost * CGBarberShop::m_currentSkinColor->m_rec->m_costModifier;
         cost += static_cast<int32_t>(value);
     }
@@ -527,6 +708,12 @@ void CGBarberShop::ApplyAppearanceChange() {
     CCharacterComponent* component = player->m_characterComponent;
 
     if (!component) {
+        return;
+    }
+
+    // BLEAKHOLD(customize): the server takes a change only with a hair style and a features row (HandleAlterAppearance);
+    // without one there is nothing to buy (this read through null before)
+    if (!CGBarberShop::m_currentHairStyle || !CGBarberShop::m_currentFacialHair) {
         return;
     }
 

@@ -367,6 +367,10 @@ void TEXTURECACHE::TextureCallback(EGxTexCommand command, uint32_t width, uint32
         return;
     }
 
+    // BLEAKHOLD(glyphfix): start every page from a clear buffer, so no pixels of the previous page's glyphs show
+    // in the gaps between this page's glyphs.
+    memset(s_textureData, 0, sizeof(s_textureData));
+
     TEXTURECACHE* cache = static_cast<TEXTURECACHE*>(userArg);
 
     for (uint32_t row = cache->m_textureRows.m_count; row > 0; row--) {

@@ -6,6 +6,7 @@
 #include "Engine/Source/BlizzardCore/SFile2-Core.h"
 #include "Engine/Source/BlizzardCore/Source/Packages/Streaming/Streaming.h"
 #include "Engine/Source/Base/Handle.h"
+#include "Engine/Source/BleakFx/BleakFx.h"
 #include "Engine/Source/Base/RCString.h"
 #include "Engine/Source/ConsoleBase/ConsoleCommand.h"
 #include "Engine/Source/ConsoleBase/ConsoleVar.h"
@@ -1923,6 +1924,11 @@ void CWorldScene::RenderLiquidPass() {
     CWorldScene::ApplyFogState();
 
     if ((CWorld::enables & Enable_Water) && CWorldScene::s_liquidRenderer) {
+        // BLEAKHOLD(bleakfx): the frame and its depth as the water sees them, before it is drawn (only when a
+        // transparent liquid is queued).
+        if (CWorldScene::s_liquidRenderer->m_instances[1].Count()) {
+            BleakFx::BeginLiquids();
+        }
         CWorldScene::s_liquidRenderer->Flush(CWorldScene::s_activeWorldView, 1);
     }
 
@@ -2712,8 +2718,9 @@ void CWorldScene::PrepareLiquidInstances() {
                 geomFactory->SetTexCoord1ValueX(texCoord1ValueX);
 
                 group->m_liquidInstance = Liquid::CInstance::Create();
-                group->m_liquidInstance->m_material = Liquid::CMaterialBank::GetMaterial(liquidType);
-                group->m_liquidInstance->m_settings = Liquid::CSettingsBank::GetSettings(liquidType);
+                uint32_t renderType = Liquid::GetRenderLiquidType(liquidType); // BLEAKHOLD(procwater)
+                group->m_liquidInstance->m_material = Liquid::CMaterialBank::GetMaterial(renderType);
+                group->m_liquidInstance->m_settings = Liquid::CSettingsBank::GetSettings(renderType);
                 group->m_liquidInstance->m_environment = environment;
                 group->m_liquidInstance->m_geomFactory = geomFactory;
                 group->m_liquidInstance->m_transform = def->m_mat;
@@ -4966,6 +4973,13 @@ void CWorldScene::RenderHorizon() {
     g_theGxDevicePtr->RsPop();
     GxXformSetViewport(minX, maxX, minY, maxY, minZ, maxZ);
     g_theGxDevicePtr->XformSetProjection(savedProjection);
+}
+
+// BLEAKHOLD(storm): the depth range RenderHorizon draws the low-detail terrain and map objects into, for the part of
+// the Bleakhold Royale storm wall past the far plane (WoW/Source/Ui/BleakholdStorm.cpp).
+void CWorldScene::BleakHorizonDepthRange(float& minZ, float& maxZ) {
+    minZ = s_horizonMinZ;
+    maxZ = s_horizonMaxZ;
 }
 
 // VERIFY: 8f0548db manual

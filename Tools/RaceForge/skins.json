@@ -1,0 +1,29 @@
+{
+    "_readme": "Skin colours for raceforge.py skins. Each race (found by its client_file_string in races.json, at its realm_id) gets the textures of its CharSections rows of the listed sections recoloured into new files under Character\\BleakholdSkins\\<ClientFileString>\\, and only its rows point at them: the template race's textures and rows stay as they are. Sections: 0 skin, 1 face, 4 underwear (a row's colour index is the skin colour in these three; hair and facial hair are never recoloured). Underwear is left out by default: its cloth colours sit near skin hues and would turn purple too; but an opaque underwear texture (the package's NakedPelvis/NakedTorso: the skin with the garment painted in) is recoloured where it is bare skin whenever section 0 is, so a purple skin never shows the template's skin through it (README.md, Skins). palette: the target colours, lightest first; the race's skin colours of a sex are ranked by lightness and spread over it (OKLab). dk_palette: the same for the Death Knight rows (flag 0x4). transform: how far each colour of a texture moves, see README.md (Skins). An empty sections list puts every row back on its original textures.",
+    "races": [
+        {
+            "client_file_string": "HighElf",
+            "sections": [0, 1],
+            "palette": ["#D3C4EC", "#C3B1E0", "#B39FD5", "#A38DC8", "#947CBB", "#846CAD", "#755B9E", "#654C8F", "#563D80", "#482E70"],
+            "dk_palette": ["#C4BED0", "#AAA4B7", "#918B9E", "#787286", "#615B6F", "#4A4458"],
+            "comment": "Night-elf-like purple from pale lavender to deep violet (an OKLab ramp, a little more colourful in the middle), replacing the fair Blood Elf skin; Death Knights a desaturated grey-violet."
+        }
+    ],
+    "transform": {
+        "hue_unreliable_below": 0.35,
+        "hue_full_within": 35.0,
+        "hue_none_beyond": 65.0,
+        "chroma_full_within": 0.07,
+        "chroma_none_beyond": 0.13,
+        "gamma_min": 0.5,
+        "gamma_max": 2.5,
+        "chroma_exponent": 0.7,
+        "chroma_floor": 0.02,
+        "chroma_max": 0.16,
+        "hue_spread": 0.3,
+        "stats_alpha_min": 128,
+        "stats_lightness_min": 0.2,
+        "stats_lightness_max": 0.97,
+        "comment": "Tuned on previews of made-up elf skin textures: hue_spread 0.3 and chroma_max 0.16 (not 0.6 and 0.25) keep lips and shadows violet instead of a bright blue; chroma_floor 0.02 (not 0.005) keeps a nearly grey Death Knight skin from colourful speckles."
+    }
+}

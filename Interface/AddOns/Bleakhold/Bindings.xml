@@ -1,0 +1,35 @@
+<Bindings>
+	<Binding name="BLEAKHOLD_ACTIVITIES" header="BLEAKHOLD">
+		BleakholdToggle("activities")
+	</Binding>
+	<Binding name="BLEAKHOLD_COLLECTIONS">
+		BleakholdToggle("collections")
+	</Binding>
+	<Binding name="BLEAKHOLD_SEASON">
+		BleakholdToggle("season")
+	</Binding>
+	<Binding name="BLEAKHOLD_LEADERBOARDS">
+		BleakholdToggle("leaderboards")
+	</Binding>
+	<Binding name="BLEAKHOLD_EMOTEWHEEL" runOnUp="true">
+		BleakholdEmoteWheel(keystate)
+	</Binding>
+	<Binding name="BLEAKHOLD_ANIMATIONS">
+		BleakholdToggle("animations")
+	</Binding>
+	<Binding name="BLEAKHOLD_GRAPHICS">
+		BleakholdToggle("graphics")
+	</Binding>
+	<Binding name="BLEAKHOLD_MAKECAMP">
+		BleakholdMakeCamp()
+	</Binding>
+	<Binding name="BLEAKHOLD_GLIDE">
+		BleakholdGlide()
+	</Binding>
+	<Binding name="BLEAKHOLD_ROYALE_MAP">
+		BleakholdToggle("royalemap")
+	</Binding>
+	<Binding name="BLEAKHOLD_CAFE">
+		BleakholdToggle("cafe")
+	</Binding>
+</Bindings>

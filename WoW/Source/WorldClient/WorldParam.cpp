@@ -115,7 +115,8 @@ void CWorldParam::SetDefaults(OPTION_PAGE page) {
     }
 
     CWorldParam::cvar_environmentDetail->Default();
-    CWorldParam::cvar_groundEffectDist->Set("70.0", true, false, false, true);
+    // BLEAKHOLD(defaults): grass twice as far (the stock default is 70 yards).
+    CWorldParam::cvar_groundEffectDist->Set("140.0", true, false, false, true);
 
     CVar* var = CVar::Lookup("weatherDensity");
 

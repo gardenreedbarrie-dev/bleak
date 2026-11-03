@@ -39,6 +39,9 @@ class CGBarberShop {
     static void ApplyAppearanceChange();
     static void Reset();
     static void SetNextBarberShopStyle(int32_t type, bool backward);
+    // BLEAKHOLD(customize): GetBarberShopStyleInfo's returns 5-7 and SetBarberShopStyleData (BarberShop_Scripts.cpp)
+    static bool GetStyleWalk(int32_t type, int32_t* raw, int32_t* position, int32_t* count);
+    static bool SetBarberShopStyleData(int32_t type, int32_t raw);
     static void InitializeGame();
     static void ShutdownGame();
     static void RegisterScriptFunctions();

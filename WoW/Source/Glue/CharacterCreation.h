@@ -1,6 +1,7 @@
 #ifndef WOW_SOURCE_GLUE_CHARACTERCREATION_H
 #define WOW_SOURCE_GLUE_CHARACTERCREATION_H
 
+#include "WoW/Common/BleakholdRaces.h"
 #include <cstdint>
 #include "Engine/Source/Storm/H/stpl.h"
 #include "WoW/Source/Game/NameGen.h"
@@ -14,7 +15,7 @@ struct CharacterPreferences;
 
 class CCharacterCreation {
     public:
-    static CharacterPreferences* m_charPreferences[22][2];
+    static CharacterPreferences* m_charPreferences[BLEAKHOLD_RACE_CAPACITY][2]; // BLEAKHOLD(races): was [22]
     static CCharacterComponent* m_character;
     static CNameGen m_nameGen;
     static CSimpleModelFFX* m_charCustomizeFrame;
@@ -44,6 +45,11 @@ class CCharacterCreation {
     static bool IsClassAvailable(int32_t classID);
     static void OnHide();
     static void RandomizeCharCustomization();
+    // BLEAKHOLD(customize): the picker's natives (CharacterCreation_Scripts.cpp), on the model of the arrows' walk in
+    // WoW/Common/BleakholdCustomize.h
+    static bool GetCharCustomizationInfo(CHAR_CUSTOMIZATION_TYPE type, int32_t* position, int32_t* count, int32_t* raw);
+    static bool SetCharCustomizationRaw(CHAR_CUSTOMIZATION_TYPE type, int32_t raw);
+    static void RandomizeCharCustomization(uint32_t keepMask);
     static void ResetCharCustomizeInfo();
     static void SetCharacterFacing(float facing);
     static void SetCharCustomizeModel(const char* modelName);

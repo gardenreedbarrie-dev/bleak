@@ -1,0 +1,57 @@
+{
+  "race": "Human",
+  "designs": [
+    {
+      "key": "TidesageKnots", "name": "Tidesage Knots",
+      "lore": "The tidesages' sea-rope: knotted bands at the forearms, a running wave on the upper arms and across the collarbones, a whirlpool over each shoulder blade, wave curls at the calves.",
+      "elements": [
+        {"on": "arm", "kind": "band", "t": 1.55, "motif": "knot", "n": 7, "size": 1.6, "rails": 0.14, "gap": 1.6, "w": 0.26},
+        {"on": "arm", "kind": "band", "t": 0.55, "motif": "wave", "n": 6, "size": 1.3, "w": 0.24},
+        {"on": "torso", "kind": "line", "smooth": true, "pts": [[0.3, 0.0], [0.2, 0.1], [0.27, 0.18], [0.2, 0.26], [0.28, 0.34]], "taper": [0.3, 0.1]},
+        {"on": "torso", "kind": "spiral", "at": [0.55, 0.82], "r": 3.6, "turns": 2.4, "w": 0.24},
+        {"on": "leg", "kind": "band", "t": 1.45, "motif": "wave", "n": 7, "size": 1.4, "rails": 0.12, "gap": 1.5, "w": 0.24},
+        {"on": "face", "kind": "arc", "at": [0.86, -0.36], "r": 0.1, "from": 200, "to": 460, "w": 0.018},
+        {"on": "face", "kind": "line", "smooth": true, "pts": [[0.72, -0.32], [0.8, -0.4], [0.9, -0.36]], "w": 0.016}
+      ]
+    },
+    {
+      "key": "KirinTorWards", "name": "Kirin Tor Wards",
+      "lore": "A magus's protective wards: rune bands round the upper arms, a warding circle of glyphs between the shoulder blades, a diamond focus on the sternum, a single ward-dot on the brow.",
+      "elements": [
+        {"on": "arm", "kind": "band", "t": 0.45, "motif": "runes", "n": 8, "size": 1.5, "rails": 0.13, "gap": 1.9, "seed": 31, "w": 0.2},
+        {"on": "arm", "kind": "band", "t": 1.9, "motif": "ticks", "n": 16, "size": 0.8, "rails": 0.12, "gap": 0.9, "w": 0.16},
+        {"on": "torso", "kind": "ring", "at": [0.9, 1.0], "r": 6.5, "w": 0.22},
+        {"on": "torso", "kind": "ring", "at": [0.9, 1.0], "r": 5.3, "w": 0.14},
+        {"on": "torso", "kind": "rune", "at": [0.9, 0.93], "h": 3.4, "wid": 2.2, "seed": 77, "w": 0.24},
+        {"on": "torso", "kind": "rune", "at": [0.45, 0.97], "h": 2.0, "wid": 1.4, "seed": 78, "w": 0.18},
+        {"on": "torso", "kind": "rune", "at": [1.35, 0.97], "h": 2.0, "wid": 1.4, "seed": 79, "w": 0.18},
+        {"on": "torso", "kind": "shape", "shape": "diamond", "at": [0.62, 0.0], "r": 2.2, "wid": 0.55, "fill": 0.35, "rim": 0.22},
+        {"on": "face", "kind": "shape", "shape": "disc", "at": [0.0, 0.72], "r": 0.045, "fill": 1.0},
+        {"on": "face", "kind": "ring", "at": [0.0, 0.72], "r": 0.1, "w": 0.014}
+      ]
+    },
+    {
+      "key": "LightsOath", "name": "Light's Oath",
+      "lore": "An oath to the Light worn on the body: a sunburst on the sternum, a sword line down the spine with its crossguard at the shoulders, rays on the upper arms, a small sun on the brow.",
+      "elements": [
+        {"on": "torso", "kind": "sunburst", "at": [0.6, 0.0], "rays": 12, "r0": 2.2, "r1": 6.2, "disc": 1.6, "fill": 0.55, "w": 0.3},
+        {"on": "torso", "kind": "line", "pts": [[0.22, 1.0], [2.3, 1.0]], "taper": [0.45, 0.08]},
+        {"on": "torso", "kind": "line", "pts": [[0.42, 0.8], [0.42, 1.0]], "w": 0.36},
+        {"on": "torso", "kind": "shape", "shape": "diamond", "at": [0.22, 1.0], "r": 1.4, "wid": 0.7, "fill": 0.8},
+        {"on": "arm", "kind": "stripes", "from": [0.3, -0.06], "to": [0.3, 0.06], "count": 3, "len": 7.0, "angle": 90, "taper": [0.34, 0.06]},
+        {"on": "face", "kind": "shape", "shape": "sun", "at": [0.0, 0.7], "r": 0.06, "rays": 8, "ray_len": 0.9, "fill": 1.0}
+      ]
+    },
+    {
+      "key": "HighlandWoad", "name": "Highland Woad",
+      "lore": "The old highland paint of the Arathi hill clans: swirls on the shoulders and thighs, bold strokes down the forearms, a band across the cheeks and the bridge of the nose.",
+      "elements": [
+        {"on": "arm", "kind": "spiral", "at": [0.3, 0.0], "r": 4.0, "turns": 2.2, "w": 0.42},
+        {"on": "arm", "kind": "stripes", "from": [1.25, -0.05], "to": [1.25, 0.05], "count": 3, "len": 9.0, "angle": 90, "taper": [0.6, 0.1]},
+        {"on": "leg", "kind": "spiral", "at": [0.35, 0.0], "r": 4.6, "turns": 2.2, "w": 0.45},
+        {"on": "torso", "kind": "line", "smooth": true, "pts": [[0.15, 0.62], [0.35, 0.72], [0.62, 0.7]], "taper": [0.55, 0.12]},
+        {"on": "face", "kind": "line", "pts": [[0.0, -0.36], [0.55, -0.4], [1.0, -0.26]], "taper": [0.07, 0.04]}
+      ]
+    }
+  ]
+}

@@ -1,4 +1,6 @@
 #include "Liquid.h"
+#include "Engine/Source/BleakFx/BleakFx.h"
+#include "WoW/Source/WorldClient/DayNight.h"
 #include "Engine/Source/Gx/CGxDevice/CGxDevice.h"
 #include "Engine/Source/Gx/Gx.h"
 #include "Engine/Source/Model2/M2Light.h"
@@ -184,8 +186,17 @@ void Liquid::CMaterialWater::Render(Liquid::IEnvironment* environment, Liquid::I
         lightCount = 3;
     }
 
-    g_theGxDevicePtr->RsSet(GxRs_VertexShader, Liquid::CMaterialWater::s_vertexShaders[lightCount]);
-    g_theGxDevicePtr->RsSet(GxRs_PixelShader, Liquid::CMaterialWater::s_pixelShader);
+    // BLEAKHOLD(bleakfx): BleakFx's water shaders (they read the same constants) when they are on.
+    BleakFx::WaterDraw water;
+    water.cameraPos = cameraPos;
+    water.fogScale = Liquid::s_vsConstants.m_fog.x;
+    water.fogOffset = Liquid::s_vsConstants.m_fog.y;
+    water.sunVisible = DayNight::BleakSunDrawn();
+
+    if (!BleakFx::BindWater(water)) {
+        g_theGxDevicePtr->RsSet(GxRs_VertexShader, Liquid::CMaterialWater::s_vertexShaders[lightCount]);
+        g_theGxDevicePtr->RsSet(GxRs_PixelShader, Liquid::CMaterialWater::s_pixelShader);
+    }
 
     CGxBuf* vertexBuf = nullptr;
     CGxBuf* indexBuf = nullptr;
@@ -263,8 +274,17 @@ void Liquid::CMaterialWaterNoSpec::Render(Liquid::IEnvironment* environment, Liq
         lightCount = 3;
     }
 
-    g_theGxDevicePtr->RsSet(GxRs_VertexShader, Liquid::CMaterialWaterNoSpec::s_vertexShaders[lightCount]);
-    g_theGxDevicePtr->RsSet(GxRs_PixelShader, Liquid::CMaterialWaterNoSpec::s_pixelShader);
+    // BLEAKHOLD(bleakfx): BleakFx's water shaders (they read the same constants) when they are on.
+    BleakFx::WaterDraw water;
+    water.cameraPos = cameraPos;
+    water.fogScale = Liquid::s_vsConstants.m_fog.x;
+    water.fogOffset = Liquid::s_vsConstants.m_fog.y;
+    water.sunVisible = DayNight::BleakSunDrawn();
+
+    if (!BleakFx::BindWater(water)) {
+        g_theGxDevicePtr->RsSet(GxRs_VertexShader, Liquid::CMaterialWaterNoSpec::s_vertexShaders[lightCount]);
+        g_theGxDevicePtr->RsSet(GxRs_PixelShader, Liquid::CMaterialWaterNoSpec::s_pixelShader);
+    }
 
     CGxBuf* vertexBuf = nullptr;
     CGxBuf* indexBuf = nullptr;

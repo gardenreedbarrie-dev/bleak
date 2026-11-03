@@ -1,0 +1,243 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Bleakhold Launcher</title>
+<link rel="stylesheet" href="app.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<div class="app is-booting" id="app" data-phase="loading">
+
+  <!-- Art: the painting with a slow drift, the portal's glow, embers, and shades for legibility. -->
+  <div class="bg" aria-hidden="true">
+    <div class="bg-art" id="bg-art">
+      <div class="bg-portal"></div>
+      <div class="bg-eye"></div>
+    </div>
+    <canvas class="embers" id="embers"></canvas>
+    <div class="bg-shade"></div>
+  </div>
+
+  <header class="titlebar" data-tauri-drag-region>
+    <div class="tb-brand" data-tauri-drag-region>
+      <svg class="mark" viewBox="0 0 40 32" aria-hidden="true" data-tauri-drag-region>
+        <defs>
+          <linearGradient id="mark-edge" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#FFF0C4"/>
+            <stop offset=".45" stop-color="#C9934A"/>
+            <stop offset="1" stop-color="#5A3E1E"/>
+          </linearGradient>
+          <linearGradient id="mark-metal" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#FFF3CF"/>
+            <stop offset=".42" stop-color="#E2B768"/>
+            <stop offset=".58" stop-color="#9A6A30"/>
+            <stop offset="1" stop-color="#D7A257"/>
+          </linearGradient>
+        </defs>
+        <path d="M9 1.5h22L38.5 16 31 30.5H9L1.5 16z" fill="#120E0A" stroke="url(#mark-edge)" stroke-width="1.6"/>
+        <text x="20" y="22.6" text-anchor="middle" class="mark-glyph" fill="url(#mark-metal)">B</text>
+      </svg>
+      <span class="tb-title" data-tauri-drag-region>Bleakhold<span class="tb-sub" data-tauri-drag-region>Launcher</span></span>
+    </div>
+    <div class="tb-spacer" data-tauri-drag-region></div>
+    <nav class="tb-links" id="links" aria-label="Links"></nav>
+    <div class="tb-controls">
+      <button type="button" class="win-btn" id="btn-min" aria-label="Minimize" data-icon="minimize"></button>
+      <button type="button" class="win-btn win-close" id="btn-close" aria-label="Close" data-icon="close"></button>
+    </div>
+  </header>
+
+  <main class="stage" data-tauri-drag-region>
+    <section class="hero" data-tauri-drag-region>
+      <h1 class="logo-wrap" data-tauri-drag-region><img class="logo" src="assets/logo.webp" alt="Bleakhold" width="1095" height="193" draggable="false" data-tauri-drag-region></h1>
+      <p class="tagline" data-tauri-drag-region><span data-tauri-drag-region>Wrath of the Lich King</span><i class="tag-gem" aria-hidden="true"></i><span class="tag-ver" data-tauri-drag-region>3.3.5a</span></p>
+    </section>
+
+    <section class="news" aria-labelledby="news-title">
+      <div class="section-head">
+        <h2 id="news-title">Latest news</h2>
+        <span class="section-rule" aria-hidden="true"></span>
+      </div>
+      <div class="news-list" id="news-list"></div>
+    </section>
+
+    <aside class="realm" id="realm" data-state="unknown" aria-label="Realm status">
+      <div class="realm-head">
+        <span class="eyebrow">Realm</span>
+        <span class="realm-pill"><i class="dot"></i><span id="realm-status">Checking</span></span>
+      </div>
+      <div class="realm-name" id="realm-name">Bleakhold</div>
+      <div class="realm-meta">
+        <span class="svc" id="svc-auth" data-tip="Login server"><i class="dot"></i>Login</span>
+        <span class="svc" id="svc-world" data-tip="World server"><i class="dot"></i>World</span>
+        <span class="ping" id="realm-ping" data-tip="Latency to the realm">
+          <span class="bars" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span id="realm-ping-text">–</span>
+        </span>
+      </div>
+    </aside>
+  </main>
+
+  <footer class="dock">
+    <div class="status" id="status">
+      <div class="status-top">
+        <span class="status-badge" id="status-badge" aria-hidden="true"></span>
+        <h2 class="status-title" id="status-title" aria-live="polite">Checking for updates</h2>
+        <span class="status-pct" id="status-pct"></span>
+      </div>
+      <div class="progress-row" id="progress-row">
+        <div class="progress" id="progress" role="progressbar" aria-label="Download progress" aria-valuemin="0" aria-valuemax="100">
+          <div class="progress-fill" id="progress-fill"><span class="progress-glint"></span></div>
+        </div>
+        <button type="button" class="mini-btn" id="btn-pause" aria-label="Pause" data-tip="Pause" data-icon="pause"></button>
+        <button type="button" class="mini-btn" id="btn-cancel" aria-label="Stop download" data-tip="Stop download" data-icon="stop"></button>
+      </div>
+      <div class="status-sub">
+        <span class="status-detail" id="status-detail"></span>
+        <span class="status-file" id="status-file"></span>
+      </div>
+    </div>
+
+    <div class="tools">
+      <button type="button" class="icon-btn" id="btn-folder" aria-label="Open game folder" data-tip="Open game folder" data-icon="folder"></button>
+      <button type="button" class="icon-btn" id="btn-repair" aria-label="Check and repair files" data-tip="Check &amp; repair files" data-icon="repair"></button>
+      <button type="button" class="icon-btn" id="btn-settings" aria-label="Settings" data-tip="Settings" data-icon="settings"></button>
+    </div>
+
+    <button type="button" class="cta" id="cta" disabled>
+      <span class="cta-ring" aria-hidden="true"></span>
+      <span class="cta-edge" aria-hidden="true"></span>
+      <span class="cta-fill" aria-hidden="true"><span class="cta-shine"></span></span>
+      <span class="cta-content"><span class="spinner" aria-hidden="true"></span><span class="cta-dot" aria-hidden="true"></span><span class="cta-label" id="cta-label">Checking</span></span>
+    </button>
+  </footer>
+
+  <div class="toasts" id="toasts" role="region" aria-label="Notifications" aria-live="polite"></div>
+
+  <!-- Settings drawer -->
+  <div class="scrim" id="scrim" hidden></div>
+  <aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" tabindex="-1" hidden>
+    <div class="drawer-head">
+      <h2 id="drawer-title">Settings</h2>
+      <span class="saved" id="saved-note" aria-live="polite"></span>
+      <button type="button" class="icon-btn icon-btn-sm" id="drawer-close" aria-label="Close settings" data-icon="close"></button>
+    </div>
+    <div class="drawer-body">
+      <section class="set-group">
+        <h3 class="eyebrow">Game folder</h3>
+        <div class="path-row">
+          <span class="path-icon" data-icon="folder" aria-hidden="true"></span>
+          <span class="path-text" id="set-path">Not installed yet</span>
+          <button type="button" class="btn btn-ghost btn-sm" id="set-open">Open</button>
+        </div>
+      </section>
+
+      <section class="set-group">
+        <h3 class="eyebrow">Downloads</h3>
+        <div class="set-row">
+          <label class="set-label" for="set-parallel">Downloads in parallel<span class="set-hint">More is faster on a good connection.</span></label>
+          <output class="set-value" id="set-parallel-out" for="set-parallel">4</output>
+        </div>
+        <input type="range" class="range" id="set-parallel" min="1" max="8" step="1" value="4">
+        <div class="range-scale" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span></div>
+
+        <div class="set-row set-row-gap">
+          <label class="set-label" for="set-limit">Speed limit<span class="set-hint">Leave empty for no limit.</span></label>
+          <span class="num-field">
+            <input type="number" id="set-limit" min="0" max="1000" step="1" inputmode="numeric" placeholder="No limit">
+            <span class="num-unit">MB/s</span>
+          </span>
+        </div>
+      </section>
+
+      <section class="set-group" id="set-packs-group" hidden>
+        <h3 class="eyebrow">Optional content</h3>
+        <div class="set-packs" id="set-packs"></div>
+      </section>
+
+      <section class="set-group">
+        <h3 class="eyebrow">Game</h3>
+        <label class="switch-row" for="set-close">
+          <span class="set-label">Close the launcher when the game starts</span>
+          <input type="checkbox" class="switch" id="set-close" role="switch">
+        </label>
+      </section>
+
+      <section class="set-group">
+        <h3 class="eyebrow">Maintenance</h3>
+        <div class="maint">
+          <div class="maint-text"><strong>Check files</strong><span>Scans every file and re-downloads any that are damaged.</span></div>
+          <button type="button" class="btn btn-ghost btn-sm" id="set-repair">Check files</button>
+        </div>
+        <div class="maint">
+          <div class="maint-text"><strong>Clear cache</strong><span>Empties the game's Cache folder. Fixes odd glitches after a patch.</span></div>
+          <button type="button" class="btn btn-ghost btn-sm" id="set-cache">Clear cache</button>
+        </div>
+      </section>
+    </div>
+    <div class="drawer-foot">
+      <span>Launcher <b id="set-version">1.2.0</b></span>
+      <span class="foot-sep" aria-hidden="true"></span>
+      <span>Build <b id="set-build">–</b></span>
+    </div>
+  </aside>
+
+  <!-- First-run install dialog -->
+  <div class="modal" id="install-modal" hidden>
+    <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="install-title" aria-describedby="install-desc">
+      <div class="dialog-inner">
+        <div class="dialog-head">
+          <h2 id="install-title">Install Bleakhold</h2>
+          <p id="install-desc">Pick a folder for the game. You can play as soon as the download is done.</p>
+        </div>
+
+        <div class="field-label">Install folder</div>
+        <div class="folder-field" id="folder-field">
+          <span class="path-icon" data-icon="folder" aria-hidden="true"></span>
+          <span class="folder-path" id="install-path">Choose a folder</span>
+          <button type="button" class="btn btn-ghost btn-sm" id="install-browse">Browse…</button>
+        </div>
+
+        <div class="space" id="space">
+          <div class="space-nums">
+            <span><em>Space needed</em><b id="space-needed">–</b></span>
+            <span class="space-free"><em>Free on this drive</em><b id="space-free">–</b></span>
+          </div>
+          <div class="space-bar" aria-hidden="true"><div class="space-used" id="space-used"></div></div>
+        </div>
+
+        <div class="notes" id="install-notes"></div>
+
+        <div class="packs" id="install-packs" hidden></div>
+
+        <div class="checks">
+          <label class="check"><input type="checkbox" id="opt-desktop" checked><span class="check-box" aria-hidden="true"></span><span>Create a desktop shortcut</span></label>
+          <label class="check"><input type="checkbox" id="opt-start" checked><span class="check-box" aria-hidden="true"></span><span>Add to the Start menu</span></label>
+        </div>
+
+        <div class="dialog-foot">
+          <button type="button" class="btn btn-ghost" id="install-cancel">Cancel</button>
+          <button type="button" class="btn btn-gold" id="install-go" disabled><span class="spinner" aria-hidden="true"></span><span>Install</span></button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Launcher self-update -->
+  <div class="selfupdate" id="selfupdate" hidden>
+    <div class="selfupdate-card" role="status" aria-live="polite">
+      <div class="selfupdate-ring" aria-hidden="true"><span></span></div>
+      <h2>Updating the launcher</h2>
+      <p id="selfupdate-msg">A newer Bleakhold Launcher is out. It restarts by itself in a moment.</p>
+      <div class="progress progress-thin"><div class="progress-fill" id="selfupdate-fill"></div></div>
+      <span class="selfupdate-pct" id="selfupdate-pct"></span>
+    </div>
+  </div>
+
+  <div class="tooltip" id="tooltip" role="tooltip" hidden></div>
+</div>
+</body>
+</html>

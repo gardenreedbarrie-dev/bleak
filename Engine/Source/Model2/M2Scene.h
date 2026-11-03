@@ -133,6 +133,9 @@ class CM2Scene {
 extern const uint32_t s_blendModes[3][7];
 extern const uint32_t s_localLighting[7];
 
+// BLEAKHOLD(glow): the fixed glow material (M2Glow.h) that a skin batch with base material `base` draws its glow with.
+M2Material* M2GlowMaterial(const M2Material* base);
+
 uint32_t ParticleBlendToM2Blend(uint32_t blend);
 uint32_t ParticleFlagsToM2Flags(uint32_t flags);
 void M2BlendBoneMatrices(const C44Matrix* bones, ubyte4 weights, ubyte4 indices, C44Matrix* result);
