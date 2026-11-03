@@ -54,6 +54,7 @@ namespace Bleakhold
             { "CORDER", IntentType::CafeOrder },
             { "CCANCEL", IntentType::CafeCancel },
             { "CSTAFF", IntentType::CafeStaff },
+            { "MARKSET", IntentType::MarkSet },
         }};
 
         struct TopicInfo
@@ -96,6 +97,8 @@ namespace Bleakhold
             { "CAFO", Topic::CafeOrderState, 0 },
             { "CAFP", Topic::CafeProfile, 0 },
             { "CAFBF", Topic::CafeBuffs, 0 },
+            { "MARKS", Topic::MarksList, 0 },
+            { "MARKME", Topic::MarksMe, 0 },
         }};
 
         constexpr char const* DropNames[] = {
@@ -222,6 +225,7 @@ namespace Bleakhold
                 case IntentType::CafeOrder: return 3;
                 case IntentType::CafeCancel: return 1;
                 case IntentType::CafeStaff: return 1;
+                case IntentType::MarkSet: return 4;
                 default: return -1;
             }
         }
@@ -443,6 +447,15 @@ namespace Bleakhold
                 case IntentType::CafeStaff:
                     BH_TRY(Medium(f[0], 1, 65535, out.recipeId));
                     break;
+                // glowing marks (section 22): a colour exactly with a design
+                case IntentType::MarkSet:
+                    BH_TRY(Small(f[0], 0, MaxMarkDesign, out.markDesign));
+                    BH_TRY(Small(f[1], 0, MaxMarkColour, out.markColour));
+                    BH_TRY(Small(f[2], 0, MaxMarkEye, out.markEye));
+                    BH_TRY(Int(f[3], 0, Int32Max, out.maxCopper));
+                    if ((out.markDesign == 0) != (out.markColour == 0))
+                        return DropReason::OutOfRange;
+                    break;
                 default:
                     break;
             }
@@ -661,6 +674,8 @@ namespace Bleakhold
                 return n(in.cafeId) + "," + n(in.recipeId) + "," + n(in.tipPct);
             case IntentType::CafeStaff:
                 return n(in.recipeId);
+            case IntentType::MarkSet:
+                return n(in.markDesign) + "," + n(in.markColour) + "," + n(in.markEye) + "," + n(in.maxCopper);
             default:
                 return std::string();
         }

@@ -9,6 +9,7 @@
 #include "BleakholdData.h"
 #include "BleakholdCafe.h"
 #include "BleakholdCafeRules.h"
+#include "BleakholdMarks.h"
 #include "BleakholdCamp.h"
 #include "BleakholdCases.h"
 #include "BleakholdCodec.h"
@@ -143,6 +144,7 @@ namespace Bleakhold
             LoadWorldLocked();
             LoadCharactersLocked();
         }
+        Marks::Instance().LoadCatalogue();   // DEF N (section 22); never under the Data lock
         RebuildDefinitions();
     }
 
@@ -152,6 +154,7 @@ namespace Bleakhold
             std::lock_guard<std::mutex> guard(_lock);
             LoadWorldLocked();
         }
+        Marks::Instance().LoadCatalogue();
         RebuildDefinitions();
     }
 
@@ -515,6 +518,8 @@ namespace Bleakhold
         // the cafe's DEF H G F U (section 21) only with BleakholdUi.Cafe.Enable = 1: the version stays the same while off
         if (Cafe::Instance().DefinitionsOn())
             CafeRules::FillDefinitions(d);
+        // the glowing marks' DEF N (section 22): the offered race-sexes, with BleakholdUi.Marks.Enable = 1
+        Marks::Instance().FillDefinitions(d);
         for (auto const& e : editors)
             e(d);
         Config const cfg = Mgr::Instance().CfgCopy();
@@ -557,7 +562,7 @@ namespace Bleakhold
         Counts c;
         c.defs = _defs.affixes.size() + _defs.eras.size() + _defs.taskTemplates.size() + _defs.weeklyBonuses.size() + _defs.chapters.size() +
             _defs.dungeons.size() + _defs.legacyTiers.size() + _defs.seasons.size() + _defs.ranks.size() + _defs.seasonRewards.size() +
-            _defs.mythicLevels.size() + _defs.extraClasses.size() + _defs.riftBosses.size();
+            _defs.mythicLevels.size() + _defs.extraClasses.size() + _defs.riftBosses.size() + _defs.markRaces.size();
         c.schedule = _schedule.size();
         c.seasons = _seasons.size();
         c.sets = _sets.size();
@@ -1511,5 +1516,11 @@ namespace Bleakhold
             m.SetDefaultProvider(t, [](Player* p, TopicRequest const& req) { Cafe::Instance().Provide(p, req); });
         m.SetBoardHandler(Board::Cafe, [](Player* p, Intent const& in) { Cafe::Instance().AnswerBoard(p, in); });
         m.AddHelloObserver([](Player* p, Intent const&) { Cafe::Instance().OnHello(p); });
+
+        // glowing marks (section 22): BleakholdMarks.cpp; Mgr refuses MARKSET with MarksErr::Off while FeatureFor is false
+        m.SetDefaultHandler(IntentType::MarkSet, [](Player* p, Intent const& in) { Marks::Instance().HandleSet(p, in); });
+        for (Topic t : { Topic::MarksList, Topic::MarksMe })
+            m.SetDefaultProvider(t, [](Player* p, TopicRequest const& req) { Marks::Instance().Provide(p, req); });
+        m.AddHelloObserver([](Player* p, Intent const&) { Marks::Instance().OnHello(p); });
     }
 }

@@ -5,7 +5,8 @@
  * Internal: the module's own data and default answers, backed by its tables
  *   world DB:      definitions (bleakhold_affix ... bleakhold_rift_boss), bleakhold_week_schedule,
  *                  bleakhold_season, bleakhold_war_effort_part, bleakhold_war_effort_rank,
- *                  bleakhold_season_reward, bleakhold_legacy_set
+ *                  bleakhold_season_reward, bleakhold_legacy_set; DEF N comes from the glowing marks' catalogue
+ *                  (bleakhold_mark_catalogue, read by BleakholdMarks.cpp on every load)
  *   characters DB: bleakhold_leaderboard, bleakhold_server_first, bleakhold_war_effort
  * It never makes game rules up: what counts for the war effort, how a run scores and what a reward
  * needs come from your systems (BleakholdUi.h) or from rows you write.
@@ -35,7 +36,8 @@ namespace Bleakhold
     public:
         static Data& Instance();
 
-        // Startup: world and characters tables. Reload: world tables only (and the definitions).
+        // Startup: world and characters tables. Reload: world tables only (and the definitions). Both read the glowing
+        // marks' catalogue again (Marks::LoadCatalogue) before the definitions are built.
         void LoadAll();
         void ReloadWorld();
 

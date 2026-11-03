@@ -115,8 +115,9 @@ end
 
 local function pushHello()
     local now = time()
-    -- (131072: the café, section 21)
-    Demo.Push("HELLO", { { ns.PROTO, 1, now, 0, 0, 2 + 8 + 16 + 32 + 64 + 4096 + 8192 + 16384 + 32768 + 65536 + 131072, 1,
+    -- (131072: the café, section 21; 262144: glowing marks, section 22)
+    Demo.Push("HELLO", { { ns.PROTO, 1, now, 0, 0, 2 + 8 + 16 + 32 + 64 + 4096 + 8192 + 16384 + 32768 + 65536 + 131072
+        + 262144, 1,
         now + 7 * 3600 + 12 * 60, now + 3 * 86400 + 5 * 3600, "Bleakhold", "bleakhold.com" } })
 end
 
@@ -374,6 +375,10 @@ function Demo.Respond(op, payload)
     if ns.Cafe and ns.Cafe.DemoRespond(op, recs) then
         return
     end
+    -- glowing marks: MARKSET, and the MARKS and MARKME of a GET (Marks.lua)
+    if ns.Marks and ns.Marks.DemoRespond(op, recs) then
+        return
+    end
     if op == "HELLO" then
         pushHello()
     elseif op == "GET" then
@@ -495,6 +500,9 @@ function Demo.Start()
     Demo.Stop(true)
     Comm.Reset()
     ns.ResetState()
+    if ns.Marks then
+        ns.Marks.Reset()
+    end
     resetFixtures()
     if ns.WarMode then
         ns.WarMode.DemoReset()
@@ -540,6 +548,10 @@ function Demo.Stop(silent)
     -- the café's HUD and key overrides go with its demo state
     if ns.Cafe then
         ns.Cafe.Reset()
+    end
+    -- the demo's marks leave the client's map with it
+    if ns.Marks then
+        ns.Marks.Reset()
     end
     if not silent then
         ns.Print("demo mode off.")

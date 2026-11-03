@@ -55,6 +55,7 @@ CLIENT_API_SOURCES = (
     ("WoW/Source/Ui/BleakholdDance.cpp", re.compile(r'\{\s*"(BleakholdDance_\w+)",\s*&Script_')),
     ("WoW/Source/Ui/BleakholdStorm.cpp", re.compile(r'\{\s*"(BleakholdStorm_\w+)",\s*&Script_')),
     ("WoW/Source/Ui/BleakholdStorm.cpp", re.compile(r'\{\s*"(BleakholdUI_\w+)",\s*&Script_')),
+    ("WoW/Source/Ui/BleakholdMarks.cpp", re.compile(r'\{\s*"(BleakholdMarks_\w+)",\s*&Script_')),
 )
 
 

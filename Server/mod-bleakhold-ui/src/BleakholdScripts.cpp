@@ -6,13 +6,15 @@
  * addon channel, login/logout, configuration and the world tick; for camping (section 16) the XP bonus,
  * the end of camp rest when combat starts, the campfires that enter the world, the glide's movement and Walk on Air in
  * the spellbook (spell_bleakhold_walk_on_air); for the cafe (section 21) the shift hooks, the shake helper, tea
- * reputation, cast cancels of step spells, the .gobject guard and the gossip of the owners and head baristas.
+ * reputation, cast cancels of step spells, the .gobject guard and the gossip of the owners and head baristas; for the
+ * glowing marks (section 22) login, logout and delete.
  */
 
 #include "BleakholdCafe.h"
 #include "BleakholdCamp.h"
 #include "BleakholdCodec.h"
 #include "BleakholdData.h"
+#include "BleakholdMarks.h"
 #include "BleakholdMgr.h"
 
 #include "Creature.h"
@@ -147,6 +149,7 @@ namespace
         void OnStartup() override
         {
             Mgr::Instance().MarkWorldThread();
+            Marks::Instance().OnStartup();   // the tables; Data::LoadAll reads the catalogue for DEF N
             Data::Instance().LoadAll();
             Camp::Instance().OnStartup();
             Cafe::Instance().OnStartup();   // always (whatever Cafe.Enable says), so .bleakhold reload can enable it
@@ -243,6 +246,35 @@ namespace
             if (!pct || !cafe.RewardPlaceOk(player) || cafe.TeaExcludesFaction(uint32(factionID)) || !cafe.HasTea(player))
                 return;
             amount *= 1.0f + float(pct) / 100.0f;
+        }
+    };
+
+    // Glowing marks (section 22; BleakholdMarks.cpp). Registered whatever BleakholdUi.Marks.Enable says, so the online
+    // characters' choices are known when .bleakhold reload turns it on. World thread.
+    class BleakholdMarksPlayerScript : public PlayerScript
+    {
+    public:
+        BleakholdMarksPlayerScript() : PlayerScript("BleakholdMarksPlayerScript", {
+            PLAYERHOOK_ON_LOGIN,
+            PLAYERHOOK_ON_LOGOUT,
+            PLAYERHOOK_ON_DELETE_FROM_DB,
+        }) { }
+
+        // the row; everyone else with the bit gets a MARK when the character has an entry
+        void OnPlayerLogin(Player* player) override
+        {
+            Marks::Instance().OnLogin(player);
+        }
+
+        // a removal MARK when the character had an entry
+        void OnPlayerLogout(Player* player) override
+        {
+            Marks::Instance().OnLogout(player);
+        }
+
+        void OnPlayerDeleteFromDB(CharacterDatabaseTransaction /*trans*/, uint32 guid) override
+        {
+            Marks::Instance().OnDeleteCharacter(guid);
         }
     };
 
@@ -386,4 +418,5 @@ void AddBleakholdScripts()
     new BleakholdCafeCreatureScript();
     new BleakholdCafeNpcScript<CafeOwnerScriptName>();
     new BleakholdCafeNpcScript<CafeStaffScriptName>();
+    new BleakholdMarksPlayerScript();
 }

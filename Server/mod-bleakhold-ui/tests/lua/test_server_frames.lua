@@ -830,3 +830,59 @@ for _, size in ipairs({ 1000, 251, 64 }) do
         H.eq(S.err.text, "Finish or bin the drink in your hands first.")
     end)
 end
+
+------------------------------------------------------------------------------------------------------
+-- Glowing marks (section 22): the C++ module's marks session (bh_gen.cpp `marks`: HELLO bit 262144, DEF N of two
+-- race-sexes, MARKME, a MARKS list of three pages, one tick of MARK deltas, MARKME after a change, ERR marks_cooldown)
+-- into the addon's state at every frame size.
+------------------------------------------------------------------------------------------------------
+for _, size in ipairs({ 1000, 251, 64 }) do
+    test("C++ glowing marks frames (max body " .. size .. ") reach the addon's state", function(M, ns)
+        local data = loadFrames(size).marks
+        H.ok(data and #data.frames >= data.messages and data.messages == 10, "bh_gen wrote the marks session")
+        local C, S = ns.Comm, ns.S
+        feed(M, data)
+        M.Advance(1)
+        noDrops(C, "marks")
+        H.eq(C.stats.framesIn, #data.frames, "frames in")
+        H.eq(C.stats.dups, 0, "duplicates")
+        if size < 1000 then
+            H.ok(#data.frames > data.messages, "small frames: messages were chunked")
+        end
+        H.ok(C.HasFeature(C.FEATURE.MARKS) and C.FEATURE.MARKS == 262144, "HELLO feature bit 262144: glowing marks")
+
+        -- DEF N: names with separators and UTF-8 come back whole; a body without eye sprites 3 and 5
+        H.eq(ns.db.defsVer, 99, "DEF Z stored the data version")
+        local ne = assert(ns.Def("N", 9), "DEF N 9")
+        H.eq(ne.raceId, 4); H.eq(ne.sex, 1); H.eq(ne.raceFile, "NightElf")
+        H.eq(ne.designs[1].key, "MoonwellSigils"); H.eq(ne.designs[1].name, "Moonwell; Sigils")
+        H.eq(ne.designs[3].name, "Sentinel: Talon~"); H.eq(ne.designs[4].name, "Starfall | 100% \195\169toiles")
+        H.eq(ne.colours[2].hex, "3FE0C5"); H.eq(ne.colours[2].glow, true); H.eq(ne.colours[3].glow, false)
+        H.eq(ne.eyes[4].key, "BloodRed"); H.eq(ne.eyes[4].dkOnly, true); H.eq(ne.eyes[2].dkOnly, false)
+        H.eq(ne.eyes[3], nil, "no sprite for eye 3"); H.eq(ne.eyes[5], nil)
+        local be = assert(ns.Def("N", 20), "DEF N 20")
+        H.eq(be.raceFile, "BloodElf"); H.eq(be.designs[3].name, "Quel'dorei"); H.eq(next(be.eyes), nil, "no eyes")
+        H.eq(ns.Marks.Path(4, 1, 4, 1), "Character\\BleakholdMarks\\NightElf\\Female\\Starfall_EluneBlue.blp")
+        H.eq(ns.Marks.EyePath(4, 1, 2), "Character\\BleakholdEyes\\NightElf\\Female\\Eye_DruidAmber.blp")
+
+        -- MARKS (three pages of listId 7, nine entries) and then the tick's deltas: 1201 in, 1225 and 1300 out
+        H.eq(S.marksBuffer, nil, "the list completed")
+        local guids = {}
+        for g in pairs(S.marks) do guids[#guids + 1] = g end
+        table.sort(guids)
+        H.eq(table.concat(guids, " "), "1201 1250 1275 1325 1350 1375 1400 1425")
+        local e = S.marks[1201]
+        H.eq(e.race, 4); H.eq(e.sex, 1); H.eq(e.design, 2); H.eq(e.colour, 3); H.eq(e.eye, 4)
+        e = S.marks[1375]
+        H.eq(e.race, 10); H.eq(e.sex, 0); H.eq(e.design, 4); H.eq(e.colour, 2); H.eq(e.eye, 1)
+        e = S.marks[1400]
+        H.eq(e.design, 0); H.eq(e.colour, 0); H.eq(e.eye, 2, "an eye alone is listed")
+
+        -- the last MARKME, and ERR marks_cooldown
+        local me = S.markMe
+        H.eq(me.design, 2); H.eq(me.colour, 3); H.eq(me.eye, 4); H.eq(me.price, 100000); H.eq(me.cooldownSec, 3600)
+        H.eq(me.changes, 1); H.eq(me.offered, 1)
+        H.eq(S.err.op, "MARKSET"); H.eq(S.err.code, "marks_cooldown"); H.eq(S.err.seq, "26")
+        H.eq(S.err.text, "You can change your markings again in 60 minutes.")
+    end)
+end

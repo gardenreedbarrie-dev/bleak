@@ -149,6 +149,8 @@ BleakholdUi.Frame.MaxBody = 1000
 #    BleakholdUi.RateLimit.CafeStepIntervalMs    CSTEP one per this many ms                 Default: 200
 #    BleakholdUi.RateLimit.CafeReleaseIntervalMs CREL one per this many ms                  Default: 100
 #    BleakholdUi.RateLimit.CafeOrderIntervalMs   CORDER and CCANCEL, one each per ms        Default: 2000
+#    BleakholdUi.RateLimit.MarksIntervalMs       MARKSET (glowing marks, section 22) one per this many ms
+#                                                                                         Default: 2000
 
 BleakholdUi.RateLimit.Burst = 10
 BleakholdUi.RateLimit.PerSecond = 5
@@ -174,6 +176,7 @@ BleakholdUi.RateLimit.CafeTakeIntervalMs = 500
 BleakholdUi.RateLimit.CafeStepIntervalMs = 200
 BleakholdUi.RateLimit.CafeReleaseIntervalMs = 100
 BleakholdUi.RateLimit.CafeOrderIntervalMs = 2000
+BleakholdUi.RateLimit.MarksIntervalMs = 2000
 
 ###################################################################################################
 # EMOJI BUBBLES (EMOJI: an emoji over the player's head for everyone nearby; needs the Bleakhold client)
@@ -730,6 +733,45 @@ BleakholdUi.Cafe.Bot.MinDrinks = 200
 BleakholdUi.Cafe.Bot.PerfectPermille = 980
 BleakholdUi.Cafe.Bot.SdMs = 30
 BleakholdUi.Cafe.OverheadKits = 0
+
+###################################################################################################
+# GLOWING MARKS (protocol section 22: MARKSET and the MARKS, MARKME topics)
+#
+# A mark (one of the race's 4 designs in one of its 3 colours, two of them glowing) and an eye colour, as a
+# cosmetic of their own: players pick them in the Markings window and pay gold for a change, and every player
+# with the Bleakhold client sees everyone's marks glow. The art is MarkForge's, packed into patch-W.MPQ by
+# bleakserv's deploy/marks/build-marks.sh, which also writes the catalogue (bleakhold_mark_catalogue, the
+# race-sexes and eye colours the files exist for). The tables come from
+# data/sql/db-world/05_bleakhold_marks_catalogue.sql and data/sql/db-characters/02_bleakhold_marks_characters.sql
+# (the module makes them at startup too). Money in copper.
+###################################################################################################
+#
+#    BleakholdUi.Marks.Enable
+#        Description: Glowing marks (feature bit 262144, with a catalogue that offers at least one race-sex).
+#                     0 -> 1 by .bleakhold reload works: the catalogue is read at every start and reload.
+#                     0 again: every client clears its marks at the next HELLO; the stored choices stay.
+#        Default:     0 - Disabled
+#                     1 - Enabled
+#
+#    BleakholdUi.Marks.GmOnly
+#        Description: 1 = only game masters get the feature bit, can change their markings and are listed
+#                     (testing on the live realm before the launch).
+#        Default:     1
+#
+#    BleakholdUi.Marks.Price           copper per change (0..2147483647; 0 = free). A change to no mark and
+#                                      the race's own eyes is always free                   Default: 100000
+#    BleakholdUi.Marks.FirstFree       1 = a character's first change is free                 Default: 1
+#    BleakholdUi.Marks.CooldownHours   hours between two changes of one character (0..720; 0 = none; game
+#                                      masters wait too: set 0 to test)                    Default: 1
+#    BleakholdUi.Marks.MaxListEntries  entries in one MARKS list, lowest character guids first (1..2000);
+#                                      the changes after it are never capped              Default: 2000
+
+BleakholdUi.Marks.Enable = 0
+BleakholdUi.Marks.GmOnly = 1
+BleakholdUi.Marks.Price = 100000
+BleakholdUi.Marks.FirstFree = 1
+BleakholdUi.Marks.CooldownHours = 1
+BleakholdUi.Marks.MaxListEntries = 2000
 
 ###################################################################################################
 # KEYSTONE RUNS

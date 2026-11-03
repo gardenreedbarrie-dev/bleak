@@ -235,6 +235,7 @@ Comm.TOPICS = {
     SET = 2, LIDX = 0, SEASON = 0, FIRSTS = 0, DEF = 1, CASES = 0, CASE = 1, CAMPST = 0, ROYS = 0, ROYM = 0,
     WMST = 0, WPZ = 0, WPMAP = 0, WANTED = 0, ARENA = 0,
     CAFE = 0, CAFST = 0, CAFQ = 0, CAFT = 0, CAFM = 1, CAFO = 0, CAFP = 0, CAFBF = 0,   -- the café (section 21)
+    MARKS = 0, MARKME = 0,                                                              -- glowing marks (section 22)
 }
 
 -- A schema lists its fields in order; `min` (default: all of them) is how many must be given, the rest may be
@@ -298,6 +299,10 @@ Comm.INTENTS = {
         end },
     CCANCEL = { int(1, INT32) },
     CSTAFF = { int(1, 65535) },
+    -- glowing marks (section 22): design (0 none, 1-4), colour (0 exactly with design 0, else 1-3), eye (0 the race's
+    -- own, 1-5), the most copper the player agreed to pay (the price the window showed)
+    MARKSET = { int(0, 4), int(0, 3), int(0, 5), int(0, INT32),
+        check = function(d, c) return (tonumber(d) == 0) == (tonumber(c) == 0) end },
 }
 
 -- Ops that skip the identical-intent check (Comm.DEDUP): "next" twice is two takes, and a press again after an ERR is
@@ -861,7 +866,8 @@ Comm.FEATURE = { RIFT_SCORE = 1, SHARDS = 2, DBM_BY_SERVER = 4, SEASON = 8, LEAD
     EMOJI = 64, DANCE = 128, CASES = 256, CAMP = 512, GLIDE = 1024, FIELD_REPAIR = 2048, ROYALE = 4096,
     BG_ANNOUNCER = 8192, WAR_MODE = 16384, WORLD_PVP = 32768,   -- 32768 counts only with 16384 (ns.WarMode)
     ARENA = 65536,                                              -- arena seasons and the 1v1 ladder (section 20)
-    CAFE = 131072 }                                             -- the café, for this player (section 21)
+    CAFE = 131072,                                              -- the café, for this player (section 21)
+    MARKS = 262144 }                                            -- glowing marks, for this player (section 22)
 
 function Comm.HasFeature(bitValue)
     local f = Comm.server and Comm.server.features or 0

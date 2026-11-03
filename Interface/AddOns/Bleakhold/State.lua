@@ -59,6 +59,10 @@ local function reset()
     S.cafeSummary = nil
     S.cafeAtBar = {}
     S.cafeRaw = {}
+    -- glowing marks (section 22): Marks.lua parses and applies them
+    S.marks = {}
+    S.markMe = nil
+    S.marksBuffer = nil
 end
 reset()
 ns.ResetState = reset
@@ -172,6 +176,63 @@ end
 local CAFE_STATIONS = { G = true, E = true, K = true, C = true, B = true, S = true, V = true }
 ns.CAFE_STATIONS = CAFE_STATIONS
 
+-- DEF N (section 22): id, raceId, sex, raceFile, designs (index~key~name, 1-4), colours (index~key~name~hex~glow,
+-- 1-3), eyes (index~key~name~hex~dkOnly, 1-5, only those with sprites). The keys and the race's file name go into
+-- texture paths (Marks.lua): a record with a malformed one, an id that is not raceId * 2 + sex, or fewer than its 4
+-- designs and 3 colours is dropped whole; an eye with a malformed key is left out.
+-- (checked on the raw field: a longer one is malformed, never cut to fit, and the classes are ASCII whatever the locale)
+local MARK_KEY, MARK_RACE_FILE = "^[A-Za-z0-9]+$", "^[A-Za-z]+$"
+
+local function markKey(raw)
+    return type(raw) == "string" and #raw <= 32 and raw:find(MARK_KEY) and raw or nil
+end
+
+local function markHex(raw)
+    local h = U.Str(raw, nil, 6)
+    return h and h:find("^%x%x%x%x%x%x$") and h:upper() or nil
+end
+
+local function markItems(raw, lo, hi, parts)
+    local out = {}
+    for _, item in ipairs(U.List(raw, hi)) do
+        local t = U.Tuple(item, parts)
+        local i = U.Int(t[1], nil)
+        local key = markKey(t[2])
+        if i and i >= lo and i <= hi and key and not out[i] then
+            out[i] = t
+            t.key = key
+        end
+    end
+    return out
+end
+
+local function markDef(f)
+    local id, raceId, sex = U.Int(f[1], nil), U.Int(f[2], nil), U.Int(f[3], nil)
+    local raceFile = f[4]
+    if not (raceId and raceId >= 1 and raceId <= 255 and (sex == 0 or sex == 1) and id == raceId * 2 + sex) then
+        return nil
+    end
+    if not (type(raceFile) == "string" and #raceFile <= 16 and raceFile:find(MARK_RACE_FILE)) then
+        return nil
+    end
+    local d = { raceId = raceId, sex = sex, raceFile = raceFile, designs = {}, colours = {}, eyes = {} }
+    for i, t in pairs(markItems(f[5], 1, 4, 3)) do
+        d.designs[i] = { key = t.key, name = U.Str(t[3], t.key, 48) }
+    end
+    for i, t in pairs(markItems(f[6], 1, 3, 5)) do
+        d.colours[i] = { key = t.key, name = U.Str(t[3], t.key, 48), hex = markHex(t[4]), glow = U.Bool(t[5], false) }
+    end
+    for i, t in pairs(markItems(f[7], 1, 5, 5)) do
+        d.eyes[i] = { key = t.key, name = U.Str(t[3], t.key, 48), hex = markHex(t[4]), dkOnly = U.Bool(t[5], i >= 4) }
+    end
+    for i = 1, 4 do
+        if not d.designs[i] or (i <= 3 and not d.colours[i]) then
+            return nil
+        end
+    end
+    return d
+end
+
 local DEF_PARSERS = {
     A = function(f) return { name = U.Str(f[2], nil, 40), text = U.Str(f[3], nil, 200) } end,
     E = function(f) return { name = U.Str(f[2], nil, 48), text = U.Str(f[3], nil, 200), tier = U.Int(f[4], nil, 0, 99) } end,
@@ -242,12 +303,14 @@ local DEF_PARSERS = {
         }
     end,
     U = function(f) return { totalXp = U.Int(f[2], nil, 0, INT32), text = U.Str(f[3], nil, 160) } end,
+    -- glowing marks (section 22): N a race-sex the catalogue offers, its id raceId * 2 + sex (markDef below)
+    N = function(f) return markDef(f) end,
 }
 ns.DEF_PARSERS = DEF_PARSERS
 -- The kinds above, as a number: raise it whenever DEF_PARSERS gains a kind. A cache saved under another schema (an
 -- addon that skipped kinds it did not know, such as V and Q before the arena, or H, G, F and U before the café) is
--- fetched again even when its dataVer matches the server's.
-local DEF_SCHEMA = 3
+-- fetched again even when its dataVer matches the server's (4: N, the glowing marks).
+local DEF_SCHEMA = 4
 ns.DEF_SCHEMA = DEF_SCHEMA
 
 Comm.Handle("DEF", function(r)

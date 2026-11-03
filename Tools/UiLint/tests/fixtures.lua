@@ -128,6 +128,10 @@ function FX.examples(M)
         CAFSUM = { { 1, "E", 1840, 14, 9, 10600, 212, 0, 190, 4, 0 } },
         CAFUI = { { "menu", 1 } },
         CAFAT = { { 1, 2 }, { "Aldric", 3, 400, 3000, "H", 2, 5 }, { "Rosalind Thornbury", 1, 900, 1500, "T", 1, 4 } },
+        -- glowing marks (section 22), unrevisioned
+        MARKS = { { 3, 1, 1, 3 }, { 1201, 4, 1, 1, 1, 1 }, { 1377, 10, 0, 3, 3, 0 }, { 1502, 6, 1, 0, 0, 2 } },
+        MARK = { { 1201, 4, 1, 4, 1, 2 }, { 1377, 10, 0, 0, 0, 0 } },
+        MARKME = { { 4, 1, 2, 100000, 3600, 1, 1 } },
     }
 end
 
@@ -161,6 +165,11 @@ function FX.openEverything(M, ns)
             ns.Arena.page.view = v
             ns.Arena.page:Refresh()
         end
+    end
+    -- the Markings window (section 22) while the realm has glowing marks on for the player
+    if ns.Marks.Available() then
+        ns.UI.Open("markings")
+        M.Advance(0.3)
     end
     ns.UI.Open("season")
     ns.UI.Open("leaderboards")

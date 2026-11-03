@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
  * GM commands:
- *   .bleakhold status                       protocol counters, data version, loaded rows
- *   .bleakhold reload                       re-read mod_bleakhold_ui.conf and the world tables (admin)
+ *   .bleakhold status                       protocol counters, data version, loaded rows, glowing marks
+ *   .bleakhold reload                       re-read mod_bleakhold_ui.conf and the world tables, the glowing marks'
+ *                                           catalogue too (admin)
  *   .bleakhold debug on|off                 log every accepted intent and every drop reason (admin)
  *   .bleakhold announce <tag> <text>        tag: legacy, first, season, queue, record, cafe (admin)
  *   .bleakhold player                       counters of the selected player (or yourself)
@@ -35,6 +36,7 @@
 #include "BleakholdCafe.h"
 #include "BleakholdCamp.h"
 #include "BleakholdData.h"
+#include "BleakholdMarks.h"
 #include "BleakholdMgr.h"
 #include "BleakholdUi.h"
 
@@ -340,6 +342,10 @@ public:
             handler->PSendSysMessage("Drops: {}", drops);
         handler->PSendSysMessage("Tables: {} definitions, {} schedule weeks, {} seasons, {} legacy sets, {} leaderboard rows, {} server firsts, {} war effort contributors",
             c.defs, c.schedule, c.seasons, c.sets, c.lbRows, c.firsts, c.weRows);
+        Marks::Status const mk = Marks::Instance().GetStatus();
+        handler->PSendSysMessage("Glowing marks: {}{}, {} race-sexes offered ({} of {} catalogue rows used), {} online, {} listed",
+            mk.enable ? "on" : "off", mk.gmOnly ? " (game masters only)" : "", mk.offered, mk.goodRows, mk.rows, mk.online,
+            mk.listed);
         return true;
     }
 
@@ -361,6 +367,9 @@ public:
             Mgr::Instance().Refresh(p, Topic::Cases);   // the case list may have changed (section 15)
         });
         handler->PSendSysMessage("Bleakhold: configuration and world tables reloaded; data version {} -> {}.", before, after);
+        Marks::Status const mk = Marks::Instance().GetStatus();
+        handler->PSendSysMessage("Glowing marks: {}{}, {} race-sexes offered (a change reaches the clients on the next tick).",
+            mk.enable ? "on" : "off", mk.gmOnly ? " (game masters only)" : "", mk.offered);
         return true;
     }
 

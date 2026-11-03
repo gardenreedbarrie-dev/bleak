@@ -175,9 +175,9 @@ test("cafe state: the empty records (no tickets, no order, no buff) and events",
     H.eq(ns.S.cafeStep.grade, "P")
 end)
 
-test("cafe state: DEF H/G/F/U lie over the built-in catalogue (DEF schema 3)", function(M, ns)
+test("cafe state: DEF H/G/F/U lie over the built-in catalogue (DEF schema 3 and later)", function(M, ns)
     FX.connect(M, H, CAFE_BIT)
-    H.eq(ns.DEF_SCHEMA, 3)
+    H.ok(ns.DEF_SCHEMA >= 3, "the café's kinds came with schema 3 (4: the glowing marks' N)")
     local Cafe = ns.Cafe
     H.eq(Cafe.Cafe(1).name, "The Lion's Roast", "built in before any DEF")
     H.eq(Cafe.Action(3).name, "Pull Shot")

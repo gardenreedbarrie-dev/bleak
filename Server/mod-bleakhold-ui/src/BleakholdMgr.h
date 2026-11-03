@@ -167,7 +167,8 @@ namespace Bleakhold
         // A change sends a new HELLO to every ready client on the next world tick.
         void SetFeature(uint32_t feature, bool on);
         bool FeatureOn(uint32_t feature);
-        // A new HELLO to every ready client on the next world tick (a per-player feature bit changed: BleakholdUi.Cafe.GmOnly).
+        // A new HELLO to every ready client on the next world tick (a per-player feature bit changed: BleakholdUi.Cafe.GmOnly,
+        // BleakholdUi.Marks.*).
         void RefreshHello();
         // Pushes the full DEF set to one player (answer to GET DEF,0) or to every ready player.
         void SendDefinitions(Player* player);

@@ -914,6 +914,93 @@ namespace Bleakhold
         return w.Take();
     }
 
+    // ---- glowing marks (section 22) ----
+    bool MarkEntryValid(MarkEntry const& e)
+    {
+        return e.guid != 0 && e.race != 0 && e.sex <= 1 && e.design <= MaxMarkDesign && e.colour <= MaxMarkColour &&
+            e.eye <= MaxMarkEye && (e.design == 0) == (e.colour == 0);
+    }
+
+    namespace
+    {
+        void WriteMarkEntry(PayloadWriter& w, MarkEntry const& e)
+        {
+            w.Int(e.guid).Int(e.race).Int(e.sex).Int(e.design).Int(e.colour).Int(e.eye);
+        }
+    }
+
+    MarksListPages EncodeMarksList(MarksList const& m, std::size_t maxEntries, std::size_t perPage)
+    {
+        maxEntries = std::clamp<std::size_t>(maxEntries, 1, MaxMarkListEntries);
+        perPage = std::clamp<std::size_t>(perPage, 1, MaxMarkPageRecords);
+        std::vector<MarkEntry> list;
+        list.reserve(m.entries.size());
+        for (MarkEntry const& e : m.entries)
+            if (MarkEntryValid(e) && !MarkEntryNone(e))
+                list.push_back(e);
+        // ascending guid order, one entry per guid (the first one given): the cap leaves out the highest guids
+        std::stable_sort(list.begin(), list.end(), [](MarkEntry const& a, MarkEntry const& b) { return a.guid < b.guid; });
+        list.erase(std::unique(list.begin(), list.end(), [](MarkEntry const& a, MarkEntry const& b) { return a.guid == b.guid; }),
+            list.end());
+        std::size_t const cap = std::min(maxEntries, perPage * MaxMarkPages);
+        MarksListPages out;
+        if (list.size() > cap)
+        {
+            out.leftOut = list.size() - cap;
+            list.resize(cap);
+        }
+        out.listed = list.size();
+        std::size_t const pages = std::max<std::size_t>(1, (list.size() + perPage - 1) / perPage);
+        int64_t const listId = std::clamp<int64_t>(m.listId, 1, Proto::Int32Max);
+        for (std::size_t p = 0; p < pages; ++p)
+        {
+            PayloadWriter w;
+            w.Int(listId).Int(static_cast<int64_t>(p + 1)).Int(static_cast<int64_t>(pages)).Int(static_cast<int64_t>(list.size()));
+            std::size_t const end = std::min(list.size(), (p + 1) * perPage);
+            for (std::size_t i = p * perPage; i < end; ++i)
+            {
+                w.Record();
+                WriteMarkEntry(w, list[i]);
+            }
+            out.payloads.push_back(w.Take());
+        }
+        return out;
+    }
+
+    std::vector<std::string> EncodeMarkDeltas(std::vector<MarkEntry> const& entries)
+    {
+        std::vector<std::string> out;
+        PayloadWriter w;
+        std::size_t n = 0;
+        for (MarkEntry const& e : entries)
+        {
+            if (!MarkEntryValid(e))
+                continue;
+            if (n == MaxMarkDeltaRecords)
+            {
+                out.push_back(w.Take());
+                w = PayloadWriter();
+                n = 0;
+            }
+            if (n++)
+                w.Record();
+            WriteMarkEntry(w, e);
+        }
+        if (n)
+            out.push_back(w.Take());
+        return out;
+    }
+
+    std::string EncodeMarkMe(MarkMe const& m)
+    {
+        // a choice outside the document reads as none (layer by layer, as the server applies it)
+        bool const look = m.design >= 1 && m.design <= MaxMarkDesign && m.colour >= 1 && m.colour <= MaxMarkColour;
+        PayloadWriter w;
+        w.Int(look ? m.design : 0).Int(look ? m.colour : 0).Int(m.eye <= MaxMarkEye ? m.eye : 0)
+            .Int(std::min<int64_t>(m.priceCopper, Proto::Int32Max)).Int(m.cooldownSec).Int(m.changes).Bool(m.offered);
+        return w.Take();
+    }
+
     std::string EncodeFirsts(FirstsList const& m)
     {
         PayloadWriter w;
@@ -989,6 +1076,23 @@ namespace Bleakhold
         });
         kind('U', d.cafeLevels, [](PayloadWriter& w, CafeLevelDef const& e) {
             w.Int(e.level).Int(e.totalXp).Text(e.text, MaxCafeLineBytes);
+        });
+        // glowing marks (section 22): id = raceId * 2 + sex; designs index~key~name, colours index~key~name~hex~glow,
+        // eyes index~key~name~hex~dkOnly
+        kind('N', d.markRaces, [](PayloadWriter& w, MarkRaceDef const& e) {
+            using P = PayloadWriter;
+            std::vector<std::vector<std::string>> designs, colours, eyes;
+            for (MarkDesignDef const& x : e.designs)
+                designs.push_back({ P::TuplePart(int64_t(x.index)), P::TuplePart(x.key, MaxMarkKeyBytes),
+                    P::TuplePart(x.name, MaxMarkNameBytes) });
+            for (MarkColourDef const& x : e.colours)
+                colours.push_back({ P::TuplePart(int64_t(x.index)), P::TuplePart(x.key, MaxMarkKeyBytes),
+                    P::TuplePart(x.name, MaxMarkNameBytes), P::TuplePart(x.hex, 6), P::TuplePart(int64_t(x.glow ? 1 : 0)) });
+            for (MarkEyeDef const& x : e.eyes)
+                eyes.push_back({ P::TuplePart(int64_t(x.index)), P::TuplePart(x.key, MaxMarkKeyBytes),
+                    P::TuplePart(x.name, MaxMarkNameBytes), P::TuplePart(x.hex, 6), P::TuplePart(int64_t(x.dkOnly ? 1 : 0)) });
+            w.Int(int64_t(e.raceId) * 2 + e.sex).Int(e.raceId).Int(e.sex).Text(e.raceFile, MaxMarkRaceFileBytes)
+                .Tuples(designs, MaxMarkDesign).Tuples(colours, MaxMarkColour).Tuples(eyes, MaxMarkEye);
         });
         PayloadWriter z;
         z.Char('Z').Int(dataVer);

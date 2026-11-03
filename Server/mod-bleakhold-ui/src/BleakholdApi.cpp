@@ -7,6 +7,7 @@
 
 #include "BleakholdUi.h"
 #include "BleakholdData.h"
+#include "BleakholdMarksRules.h"
 #include "BleakholdMgr.h"
 
 #include "Player.h"
@@ -319,6 +320,35 @@ namespace Bleakhold::Ui
     void SendCafeAtBar(std::vector<Player*> const& players, CafeAtBar const& m)
     {
         PushAll(players, "CAFAT", EncodeCafeAtBar(m));
+    }
+
+    // ---- glowing marks (section 22) ----
+    void SendMarkMe(Player* player, MarkMe const& m)
+    {
+        M().Push(player, "MARKME", Topic::Count, nullptr, [&](uint32_t) { return EncodeMarkMe(m); });
+    }
+
+    std::size_t SendMarksList(Player* player, MarksList const& m, std::size_t maxEntries)
+    {
+        if (!player)
+            return 0;
+        // a page is one message: as many entries as 99 frames of the configured size carry
+        MarksListPages const pages = EncodeMarksList(m, maxEntries, MarksRules::PageRecordsFor(M().CfgCopy().maxFrameBody));
+        for (std::string const& page : pages.payloads)
+            M().Push(player, "MARKS", Topic::Count, nullptr, [&](uint32_t) { return page; });
+        return pages.leftOut;
+    }
+
+    void SendMarks(Player* player, std::vector<MarkEntry> const& entries)
+    {
+        for (std::string const& p : EncodeMarkDeltas(entries))
+            M().Push(player, "MARK", Topic::Count, nullptr, [&](uint32_t) { return p; });
+    }
+
+    void SendMarks(std::vector<Player*> const& players, std::vector<MarkEntry> const& entries)
+    {
+        for (std::string const& p : EncodeMarkDeltas(entries))
+            PushAll(players, "MARK", p);
     }
 
     void RiftStatus(Player* player, RiftState const& m)

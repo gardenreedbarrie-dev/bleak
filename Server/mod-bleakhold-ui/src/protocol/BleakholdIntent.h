@@ -53,6 +53,7 @@ namespace Bleakhold
         CafeOrder,        // CORDER   cafeId, recipeId, tipPct
         CafeCancel,       // CCANCEL  orderId
         CafeStaff,        // CSTAFF   recipeId
+        MarkSet,          // MARKSET  design, colour, eye, maxCopper (section 22)
         Count
     };
 
@@ -66,6 +67,7 @@ namespace Bleakhold
         Arena,                                                     // ARENA (section 20)
         CafeList, CafeState, CafeQueue, CafeTickets, CafeMenu,     // CAFE, CAFST, CAFQ, CAFT, CAFM (section 21)
         CafeOrderState, CafeProfile, CafeBuffs,                    // CAFO, CAFP, CAFBF
+        MarksList, MarksMe,                                        // MARKS, MARKME (section 22)
         Count
     };
     inline constexpr uint8_t RevisionedTopicCount = 9;
@@ -91,6 +93,11 @@ namespace Bleakhold
     inline constexpr uint32_t MaxCafeActionId = 63;
     inline constexpr uint32_t MaxCafeReleaseMs = 60000;
     inline constexpr bool IsCafeTipPct(uint32_t pct) { return pct == 0 || pct == 10 || pct == 25 || pct == 50; }
+    // MARKSET (section 22): design 0..MaxMarkDesign (0 no mark), colour 0..MaxMarkColour (0 exactly when design is 0), eye
+    // 0..MaxMarkEye (0 the race's own eyes); maxCopper, the most the player agreed to pay, 0..2147483647.
+    inline constexpr uint32_t MaxMarkDesign = 4;
+    inline constexpr uint32_t MaxMarkColour = 3;
+    inline constexpr uint32_t MaxMarkEye = 5;
     // HELLO caps: the optional parts of the client that are loaded. Bit 1 the cafe's UI (section 21: the staff's
     // gossip opens its windows with CAFUI only for it). A client without optional parts sends no caps field.
     enum ClientCap : uint32_t { ClientCapCafeUi = 1 };
@@ -201,6 +208,13 @@ namespace Bleakhold
         uint16_t recipeId = 0;         // 1..65535
         uint8_t tipPct = 0;            // IsCafeTipPct
         uint16_t clientMs = 0;         // 0..MaxCafeReleaseMs
+
+        // MARKSET (section 22): the markings the player asks for and the most they agreed to pay (the price their window
+        // showed); the server checks the choice against its catalogue and charges at most maxCopper
+        uint8_t markDesign = 0;        // 0..MaxMarkDesign
+        uint8_t markColour = 0;        // 0..MaxMarkColour, 0 exactly when markDesign is 0
+        uint8_t markEye = 0;           // 0..MaxMarkEye
+        uint32_t maxCopper = 0;        // 0..2147483647
     };
 
     // Why a message was not accepted.

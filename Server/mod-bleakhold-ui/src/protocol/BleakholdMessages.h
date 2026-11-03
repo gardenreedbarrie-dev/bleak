@@ -68,6 +68,7 @@ namespace Bleakhold
         FeatureWorldPvp = 32768,      // World PvP objectives are live (WPZ, WPCAP, WPMAP, section 19); Ui::SetFeature
         FeatureArena = 65536,         // arena seasons and the 1v1 ladder are live (ARENA, section 20); Ui::SetFeature
         FeatureCafe = 131072,         // the cafe is live (section 21); Ui::SetFeature, sent per player (GmOnly)
+        FeatureMarks = 262144,        // glowing marks are live for this player (section 22); sent per player (GmOnly)
     };
 
     // One reward line of MPE / RIFTE.
@@ -204,6 +205,21 @@ namespace Bleakhold
     };
     struct CafeLevelDef { uint32_t level = 0, totalXp = 0; std::string text; };
 
+    // Glowing marks (section 22). N one race-sex the mark catalogue offers: its 4 designs, 3 colours and the eye colours
+    // whose sprites exist. Keys are [A-Za-z0-9]{1,32} (they build the texture paths), names at most 48 bytes.
+    struct MarkDesignDef { uint32_t index = 0; std::string key, name; };                    // index 1-4
+    struct MarkColourDef { uint32_t index = 0; std::string key, name, hex; bool glow = false; };   // index 1-3
+    struct MarkEyeDef { uint32_t index = 0; std::string key, name, hex; bool dkOnly = false; };   // index 1-5
+    struct MarkRaceDef
+    {
+        uint32_t raceId = 0;                 // the realm's race id, 1..255
+        uint32_t sex = 0;                    // 0 male, 1 female; the record id is raceId * 2 + sex
+        std::string raceFile;                // ChrRaces clientFileString, [A-Za-z]{1,16}
+        std::vector<MarkDesignDef> designs;  // exactly 4
+        std::vector<MarkColourDef> colours;  // exactly 3
+        std::vector<MarkEyeDef> eyes;        // 0 to 5
+    };
+
     struct Definitions
     {
         std::vector<AffixDef> affixes;              // A
@@ -225,6 +241,7 @@ namespace Bleakhold
         std::vector<CafeActionDef> cafeActions;     // G
         std::vector<CafeRecipeDef> cafeRecipes;     // F
         std::vector<CafeLevelDef> cafeLevels;       // U
+        std::vector<MarkRaceDef> markRaces;         // N (section 22)
     };
 
     // ---------------------------------------------------------------------------------------------
@@ -1328,6 +1345,76 @@ namespace Bleakhold
         inline constexpr Refusal Failed{ "failed", "That did not work; try again." };
     }
 
+    // ---------------------------------------------------------------------------------------------------------------
+    // Glowing marks (section 22): MARKS (the list of every online player with a mark or an eye, in pages), MARK (a
+    // delta), MARKME (the player's own state), all unrevisioned; DEF N. The server stores every choice and checks it
+    // against its catalogue (BleakholdMarks.h); the client turns each choice into texture paths from DEF N and hands
+    // them to Bleakhold.exe by player GUID. BLEAKHOLD_UI_MARKS tells a server module that this API exists.
+    // ---------------------------------------------------------------------------------------------------------------
+#define BLEAKHOLD_UI_MARKS 1
+    inline constexpr std::size_t MaxMarkPageRecords = 400;   // MARKS entries per page
+    inline constexpr std::size_t MaxMarkPages = 5;           // MARKS pages of one list
+    inline constexpr std::size_t MaxMarkListEntries = 2000;  // MARKS entries of one list (BleakholdUi.Marks.MaxListEntries)
+    inline constexpr std::size_t MaxMarkDeltaRecords = 50;   // MARK records per message
+    inline constexpr std::size_t MaxMarkNameBytes = 48;      // DEF N names
+    inline constexpr std::size_t MaxMarkKeyBytes = 32;       // DEF N keys
+    inline constexpr std::size_t MaxMarkRaceFileBytes = 16;  // DEF N raceFile
+
+    // One player's markings as the server applies them now. design 0 (and colour 0) no mark, eye 0 the race's own eyes;
+    // all three 0 is "no entry" (a MARK removal).
+    struct MarkEntry
+    {
+        uint32_t guid = 0;                   // the player's GUID counter (ObjectGuid::GetCounter), 1..4294967295
+        uint8_t race = 0;                    // the realm's race id, 1..255
+        uint8_t sex = 0;                     // 0..1
+        uint8_t design = 0;                  // 0..MaxMarkDesign
+        uint8_t colour = 0;                  // 0..MaxMarkColour, 0 exactly when design is 0
+        uint8_t eye = 0;                     // 0..MaxMarkEye
+    };
+    // Whether an entry can be sent at all (every field in its range, the colour with the design).
+    bool MarkEntryValid(MarkEntry const& e);
+    inline bool MarkEntryNone(MarkEntry const& e) { return e.design == 0 && e.colour == 0 && e.eye == 0; }
+
+    // MARKS: one list, cut into pages. Only valid entries with a mark or an eye are listed, in ascending guid order (one
+    // per guid), at most maxEntries (1..MaxMarkListEntries) and at most MaxMarkPages pages of perPage entries
+    // (1..MaxMarkPageRecords); the rest is left out. An empty list is one page with the header only.
+    struct MarksList
+    {
+        uint32_t listId = 1;                 // 1..2147483647, a per-player counter
+        std::vector<MarkEntry> entries;
+    };
+    struct MarksListPages
+    {
+        std::vector<std::string> payloads;   // page 1 first
+        std::size_t listed = 0;              // entries sent (the header's total)
+        std::size_t leftOut = 0;             // listable entries over the caps
+    };
+
+    // MARKME: the player's own state.
+    struct MarkMe
+    {
+        uint8_t design = 0, colour = 0, eye = 0;   // the stored choice as the server applies it now
+        uint32_t priceCopper = 0;            // what a change to a mark or eye costs now (0: the next one is free)
+        uint32_t cooldownSec = 0;            // until the next change is allowed (0 = now)
+        uint32_t changes = 0;                // accepted changes so far
+        bool offered = false;                // the catalogue has this character's race-sex
+    };
+
+    // ERR codes of MARKSET (section 22) with a default sentence; Ui::Refuse(player, intent, refusal) sends one.
+    // marks_cooldown should say the minutes left: MarksRules::CooldownText. `dead` and `failed` are the generic codes.
+    namespace MarksErr
+    {
+        inline constexpr Refusal Off{ "marks_off", "Glowing marks are not available on this realm right now." };
+        inline constexpr Refusal Unknown{ "marks_unknown", "That mark or eye is not made for your race and body." };
+        inline constexpr Refusal Same{ "marks_same", "That is how you look already." };
+        inline constexpr Refusal Cooldown{ "marks_cooldown", "You changed your markings recently: wait a little." };
+        inline constexpr Refusal Price{ "marks_price", "The price has changed: look at it again and accept." };
+        inline constexpr Refusal Gold{ "marks_gold", "You cannot afford that." };
+        inline constexpr Refusal Combat{ "marks_combat", "Not while you are in combat." };
+        inline constexpr Refusal Dead{ "dead", "You cannot do that while dead." };
+        inline constexpr Refusal Failed{ "failed", "That did not work; try again." };
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Encoders: payload of each op (without frame header). `rev` is the revision of the topic.
     // ---------------------------------------------------------------------------------------------
@@ -1386,6 +1473,12 @@ namespace Bleakhold
     std::string EncodeCafeSummary(CafeSummary const& m);     // CAFSUM
     std::string EncodeCafeOpenUi(std::string_view what, uint8_t cafeId);   // CAFUI (what: IsCafeUiTarget)
     std::string EncodeCafeAtBar(CafeAtBar const& m);         // CAFAT
+    // MARKS: every page of one list (send them in order, back to back)
+    MarksListPages EncodeMarksList(MarksList const& m, std::size_t maxEntries = MaxMarkListEntries,
+        std::size_t perPage = MaxMarkPageRecords);
+    // MARK: the valid entries in messages of at most MaxMarkDeltaRecords records (none: no message)
+    std::vector<std::string> EncodeMarkDeltas(std::vector<MarkEntry> const& entries);
+    std::string EncodeMarkMe(MarkMe const& m);              // MARKME
 
     // DEF: one payload per non-empty kind, in a fixed order, followed by "Z,<dataVer>".
     std::vector<std::string> EncodeDefinitions(Definitions const& d, uint32_t dataVer);

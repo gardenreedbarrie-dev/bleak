@@ -162,5 +162,7 @@ client and a patches folder (with an HD pack that disagrees) to build through th
 They cover pal8 packing and decoding, sources and CharSections reading, the atlas, seams, charts and keep-out zones,
 every design kind (and a crack under a unit that differs in its last bit), the gates (a file breaking the file rules
 fails the build), eyes, the garment union, and the CLI (`build`, `--check`, `validate`, `fixture`, the refusal to
-write into a checkout). `tests/run_marks_core.sh` and `tests/test_marks_core.cpp` are the exe's mark-layer core
-tests, which belong to the client code.
+write into a checkout). `tests/run_marks_core.sh` builds and runs the exe's core tests, which belong to the client
+code: `tests/test_marks_core.cpp` (the mark layer, `BleakMarks.h`) and `tests/test_mark_owners.cpp` (the marks by
+player GUID of the realm without customize, `BleakMarkOwners.h`: which GUIDs and paths the Lua natives take, the
+entry and name limits, the name pool's stable pointers and the sync generation).

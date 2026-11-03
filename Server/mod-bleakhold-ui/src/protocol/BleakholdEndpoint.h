@@ -70,6 +70,7 @@ namespace Bleakhold::Proto
         uint32_t cafeStepIntervalMs = 200;      // CSTEP
         uint32_t cafeReleaseIntervalMs = 100;   // CREL
         uint32_t cafeOrderIntervalMs = 2000;    // CORDER and CCANCEL together
+        uint32_t marksIntervalMs = 2000;        // MARKSET: 1 per BleakholdUi.RateLimit.MarksIntervalMs (section 22)
         // the same action intent again within this window is ignored (0 = off); RSPEC, CTAKE, CSTEP and CREL are never
         // duplicates (IsDuplicateGuarded: next, next is two steps; a re-press is a new request)
         uint32_t duplicateWindowMs = 1000;
@@ -161,6 +162,7 @@ namespace Bleakhold::Proto
         TokenBucket _cafeStep;
         TokenBucket _cafeRelease;
         TokenBucket _cafeOrder;     // CORDER, CCANCEL
+        TokenBucket _marks;         // MARKSET
         std::unordered_map<std::string, uint64_t> _lastGet;
         struct LastIntent { std::string key; uint64_t atMs = 0; bool set = false; };
         std::array<LastIntent, static_cast<std::size_t>(IntentType::Count)> _last{};

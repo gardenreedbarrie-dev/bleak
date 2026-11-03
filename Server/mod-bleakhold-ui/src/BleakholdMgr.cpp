@@ -9,6 +9,7 @@
 #include "BleakholdCodec.h"
 #include "BleakholdData.h"
 #include "BleakholdEmoji.h"
+#include "BleakholdMarks.h"
 
 #include "Chat.h"
 #include "Config.h"
@@ -191,6 +192,8 @@ namespace Bleakhold
         l.cafeStepIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.CafeStepIntervalMs", 200);
         l.cafeReleaseIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.CafeReleaseIntervalMs", 100);
         l.cafeOrderIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.CafeOrderIntervalMs", 2000);
+        // glowing marks (section 22)
+        l.marksIntervalMs = sConfigMgr->GetOption<uint32_t>("BleakholdUi.RateLimit.MarksIntervalMs", 2000);
 
         c.heartbeatMs = 1000 * std::max<uint32_t>(1, sConfigMgr->GetOption<uint32_t>("BleakholdUi.KeyRun.HeartbeatSec", 15));
         c.colorTagsWithoutAddon = sConfigMgr->GetOption<bool>("BleakholdUi.Announce.ColorTagsWithoutAddon", true);
@@ -223,6 +226,7 @@ namespace Bleakhold
         }
         Camp::Instance().LoadConfig();   // never under the Mgr lock (lock order: Camp, then Mgr)
         Cafe::Instance().LoadConfig();   // the same (lock order: Cafe, then Mgr)
+        Marks::Instance().LoadConfig();  // the same (Marks never calls the Mgr under its lock)
     }
 
     Config Mgr::CfgCopy()
@@ -398,11 +402,15 @@ namespace Bleakhold
             }
             case IntentType::Get:
             {
-                // a GET of a cafe topic is answered with nothing while the cafe's bit is off for the player (section 21)
+                // a GET of a cafe topic is answered with nothing while the cafe's bit is off for the player (section 21),
+                // and so is one of the glowing marks' while theirs is (section 22)
                 bool const cafe = Cafe::Instance().FeatureFor(player);
+                bool const marks = Marks::Instance().FeatureFor(player);
                 for (TopicRequest const& req : intent.topics)
                 {
                     if (!cafe && Cafe::IsCafeTopic(req.topic))
+                        continue;
+                    if (!marks && Marks::IsMarksTopic(req.topic))
                         continue;
                     Ui::TopicProvider provider;
                     {
@@ -499,6 +507,14 @@ namespace Bleakhold
             return;
         }
 
+        // Glowing marks (section 22) are decided per player (BleakholdUi.Marks.GmOnly): while their bit is off for this
+        // player MARKSET gets ERR marks_off, whoever handles it.
+        if (intent.type == IntentType::MarkSet && !Marks::Instance().FeatureFor(player))
+        {
+            Refuse(player, intent, MarksErr::Off.code, MarksErr::Off.text);
+            return;
+        }
+
         // The 1v1 arena queue (section 20) is open only while its system has turned feature bit 65536 on.
         if (intent.type == IntentType::QueueJoin && intent.queueKind == QueueKind::Arena && !FeatureOn(FeatureArena))
         {
@@ -543,6 +559,10 @@ namespace Bleakhold
         h.featureBits &= ~static_cast<uint32_t>(FeatureCafe);
         if (Cafe::Instance().FeatureFor(player))
             h.featureBits |= FeatureCafe;
+        // so is the glowing marks' (BleakholdUi.Marks.Enable with an offered race-sex, GmOnly)
+        h.featureBits &= ~static_cast<uint32_t>(FeatureMarks);
+        if (Marks::Instance().FeatureFor(player))
+            h.featureBits |= FeatureMarks;
         if (season)
             h.seasonId = season;
         if (resets.first)
@@ -1047,6 +1067,7 @@ namespace Bleakhold
         Data::Instance().Update(now);
         Camp::Instance().Update(now);
         Cafe::Instance().Update(now);
+        Marks::Instance().Update(now);   // the MARK deltas of this tick, together
         FlushAll();
     }
 

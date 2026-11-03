@@ -8,8 +8,8 @@
 //     and may never accept more than its token bucket allows;
 //   * EscapeText/BuildFrames/PayloadWriter keep their invariants for the input used as server text;
 //   * the Bleakhold Royale encoders (section 17), BGANN (section 18), the World PvP encoders (section 19), ARENA /
-//     LB A (section 20) and the cafe's encoders (section 21) keep their field and record counts with the input as every
-//     name.
+//     LB A (section 20), the cafe's encoders (section 21) and DEF N / MARKS / MARK (section 22) keep their field and
+//     record counts with the input as every name.
 //
 // Standalone (mutation driver):  bh_fuzz [iterations] [seed] [corpus files...]
 // libFuzzer:                     build with -DBH_LIBFUZZER -fsanitize=fuzzer (see run_tests.sh)
@@ -101,7 +101,7 @@ namespace
                 return false;
             static std::regex const plain(
                 "WEEK|ERA|TASKS|KEY|BOARD|QUEUE|COLL|LIDX|SEASON|FIRSTS|MPLUS|RIFT|CASES|CAMPST|ROYS|ROYM|WMST|WPZ|WPMAP|"
-                "WANTED|ARENA|CAFE|CAFST|CAFQ|CAFT|CAFO|CAFP|CAFBF");
+                "WANTED|ARENA|CAFE|CAFST|CAFQ|CAFT|CAFO|CAFP|CAFBF|MARKS|MARKME");
             for (std::string const& r : recs)
             {
                 std::vector<std::string> f = Split(r, ',');
@@ -196,6 +196,10 @@ namespace
             return n(1) && RefInt(f[0], 1, I32);
         if (op == "CSTAFF")
             return n(1) && RefInt(f[0], 1, 65535);
+        // glowing marks (section 22): a colour exactly with a design
+        if (op == "MARKSET")
+            return n(4) && RefInt(f[0], 0, 4) && RefInt(f[1], 0, 3) && RefInt(f[2], 0, 5) && RefInt(f[3], 0, I32) &&
+                (std::stoll(f[0]) == 0) == (std::stoll(f[1]) == 0);
         return false;
     }
 
@@ -668,6 +672,71 @@ namespace
             Die("CAFST: flags or nearDm outside the document", text);
     }
 
+    // The input as every name of DEF N and as the numbers of MARKS / MARK entries (section 22): the record and field counts
+    // hold, every name decodes to the input cleaned and cut, and an entry out of range is never written.
+    void CheckMarksEncoders(std::string const& text, unsigned char k)
+    {
+        Definitions d;
+        MarkRaceDef r;
+        r.raceId = 1u + k; r.sex = k % 2; r.raceFile = text;
+        for (uint32_t i = 1; i <= 4; ++i)
+            r.designs.push_back({ i, text, text });
+        for (uint32_t i = 1; i <= 3; ++i)
+            r.colours.push_back({ i, text, text, text, i < 3 });
+        for (uint32_t i = 1; i <= k % 6; ++i)
+            r.eyes.push_back({ i, text, text, text, i >= 4 });
+        d.markRaces = { r };
+        std::vector<std::string> p = EncodeDefinitions(d, 1);
+        if (p.size() != 2)
+            Die("DEF N: not one kind and Z", text);
+        std::vector<std::string> recs = Split(p[0], ';');
+        if (recs.size() != 2)
+            Die("DEF N: the input added or removed a record", text);
+        std::vector<std::string> f = Split(recs[1], ',');
+        if (f.size() > 7 || f.size() < 6)
+            Die("DEF N: the input added or removed a field", text);
+        std::vector<std::string> designs = Split(f[4], ':');
+        if (designs.size() != 4 || Split(f[5], ':').size() != 3)
+            Die("DEF N: the input added or removed a list item", text);
+        std::vector<std::string> parts = Split(designs[0], '~');
+        if (parts.size() != 3)
+            Die("DEF N: the input added or removed a tuple part", text);
+        std::optional<std::string> back = Unescape(parts[2]);
+        if (!back || *back != CleanText(text, MaxMarkNameBytes))
+            Die("DEF N: the name does not decode to the cleaned input", text);
+
+        MarksList list;
+        list.listId = k;
+        for (std::size_t i = 0; i + 6 <= text.size() && i < 600; i += 6)
+        {
+            auto b = [&](std::size_t j) { return static_cast<uint8_t>(text[i + j]); };
+            list.entries.push_back({ uint32_t(b(0)) << 8 | b(1), b(2), uint8_t(b(3) % 3), uint8_t(b(4) % 6), uint8_t(b(5) % 5),
+                uint8_t(b(4) % 7) });
+        }
+        MarksListPages const pages = EncodeMarksList(list, 1 + k * 8u, 1 + k % 50u);
+        if (pages.payloads.empty() || pages.payloads.size() > MaxMarkPages)
+            Die("MARKS: no page or more than 5", text);
+        std::size_t listed = 0;
+        for (std::string const& page : pages.payloads)
+        {
+            std::vector<std::string> pr = Split(page, ';');
+            listed += pr.size() - 1;
+            for (std::size_t i = 1; i < pr.size(); ++i)
+            {
+                std::vector<std::string> e = Split(pr[i], ',');
+                if (e.size() != 6 || std::stoul(e[1]) == 0 || std::stoul(e[2]) > 1 || std::stoul(e[3]) > 4 ||
+                    std::stoul(e[4]) > 3 || std::stoul(e[5]) > 5 || (e[3] == "0") != (e[4] == "0") ||
+                    (e[3] == "0" && e[5] == "0") || e[0] == "0")
+                    Die("MARKS: an entry outside the document", text);
+            }
+        }
+        if (listed != pages.listed)
+            Die("MARKS: the total is not the entries sent", text);
+        for (std::string const& m : EncodeMarkDeltas(list.entries))
+            if (Split(m, ';').size() > MaxMarkDeltaRecords)
+                Die("MARK: more than 50 records", text);
+    }
+
     void FuzzOne(uint8_t const* data, std::size_t size)
     {
         std::string const raw(reinterpret_cast<char const*>(data), size);
@@ -680,6 +749,7 @@ namespace
         CheckRoyaleEncoders(raw, k);
         CheckWarEncoders(raw, k);
         CheckCafeEncoders(raw, k);
+        CheckMarksEncoders(raw, k);
     }
 
 #ifndef BH_LIBFUZZER
@@ -704,6 +774,8 @@ namespace
             "1 GET z 1/1 CAFE;CAFST;CAFQ;CAFT;CAFM,1;CAFO;CAFP;CAFBF", "1 CSHIFT 3b 1/1 1,1", "1 CTAKE 3c 1/1 0",
             "1 CSTEP 3e 1/1 41,1,1", "1 CREL 3g 1/1 41,2,2380", "1 CORDER 3q 1/1 1,103,10", "1 CCANCEL 3r 1/1 1210",
             "1 CSTAFF 3o 1/1 108", "1 LBQ 3s 1/1 C,0,1,0,1", "1 CSTEP 3f 1/1 2147483647,12,63", "1 CREL 3h 1/1 1,1,60000",
+            "1 GET 40 1/1 MARKME;MARKS", "1 MARKSET 41 1/1 4,1,2,100000", "1 MARKSET 42 1/1 0,0,0,0",
+            "1 MARKSET 43 1/1 0,0,5,2147483647",
         };
     }
 
@@ -715,7 +787,8 @@ namespace
             "HELLO", "GET", "BHc\t", "BHs\t", "1/1", "1/2", "99/99", "zzzzzz", "%00", "%2C", "\xC3\xA9", ";;", ",,",
             "R,0", "D,0", "B,", "B,901", "RDROP", "RDEPLOY", "RSPEC", "ROYS", "ROYM", "-17067", "17068", "-0", "--1",
             "WARMODE", "WMST", "WPZ", "WPMAP", "WANTED", "WPCAP", "WPEV", "CSHIFT", "CTAKE", "CSTEP", "CREL", "CORDER",
-            "CCANCEL", "CSTAFF", "CAFM,", "CAFE", "CAFAT", "C,", "60000", "60001", "65535", "65536", ",10", ",25", ",50", "12,63" };
+            "CCANCEL", "CSTAFF", "CAFM,", "CAFE", "CAFAT", "C,", "60000", "60001", "65535", "65536", ",10", ",25", ",50", "12,63",
+            "MARKSET", "MARKS", "MARKME", "MARK", "0,0,", "4,3,5,", "1,0,", "0,1," };
         int const steps = 1 + static_cast<int>(rng() % 4);
         for (int i = 0; i < steps; ++i)
         {

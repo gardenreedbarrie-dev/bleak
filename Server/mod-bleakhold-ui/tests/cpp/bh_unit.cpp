@@ -2205,7 +2205,7 @@ TEST("cafe: the intents and topics of section 21 parse as documented; everything
     // appended after section 20, unrevisioned, action intents
     CHECK(static_cast<uint8_t>(IntentType::CafeShift) == static_cast<uint8_t>(IntentType::WarMode) + 1);
     CHECK(static_cast<uint8_t>(Topic::CafeList) == static_cast<uint8_t>(Topic::Arena) + 1);
-    CHECK(static_cast<uint8_t>(Topic::CafeBuffs) + 1 == static_cast<uint8_t>(Topic::Count));
+    CHECK(static_cast<uint8_t>(Topic::MarksList) == static_cast<uint8_t>(Topic::CafeBuffs) + 1);   // section 22 after
     CHECK_EQN(RevisionedTopicCount, 9u);
     char const* const ops[] = { "CSHIFT", "CTAKE", "CSTEP", "CREL", "CORDER", "CCANCEL", "CSTAFF" };
     for (uint8_t i = 0; i < 7; ++i)
@@ -2568,6 +2568,208 @@ TEST("cafe: DEF H, G, F and U follow the arena kinds; LB and LBME board C use th
     LeaderboardMe nobody;
     nobody.board = Board::Cafe;
     CHECK_EQ(EncodeLeaderboardMe(nobody), "C");
+}
+
+TEST("marks: MARKSET and GET MARKS / MARKME parse as section 22 says; everything else is dropped")
+{
+    Intent in;
+    CHECK(Parse("1 MARKSET 41 1/1 4,1,2,100000", &in) == DropReason::None);
+    CHECK(in.type == IntentType::MarkSet && in.markDesign == 4 && in.markColour == 1 && in.markEye == 2 &&
+        in.maxCopper == 100000 && in.seq == 4 * 36 + 1);
+    CHECK(Parse("1 MARKSET 1 1/1 0,0,0,0", &in) == DropReason::None && in.markDesign == 0 && in.markEye == 0);
+    CHECK(Parse("1 MARKSET 1 1/1 0,0,5,2147483647", &in) == DropReason::None && in.markEye == 5 &&
+        in.maxCopper == 2147483647u);
+    CHECK_EQ(EncodeIntentBody(in), "1 MARKSET 1 1/1 0,0,5,2147483647");
+    CHECK(Parse("1 MARKSET 1 1/1 1,3,0,0", &in) == DropReason::None && in.markColour == 3);
+    // a colour exactly with a design, every field in range
+    for (char const* bad : { "1 MARKSET 1 1/1 1,0,0,0", "1 MARKSET 1 1/1 0,1,0,0", "1 MARKSET 1 1/1 5,1,0,0",
+             "1 MARKSET 1 1/1 1,4,0,0", "1 MARKSET 1 1/1 1,1,6,0", "1 MARKSET 1 1/1 1,1,0,2147483648",
+             "1 MARKSET 1 1/1 1,1,0,-1", "1 MARKSET 1 1/1 -1,1,0,0" })
+        CHECK_MSG(Parse(bad) == DropReason::OutOfRange, bad);
+    for (char const* bad : { "1 MARKSET 1 1/1 1,1,0", "1 MARKSET 1 1/1 1,1,0,0,0", "1 MARKSET 1 1/1" })
+        CHECK_MSG(Parse(bad) == DropReason::FieldCount, bad);
+    CHECK(Parse("1 MARKSET 1 1/1 1,1,a,0") == DropReason::BadField);
+    CHECK(Parse("1 MARKSET 1 1/1 1;1,0,0") == DropReason::FieldCount);
+    // GET: no arguments
+    CHECK(Parse("1 GET 40 1/1 MARKME;MARKS", &in) == DropReason::None);
+    CHECK(in.topics.size() == 2 && in.topics[0].topic == Topic::MarksMe && in.topics[1].topic == Topic::MarksList);
+    CHECK(Parse("1 GET 1 1/1 MARKS,1") == DropReason::BadTopic);
+    CHECK(Parse("1 GET 1 1/1 MARK") == DropReason::BadTopic);   // MARK is pushed only
+    // appended after section 21, unrevisioned, an action intent with the duplicate guard
+    CHECK(static_cast<uint8_t>(IntentType::MarkSet) == static_cast<uint8_t>(IntentType::CafeStaff) + 1);
+    CHECK(static_cast<uint8_t>(IntentType::MarkSet) + 1 == static_cast<uint8_t>(IntentType::Count));
+    CHECK(static_cast<uint8_t>(Topic::MarksMe) + 1 == static_cast<uint8_t>(Topic::Count));
+    CHECK_EQ(IntentOpName(IntentType::MarkSet), "MARKSET");
+    CHECK_EQ(TopicName(Topic::MarksList), "MARKS");
+    CHECK_EQ(TopicName(Topic::MarksMe), "MARKME");
+    CHECK(IsActionIntent(IntentType::MarkSet) && IsDuplicateGuarded(IntentType::MarkSet));
+    CHECK(!IsRevisioned(Topic::MarksList) && !IsRevisioned(Topic::MarksMe));
+}
+
+TEST("marks: MARKSET is 1 per BleakholdUi.RateLimit.MarksIntervalMs, the same one within 1 s a duplicate")
+{
+    Limits d;
+    CHECK_EQN(d.marksIntervalMs, 2000u);
+    Endpoint ep;
+    Feed(ep, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    Intent in;
+    CHECK(Feed(ep, "1 MARKSET 2 1/1 4,1,2,100000", 1000).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 MARKSET 3 1/1 4,1,2,100000", 1500).reason == DropReason::Duplicate);
+    ReceiveResult r = Feed(ep, "1 MARKSET 4 1/1 0,0,0,0", 1600, &in);
+    CHECK(r.verdict == Verdict::Refused && r.reason == DropReason::Throttled && in.type == IntentType::MarkSet);
+    CHECK(Feed(ep, "1 MARKSET 5 1/1 0,0,0,0", 3100).verdict == Verdict::Accepted);
+    CHECK(Feed(ep, "1 WARMODE 6 1/1 1", 3200).verdict == Verdict::Accepted);   // its own bucket
+    CHECK(Feed(ep, "1 GET 7 1/1 MARKS;MARKME", 3300, &in).verdict == Verdict::Accepted && in.topics.size() == 2);
+    CHECK(Feed(ep, "1 GET 8 1/1 MARKS", 3500).reason == DropReason::Throttled);   // a topic once per second
+    Limits l;
+    l.marksIntervalMs = 5000;
+    Endpoint lim(l);
+    Feed(lim, "1 HELLO 1 1/1 1,1.0.0,0,enUS", 0);
+    CHECK(Feed(lim, "1 MARKSET 2 1/1 1,1,0,0", 1000).verdict == Verdict::Accepted);
+    CHECK(Feed(lim, "1 MARKSET 3 1/1 2,1,0,0", 4000).verdict == Verdict::Refused);
+    CHECK(Feed(lim, "1 MARKSET 4 1/1 2,1,0,0", 6100).verdict == Verdict::Accepted);
+}
+
+TEST("marks: the feature bit, the macros and the ERR codes of section 22")
+{
+    CHECK_EQN(static_cast<uint32_t>(FeatureMarks), 262144u);
+    CHECK_EQN(static_cast<uint32_t>(FeatureMarks) & 0x3FFFFu, 0u);   // above every bit before it (the cafe is 131072)
+    CHECK_EQN(BLEAKHOLD_UI_MARKS, 1);
+    CHECK_EQN(MaxMarkPageRecords, std::size_t(400));
+    CHECK_EQN(MaxMarkPages, std::size_t(5));
+    CHECK_EQN(MaxMarkListEntries, std::size_t(2000));
+    CHECK_EQN(MaxMarkDeltaRecords, std::size_t(50));
+    CHECK(MaxMarkPageRecords * MaxMarkPages >= MaxMarkListEntries);
+    std::string const doc = bhtest::ReadFile(g_repo + "/docs/BleakholdProtocol.md");
+    CHECK(doc.find("## 22. Glowing marks") != std::string::npos);
+    CHECK(doc.find("262144 glowing marks live") != std::string::npos);
+    CHECK(doc.find("| `N` glowing marks of a race-sex |") != std::string::npos);
+    CHECK(doc.find("`MARKS`, `MARK`, `MARKME`) are full states") != std::string::npos);
+    CHECK(doc.find("| `MARKSET` | 1 per `BleakholdUi.RateLimit.MarksIntervalMs` (2 s)") != std::string::npos);
+    for (Refusal const& r : { MarksErr::Off, MarksErr::Unknown, MarksErr::Same, MarksErr::Cooldown, MarksErr::Price,
+             MarksErr::Gold, MarksErr::Combat, MarksErr::Dead, MarksErr::Failed })
+    {
+        std::string const code = r.code;
+        bool ok = !code.empty() && code.size() <= 24;
+        for (char c : code)
+            ok = ok && ((c >= 'a' && c <= 'z') || c == '_');
+        CHECK_MSG(ok, "code [" + code + "]");
+        CHECK_MSG(code.compare(0, 6, "marks_") == 0 || code == "dead" || code == "failed", code);
+        CHECK_MSG(doc.find("| `" + code + "` |", doc.find("## 22. Glowing marks")) != std::string::npos,
+            code + " is in the error table of section 22");
+        std::string const text = r.text;
+        CHECK_MSG(!text.empty() && text.size() <= 160 && CleanText(text) == text, code + " has a sentence");
+    }
+}
+
+TEST("marks: MARKS pages, MARK batches and MARKME keep their fields, caps and order")
+{
+    // an empty list is one page with the header only
+    MarksList empty;
+    empty.listId = 7;
+    MarksListPages e = EncodeMarksList(empty);
+    CHECK_EQN(e.payloads.size(), std::size_t(1));
+    CHECK_EQ(e.payloads[0], "7,1,1,0");
+    CHECK_EQN(e.listed, std::size_t(0));
+    // 2300 players: 2000 in guid order on 5 pages of 400, the 300 highest guids left out
+    MarksList big;
+    big.listId = 0;   // out of range: 1
+    for (uint32_t i = 2300; i >= 1; --i)
+        big.entries.push_back({ i, 4, 1, static_cast<uint8_t>(1 + i % 4), static_cast<uint8_t>(1 + i % 3), static_cast<uint8_t>(i % 6) });
+    big.entries.push_back({ 5, 4, 1, 1, 1, 1 });   // a second entry for guid 5: the first one counts
+    big.entries.push_back({ 0, 4, 1, 1, 1, 1 });   // invalid: no guid
+    MarksListPages b = EncodeMarksList(big);
+    CHECK_EQN(b.payloads.size(), MaxMarkPages);
+    CHECK_EQN(b.listed, std::size_t(2000));
+    CHECK_EQN(b.leftOut, std::size_t(300));
+    uint32_t expect = 1;
+    for (std::size_t p = 0; p < b.payloads.size(); ++p)
+    {
+        std::vector<std::string> recs = SplitStr(b.payloads[p], ';');
+        CHECK_EQN(recs.size(), MaxMarkPageRecords + 1);
+        CHECK_EQ(recs[0], "1," + std::to_string(p + 1) + ",5,2000");
+        for (std::size_t i = 1; i < recs.size(); ++i, ++expect)
+            CHECK_MSG(recs[i].compare(0, std::to_string(expect).size() + 1, std::to_string(expect) + ",") == 0, recs[i]);
+    }
+    CHECK_EQ(SplitStr(b.payloads[0], ';')[5], "5,4,1,2,3,5");   // the first entry of guid 5 (5 % 4 + 1, 5 % 3 + 1, 5 % 6)
+    // the caps: MaxListEntries and the page size (fewer per page at small frames, still at most 5 pages)
+    MarksListPages c = EncodeMarksList(big, 450, 400);
+    CHECK_EQN(c.payloads.size(), std::size_t(2));
+    CHECK_EQ(SplitStr(c.payloads[1], ';')[0], "1,2,2,450");
+    CHECK_EQN(SplitStr(c.payloads[1], ';').size(), std::size_t(51));
+    MarksListPages small = EncodeMarksList(big, 2000, 89);
+    CHECK_EQN(small.payloads.size(), std::size_t(5));
+    CHECK_EQN(small.listed, std::size_t(445));
+    CHECK_EQN(EncodeMarksList(big, 0, 0).listed, std::size_t(1));   // both clamped to at least 1
+    CHECK_EQN(EncodeMarksList(big, 99999, 99999).listed, MaxMarkListEntries);
+    // entries out of range are never listed; none-at-all ones neither
+    MarksList odd;
+    odd.entries = { { 1, 0, 0, 1, 1, 0 }, { 2, 4, 2, 1, 1, 0 }, { 3, 4, 1, 5, 1, 0 }, { 4, 4, 1, 1, 0, 0 }, { 5, 4, 1, 0, 1, 0 },
+        { 6, 4, 1, 0, 0, 6 }, { 7, 4, 1, 0, 0, 0 }, { 4294967295u, 255, 1, 4, 3, 5 } };
+    CHECK_EQ(EncodeMarksList(odd).payloads.at(0), "1,1,1,1;4294967295,255,1,4,3,5");
+    // MARK: 50 records per message, removals included, invalid ones skipped
+    std::vector<MarkEntry> deltas;
+    for (uint32_t i = 1; i <= 120; ++i)
+        deltas.push_back({ i, 10, 0, 0, 0, 0 });
+    deltas.push_back({ 0, 10, 0, 0, 0, 0 });
+    std::vector<std::string> dm = EncodeMarkDeltas(deltas);
+    CHECK_EQN(dm.size(), std::size_t(3));
+    CHECK_EQN(SplitStr(dm[0], ';').size(), MaxMarkDeltaRecords);
+    CHECK_EQN(SplitStr(dm[2], ';').size(), std::size_t(20));
+    CHECK_EQ(SplitStr(dm[1], ';')[0], "51,10,0,0,0,0");
+    CHECK(EncodeMarkDeltas({}).empty());
+    CHECK(EncodeMarkDeltas({ { 0, 1, 0, 0, 0, 0 } }).empty());
+    // MARKME: a choice outside the document reads as none, layer by layer
+    MarkMe me;
+    me.design = 5; me.colour = 1; me.eye = 6; me.priceCopper = 4000000000u; me.cooldownSec = 59; me.changes = 3;
+    CHECK_EQ(EncodeMarkMe(me), "0,0,0,2147483647,59,3,0");
+    me.design = 2; me.colour = 0; me.eye = 3; me.offered = true;
+    CHECK_EQ(EncodeMarkMe(me), "0,0,3,2147483647,59,3,1");
+    me.colour = 3;
+    CHECK_EQ(EncodeMarkMe(me), "2,3,3,2147483647,59,3,1");
+}
+
+TEST("marks: DEF N follows the cafe's kinds; names are escaped and cut, lists capped")
+{
+    Definitions d;
+    d.cafeLevels = { { 1, 0, "x" } };
+    MarkRaceDef r;
+    r.raceId = 255; r.sex = 1; r.raceFile = "Eredar" + std::string(20, 'x');
+    for (uint32_t i = 1; i <= 6; ++i)
+    {
+        r.designs.push_back({ i, "D" + std::to_string(i), "Name; with, every: separator~" + std::string(60, 'n') });
+        r.colours.push_back({ i, "C" + std::to_string(i), "Colour " + std::to_string(i), "ABCDEF", i < 3 });
+        r.eyes.push_back({ i, "E" + std::to_string(i), "Eye", "123456", i >= 4 });
+    }
+    d.markRaces = { r };
+    std::vector<std::string> p = EncodeDefinitions(d, 3);
+    CHECK_EQN(p.size(), std::size_t(3));
+    CHECK(p[0].compare(0, 4, "U,3;") == 0);
+    CHECK_EQ(p[2], "Z,3");
+    std::vector<std::string> recs = SplitStr(p[1], ';');
+    CHECK_EQN(recs.size(), std::size_t(2));
+    CHECK_EQ(recs[0], "N,3");
+    std::vector<std::string> f = SplitStr(recs[1], ',');
+    CHECK_EQN(f.size(), std::size_t(7));
+    CHECK_EQ(f[0], "511"); CHECK_EQ(f[1], "255"); CHECK_EQ(f[2], "1");
+    CHECK_EQ(f[3], "Eredar" + std::string(10, 'x'));   // 16 bytes
+    std::vector<std::string> designs = SplitStr(f[4], ':');
+    CHECK_EQN(designs.size(), std::size_t(MaxMarkDesign));
+    std::vector<std::string> one = SplitStr(designs[0], '~');
+    CHECK_EQN(one.size(), std::size_t(3));
+    CHECK_EQ(*Unescape(one[2]), CleanText("Name; with, every: separator~" + std::string(60, 'n'), MaxMarkNameBytes));
+    CHECK_EQN(SplitStr(f[5], ':').size(), std::size_t(MaxMarkColour));
+    CHECK_EQ(SplitStr(f[5], ':')[1], "2~C2~Colour 2~ABCDEF~1");
+    CHECK_EQ(SplitStr(f[5], ':')[2], "3~C3~Colour 3~ABCDEF~0");
+    CHECK_EQN(SplitStr(f[6], ':').size(), std::size_t(MaxMarkEye));
+    CHECK_EQ(SplitStr(f[6], ':')[3], "4~E4~Eye~123456~1");
+    // a body without eye sprites: the eyes field is empty (left out at the end of the record)
+    r.eyes.clear();
+    d.markRaces = { r };
+    CHECK_EQN(SplitStr(SplitStr(EncodeDefinitions(d, 3)[1], ';')[1], ',').size(), std::size_t(6));
+    Definitions none = d;
+    none.markRaces.clear();
+    CHECK(DefinitionsHash(d) != DefinitionsHash(none));
 }
 
 TEST("endpoint: SEQ per message, revisions per topic, snapshots reset by HELLO")
@@ -3234,6 +3436,45 @@ static std::map<std::string, std::string> BuiltExamples()
         bar.rows = { { "Aldric", 3, 400, 3000, CafeStepKind::Timed, 2, 5 },
             { "Rosalind Thornbury", 1, 900, 1500, CafeStepKind::Tap, 1, 4 } };
         m["CAFAT 56"] = EncodeCafeAtBar(bar);
+    }
+    {
+        // glowing marks (section 22)
+        Definitions defs;
+        MarkRaceDef nightElf;
+        nightElf.raceId = 4; nightElf.sex = 1; nightElf.raceFile = "NightElf";
+        nightElf.designs = { { 1, "MoonwellSigils", "Moonwell Sigils" }, { 2, "CenarionVines", "Cenarion Vines" },
+            { 3, "SentinelTalon", "Sentinel Talon" }, { 4, "Starfall", "Starfall" } };
+        nightElf.colours = { { 1, "EluneBlue", "Elune Blue", "5FB4FF", true }, { 2, "MoonwellTeal", "Moonwell Teal", "3FE0C5", true },
+            { 3, "MidnightInk", "Midnight Ink", "2A2350", false } };
+        nightElf.eyes = { { 1, "MoonlightSilver", "Moonlight Silver", "CFE3FF", false }, { 2, "DruidAmber", "Druid Amber", "FFB43A", false },
+            { 3, "DreamEmerald", "Dream Emerald", "4CFF8A", false }, { 4, "BloodRed", "Blood Red", "FF1E1E", true },
+            { 5, "UnholyGreen", "Unholy Green", "7CFF3A", true } };
+        defs.markRaces = { nightElf };
+        std::vector<std::string> p = EncodeDefinitions(defs, 9);
+        m["DEF 70"] = p.at(0);
+        m["DEF 71"] = p.at(1);
+        MarkMe fresh;
+        fresh.offered = true;
+        m["MARKME 72"] = EncodeMarkMe(fresh);
+        MarksList list;
+        list.listId = 3;
+        list.entries = { { 1502, 6, 1, 0, 0, 2 }, { 1201, 4, 1, 1, 1, 1 }, { 1377, 10, 0, 3, 3, 0 },
+            { 1600, 2, 0, 0, 0, 0 } };   // no mark and no eye: not listed; the rest in guid order
+        MarksListPages pages = EncodeMarksList(list);
+        m["MARKS 73"] = pages.payloads.at(0);
+        ErrorReply same;
+        same.op = IntentType::MarkSet; same.seq = *ParseBase36("41"); same.code = MarksErr::Same.code; same.text = MarksErr::Same.text;
+        m["ERR 74"] = EncodeError(same);
+        m["MARK 75"] = EncodeMarkDeltas({ { 1201, 4, 1, 4, 1, 2 } }).at(0);
+        MarkMe after;
+        after.design = 4; after.colour = 1; after.eye = 2; after.priceCopper = 100000; after.cooldownSec = 3600; after.changes = 1;
+        after.offered = true;
+        m["MARKME 76"] = EncodeMarkMe(after);
+        m["MARK 77"] = EncodeMarkDeltas({ { 1377, 10, 0, 0, 0, 0 } }).at(0);
+        ErrorReply wait;
+        wait.op = IntentType::MarkSet; wait.seq = *ParseBase36("42"); wait.code = MarksErr::Cooldown.code;
+        wait.text = "You can change your markings again in 60 minutes.";
+        m["ERR 78"] = EncodeError(wait);
     }
     return m;
 }

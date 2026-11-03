@@ -40,6 +40,8 @@ CafeBar.lua
 CafeHud.lua
 CafeWindow.lua
 CafeMenu.lua
+Marks.lua
+MarksWindow.lua
 RoyaleArtData.lua
 RoyaleStyle.lua
 Royale.lua

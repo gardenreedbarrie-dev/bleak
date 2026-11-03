@@ -92,6 +92,7 @@
 #include "WoW/Source/Ui/DressUpModelFrame.h"
 #include "WoW/Source/Ui/DuelInfo.h"
 #include "WoW/Source/Ui/BleakholdDance.h"
+#include "WoW/Source/Ui/BleakholdMarks.h"
 #include "WoW/Source/Ui/BleakholdStorm.h"
 #include "WoW/Source/Ui/EmojiBubbleFrame.h"
 #include "WoW/Source/Ui/EquipmentManager.h"
@@ -7529,6 +7530,8 @@ void CGGameUI::Shutdown() {
     // BLEAKHOLD(emoji): before the world frame (and the emoji bubbles under it) is deleted below.
     CGEmojiBubbleFrame::ClearAll();
     CGBleakholdDance::ClearAll();
+    // BLEAKHOLD(marks): no marks carry over to the next character (the server sends the list after its HELLO).
+    CGBleakholdMarks::Reset();
     CGBleakholdStorm::ClearAll();
     CGWorldMap::ClearArrowFrames();
     CGChat::SaveChatSettings();

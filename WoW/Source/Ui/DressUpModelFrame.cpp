@@ -514,6 +514,13 @@ void CGDressUpModelFrame::SetModel(CM2Model* model) {
 
     if (player) {
         this->m_component = CCharacterComponent::AllocComponent();
+
+        // BLEAKHOLD(marks): the character pane, inspect, the dressing room and the Markings window show the player's
+        // marks by GUID (Init below reads them).
+        if (this->m_component) {
+            this->m_component->SetBleakMarkOwner(player->m_obj->m_guid.m_guid);
+        }
+
         model->m_refCount++;
         ComponentData data;
         data.m_preferences.m_raceID = player->m_unit->m_unitFieldBytes0[0];

@@ -36,6 +36,7 @@
 #include "Engine/Source/Storm/Source/SThread.h"
 #include "Engine/Source/Tempest/CImVector.h"
 #include "Engine/Source/Tempest/CRandom.h"
+#include "WoW/Common/ComponentCore/BleakMarkOwners.h"
 #include "WoW/Common/ComponentCore/BleakMarks.h"
 #include "WoW/Common/ComponentCore/ComponentUtils.h"
 #include "WoW/Common/TextureCache.h"
@@ -3617,6 +3618,14 @@ void CCharacterComponent::GeosRenderPrep() {
     // eye options.
     const char* eyeSprite = faceRec && BleakMarks::HasTexture(faceRec->m_textureName[2]) ? faceRec->m_textureName[2] : nullptr;
 
+    // BLEAKHOLD(marks): the owner's eye sprite by GUID, when it has one, in place of the row's (a pool pointer, so
+    // SetEyeSprite may keep it).
+    const char* ownedEye = this->m_bleakMarkOwner ? CCharacterComponent::BleakMarkOwnerMap().Eye(this->m_bleakMarkOwner) : nullptr;
+
+    if (ownedEye) {
+        eyeSprite = ownedEye;
+    }
+
     if (eyeSprite) {
         eyeGlow = true;
     }
@@ -4406,6 +4415,7 @@ CCharacterComponent::CCharacterComponent() {
     this->m_glowSections = 0;
     this->m_glowState = 0;
     this->m_eyeSprite = nullptr;
+    this->m_bleakMarkOwner = 0; // BLEAKHOLD(marks)
 
     // BLEAKHOLD(glow): every component is in s_glowList (main thread only), so GlowSweep can switch glow on and off
     this->m_glowNext = s_glowList;
@@ -6083,6 +6093,10 @@ void CCharacterComponent::AddItemByType(INVENTORY_TYPES invType, int32_t display
 //   a `_Glow` file pastes it, every other layer pastes black through its own alpha, so armour and hair hide the glow
 //   where they hide the mark. The model draws it again, additive and unlit (Engine/Source/Model2/M2Glow.h).
 // - A face row's third texture is an eye sprite, drawn on geoset 1703 (GeosRenderPrep, SetEyeSprite).
+// - BLEAKHOLD(marks): a second source of both names, for realms whose CharSections cannot carry them: the map by
+//   player GUID (BleakMarkOwners.h, filled by the Lua natives of WoW/Source/Ui/BleakholdMarks.cpp). A component shows
+//   the entry of m_bleakMarkOwner (set for players' units and the dress-up models only), layer by layer in place of
+//   the row's; BleakMarksChanged rebuilds the components of a GUID whose entry changed. An empty map changes nothing.
 // Today no row has a third texture and no `_Glow` file exists: then nothing here does anything but look up each
 // texture's `_Glow` name once.
 
@@ -6306,6 +6320,13 @@ void CCharacterComponent::LoadMarkLayer(const char* debug) {
     void*& texture = this->m_baseVariation[VARIATION_FACIAL_HAIR].m_texture[2];
     CharSectionsRec* rec = ComponentGetSectionsRecord(CCharacterComponent::s_chrVarArray, this->m_data.m_preferences.m_raceID, this->m_data.m_preferences.m_sexID, VARIATION_FACIAL_HAIR, this->m_data.m_preferences.m_facialHairId, this->m_data.m_preferences.m_hairColorId, nullptr);
     const char* name = rec && BleakMarks::HasTexture(rec->m_textureName[2]) ? rec->m_textureName[2] : nullptr;
+
+    // BLEAKHOLD(marks): the owner's mark by GUID, when it has one, in place of the row's.
+    const char* ownedMark = this->m_bleakMarkOwner ? CCharacterComponent::BleakMarkOwnerMap().Mark(this->m_bleakMarkOwner) : nullptr;
+
+    if (ownedMark) {
+        name = ownedMark;
+    }
 
     // No mark before and none now: nothing changes (every row today).
     if (!texture && !name) {
@@ -6787,6 +6808,46 @@ void CCharacterComponent::SetEyeSprite(const char* sprite) {
     }
 
     this->m_eyeSprite = sprite;
+}
+
+// BLEAKHOLD(marks): made once and never freed, so its names outlive every component that holds one (m_eyeSprite).
+BleakMarkOwners::Owners& CCharacterComponent::BleakMarkOwnerMap() {
+    static BleakMarkOwners::Owners* s_owners = new BleakMarkOwners::Owners();
+    return *s_owners;
+}
+
+// BLEAKHOLD(marks)
+void CCharacterComponent::BleakMarksLog(const char* line) {
+    BleakLog("%s", line ? line : "");
+}
+
+// BLEAKHOLD(marks)
+void CCharacterComponent::SetBleakMarkOwner(uint64_t guid) {
+    this->m_bleakMarkOwner = guid;
+}
+
+// BLEAKHOLD(marks): every component showing `guid` loads its mark again and redoes its geosets (the eye sprite) and
+// its whole texture on the next RenderPrep, as a barber shop change does. Not the baked skins of NPCs, nor a
+// component without a model (Init has not run). Main thread, as s_glowList is.
+uint32_t CCharacterComponent::BleakMarksChanged(uint64_t guid) {
+    uint32_t touched = 0;
+
+    if (!guid) {
+        return 0;
+    }
+
+    for (CCharacterComponent* component = s_glowList; component; component = component->m_glowNext) {
+        if (component->m_bleakMarkOwner != guid || !component->m_data.m_model || (component->m_data.m_flags & 0x1)) {
+            continue;
+        }
+
+        component->LoadMarkLayer(nullptr);
+        component->m_flags |= 0x4;
+        component->SetDirtySections((1 << NUM_COMPONENT_SECTIONS) - 1);
+        touched++;
+    }
+
+    return touched;
 }
 
 // Every frame from Update, at most four times a second (at once when bleakGlow changes, and the frame after a whole

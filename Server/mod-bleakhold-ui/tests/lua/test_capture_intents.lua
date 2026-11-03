@@ -32,8 +32,8 @@ end
 
 test("every intent the addon can send, captured for the C++ parser", function(M, ns)
     local C = ns.Comm
-    -- camping, glide, field repair, Bleakhold Royale, War Mode and World PvP, arena seasons, the café
-    FX.connect(M, H, { [6] = 512 + 1024 + 2048 + 4096 + 16384 + 32768 + 65536 + 131072 })
+    -- camping, glide, field repair, Bleakhold Royale, War Mode and World PvP, arena seasons, the café, glowing marks
+    FX.connect(M, H, { [6] = 512 + 1024 + 2048 + 4096 + 16384 + 32768 + 65536 + 131072 + 262144 })
     FX.all(M, H)
 
     -- the windows' own buttons (the paths players use), as Tools/UiLint/tests/test_intents.lua drives them: every
@@ -269,6 +269,29 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
         .. "CSTEP 2147483647,12,63|CREL 1,1,0|CREL 1,1,0|CREL 2147483647,12,60000|CSHIFT 255,0|CSTAFF 1|CSTAFF 65535|"
         .. "CORDER 1,1,0|CORDER 2,201,10|CORDER 1,103,25|CORDER 255,65535,50|CCANCEL 1|CCANCEL 2147483647|"
         .. "LBQ C,0,1,0,1|LBQ C,2147483647,2,0,999", "the café intents went out, repeats included")
+    -- glowing marks (section 22) through the client's encoder, with edge values, 2.3 s apart (one MARKSET per 2 s; the
+    -- Markings window waits 2.25 s itself)
+    M.Advance(2.3)
+    local marks = { { "MARKSET", 0, 0, 0, 0 }, { "MARKSET", 4, 3, 5, 2147483647 }, { "MARKSET", 1, 1, 0, 100000 },
+        { "MARKSET", 0, 0, 1, 0 } }
+    from = #M.sent + 1
+    for _, s in ipairs(marks) do
+        H.eq(C.Send(unpack(s)), true, "the client sends " .. table.concat({ unpack(s, 2) }, ","))
+        M.Advance(2.3)
+    end
+    local sentMarks = {}
+    for _, it in ipairs(H.intents(M, from)) do
+        sentMarks[#sentMarks + 1] = it.op .. " " .. it.payload
+    end
+    H.eq(table.concat(sentMarks, "|"), "MARKSET 0,0,0,0|MARKSET 4,3,5,2147483647|MARKSET 1,1,0,100000|MARKSET 0,0,1,0",
+        "the marks intents went out")
+    H.eq(C.Send("MARKSET", 1, 0, 0, 0), false, "a design needs a colour")
+    H.eq(C.Send("MARKSET", 0, 1, 0, 0), false, "a colour needs a design")
+    H.eq(C.Send("MARKSET", 5, 1, 0, 0), false, "designs 0..4")
+    H.eq(C.Send("MARKSET", 1, 4, 0, 0), false, "colours 0..3")
+    H.eq(C.Send("MARKSET", 1, 1, 6, 0), false, "eyes 0..5")
+    H.eq(C.Send("MARKSET", 1, 1, 0, 2147483648), false, "maxCopper 0..2147483647")
+    H.eq(C.Send("MARKSET", 1, 1, 0), false, "MARKSET needs maxCopper")
     -- every other op keeps the 0.5 s identical-intent check
     H.eq(C.Send("CSHIFT", 1, 1), true)
     H.eq(select(2, C.Send("CSHIFT", 1, 1)), "dedup", "a second CSHIFT within 0.5 s is sent once")
@@ -329,6 +352,8 @@ test("every intent the addon can send, captured for the C++ parser", function(M,
     C.Refresh("CAFM", 1)
     C.Refresh("CAFM", 2)
     C.Refresh("CAFM", 255)
+    C.Refresh("MARKS")
+    C.Refresh("MARKME")
     M.Advance(10)
 
     local ops, topics, n = {}, {}, 0

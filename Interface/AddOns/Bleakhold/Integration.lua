@@ -24,6 +24,9 @@ I.WINDOWS = {
       text = "Mythic keys, the Eclipse Rift, raid echoes and server firsts.", window = "BleakholdLeaderboardsFrame" },
     { key = "graphics", title = "Graphics", emote = "sparkle", binding = "BLEAKHOLD_GRAPHICS",
       text = "Bleakhold's graphics presets and settings.", window = "BleakholdGraphics" },
+    -- listed while the realm has glowing marks on for this player (section 22); no key binding
+    { key = "markings", title = "Markings", emote = "sparkle", text = "Glowing marks and eye colours.",
+      window = "BleakholdMarkingsFrame", shown = function() return ns.Marks.Available() end },
     -- not a window: what the minimap's Make camp orb does (the orbs are off while this launcher lists the windows),
     -- listed while the realm has camping on, its tooltip line with the cooldown
     { key = "camp", title = "Make camp", glyph = "flame", binding = "BLEAKHOLD_MAKECAMP",

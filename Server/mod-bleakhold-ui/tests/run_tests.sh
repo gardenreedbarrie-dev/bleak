@@ -11,8 +11,9 @@
 # Steps:
 #   1. the core-independent protocol sources compile cleanly on their own (-Wall -Wextra -Wconversion -Werror)
 #   2. C++ unit tests, every example frame of docs/BleakholdProtocol.md           (ASan + UBSan)
-#      and the café's rule tests, cpp/bh_cafe.cpp and cpp/bh_cafe_crowd.cpp, once they exist; they see src/ and, for a
-#      core-free stand-in of an AzerothCore header (Position.h), cpp/stub/ when it exists
+#      and the café's and the glowing marks' rule tests, cpp/bh_cafe.cpp, cpp/bh_cafe_crowd.cpp and cpp/bh_marks.cpp, once
+#      they exist; they see src/ and, for a core-free stand-in of an AzerothCore header (Position.h), cpp/stub/ when it
+#      exists
 #   3. frames for every server message from the C++ encoders -> the addon's real Lua parser and state
 #      (the client's own Lua 5.1 in wowlua, the WoW API mock of Tools/UiLint), at frame sizes 1000/251/64
 #   4. every intent the addon sends (captured from the mock's SendAddonMessage) -> the C++ parser and
@@ -67,7 +68,7 @@ done
 "$build/bh_unit" "$repo"
 cafeInc=(-I"$mod/src")
 [[ -d "$here/cpp/stub" ]] && cafeInc+=(-I"$here/cpp/stub")
-for t in bh_cafe bh_cafe_crowd; do
+for t in bh_cafe bh_cafe_crowd bh_marks; do
     if [[ -f "$here/cpp/$t.cpp" ]]; then
         "$CXX" "${flags[@]}" "${san[@]}" "${cafeInc[@]}" "$here/cpp/$t.cpp" "${protoSrc[@]}" -o "$build/$t"
         "$build/$t" "$repo"

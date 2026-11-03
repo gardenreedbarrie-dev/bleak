@@ -54,10 +54,10 @@ DEFAULT_BASE = "/root/wowdata/customize-base"
 REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
 DEFAULT_MPQ = "patch-R.MPQ"
 OUTPUT_ENTRIES = ("client", "server", "customization", "report.txt")
-# Art archives of a customization package (build --customization): patch-<character>.MPQ. Every letter but W belongs
-# to a patch the realm ships (taken_patches.json); the digits 4-9 load after the stock patch-3.MPQ and below every
-# lettered patch (rflib/patchnames.py); 4 and 5 are CafeForge's and MapForge's, 6 and 7 the realm's customize
-# archives. The client reads MPQ v1 offsets as unsigned 32-bit (InitializeTables), and MpqPack writes v1, so an
+# Art archives of a customization package (build --customization): patch-<character>.MPQ. Every letter belongs to a
+# patch the realm ships (taken_patches.json; W is the glowing marks' patch-W); the digits 4-9 load after the stock
+# patch-3.MPQ and below every lettered patch (rflib/patchnames.py); 4 and 5 are CafeForge's and MapForge's, 6 and 7
+# the realm's customize archives. The client reads MPQ v1 offsets as unsigned 32-bit (InitializeTables), and MpqPack writes v1, so an
 # archive stays below 4 GiB: 3500 MB (MiB) of files leaves room for the tables, and the two default archives hold
 # 7000 MB.
 DEFAULT_ART_LETTERS = "89"

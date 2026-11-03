@@ -70,6 +70,7 @@ namespace Bleakhold::Proto
         _cafeStep.Configure(1, perInterval(l.cafeStepIntervalMs));
         _cafeRelease.Configure(1, perInterval(l.cafeReleaseIntervalMs));
         _cafeOrder.Configure(1, perInterval(l.cafeOrderIntervalMs));
+        _marks.Configure(1, perInterval(l.marksIntervalMs));
     }
 
     void Endpoint::CountDrop(uint64_t nowMs, ReceiveResult& r)
@@ -119,6 +120,7 @@ namespace Bleakhold::Proto
             case IntentType::CafeOrder:
             case IntentType::CafeCancel:
                 return _cafeOrder.Take(nowMs);
+            case IntentType::MarkSet: return _marks.Take(nowMs);
             case IntentType::TaskClaim:
             case IntentType::TaskReroll:
             case IntentType::BountyClaim:

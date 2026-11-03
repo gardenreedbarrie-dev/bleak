@@ -103,8 +103,13 @@ test("launcher: every window with its key binding, a tooltip line and Bleakhold'
     local keys = {}
     for _, e in ipairs(spec.entries) do
         keys[#keys + 1] = e.key
-        H.ok(bindings:find('name="' .. e.binding .. '"', 1, true), e.key .. ": binding in Bindings.xml")
-        H.ok(type(M.env["BINDING_NAME_" .. e.binding]) == "string", e.key .. ": binding label")
+        -- every window but Markings (section 22: opened from here and /bh marks only) has a key binding
+        if e.key == "markings" then
+            H.eq(e.binding, nil, "markings: no key binding")
+        else
+            H.ok(bindings:find('name="' .. e.binding .. '"', 1, true), e.key .. ": binding in Bindings.xml")
+            H.ok(type(M.env["BINDING_NAME_" .. e.binding]) == "string", e.key .. ": binding label")
+        end
         local text = type(e.description) == "function" and e.description() or e.description
         H.ok(e.title ~= "" and type(text) == "string" and text ~= "", e.key .. ": title and tooltip line")
         H.ok(type(e.open) == "function", e.key .. ": opens")
@@ -114,7 +119,7 @@ test("launcher: every window with its key binding, a tooltip line and Bleakhold'
         H.ok(e.shown == nil or type(e.shown) == "function", e.key .. ": shown is a predicate")
         checkIcon(e.icon, e.key)
     end
-    H.eq(table.concat(keys, ","), "activities,collections,animations,season,leaderboards,graphics,camp")
+    H.eq(table.concat(keys, ","), "activities,collections,animations,season,leaderboards,graphics,markings,camp")
 end, withAddicatUI())
 
 ------------------------------------------------------------------------------------------------------

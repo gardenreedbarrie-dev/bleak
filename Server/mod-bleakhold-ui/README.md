@@ -13,8 +13,8 @@ The client and the server talk with small hidden addon messages (the protocol is
   seasons) a small C++ interface: one function per thing the UI shows, and one hook per button;
 - it has its own tables for the parts that need no custom system (definitions, week schedule, season
   and war effort, legacy sets, leaderboards, server firsts) and a GM command to test everything;
-- it runs a few features entirely on its own: emoji bubbles, dances, cases and camping (campfires, camp
-  objects, the warmth and food XP bonus, field repair and the High Elf glide, Walk on Air).
+- it runs a few features entirely on its own: emoji bubbles, dances, cases, camping (campfires, camp
+  objects, the warmth and food XP bonus, field repair and the High Elf glide, Walk on Air) and glowing marks.
 
 It never invents game rules: what a key scores, what the war effort counts, what a task pays, how the
 Rift scales is decided by your systems or by rows you write.
@@ -64,8 +64,8 @@ You should see `mod-bleakhold-ui` in CMake's list of modules.
 
 | Folder | Database | What it creates |
 |---|---|---|
-| `data/sql/db-world/` | world (`acore_world`) | the definition tables, with the UI's own names and texts filled in, the case tables (empty) and the glide's two Walk on Air spells (`spell_dbc` rows: 100801 in the spellbook with its `spell_script_names` row, 100800 the glide's aura) |
-| `data/sql/db-characters/` | characters (`acore_characters`) | leaderboards, server firsts, war effort points |
+| `data/sql/db-world/` | world (`acore_world`) | the definition tables, with the UI's own names and texts filled in, the case tables (empty), the glide's two Walk on Air spells (`spell_dbc` rows: 100801 in the spellbook with its `spell_script_names` row, 100800 the glide's aura) and the glowing marks' catalogue (empty) |
+| `data/sql/db-characters/` | characters (`acore_characters`) | leaderboards, server firsts, war effort points, the glowing marks players chose |
 
 Nothing to do if your `worldserver.conf` has `Updates.EnableDatabases = 7` (the default): the
 worldserver applies them itself at the next start. Otherwise import the files by hand, in name order,
@@ -121,6 +121,7 @@ To change names, texts, the week schedule or seasons later: edit the `bleakhold_
 | Emoji bubbles (Animations tab, emote wheel, `/bh emoji`) | everything: the module checks `EMOJI` and shows the emoji over the player's head to everyone nearby; config `BleakholdUi.Emoji.*` | nothing (players need the Bleakhold client to see the bubbles) |
 | Dances (Animations tab, emote wheel, `/bh dance`, each dance's own command) | everything: the module checks `DANCE`, starts the stock dance (emote state) and tells everyone nearby which Bleakhold dance it is, again at every loop; config `BleakholdUi.Dance.*` | nothing (players need the Bleakhold client to see the dances; stock clients see the stock dance) |
 | Camping (Make camp button and `/camp`, the Camp frame at a fire, camp objects, Pack up, Repair and `/repair`, the High Elf glide Walk on Air with its Glide button, glide bar, key and `/glide`) | everything: the module lights the camp fire (`CAMP M`, a script-free bonfire that goes out by itself), counts every lit fire (camp fires, Basic Campfires players light, `BleakholdUi.Camp.ExtraFireEntries`), lets players rest there like at an inn, settles them after a minute (camp object buffs, Campfire Warmth), places and removes camp objects (`CAMP O`, `CAMP P`), adds the warmth and Well Fed XP bonus, repairs (`REPAIR`), glides (`GLIDE`, or a cast of Walk on Air from the spellbook, which it teaches at login to the races of `BleakholdUi.Glide.Races` and puts on a free action bar slot once: the feather fall aura, the forward push along the player's facing, again when they turn, the end on landing; the spell only in the air, its cooldown shared with `GLIDE` and shown on its button; never in battlegrounds and arenas, nor in dungeons and raids unless `BleakholdUi.Glide.Instances`) and keeps the client's `CAMPST` up to date; config `BleakholdUi.Camp.*`, `Glide.*`, `Repair.*` | the client's `Spell.dbc` rows of Walk on Air (spells 100800 and 100801, the same values as `data/sql/db-world/02_bleakhold_walk_on_air.sql`: Tools/RaceForge/races.json and `raceforge.py update`) in a patch MPQ, for the spellbook entry, the buff's name and icon and the glide's look; without them the glide works through `/glide` with no buff shown and nothing in the spellbook. Check the default buff spells in game once (`BleakholdUi.Camp.Profession.*`: they were chosen without the client's Spell.dbc) |
+| Glowing marks (protocol section 22: the Markings window, `/bh marks`; a mark of the race's designs and colours and an eye colour, glowing on every player who chose one) | everything: the module keeps every character's choice (`bleakhold_marks`), checks `MARKSET` against its catalogue (`bleakhold_mark_catalogue`: a race-sex only with all 12 looks, eye colours one by one, Blood Red and Unholy Green for Death Knights), charges `BleakholdUi.Marks.Price` (the first change free, back to nothing always free) with a cooldown, and sends every client with the bit `MARKME` and the marks of every online player (`MARKS` after `HELLO`, `MARK` on a change, a login, a logout); config `BleakholdUi.Marks.*`, off by default and game masters only at first | the art and the catalogue: bleakserv's `deploy/marks/build-marks.sh` (MarkForge's marks and eye sprites in `patch-W.MPQ`, the catalogue rows as a world rev), and players on the current Bleakhold client to see the marks |
 | Cases (right-click a case item: the case window with its rewards and chances, Unlock and the reel) | everything: the module answers `GET CASES` / `GET CASE`, checks `CASEOPEN` (the case, its key, bag room), rolls the reward by weight, swaps the case for it, answers `UNBOX` and announces rare rewards (`[Case]`); config `BleakholdUi.Case.*` | the cases: rows in `bleakhold_case` and `bleakhold_case_reward` (see `data/sql/db-world/02_bleakhold_case_tables.sql`), and the case items themselves (any item, no spell needed) |
 
 Buttons whose system is not connected yet answer the player with "This is not available on this realm
@@ -397,13 +398,13 @@ the arena API of section 20 exists.
 
 | Command | Who | What |
 |---|---|---|
-| `.bleakhold status` | GM | players with the UI, message counters, drop reasons, loaded rows |
+| `.bleakhold status` | GM | players with the UI, message counters, drop reasons, loaded rows, glowing marks (on, offered race-sexes, listed players) |
 | `.bleakhold player` | GM | counters of the selected player |
 | `.bleakhold camp [show]` | GM | camping state of the selected player (or you): the fire, objects, cooldowns, warmth, XP bonus, Well Fed, glide, repair, the resting flag; and how many fires the realm tracks |
 | `.bleakhold camp reset` | GM | clears the selected player's make-camp and glide cooldowns (and the cooldown on the spellbook's Walk on Air) |
 | `.bleakhold camp fire` | GM | lights a camp fire for the selected player where they stand (no rules, no cooldown) |
 | `.bleakhold test <what>` | GM | sample data to the selected player (or you): `all`, `week`, `era`, `tasks`, `taskdone`, `key`, `board`, `queue`, `run`, `rift`, `collections`, `season`, `leaderboard`, `firsts`, `toast`, `announce`, `defs`, `camp` |
-| `.bleakhold reload` | admin | re-read `mod_bleakhold_ui.conf` and the world tables; players get the changes |
+| `.bleakhold reload` | admin | re-read `mod_bleakhold_ui.conf` and the world tables (the glowing marks' catalogue too); players get the changes |
 | `.bleakhold announce <tag> <text>` | admin | tag: `legacy`, `first`, `season`, `queue`, `record` |
 | `.bleakhold debug on\|off` | admin | log every message and every drop reason |
 
@@ -427,6 +428,10 @@ the arena API of section 20 exists.
 - Camp objects and camp fires are decoration: the module refuses at startup any that has a script, AI or
   trap, or is a crafting station tied to a place (a spell focus outside `BleakholdUi.Camp.AllowedFocusIds`,
   by default anvil, forge and cooking fire), so no Alchemy Lab or Mana Loom can be carried into the field.
+- Glowing marks: the server decides what a player wears. `MARKSET` names a design, colour and eye only; the server
+  checks them against its catalogue for the character's race, sex and class, never charges more than the price the
+  window showed (`maxCopper`), and writes the money and the choice in one transaction. The clients only ever get
+  numbers and build the texture paths themselves from `DEF N`, whose keys are letters and digits only.
 
 ## 6. Tests
 

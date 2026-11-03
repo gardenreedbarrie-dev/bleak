@@ -13,6 +13,8 @@
 // - a features row's third texture is the mark: a 512 x 512 palettized atlas of all ten sections, pasted after the
 //   face and underwear and before the features, scalp and items; `<mark>_Glow.blp` beside it is its emitted light;
 // - a face row's third texture is the eye sprite, drawn on geoset 1703.
+// BLEAKHOLD(marks): both names have a second source, for realms whose CharSections cannot carry them: the map by
+// player GUID (BleakMarkOwners.h), which takes the row's place layer by layer; all below applies to it unchanged.
 //
 // The glow bake replays the colour bake's layer list into a second, smaller texture (the pass rule, GlowLayer below)
 // and the model draws it a second time, additive and unlit (Engine/Source/Model2/M2Glow.h, the glow-draw side, which

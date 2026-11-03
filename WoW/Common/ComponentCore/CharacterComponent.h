@@ -24,6 +24,10 @@ struct CVar;
 class ItemDisplayInfoRec;
 struct st_race;
 
+namespace BleakMarkOwners {
+class Owners;
+}
+
 struct CharacterBaseVariation {
     /* 0000 */ void* m_texture [3];
 
@@ -171,6 +175,12 @@ class CCharacterComponent {
     static void RegisterBleakGlowCVars();
     static void UpdateGlowTexture(EGxTexCommand command, uint32_t width, uint32_t height, uint32_t face, uint32_t level, void* userArg, uint32_t& texelStrideInBytes, const void*& texels);
     static void GlowSweep();
+    // BLEAKHOLD(marks): the marks and eye sprites by player GUID (BleakMarkOwners.h; written by the Lua natives,
+    // WoW/Source/Ui/BleakholdMarks.cpp); BleakMarksChanged rebuilds the components of `guid` after its entry changed
+    // and returns how many it touched (main thread). BleakMarksLog writes a line to Logs\BleakholdMarks.log.
+    static BleakMarkOwners::Owners& BleakMarkOwnerMap();
+    static uint32_t BleakMarksChanged(uint64_t guid);
+    static void BleakMarksLog(const char* line);
     static void ValidateComponentData(ComponentData* data, COMPONENT_CONTEXT context);
 
     /* 0000 */ TSLink<CCharacterComponent> m_link;
@@ -197,6 +207,9 @@ class CCharacterComponent {
     const char* m_eyeSprite;
     CCharacterComponent* m_glowNext;
     CCharacterComponent** m_glowPrev;
+    // BLEAKHOLD(marks): the player GUID whose entry in BleakMarkOwnerMap this component shows (0 none: NPCs, corpses,
+    // mirror images, glue). Set after AllocComponent and before Init, which reads it.
+    uint64_t m_bleakMarkOwner;
 
     CCharacterComponent();
     ~CCharacterComponent();
@@ -223,6 +236,7 @@ class CCharacterComponent {
     void MarkLayerRequest(COMPONENT_SECTIONS section);
     void MarkLayerRenderPrep(COMPONENT_SECTIONS section);
     void SetEyeSprite(const char* sprite);
+    void SetBleakMarkOwner(uint64_t guid); // BLEAKHOLD(marks)
     int32_t AreShoulderModelsCorrect();
     int32_t BuildShoulderItemPaths(ItemDisplayInfoRec& rec, const ItemDisplayInfoRec*& displayRec, char* leftModel, char* rightModel, char* leftTexture, char* rightTexture);
     void ClearGuildTexture(int32_t count);

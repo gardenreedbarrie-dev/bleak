@@ -66,6 +66,15 @@
  *      off for a player the module answers every cafe intent with ERR cafe_off (CafeErr::Off), whoever handles it, and
  *      a GET of a cafe topic with nothing.
  *
+ *   8. Glowing marks (section 22) are the module's own (BleakholdMarks.h: BleakholdUi.Marks.*, the catalogue
+ *      bleakhold_mark_catalogue, the choices in bleakhold_marks, MARKSET with its gold and cooldown). It pushes the lists
+ *      itself; the Send functions below are for a system of your own that keeps marks:
+ *          Ui::SendMarkMe(player, me);                          // MARKME, the player's own state
+ *          Ui::SendMarksList(player, { listId, entries });      // MARKS, every page of one list (after HELLO)
+ *          Ui::SendMarks(players, { entry });                   // MARK deltas (design, colour, eye 0: removal)
+ *      The bit (262144) is decided per player (BleakholdUi.Marks.GmOnly): while it is off for a player the module answers
+ *      MARKSET with ERR marks_off (MarksErr::Off), whoever handles it, and a GET MARKS or MARKME with nothing.
+ *
  * Threading: every function here may be called from any thread (map update threads included). The
  * module queues the frames and sends them from the world thread. Your handlers and providers are
  * always called on the world thread, never while the module holds a lock.
@@ -80,6 +89,7 @@
 #include "BleakholdEmoji.h"
 #include "BleakholdMessages.h"
 
+#include <cstddef>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -109,6 +119,8 @@ namespace Bleakhold::Ui
     //   While FeatureArena is off QJOIN with kind A gets ERR arena_off, also with your handler.
     //   CSHIFT CTAKE CSTEP CREL CORDER CCANCEL CSTAFF (section 21) -> the module's cafe; while the cafe bit is off
     //   for the player they get ERR cafe_off.
+    //   MARKSET (section 22) -> the module's glowing marks; while the marks bit is off for the player it gets
+    //   ERR marks_off.
     //   HELLO, GET and PING are handled by the module.
     using IntentHandler = std::function<void(Player* player, Intent const& intent)>;
     void OnIntent(IntentType type, IntentHandler handler);
@@ -166,7 +178,7 @@ namespace Bleakhold::Ui
     //   SET, LIDX -> bleakhold_legacy_set; FIRSTS -> bleakhold_server_first; MPLUS -> the run tracker;
     //   DEF -> the definition tables; CAMPST -> the module's camping state; ROYS ROYM WMST WPZ WPMAP WANTED ARENA
     //   -> nothing; CAFE CAFST CAFQ CAFT CAFM CAFO CAFP CAFBF -> the module's cafe (nothing while its bit is off for
-    //   the player). Example:
+    //   the player); MARKS MARKME -> the module's glowing marks (nothing while their bit is off). Example:
     //     Ui::OnRequest(Topic::Week, [](Player* p, TopicRequest const&) { Ui::SendWeek(p, MySeason::Week(p)); });
     using TopicProvider = std::function<void(Player* player, TopicRequest const& request)>;
     void OnRequest(Topic topic, TopicProvider provider);
@@ -264,6 +276,14 @@ namespace Bleakhold::Ui
     void SendCafeOpenUi(Player* player, std::string_view what, uint8_t cafeId);   // CAFUI (menu, shift, board, help)
     void SendCafeAtBar(Player* player, CafeAtBar const& bar);             // CAFAT
     void SendCafeAtBar(std::vector<Player*> const& players, CafeAtBar const& bar);
+    // Glowing marks (section 22), all unrevisioned and never remembered. SendMarksList sends every page of one list in
+    // order, back to back (valid entries with a mark or an eye, ascending guid, at most maxEntries, pages sized for
+    // BleakholdUi.Frame.MaxBody) and returns how many entries it left out over the caps. SendMarks sends MARK deltas
+    // of at most 50 records each (the list version encodes them once).
+    void SendMarkMe(Player* player, MarkMe const& me);                   // MARKME
+    std::size_t SendMarksList(Player* player, MarksList const& list, std::size_t maxEntries = MaxMarkListEntries);
+    void SendMarks(Player* player, std::vector<MarkEntry> const& entries);  // MARK
+    void SendMarks(std::vector<Player*> const& players, std::vector<MarkEntry> const& entries);
     // Low-level keystone run messages for one player. Prefer the run tracker below.
     void SendKeyRunStart(Player* player, Bleakhold::KeyRunStart const& start);   // MPS
     void SendKeyRunState(Player* player, KeyRunState const& state);   // MP

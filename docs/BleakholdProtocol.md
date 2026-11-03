@@ -162,7 +162,8 @@ These topics are revisioned. The first field of the first record of every messag
 - Unrevisioned ops (`MPS`, `MP`, `MPE`, `RIFT`, `RIFTE`, `SET`, `LB`, `LBME`, `FIRSTS`, `DEF`, `TOAST`,
   `ERR`, `HELLO`, `PONG`, `CASES`, `CASE`, `UNBOX`, `CAMPST`, `ROYS`, `ROYM`, `ROYO`, `ROYK`, `ROYV`, `ROYE`, `BGANN`,
   `WMST`, `WPZ`, `WPCAP`, `WPMAP`, `WANTED`, `WPEV`, `ARENA`, `CAFE`, `CAFST`, `CAFQ`, `CAFT`, `CAFEV`, `CAFRES`,
-  `CAFM`, `CAFO`, `CAFP`, `CAFBF`, `CAFSUM`, `CAFUI`, `CAFAT`) are full states or events; each one stands alone.
+  `CAFM`, `CAFO`, `CAFP`, `CAFBF`, `CAFSUM`, `CAFUI`, `CAFAT`, `MARKS`, `MARK`, `MARKME`) are full states or events; each
+  one stands alone.
 
 Push a new snapshot or delta whenever something changes (task progress, queue state, keystone, run
 events). The client also asks with `GET` when a window opens; answer every `GET` with the current
@@ -207,6 +208,7 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `CORDER` | `cafeId, recipeId, tipPct` | order a drink at a café (section 21). `recipeId`: 1..65535, `tipPct`: 0, 10, 25 or 50 |
 | `CCANCEL` | `orderId` | cancel my café order (section 21). `orderId`: 1..2147483647 |
 | `CSTAFF` | `recipeId` | claim today's Staff Drink (section 21). `recipeId`: 1..65535 |
+| `MARKSET` | `design, colour, eye, maxCopper` | set my markings (section 22). `design`: 0..4 (0 no mark), `colour`: 0..3 (0 exactly when `design` is 0), `eye`: 0..5 (0 the race's own eyes), `maxCopper`: 0..2147483647, the most the player agreed to pay |
 
 `GET` topics and what to send back:
 
@@ -231,6 +233,8 @@ Every field is a decimal integer, a one-letter enum or a short token (`[A-Za-z0-
 | `CAFQ` | | `CAFQ` of the café the player works at or is near; nothing otherwise (section 21) |
 | `CAFT` | | `CAFT` while the player is on a barista shift; nothing otherwise (section 21) |
 | `CAFM` | `cafeId` | `CAFM` of that café (1..255), the player's own team's only; nothing otherwise (section 21) |
+| `MARKS` | | a full `MARKS` list while feature bit 262144 is on for the player; nothing otherwise (section 22) |
+| `MARKME` | | `MARKME` while feature bit 262144 is on for the player; nothing otherwise (section 22) |
 
 Examples:
 
@@ -297,10 +301,11 @@ may define more with `DEF X`), item ids are item template entries.
   anywhere (section 16), 4096 Bleakhold Royale live (section 17), 8192 the battleground kill announcer live
   (section 18), 16384 War Mode live, 32768 World PvP objectives live (section 19; 32768 is only ever on together
   with 16384), 65536 arena seasons and the 1v1 ladder live (section 20), 131072 the café live for this player (section
-  21; with `BleakholdUi.Cafe.GmOnly` game masters only).
+  21; with `BleakholdUi.Cafe.GmOnly` game masters only), 262144 glowing marks live for this player (section 22; with
+  `BleakholdUi.Marks.GmOnly` game masters only).
 - The server may send `HELLO` again at any time, without a client `HELLO`, when its feature bits change (Bleakhold
-  Royale, War Mode and World PvP turn their bits on or off at runtime, the arena system 65536, the café 131072). The
-  client reads it like an answer to its own.
+  Royale, War Mode and World PvP turn their bits on or off at runtime, the arena system 65536, the café 131072, the
+  glowing marks 262144). The client reads it like an answer to its own.
 - `dailyResetEpoch`/`weeklyResetEpoch`: the next resets (Unix time).
 - `siteUrl`: shown for copying under the leaderboards (there is no web browser in game).
 
@@ -353,12 +358,13 @@ The client has built-in fallback names, but the server is the source of truth. F
 | `G` barista action | `id, station, key, kind, durMs, goldLoPermille, goldHiPermille, name, hordeName, spellId` (section 21) |
 | `F` café recipe | `id, cafeId, archetype, family, tier, unlockLevel, price80Copper, buffMin, steps (list of action ids), name, text` (section 21) |
 | `U` barista level | `level, totalXp, text` (section 21) |
+| `N` glowing marks of a race-sex | `id, raceId, sex, raceFile, designs, colours, eyes` (section 22) |
 | `Z` end | header only: `Z, dataVer` |
 
 Send `DEF Z,<dataVer>` after the last kind: the client keeps the definitions for that `dataVer` only once
 the set is complete. The client also stores the set of kinds it parsed (its DEF schema): a cache saved by an addon
-that did not know some kinds (V and Q before section 20, H G F U before section 21) is fetched again after an addon
-update even when `dataVer` matches, and its `HELLO` then says `dataVer` 0.
+that did not know some kinds (V and Q before section 20, H G F U before section 21, N before section 22) is fetched
+again after an addon update even when `dataVer` matches, and its `HELLO` then says `dataVer` 0.
 
 ```
 S> 1 DEF 4 1/1 A,7;1,Fortified,Non-boss enemies have more health and hit harder.;3,Bolstering,When a non-boss enemy dies%2C its allies nearby grow stronger.
@@ -596,6 +602,7 @@ does not throttle addon messages for you (AzerothCore's addon flood check is not
 | `CSTEP` | 1 per `BleakholdUi.RateLimit.CafeStepIntervalMs` (0.2 s); never a duplicate; the addon waits 0.25 s itself |
 | `CREL` | 1 per `BleakholdUi.RateLimit.CafeReleaseIntervalMs` (0.1 s); never a duplicate; the addon sends it at once |
 | `CORDER`, `CCANCEL` | 1 per `BleakholdUi.RateLimit.CafeOrderIntervalMs` (2 s) together; the addon waits 2.25 s itself |
+| `MARKSET` | 1 per `BleakholdUi.RateLimit.MarksIntervalMs` (2 s); the addon waits 2.25 s itself; a change itself waits `BleakholdUi.Marks.CooldownHours` (`ERR marks_cooldown`) |
 
 The server drops an action intent that repeats the player's last accepted one of the same op (same fields) within
 `BleakholdUi.RateLimit.DuplicateWindowMs` (1 s), except `RSPEC`: "next" twice is two steps, and the café's `CTAKE`,
@@ -670,6 +677,10 @@ The arena leaderboard: `LBQ A` -> `LB` and `LBME`. Season changes: `ARENA` to ev
 **Café.** `HELLO` (feature bit 131072) -> `CAFE`, `CAFBF` (and the client's `GET`) -> `CSHIFT 1` -> `CAFST`, `CAFQ` ->
 `CTAKE` -> `CAFT` -> `CSTEP` / `CREL` -> `CAFEV` for each step -> `CAFRES` -> `CSHIFT 0` -> `CAFSUM`. A customer:
 `GET CAFM` -> `CORDER` -> `CAFO` until `D`. Bystanders near the bar get `CAFAT`. The whole flow is in section 21.
+
+**Glowing marks.** `HELLO` (feature bit 262144) -> `MARKME` and a full `MARKS` list -> the Markings window: `GET MARKME`
+-> `MARKSET` -> `MARKME`, and `MARK` to everyone with the bit. Logins and logouts of players with marks: `MARK`. The
+whole flow is in section 22.
 
 ## 12. Versioning
 
@@ -2439,3 +2450,151 @@ board of The Lion's Roast has him second behind Brenna, at 792 permille of her p
 cafés, three actions, a recipe and two barista levels; the toast of an earlier level-up; the window the owner's gossip
 opens; and what a bystander near the bar sees: Aldric pulling a shot (step 2 of 5, 400 ms in) and the owner grinding
 beans for the house.
+
+## 22. Glowing marks
+
+A mark (one of four designs of the character's race and body, in one of three colours) and an eye colour are a
+cosmetic of their own, apart from the character tables: a realm whose `CharSections` cannot take the marks' rows still
+has them. The server stores each character's choice, checks it against its catalogue of the files that exist, charges
+gold for a change and sends every client with the feature bit the choices of every online player. The client turns a
+choice into two texture paths from `DEF N` and hands them to Bleakhold.exe by player GUID, which paints the mark on
+that player's body and lets two of the colours glow, as it does a mark of the character tables. A client without the
+Bleakhold client's natives keeps the lists and can still change the player's own choice. The files are MarkForge's
+marks and eye sprites in `patch-W.MPQ`.
+
+`HELLO` feature bit 262144 is on for a player while `BleakholdUi.Marks.Enable = 1`, the catalogue offers at least one
+race-sex and (`BleakholdUi.Marks.GmOnly = 0` or the player is a game master). A `.bleakhold reload` that changes it sends
+every connected client a new `HELLO` (section 7), then `MARKME` and a new list. While the bit is off for a player the
+server answers `MARKSET` with `ERR` `marks_off`, answers no `GET MARKS` or `GET MARKME` and sends that player no `MARKS`,
+`MARK` or `MARKME`; the client clears every mark it applied and shows no Markings window. Under `GmOnly` the lists hold
+only game masters' entries (whatever their `.gm visible` state).
+
+**Texture paths.** A mark is `Character\BleakholdMarks\<raceFile>\<Male|Female>\<designKey>_<colourKey>.blp`, with
+`<designKey>_<colourKey>_Glow.blp` beside it for a glowing colour; an eye sprite is
+`Character\BleakholdEyes\<raceFile>\<Male|Female>\Eye_<eyeKey>.blp` (backslashes, no leading backslash, `.blp` in lower
+case; `Male` for sex 0, `Female` for 1). `raceFile` and the keys come from `DEF N`.
+
+### Intents
+
+| Op | Fields | Meaning |
+|---|---|---|
+| `MARKSET` | `design, colour, eye, maxCopper` | set my markings: `design` 0..4 (0 no mark, 1-4 the race's designs), `colour` 0..3 (0 exactly when `design` is 0, 1-3 the race's colours), `eye` 0..5 (0 the race's own eyes, 1-3 the race's eye colours, 4 Blood Red and 5 Unholy Green for Death Knights only), `maxCopper` 0..2147483647 (the most the player agreed to pay: the price the window showed) |
+
+Anything else is malformed and dropped (section 1): a colour without a design or a design without a colour, a field out
+of range, another number of fields. The checks of `MARKSET`, in this order: the rate (section 8; an identical `MARKSET`
+within 1 s is a duplicate); the bit (`marks_off`); dead (`dead`); in combat (`marks_combat`); a choice the catalogue does
+not offer for the character's race, sex and class (`marks_unknown`: a look of a race-sex without all its looks, an eye
+without a sprite, eye 4 or 5 for a class other than Death Knight); the choice the player has now (`marks_same`); a
+change within `BleakholdUi.Marks.CooldownHours` (1) of the last one (`marks_cooldown`, the text says the minutes); a
+price above `maxCopper` (`marks_price`); not enough money (`marks_gold`). Then the money and the choice are written to
+the database together (a crash never charges for a change it lost); `MARKME` goes to the player and `MARK` to everyone
+with the bit, the player included. After `marks_cooldown` and `marks_price` a `MARKME` follows, so the window shows the
+current numbers.
+
+**Price.** A change to nothing at all (`0,0,0`) is always free. Any other change is free while
+`BleakholdUi.Marks.FirstFree = 1` and the character never changed before, else `BleakholdUi.Marks.Price` copper
+(100000). Every accepted change, free or not, counts and starts the cooldown; game masters wait too.
+
+### GET topics
+
+| Topic | Args | Answer |
+|---|---|---|
+| `MARKS` | | a full `MARKS` list |
+| `MARKME` | | `MARKME` |
+
+Both answer nothing while the bit is off for the player. **Pushes.** After every `HELLO` with the bit the server sends
+`MARKME`, then a full `MARKS` list; the client asks `GET MARKME` when the Markings window opens and `GET MARKS` when a
+list did not complete. `MARK` follows every change: an accepted `MARKSET`, the login of a player with an entry (to
+everyone but that player, who gets the full list after `HELLO`) and their logout (a removal). The changes of one world
+tick go out together. Every marks message is unrevisioned.
+
+### MARKS (every online player with a mark or an eye)
+
+First record: `listId, page, pages, total`. Then up to 400 records: `guid, race, sex, design, colour, eye`.
+
+- `listId` 1..2147483647: a counter of the receiver's lists (+1 per list; it may start again after a restart). `page`
+  1..`pages`, `pages` 1..5, `total` 0..2000: the entries in all pages. An empty list is one page with the header only:
+  `listId,1,1,0`.
+- `guid` 1..4294967295: the player's GUID counter (the client's GUID of the player is that number, high part 0). `race`
+  1..255 (the realm's race id), `sex` 0..1, `design` 0..4, `colour` 0..3 (0 exactly when `design` is 0), `eye` 0..5 as
+  in `MARKSET`, the choice as the server applies it now. Only players with a mark or an eye are listed; the receiver's
+  own entry is in the list too.
+- The pages of one list are sent in order, back to back, before any later `MARK` to that player. A page holds at most
+  400 records (fewer at small `BleakholdUi.Frame.MaxBody`, so a page always fits in 99 frames).
+- At most `BleakholdUi.Marks.MaxListEntries` (2000) entries, in ascending `guid` order; the server leaves the rest out
+  (and logs it). Deltas are never capped.
+- The client collects the pages of one `listId` (a page of another `listId` starts again); when all are there the list
+  replaces everything it had. `MARK` records that arrive meanwhile are applied, in order, right after it. A list still
+  incomplete 10 s after its first page is dropped with them and the client asks `GET MARKS` (at most every 30 s).
+  Records beyond 400 per page, malformed records and records out of range are skipped.
+
+### MARK (a delta)
+
+Up to 50 records `guid, race, sex, design, colour, eye` (as in `MARKS`). `design 0, colour 0, eye 0` removes that
+player's entry.
+
+### MARKME (the player's own state)
+
+`design, colour, eye, priceCopper, cooldownSec, changes, offered`
+
+- `design, colour, eye`: the stored choice as the server applies it now. A stored choice the catalogue no longer offers
+  for the character's race, sex and class reads as 0 here and in the lists, layer by layer; the server keeps it.
+- `priceCopper`: what a change to a mark or an eye costs now (0 while the next change is free). A change to nothing at
+  all is always free.
+- `cooldownSec`: seconds until the next change is allowed (0 = now). `changes`: accepted changes so far. `offered`: 1
+  when the catalogue has the character's race-sex, 0 when no marks are made for this body yet.
+
+### DEF N
+
+One record per race-sex the catalogue offers: `id, raceId, sex, raceFile, designs, colours, eyes`.
+
+- `id` = `raceId` × 2 + `sex`. `raceFile`: the race's ChrRaces file name, `[A-Za-z]{1,16}`.
+- `designs`: a list of `index~key~name`, exactly 4 items, index 1-4.
+- `colours`: a list of `index~key~name~hex~glow`, exactly 3 items, index 1-3; `hex` RRGGBB without `#`; `glow` 1 when the
+  colour has `_Glow` files (colours 1 and 2), 0 for the paint (colour 3).
+- `eyes`: a list of `index~key~name~hex~dkOnly`, 0 to 5 items, index 1-5: only the eye colours whose sprites exist for
+  this race-sex (none for a body without eye geosets); `dkOnly` 1 for eyes 4 and 5.
+- Keys are `[A-Za-z0-9]{1,32}`, names at most 48 bytes (escaped as usual). The server leaves `DEF N` out while
+  `BleakholdUi.Marks.Enable = 0`. A race-sex is offered only when the catalogue has all 12 of its looks.
+
+### Error codes
+
+| Code | Meaning |
+|---|---|
+| `marks_off` | glowing marks are off (no feature bit 262144 for the player) |
+| `marks_unknown` | that mark or eye is not made for the player's race and body (or is for Death Knights only) |
+| `marks_same` | the choice is the current one |
+| `marks_cooldown` | changed too recently (`BleakholdUi.Marks.CooldownHours`); the text says the minutes |
+| `marks_price` | the price is above what the client agreed to (it changed) |
+| `marks_gold` | not enough money |
+| `marks_combat` | in combat |
+| `dead` | dead |
+| `failed` | the server could not do it; nothing changed |
+
+`busy` (over the rate of `MARKSET`, section 8) is the generic code as everywhere.
+
+```
+C> 1 GET 40 1/1 MARKME;MARKS
+C> 1 MARKSET 41 1/1 4,1,2,100000
+C> 1 MARKSET 42 1/1 0,0,0,0
+S> 1 DEF 70 1/1 N,9;9,4,1,NightElf,1~MoonwellSigils~Moonwell Sigils:2~CenarionVines~Cenarion Vines:3~SentinelTalon~Sentinel Talon:4~Starfall~Starfall,1~EluneBlue~Elune Blue~5FB4FF~1:2~MoonwellTeal~Moonwell Teal~3FE0C5~1:3~MidnightInk~Midnight Ink~2A2350~0,1~MoonlightSilver~Moonlight Silver~CFE3FF~0:2~DruidAmber~Druid Amber~FFB43A~0:3~DreamEmerald~Dream Emerald~4CFF8A~0:4~BloodRed~Blood Red~FF1E1E~1:5~UnholyGreen~Unholy Green~7CFF3A~1
+S> 1 DEF 71 1/1 Z,9
+S> 1 MARKME 72 1/1 0,0,0,0,0,0,1
+S> 1 MARKS 73 1/1 3,1,1,3;1201,4,1,1,1,1;1377,10,0,3,3,0;1502,6,1,0,0,2
+S> 1 ERR 74 1/1 MARKSET,41,marks_same,That is how you look already.
+S> 1 MARK 75 1/1 1201,4,1,4,1,2
+S> 1 MARKME 76 1/1 4,1,2,100000,3600,1,1
+S> 1 MARK 77 1/1 1377,10,0,0,0,0
+S> 1 ERR 78 1/1 MARKSET,42,marks_cooldown,You can change your markings again in 60 minutes.
+```
+
+Ilyssa (guid 1201, a Night Elf woman) opens the Markings window: `GET MARKME;MARKS`. The catalogue of her race-sex is
+`DEF N` 9 (4 × 2 + 1): four designs, three colours (Elune Blue and Moonwell Teal glow, Midnight Ink is paint) and five
+eye colours, the last two for Death Knights. `MARKME` is a character who has chosen nothing yet, whose first change is
+free and whose body is offered. `MARKS` is a list of one page with three players: 1201 (design 1 in colour 1 with eye
+1), Torvak (1377, a Blood Elf man: design 3 in the paint, his own eyes) and 1502 (a Tauren woman: no mark, eye 2). She
+takes Starfall in Elune Blue with Druid Amber eyes and agrees to pay at most 10 gold (`MARKSET 41`); had that been her
+look already, the answer would be `marks_same` (`ERR 74`). It is accepted: everyone with the bit gets her `MARK`, and
+her `MARKME` says the next change costs 10 gold, in 3600 s, after one change. Torvak logs out: his `MARK` with design,
+colour and eye 0 removes him. Within the hour Ilyssa asks to go back to nothing (`MARKSET 42`, always free) and is told
+to wait.
