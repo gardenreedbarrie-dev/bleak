@@ -132,6 +132,27 @@ class Garment(unittest.TestCase):
         self.assertFalse([e for e in rep if "skipped" in e or any("skipped" in str(v) for v in e.values())], rep)
         self.assertTrue(np.array_equal(union, plain))
 
+    def test_an_underwear_shared_by_other_skin_colours_takes_its_own_skins_mask(self):
+        # an HD pack gives skin colours 41-45 the underwear painted over skin 7: compared with skin 41 almost all of
+        # it differs and the cloth is lost; it is compared with every skin that wears it and the best fit wins
+        d = common.temp_dir("pkg-shared")
+        common.write_package(d)
+        src = AR.FolderSource(d)
+        rows = AR.char_sections(src)
+        plain, plain_rep = AR.garment_union(src, rows, 1, 0)
+        under = {AR._col(r, "colorIndex", "colour"): r for r in rows
+                 if AR._col(r, "baseSection", "section") == 4 and AR._col(r, "raceID", "race") == 1
+                 and AR._col(r, "sexID", "sex") == 0}
+        first, second = sorted(under)[:2]
+        under[second]["textures"] = list(under[first]["textures"])
+        union, rep = AR.garment_union(src, rows, 1, 0)
+        self.assertEqual(AR.garment_problems(rep), [], rep)
+        by_colour = {e["colour"]: e for e in rep}
+        self.assertEqual(by_colour[second]["torso"].get("mask_of_colour"), first, rep)
+        self.assertNotIn("mask_of_colour", by_colour[first]["torso"], rep)
+        x, y, w, h = A.SECTIONS["TU"]
+        self.assertTrue(union[y:y + h, x:x + w].any())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -445,12 +445,17 @@ def garment_union(source, rows, race: int, sex: int, log=None) -> tuple[np.ndarr
     mask, and a per-colour report, each underwear compared with the skin it was painted for: the purple High Elf
     skin's Blood Elf original, and its underwear's original too (raceforge.py skins recolours an opaque underwear
     where it is bare skin, under the same Character\\BleakholdSkins\\ rule; the original is the Blood Elf skin with
-    the garment painted in, so the cloth is found by the same pair either way)."""
+    the garment painted in, so the cloth is found by the same pair either way).
+
+    An HD pack gives many skin colours one underwear texture, painted for one of them (colour 41 wears
+    ...NakedPelvisSkin00_07, painted over skin 7): an underwear is compared with every skin that wears it and the
+    best fit (the most cloth found against the yardstick) makes its mask; the other colours report that colour."""
     from .atlas import N, SECTIONS, garment_from, garment_reference_pct, place_section, section_of
     union = np.zeros((N, N), bool)
     report = []
     skins = visible_skins(rows, rows_race(source, race), sex)
     seen = set()
+    loaded = []  # (entry, the skin colour row, the 512 skin)
     for s in skins:
         key = (s["skin"].casefold(), s["pelvis"].casefold(), s["torso"].casefold())
         if key in seen:
@@ -466,35 +471,49 @@ def garment_union(source, rows, race: int, sex: int, log=None) -> tuple[np.ndarr
             f = N // skin.shape[0]
             skin = np.repeat(np.repeat(skin, f, 0), f, 1) if f >= 1 else skin
         entry = {"colour": s["colour"], "skin": skin_name}
-        for part, sec in (("pelvis", "LU"), ("torso", "TU")):
-            name = strip_skins_prefix(s[part]) if s[part] else ""
-            if not name:
-                continue
-            try:
-                uw = decode_blp(source.read(name))
-            except MarkForgeError as e:
-                entry[part] = f"skipped: {e}"
-                continue
-            x, y, w, h = SECTIONS[sec]
-            sk = section_of(sec, skin)
-            if uw.shape[:2] != sk.shape[:2]:
-                fy = uw.shape[0] / sk.shape[0]
-                if fy > 1:
-                    k = int(fy)
-                    uw = uw[::k, ::k]
-                else:
-                    k = int(round(1 / fy))
-                    uw = np.repeat(np.repeat(uw, k, 0), k, 1)
-            g, thr = garment_from(uw, sk)
-            union |= place_section(g, sec)
-            cover, ref = 100 * float(g.mean()), garment_reference_pct(uw, sk)
-            entry[part] = {"texture": name, "cover_pct": round(cover, 1), "threshold": round(thr, 1),
-                           "reference_pct": round(ref, 1)}
-            if cover < GARMENT_GATE * ref:
-                # the mask lost the cloth: marks would be painted over the underwear (the gate's own check reads
-                # the same mask, so only this comparison sees it)
-                entry[part]["short"] = True
         report.append(entry)
+        loaded.append((entry, s, skin))
+    for part, sec in (("pelvis", "LU"), ("torso", "TU")):
+        wearers: dict[str, list] = {}
+        for entry, s, skin in loaded:
+            name = strip_skins_prefix(s[part]) if s[part] else ""
+            if name:
+                wearers.setdefault(name.casefold(), []).append((entry, skin, name))
+        for group in wearers.values():
+            name = group[0][2]
+            try:
+                uw0 = decode_blp(source.read(name))
+            except MarkForgeError as e:
+                for entry, _, _ in group:
+                    entry[part] = f"skipped: {e}"
+                continue
+            best = None
+            for entry, skin, _ in group:
+                sk = section_of(sec, skin)
+                uw = uw0
+                if uw.shape[:2] != sk.shape[:2]:
+                    fy = uw.shape[0] / sk.shape[0]
+                    if fy > 1:
+                        k = int(fy)
+                        uw = uw[::k, ::k]
+                    else:
+                        k = int(round(1 / fy))
+                        uw = np.repeat(np.repeat(uw, k, 0), k, 1)
+                g, thr = garment_from(uw, sk)
+                cover, ref = 100 * float(g.mean()), garment_reference_pct(uw, sk)
+                fit = cover / ref if ref > 0 else 1.0
+                if best is None or fit > best[0]:
+                    best = (fit, entry, g, thr, cover, ref)
+            _, chosen, g, thr, cover, ref = best
+            union |= place_section(g, sec)
+            stats = {"texture": name, "cover_pct": round(cover, 1), "threshold": round(thr, 1),
+                     "reference_pct": round(ref, 1)}
+            if cover < GARMENT_GATE * ref:
+                # the mask lost the cloth even against its best skin: marks would be painted over the underwear (the
+                # gate's own check reads the same mask, so only this comparison sees it)
+                stats["short"] = True
+            for entry, _, _ in group:
+                entry[part] = stats if entry is chosen else {"texture": name, "mask_of_colour": chosen["colour"]}
     return union, report
 
 
