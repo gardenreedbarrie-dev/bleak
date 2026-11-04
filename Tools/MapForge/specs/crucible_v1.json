@@ -1,0 +1,123 @@
+{
+  "_comment": [
+    "Bleakhold: Crucible of Onyxia (map 902), terrain v1: a 10-man custom raid laid out as one continuous map,",
+    "three legs sharing one instance lock. World X is north, Y is west (MapForge convention, see royale_v1.json).",
+    "Tile range x [31,33] y [31,32]: a 1600 x 1066.67 yard block, centre C (-266.67, 266.67).",
+    "Three WMO placements carry the real dungeon/raid interiors UNCHANGED: the Ragefire Chasm WMO at the west",
+    "anchor (RFC_ANCHOR), the Molten Core WMO at the centre anchor (MC_ANCHOR), the Onyxia's Lair WMO at the",
+    "east anchor (ONY_ANCHOR). Every wmo 'model' path below is a TODO placeholder: the real client path, the",
+    "WMO's real footprint ('bounds') and its door-facing orientation must be confirmed against the live 3.3.5a",
+    "client on the VPS (package.py resolve-assets / terrain/validate.py --assets), same as royale_v1.json's own",
+    "note on rebuilding with --assets for real model boxes. Do not ship this spec to package.py build until",
+    "those three TODOs are resolved and the WMO footprints are checked against the pad radii below.",
+    "Connective terrain between the anchors is new (the custom 20%): three flattened pads, a ramped tunnel",
+    "corridor west->centre (fire-cult cave, RFC_ANCHOR to MC_ANCHOR) and a causeway centre->east (scorched",
+    "basalt, MC_ANCHOR to ONY_ANCHOR), closed by a border cliff ring so nobody falls off the map edge (royale's",
+    "'no holes: players drop in anywhere' approach, since this is a raid with a fixed entrance not a BG drop).",
+    "pois feed the raid's boss/trash anchor SQL the way bh_royale_poi feeds Royale's POI table (package.py",
+    "writes it): 'entrance' is the raid's start point, 'intro_boss' the RFC-leg custom boss spot, 'final_boss'",
+    "Onyxia's own spot inside her WMO (z_from the WMO, like royale's crate z_from), 'trash_anchor' points mark",
+    "where leg trash spawns cluster (consumed when the SQL for Phase 2 is written; harmless if package.py's",
+    "current POI kind set doesn't know these names yet -- that validation is Royale-specific per the README).",
+    "Every non-WMO texture path below is a verified stock 3.3.5a path (lava/basalt/ash tilesets used all over",
+    "Blackrock Mountain content); only the three wmo 'model' paths need VPS verification."
+  ],
+  "format": "mapforge-terrain/1",
+  "map": {"id": 902, "directory": "BleakholdCrucible", "tiles": {"x": [31, 33], "y": [31, 32]}},
+  "seed": 20261104,
+  "area_id": 5220,
+  "uid_base": 320000,
+  "areas": [
+    {"_": "RFC leg (intro boss + trash)", "area_id": 5221, "shape": {"circle": {"center": [455, 455], "radius": 160}}},
+    {"_": "connective tunnel, west->centre", "area_id": 5221,
+     "shape": {"rect": {"min": [120, 180], "max": [420, 520]}}},
+    {"_": "MC leg (trash/path only)", "area_id": 5222, "shape": {"circle": {"center": [-266, 266], "radius": 200}}},
+    {"_": "causeway, centre->east", "area_id": 5222, "shape": {"rect": {"min": [-820, 180], "max": [-320, 360]}}},
+    {"_": "Onyxia leg (final boss)", "area_id": 5223, "shape": {"circle": {"center": [-900, 266], "radius": 220}}}
+  ],
+  "heightmap": {"base": 6,
+   "noise": [
+     {"scale": 220, "amplitude": 6, "octaves": 3, "persistence": 0.5},
+     {"scale": 40, "amplitude": 1.6, "octaves": 2, "seed": 11}
+   ],
+   "features": [
+     {"_": "RFC_ANCHOR pad: a shallow scorched bowl, entrance faces east into the tunnel", "type": "flatten",
+      "shape": {"circle": {"center": [455, 455], "radius": 60}}, "height": 6, "falloff": 24},
+     {"_": "MC_ANCHOR pad: a wide basalt shelf, the raid's midpoint", "type": "flatten",
+      "shape": {"circle": {"center": [-266, 266], "radius": 90}}, "height": 4, "falloff": 36},
+     {"_": "ONY_ANCHOR pad: Onyxia's bowl mouth, slightly sunken for the dragon's lair feel", "type": "flatten",
+      "shape": {"circle": {"center": [-900, 266], "radius": 100}}, "height": 1, "falloff": 42, "mode": "lower"},
+     {"_": "tunnel corridor RFC->MC: a sunken scorched-rock ramp", "type": "ramp",
+      "from": [420, 480, 6], "to": [-180, 300, 4], "width": 34, "falloff": 18},
+     {"_": "causeway MC->Onyxia: a wider basalt path, lava-flanked", "type": "ramp",
+      "from": [-360, 280, 4], "to": [-800, 270, 2], "width": 40, "falloff": 20},
+     {"_": "shallow lava-adjacent gullies either side of the causeway", "type": "hill",
+      "center": [-560, 180], "radius": 90, "height": -3, "shape": "dome"},
+     {"type": "hill", "center": [-560, 360], "radius": 90, "height": -3, "shape": "dome"},
+     {"_": "the closing ring: a jittered cliff wall, raid has one fixed entrance so no gaps needed", "type": "border",
+      "inset": 50, "width": 100, "height": 40, "jitter": 18, "jitter_scale": 160, "seed": 21},
+     {"type": "clamp", "min": -4, "max": 80}
+   ]},
+  "textures": [
+    {"name": "ash", "path": "TILESET\\Generic\\BurntGround01.blp", "color": "#2c2420"},
+    {"name": "basalt", "path": "TILESET\\BlackRock\\BlackrockTrollRubble.blp", "color": "#453a36"},
+    {"name": "lavarock", "path": "TILESET\\BlackRock\\BlackrockBrick.blp", "color": "#55433a"},
+    {"name": "scorchedgrass", "path": "TILESET\\Generic\\BurntGrass.blp", "color": "#3b3326"},
+    {"name": "bonedust", "path": "TILESET\\Felwood\\FelwoodDirt01.blp", "color": "#6b5c4a"}
+  ],
+  "texture_rules": [
+    {"_": "global base: scorched rock everywhere", "texture": "basalt",
+     "noise": {"scale": 60, "threshold": 0.22, "fade": 0.2, "seed": 4}},
+    {"_": "global: roads paint here", "roads": true},
+    {"_": "regional: RFC pad ash", "texture": "ash", "fade": 18, "strength": 0.85,
+     "shape": {"circle": {"center": [455, 455], "radius": 70}}},
+    {"_": "regional: scorched grass fringe around the RFC pad", "texture": "scorchedgrass", "fade": 24,
+     "strength": 0.6, "shape": {"circle": {"center": [455, 455], "radius": 110}}},
+    {"_": "regional: MC pad lava-rock", "texture": "lavarock", "fade": 22, "strength": 0.85,
+     "shape": {"circle": {"center": [-266, 266], "radius": 100}}},
+    {"_": "regional: Onyxia pad bone dust", "texture": "bonedust", "fade": 26, "strength": 0.8,
+     "shape": {"circle": {"center": [-900, 266], "radius": 110}}},
+    {"_": "global: rock on steep ground (border cliffs)", "texture": "lavarock", "slope": {"min": 24, "max": 40}}
+  ],
+  "roads": [
+    {"name": "rfc_to_mc", "points": [[455, 455], [420, 480], [120, 380], [-180, 300], [-266, 266]], "width": 10,
+     "fade": 5, "texture": "ash"},
+    {"name": "mc_to_onyxia", "points": [[-266, 266], [-360, 280], [-560, 270], [-800, 270], [-900, 266]],
+     "width": 12, "fade": 5, "texture": "lavarock"}
+  ],
+  "wmos": [
+    {
+      "_comment": "TODO: confirm real client path, bounds and door facing on the VPS before build",
+      "model": "World\\wmo\\TODO\\RagefireChasm\\RagefireChasm.wmo",
+      "position": [455, 455, 6],
+      "facing": 90,
+      "label": "RFC_ANCHOR"
+    },
+    {
+      "_comment": "TODO: confirm real client path, bounds and door facing on the VPS before build",
+      "model": "World\\wmo\\TODO\\MoltenCore\\MoltenCore.wmo",
+      "position": [-266, 266, 4],
+      "facing": 180,
+      "label": "MC_ANCHOR"
+    },
+    {
+      "_comment": "TODO: confirm real client path, bounds and door facing on the VPS before build",
+      "model": "World\\wmo\\TODO\\Onyxia\\OnyxiasLair.wmo",
+      "position": [-900, 266, 1],
+      "facing": 180,
+      "label": "ONY_ANCHOR"
+    }
+  ],
+  "pois": [
+    {"name": "raid_entrance", "title": "Raid Entrance", "kind": "entrance", "position": [480, 430, 6],
+     "facing": 225, "radius": 8, "weight": 1},
+    {"name": "firecult_warden", "title": "Fire-Cult Warden", "kind": "intro_boss", "position": [455, 455, 6],
+     "facing": 0, "radius": 20, "weight": 1},
+    {"name": "rfc_trash", "title": "RFC Trash", "kind": "trash_anchor", "position": [420, 470, 6], "facing": 0,
+     "radius": 40, "weight": 1},
+    {"name": "causeway_trash", "title": "Causeway Trash", "kind": "trash_anchor", "position": [-560, 270, 3],
+     "facing": 0, "radius": 60, "weight": 1},
+    {"name": "onyxia", "title": "Onyxia", "kind": "final_boss", "position": [-900, 266], "facing": 0,
+     "radius": 60, "weight": 1, "z_from": "ONY_ANCHOR"}
+  ]
+}

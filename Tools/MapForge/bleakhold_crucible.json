@@ -1,0 +1,76 @@
+{
+    "_comment": [
+        "Bleakhold: Crucible of Onyxia -- a 10-man custom raid on its own map. package.py build reads this.",
+        "Map id 902: Royale already took 901 (the next free id above stock's 724 and the realm's Emberwing Hollow",
+        "740); this build must still run the same id-conflict check royale_v1's README describes",
+        "(bleakhold_royale_check.sql-equivalent) against the live world database before install, since the realm's",
+        "patches may have claimed ids in the 900s or the 5220+ zone/area range already.",
+        "Zone 5220 / areas 5221-5223: Royale owns 5200-5213 and 5214-5217 (POI-only), the realm's own patches use",
+        "5006-5018, 5100, 5101 and 6001+, so 5220 keeps clear; re-check on the VPS build same as royale_v1.",
+        "instance_type 2 (raid, dbc/config.py INSTANCE_TYPES): no battleground section (that's instance_type 3",
+        "only, config.py raises ConfigError otherwise). A raid still needs an AzerothCore instance_template row",
+        "and the InstanceScript binding -- that is server-side SQL/C++ (Phase 2 of the plan doc), not something",
+        "this DBC config produces.",
+        "zone.set_flags: none of Royale's ARENA/NO_FLY_ZONE -- this is a normal instanced PvE raid, not an FFA",
+        "zone. clear_flags drops the same rule-changing bits royale_v1 does (duels, rest, sanctuary, cities,",
+        "ghost revival, outdoor PvP) so a raid with no explicit flags doesn't inherit anything stray from its",
+        "template zone; package.py fails on anything left over outside HARMLESS_TEMPLATE_FLAGS, same check as",
+        "royale.",
+        "zone.template 215 (Blackrock Depths) for ambience/music closer to a lava-and-dragon raid than",
+        "Duskwood; swap for another verified 3.3.5a zone template on the VPS build if the ambience doesn't fit.",
+        "light.skybox: StratholmeSkybox (a dim, enclosed-feeling sky) as a placeholder for an indoor-feeling raid;",
+        "DeathSkybox or IceCrownDarkSky are the other verified alternatives royale_v1's own comment lists.",
+        "corpse_map -1, corpse_x/y 0: same as royale, release-to-graveyard behaviour is server-side (Phase 2)."
+    ],
+    "map": {
+        "id": 902,
+        "directory": "BleakholdCrucible",
+        "template": 409,
+        "name": "Bleakhold: Crucible of Onyxia",
+        "instance_type": 2,
+        "pvp": 0,
+        "flags": 0,
+        "description_horde": "Three lairs, one road: the fire-cult's chasm, the scorched causeway, and Onyxia's own.",
+        "description_alliance": "Three lairs, one road: the fire-cult's chasm, the scorched causeway, and Onyxia's own.",
+        "corpse_map": -1,
+        "corpse_x": 0,
+        "corpse_y": 0,
+        "time_of_day_override": "off",
+        "expansion": 0,
+        "max_players": 10
+    },
+    "zone": {
+        "id": 5220,
+        "template": 215,
+        "name": "Bleakhold: Crucible of Onyxia",
+        "set_flags": [],
+        "clear_flags": ["SANCTUARY", "OUTLAND", "OUTLAND2", "CAPITAL", "SLAVE_CAPITAL", "SLAVE_CAPITAL2", "CITY",
+                        "TOWN", "REST_ZONE_HORDE", "REST_ZONE_ALLIANCE", "CONTESTED_AREA", "WINTERGRASP",
+                        "WINTERGRASP_2", "ALLOW_DUELS", "NEED_FLY", "OUTDOOR_PVP", "ARENA", "ARENA_INSTANCE",
+                        "UNK4", "LOWLEVEL"],
+        "exploration_level": 0,
+        "faction_group_mask": 0,
+        "subzones": [
+            { "id": 5221, "name": "The Fire-Cult Chasm" },
+            { "id": 5222, "name": "The Scorched Causeway" },
+            { "id": 5223, "name": "Onyxia's Own" }
+        ]
+    },
+    "loading_screen": null,
+    "light": {
+        "skybox": "Environments\\Stratholme\\StratholmeSkybox.M2"
+    },
+    "world_map_area": {
+        "name": "BleakholdCrucible",
+        "bounds": "auto"
+    },
+    "archives": {
+        "map": "patch-Q.MPQ",
+        "marker_texture": "Interface\\Bleakhold\\Crucible\\Marker.blp",
+        "dbc": "auto",
+        "reserved_letters": "ABCDEGHIJLMNPRSTUVWXYZ",
+        "optional_packs": {
+            "hd": ["Data/patch-[ABCDEGIMNPSU].MPQ", "Data/Patch-Y.MPQ"]
+        }
+    }
+}
