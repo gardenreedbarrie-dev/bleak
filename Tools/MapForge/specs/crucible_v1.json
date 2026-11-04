@@ -4,15 +4,14 @@
     "three legs sharing one instance lock. World X is north, Y is west (MapForge convention, see royale_v1.json).",
     "Tile range x [31,33] y [31,32]: a 1600 x 1066.67 yard block, centre C (-266.67, 266.67).",
     "Three WMO placements carry the real dungeon/raid interiors UNCHANGED: the Ragefire Chasm WMO at the west",
-    "anchor (RFC_ANCHOR), the Molten Core WMO at the centre anchor (MC_ANCHOR), the Onyxia's Lair WMO at the",
-    "east anchor (ONY_ANCHOR). Every wmo 'model' path below is a TODO placeholder: the real client path, the",
-    "WMO's real footprint ('bounds') and its door-facing orientation must be confirmed against the live 3.3.5a",
-    "client on the VPS (package.py resolve-assets / terrain/validate.py --assets), same as royale_v1.json's own",
-    "note on rebuilding with --assets for real model boxes. Do not ship this spec to package.py build until",
-    "those three TODOs are resolved and the WMO footprints are checked against the pad radii below.",
+    "anchor (RFC_ANCHOR) and the Onyxia's Lair WMO at the east anchor (ONY_ANCHOR). The middle leg has no WMO:",
+    "Molten Core is ADT terrain, not a model (see _molten_core below). Both WMO paths are confirmed against",
+    "the live client's archives; what still needs an in-game look is each model's real footprint ('bounds')",
+    "and its door-facing orientation, so the connective tunnels meet the doors (rebuild with --assets for the",
+    "real model boxes, as royale_v1.json's own note says).",
     "Connective terrain between the anchors is new (the custom 20%): three flattened pads, a ramped tunnel",
-    "corridor west->centre (fire-cult cave, RFC_ANCHOR to MC_ANCHOR) and a causeway centre->east (scorched",
-    "basalt, MC_ANCHOR to ONY_ANCHOR), closed by a border cliff ring so nobody falls off the map edge (royale's",
+    "corridor west->centre (fire-cult cave, RFC_ANCHOR to the mid pad) and a causeway centre->east (scorched",
+    "basalt, mid pad to ONY_ANCHOR), closed by a border cliff ring so nobody falls off the map edge (royale's",
     "'no holes: players drop in anywhere' approach, since this is a raid with a fixed entrance not a BG drop).",
     "pois feed the raid's boss/trash anchor SQL the way bh_royale_poi feeds Royale's POI table (package.py",
     "writes it): 'entrance' is the raid's start point, 'intro_boss' the RFC-leg custom boss spot, 'final_boss'",
@@ -43,7 +42,7 @@
    "features": [
      {"_": "RFC_ANCHOR pad: a shallow scorched bowl, entrance faces east into the tunnel", "type": "flatten",
       "shape": {"circle": {"center": [455, 455], "radius": 60}}, "height": 6, "falloff": 24},
-     {"_": "MC_ANCHOR pad: a wide basalt shelf, the raid's midpoint", "type": "flatten",
+     {"_": "the mid pad: a wide basalt shelf in Molten Core's register, the raid's midpoint", "type": "flatten",
       "shape": {"circle": {"center": [-266, 266], "radius": 90}}, "height": 4, "falloff": 36},
      {"_": "ONY_ANCHOR pad: Onyxia's bowl mouth, slightly sunken for the dragon's lair feel", "type": "flatten",
       "shape": {"circle": {"center": [-900, 266], "radius": 100}}, "height": 1, "falloff": 42, "mode": "lower"},
@@ -87,26 +86,39 @@
   ],
   "wmos": [
     {
-      "_comment": "TODO: confirm real client path, bounds and door facing on the VPS before build",
-      "model": "World\\wmo\\TODO\\RagefireChasm\\RagefireChasm.wmo",
+      "_comment": [
+        "Ragefire Chasm. Its client name is the Orgrimmar Lava Dungeon, which is why nothing called 'ragefire'",
+        "exists: path confirmed from the live client's archives (list_client_files.py over common.MPQ).",
+        "Facing and the exact position still need a look in game: the model carries its own entrance, so the",
+        "connective tunnel's mouth (the ramp from RFC_ANCHOR towards the mid pad) has to meet that door."
+      ],
+      "model": "World\\wmo\\Dungeon\\KL_OrgrimmarLavaDungeon\\LavaDungeon.wmo",
       "position": [455, 455, 6],
       "facing": 90,
       "label": "RFC_ANCHOR"
     },
     {
-      "_comment": "TODO: confirm real client path, bounds and door facing on the VPS before build",
-      "model": "World\\wmo\\TODO\\MoltenCore\\MoltenCore.wmo",
-      "position": [-266, 266, 4],
-      "facing": 180,
-      "label": "MC_ANCHOR"
-    },
-    {
-      "_comment": "TODO: confirm real client path, bounds and door facing on the VPS before build",
-      "model": "World\\wmo\\TODO\\Onyxia\\OnyxiasLair.wmo",
+      "_comment": [
+        "Onyxia's Lair, the main cavern. The client holds KL_OnyxiasLair.wmo, _A and _B; only _A and _B are",
+        "referenced by the game (both are in the realm's extracted vmaps, the bare one is not), and _B is the",
+        "large hall (441 KB of vmap against _A's 158 KB), so _B is the lair the raid ends in. _A (the entrance",
+        "stretch) can be added beside it once the two are seen together in game: their relative offset comes",
+        "from map 249's own placement, which is not copied here.",
+        "Facing and position need the same in-game check as the RFC anchor."
+      ],
+      "model": "World\\wmo\\Dungeon\\KL_OnyxiasLair\\KL_OnyxiasLair_B.wmo",
       "position": [-900, 266, 1],
       "facing": 180,
       "label": "ONY_ANCHOR"
     }
+  ],
+  "_molten_core": [
+    "There is no Molten Core WMO. The client's whole Dungeon\\ WMO tree was listed and MC is not in it; the",
+    "AZ_Blackrock models are Blackrock Depths (_lower_) and Blackrock Spire (_upper_). Molten Core is built",
+    "from ADT terrain on its own map (409), so it cannot be placed as a model the way RFC and Onyxia are.",
+    "The middle leg is therefore MapForge's own lava terrain in MC's register (the lavarock/ash texturing and",
+    "the sunken gullies flanking the causeway below), not MC's actual rooms. Importing MC's real geometry",
+    "would mean copying its ADT tiles, which this generator does not do."
   ],
   "pois": [
     {"name": "raid_entrance", "title": "Raid Entrance", "kind": "entrance", "position": [480, 430, 6],
