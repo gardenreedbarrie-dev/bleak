@@ -2,7 +2,9 @@
   "_comment": [
     "Bleakhold: Crucible of Onyxia (map 902), terrain v1: a 10-man custom raid laid out as one continuous map,",
     "three legs sharing one instance lock. World X is north, Y is west (MapForge convention, see royale_v1.json).",
-    "Tile range x [31,33] y [31,32]: a 1600 x 1066.67 yard block, centre C (-266.67, 266.67).",
+    "Tile range x [31,33] y [31,32]. Note the axes: tiles.x runs along world Y and tiles.y along world X,",
+    "so the block is X -533.33..533.33 by Y -1066.67..533.33. The three legs run along Y (the long axis);",
+    "the border cliff (inset 50, width 100) eats the outer ~150 yards, so every pad stays well inside that.",
     "Three WMO placements carry the real dungeon/raid interiors UNCHANGED: the Ragefire Chasm WMO at the west",
     "anchor (RFC_ANCHOR) and the Onyxia's Lair WMO at the east anchor (ONY_ANCHOR). The middle leg has no WMO:",
     "Molten Core is ADT terrain, not a model (see _molten_core below). Both WMO paths are confirmed against",
@@ -27,12 +29,12 @@
   "area_id": 5220,
   "uid_base": 320000,
   "areas": [
-    {"_": "RFC leg (intro boss + trash)", "area_id": 5221, "shape": {"circle": {"center": [455, 455], "radius": 160}}},
-    {"_": "connective tunnel, west->centre", "area_id": 5221,
-     "shape": {"rect": {"min": [120, 180], "max": [420, 520]}}},
-    {"_": "MC leg (trash/path only)", "area_id": 5222, "shape": {"circle": {"center": [-266, 266], "radius": 200}}},
-    {"_": "causeway, centre->east", "area_id": 5222, "shape": {"rect": {"min": [-820, 180], "max": [-320, 360]}}},
-    {"_": "Onyxia leg (final boss)", "area_id": 5223, "shape": {"circle": {"center": [-900, 266], "radius": 220}}}
+    {"_": "the Fire-Cult Chasm leg (RFC)", "area_id": 5221, "shape": {"circle": {"center": [0, 300], "radius": 170}}},
+    {"_": "connective tunnel, chasm -> mid pad", "area_id": 5221,
+     "shape": {"rect": {"min": [-60, 40], "max": [60, 260]}}},
+    {"_": "the Scorched Causeway (mid leg, no WMO)", "area_id": 5222, "shape": {"circle": {"center": [0, -150], "radius": 200}}},
+    {"_": "causeway, mid pad -> lair", "area_id": 5222, "shape": {"rect": {"min": [-90, -620], "max": [90, -240]}}},
+    {"_": "Onyxia's Own (the lair)", "area_id": 5223, "shape": {"circle": {"center": [0, -700], "radius": 220}}}
   ],
   "heightmap": {"base": 6,
    "noise": [
@@ -41,21 +43,23 @@
    ],
    "features": [
      {"_": "RFC_ANCHOR pad: a shallow scorched bowl, entrance faces east into the tunnel", "type": "flatten",
-      "shape": {"circle": {"center": [455, 455], "radius": 60}}, "height": 6, "falloff": 24},
+      "shape": {"circle": {"center": [0, 300], "radius": 60}}, "height": 6, "falloff": 24},
      {"_": "the mid pad: a wide basalt shelf in Molten Core's register, the raid's midpoint", "type": "flatten",
-      "shape": {"circle": {"center": [-266, 266], "radius": 90}}, "height": 4, "falloff": 36},
+      "shape": {"circle": {"center": [0, -150], "radius": 90}}, "height": 4, "falloff": 36},
      {"_": "ONY_ANCHOR pad: Onyxia's bowl mouth, slightly sunken for the dragon's lair feel", "type": "flatten",
-      "shape": {"circle": {"center": [-900, 266], "radius": 100}}, "height": 1, "falloff": 42, "mode": "lower"},
+      "shape": {"circle": {"center": [0, -700], "radius": 100}}, "height": 1, "falloff": 42, "mode": "lower"},
      {"_": "tunnel corridor RFC->MC: a sunken scorched-rock ramp", "type": "ramp",
-      "from": [420, 480, 6], "to": [-180, 300, 4], "width": 34, "falloff": 18},
+      "from": [0, 240, 6], "to": [0, -60, 4], "width": 34, "falloff": 18},
      {"_": "causeway MC->Onyxia: a wider basalt path, lava-flanked", "type": "ramp",
-      "from": [-360, 280, 4], "to": [-800, 270, 2], "width": 40, "falloff": 20},
+      "from": [0, -240, 4], "to": [0, -600, 2], "width": 40, "falloff": 20},
      {"_": "shallow lava-adjacent gullies either side of the causeway", "type": "hill",
-      "center": [-560, 180], "radius": 90, "height": -3, "shape": "dome"},
-     {"type": "hill", "center": [-560, 360], "radius": 90, "height": -3, "shape": "dome"},
-     {"_": "the closing ring: a jittered cliff wall, raid has one fixed entrance so no gaps needed", "type": "border",
-      "inset": 50, "width": 100, "height": 40, "jitter": 18, "jitter_scale": 160, "seed": 21},
-     {"type": "clamp", "min": -4, "max": 80}
+      "center": [-130, -420], "radius": 90, "height": -3, "shape": "dome"},
+     {"type": "hill", "center": [130, -420], "radius": 90, "height": -3, "shape": "dome"},
+     {"_": "closing ring, outer foothill: a jittered rise up to the cliff foot (same two-ring form as royale_v1)",
+      "type": "border", "inset": 50, "width": 90, "height": 18, "jitter": 18, "jitter_scale": 160, "seed": 21},
+     {"_": "closing ring, inner wall: a short steep cliff (height 60 over width 20 is ~72 deg, past the 50 deg walkable limit) so nobody climbs or swims out; one fixed entrance, no gaps needed",
+      "type": "border", "inset": 10, "width": 20, "height": 60, "jitter": 6, "jitter_scale": 120, "seed": 22},
+     {"type": "clamp", "min": -4, "max": 100}
    ]},
   "textures": [
     {"name": "ash", "path": "TILESET\\Generic\\BurntGround01.blp", "color": "#2c2420"},
@@ -69,19 +73,19 @@
      "noise": {"scale": 60, "threshold": 0.22, "fade": 0.2, "seed": 4}},
     {"_": "global: roads paint here", "roads": true},
     {"_": "regional: RFC pad ash", "texture": "ash", "fade": 18, "strength": 0.85,
-     "shape": {"circle": {"center": [455, 455], "radius": 70}}},
+     "shape": {"circle": {"center": [0, 300], "radius": 70}}},
     {"_": "regional: scorched grass fringe around the RFC pad", "texture": "scorchedgrass", "fade": 24,
-     "strength": 0.6, "shape": {"circle": {"center": [455, 455], "radius": 110}}},
+     "strength": 0.6, "shape": {"circle": {"center": [0, 300], "radius": 110}}},
     {"_": "regional: MC pad lava-rock", "texture": "lavarock", "fade": 22, "strength": 0.85,
-     "shape": {"circle": {"center": [-266, 266], "radius": 100}}},
+     "shape": {"circle": {"center": [0, -150], "radius": 100}}},
     {"_": "regional: Onyxia pad bone dust", "texture": "bonedust", "fade": 26, "strength": 0.8,
-     "shape": {"circle": {"center": [-900, 266], "radius": 110}}},
+     "shape": {"circle": {"center": [0, -700], "radius": 110}}},
     {"_": "global: rock on steep ground (border cliffs)", "texture": "lavarock", "slope": {"min": 24, "max": 40}}
   ],
   "roads": [
-    {"name": "rfc_to_mc", "points": [[455, 455], [420, 480], [120, 380], [-180, 300], [-266, 266]], "width": 10,
+    {"name": "chasm_to_mid", "points": [[0, 300], [0, 240], [0, 60], [0, -60], [0, -150]], "width": 10,
      "fade": 5, "texture": "ash"},
-    {"name": "mc_to_onyxia", "points": [[-266, 266], [-360, 280], [-560, 270], [-800, 270], [-900, 266]],
+    {"name": "mid_to_lair", "points": [[0, -150], [0, -240], [0, -420], [0, -600], [0, -700]],
      "width": 12, "fade": 5, "texture": "lavarock"}
   ],
   "wmos": [
@@ -93,8 +97,8 @@
         "connective tunnel's mouth (the ramp from RFC_ANCHOR towards the mid pad) has to meet that door."
       ],
       "model": "World\\wmo\\Dungeon\\KL_OrgrimmarLavaDungeon\\LavaDungeon.wmo",
-      "position": [455, 455, 6],
-      "facing": 90,
+      "position": [0, 300, 6],
+      "facing": 180,
       "label": "RFC_ANCHOR"
     },
     {
@@ -107,8 +111,8 @@
         "Facing and position need the same in-game check as the RFC anchor."
       ],
       "model": "World\\wmo\\Dungeon\\KL_OnyxiasLair\\KL_OnyxiasLair_B.wmo",
-      "position": [-900, 266, 1],
-      "facing": 180,
+      "position": [0, -700, 1],
+      "facing": 0,
       "label": "ONY_ANCHOR"
     }
   ],
@@ -121,15 +125,15 @@
     "would mean copying its ADT tiles, which this generator does not do."
   ],
   "pois": [
-    {"name": "raid_entrance", "title": "Raid Entrance", "kind": "entrance", "position": [480, 430, 6],
-     "facing": 225, "radius": 8, "weight": 1},
-    {"name": "firecult_warden", "title": "Fire-Cult Warden", "kind": "intro_boss", "position": [455, 455, 6],
+    {"name": "raid_entrance", "title": "Raid Entrance", "kind": "entrance", "position": [0, 370, 6],
+     "facing": 180, "radius": 8, "weight": 1},
+    {"name": "firecult_warden", "title": "Fire-Cult Warden", "kind": "intro_boss", "position": [0, 300, 6],
      "facing": 0, "radius": 20, "weight": 1},
-    {"name": "rfc_trash", "title": "RFC Trash", "kind": "trash_anchor", "position": [420, 470, 6], "facing": 0,
+    {"name": "rfc_trash", "title": "RFC Trash", "kind": "trash_anchor", "position": [0, 250, 6], "facing": 0,
      "radius": 40, "weight": 1},
-    {"name": "causeway_trash", "title": "Causeway Trash", "kind": "trash_anchor", "position": [-560, 270, 3],
+    {"name": "causeway_trash", "title": "Causeway Trash", "kind": "trash_anchor", "position": [0, -420, 3],
      "facing": 0, "radius": 60, "weight": 1},
-    {"name": "onyxia", "title": "Onyxia", "kind": "final_boss", "position": [-900, 266], "facing": 0,
+    {"name": "onyxia", "title": "Onyxia", "kind": "final_boss", "position": [0, -700], "facing": 0,
      "radius": 60, "weight": 1, "z_from": "ONY_ANCHOR"}
   ]
 }
