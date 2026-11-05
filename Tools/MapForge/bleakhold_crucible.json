@@ -22,10 +22,15 @@
         "ghost revival, outdoor PvP) so a raid with no explicit flags doesn't inherit anything stray from its",
         "template zone; package.py fails on anything left over outside HARMLESS_TEMPLATE_FLAGS, same check as",
         "royale.",
-        "zone.template 215 (Blackrock Depths) for ambience/music closer to a lava-and-dragon raid than",
-        "Duskwood; swap for another verified 3.3.5a zone template on the VPS build if the ambience doesn't fit.",
-        "light.skybox: StratholmeSkybox (a dim, enclosed-feeling sky) as a placeholder for an indoor-feeling raid;",
-        "DeathSkybox or IceCrownDarkSky are the other verified alternatives royale_v1's own comment lists.",
+        "zone.template 46 (Burning Steppes): the ambience and music of an outdoor volcanic zone, for an outdoor lava",
+        "caldera. (The first version said 215, written from memory as Blackrock Depths; 215 is Mulgore.) The build",
+        "copies the template's ambience, music and flags; INSIDE is in clear_flags because this map is outdoors (an",
+        "INSIDE area changes mounting and the sky). Check the id before a build with forge_check.py --areas, which",
+        "lists the AreaTable rows with their names and flags and runs the forge on the realm's DBCs.",
+        "light.params_from_map 409: Molten Core's own default light set (its fog, sky and sun colours: a dark red",
+        "glow), which is what makes the lava basin read as lava rather than as a brown field. The forge stops with",
+        "'map 409 has no default light' if Light.dbc has no row for it; use params_from_map 229 (Blackrock Spire)",
+        "or 249 (Onyxia's Lair) instead in that case.",
         "corpse_map -1, corpse_x/y 0: same as royale, release-to-graveyard behaviour is server-side (Phase 2)."
     ],
     "map": {
@@ -47,24 +52,24 @@
     },
     "zone": {
         "id": 5220,
-        "template": 215,
+        "template": 46,
         "name": "Bleakhold: Crucible of Onyxia",
         "set_flags": [],
         "clear_flags": ["SANCTUARY", "OUTLAND", "OUTLAND2", "CAPITAL", "SLAVE_CAPITAL", "SLAVE_CAPITAL2", "CITY",
                         "TOWN", "REST_ZONE_HORDE", "REST_ZONE_ALLIANCE", "CONTESTED_AREA", "WINTERGRASP",
                         "WINTERGRASP_2", "ALLOW_DUELS", "NEED_FLY", "OUTDOOR_PVP", "ARENA", "ARENA_INSTANCE",
-                        "UNK4", "LOWLEVEL"],
+                        "UNK4", "LOWLEVEL", "INSIDE"],
         "exploration_level": 0,
         "faction_group_mask": 0,
         "subzones": [
             { "id": 5221, "name": "The Fire-Cult Chasm" },
-            { "id": 5222, "name": "The Scorched Causeway" },
-            { "id": 5223, "name": "Onyxia's Own" }
+            { "id": 5222, "name": "The Molten Basin" },
+            { "id": 5223, "name": "The Dragon's Nest" }
         ]
     },
     "loading_screen": null,
     "light": {
-        "skybox": "Environments\\Stratholme\\StratholmeSkybox.M2"
+        "params_from_map": 409
     },
     "world_map_area": {
         "name": "BleakholdCrucible",
