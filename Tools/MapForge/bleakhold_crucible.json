@@ -23,14 +23,15 @@
         "template zone; package.py fails on anything left over outside HARMLESS_TEMPLATE_FLAGS, same check as",
         "royale.",
         "zone.template 46 (Burning Steppes): the ambience and music of an outdoor volcanic zone, for an outdoor lava",
-        "caldera. (The first version said 215, written from memory as Blackrock Depths; 215 is Mulgore.) The build",
+        "caldera, confirmed in the realm's AreaTable (flags: ALLOW_DUELS only, cleared below). (The first version",
+        "said 215, written from memory as Blackrock Depths; 215 is Mulgore.) The build",
         "copies the template's ambience, music and flags; INSIDE is in clear_flags because this map is outdoors (an",
         "INSIDE area changes mounting and the sky). Check the id before a build with forge_check.py --areas, which",
         "lists the AreaTable rows with their names and flags and runs the forge on the realm's DBCs.",
-        "light.params_from_map 409: Molten Core's own default light set (its fog, sky and sun colours: a dark red",
-        "glow), which is what makes the lava basin read as lava rather than as a brown field. The forge stops with",
-        "'map 409 has no default light' if Light.dbc has no row for it; use params_from_map 229 (Blackrock Spire)",
-        "or 249 (Onyxia's Lair) instead in that case.",
+        "light.params_from_map 249: Onyxia's Lair's own default light set (Light 320: its fog, sky and sun colours).",
+        "Read from the realm's DBCs with forge_check.py: Molten Core (409), Ragefire (389), Blackrock Spire (229) and",
+        "Blackrock Depths (230) have NO default light (a Light row at 0,0,0), so params_from_map cannot copy them;",
+        "Onyxia's Lair (249, light 320) and Blackwing Lair (469, light 83) have one.",
         "corpse_map -1, corpse_x/y 0: same as royale, release-to-graveyard behaviour is server-side (Phase 2)."
     ],
     "map": {
@@ -69,7 +70,7 @@
     },
     "loading_screen": null,
     "light": {
-        "params_from_map": 409
+        "params_from_map": 249
     },
     "world_map_area": {
         "name": "BleakholdCrucible",
