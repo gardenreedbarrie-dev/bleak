@@ -62,7 +62,8 @@ def render(ctx, tiles: dict, out_preview: str, out_height: str) -> None:
     r_base = spec.ty0 * coords.LATTICE_PER_TILE
     c_base = spec.tx0 * coords.LATTICE_PER_TILE
     color = [[(0.0, 0.0, 0.0)] * width for _ in range(height)]
-    wet = [[False] * width for _ in range(height)]
+    # 0 = dry; otherwise the cell's liquid_type (so magma and slime are tinted as themselves, not as blue water).
+    wet = [[0] * width for _ in range(height)]
     for (tx, ty), res in tiles.items():
         for (ix, iy), tex in res.texturing.items():
             r0 = (ty * 16 + iy) * 16 - r_base
@@ -87,7 +88,7 @@ def render(ctx, tiles: dict, out_preview: str, out_height: str) -> None:
                 for r in range(2 * cy, 2 * cy + 3):
                     for c in range(2 * cx, 2 * cx + 3):
                         if grid.get(r_base + r0 + r, c_base + c0 + c) < level:
-                            wet[r0 + r][c0 + c] = True
+                            wet[r0 + r][c0 + c] = cw.liquid_type or 1
 
     lx, ly, lz = 0.5, 0.5, 0.7071
     lo = min(grid.get(r_base + r, c_base + c) for r in range(0, height, 4) for c in range(0, width, 4))
@@ -102,7 +103,13 @@ def render(ctx, tiles: dict, out_preview: str, out_height: str) -> None:
             nx, ny, nz = grid.normal(r_base + r, c_base + c)
             shade = 0.45 + 0.75 * max(0.0, nx * lx + ny * ly + nz * lz)
             red, green, blue = color[r][c]
-            if wet[r][c]:
+            lt = wet[r][c]
+            if lt == 3:  # magma / lava: emissive, so it keeps its glow in shadow
+                red, green, blue = red * 0.12 + 232, green * 0.12 + 84, blue * 0.12 + 22
+                shade = max(shade, 0.92)
+            elif lt == 4 or lt == 21:  # slime
+                red, green, blue = red * 0.3 + 70, green * 0.3 + 150, blue * 0.3 + 40
+            elif lt:  # water, ocean, everything else
                 red, green, blue = red * 0.35 + 30, green * 0.35 + 80, blue * 0.35 + 160
             row += bytes((_clamp8(red * shade), _clamp8(green * shade), _clamp8(blue * shade)))
             g = _clamp8((grid.get(r_base + r, c_base + c) - lo) / span * 255.0)

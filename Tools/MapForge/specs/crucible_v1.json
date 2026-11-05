@@ -1,139 +1,160 @@
 {
   "_comment": [
-    "Bleakhold: Crucible of Onyxia (map 902), terrain v1: a 10-man custom raid laid out as one continuous map,",
-    "three legs sharing one instance lock. World X is north, Y is west (MapForge convention, see royale_v1.json).",
-    "Tile range x [31,33] y [31,32]. Note the axes: tiles.x runs along world Y and tiles.y along world X,",
-    "so the block is X -533.33..533.33 by Y -1066.67..533.33. The three legs run along Y (the long axis);",
-    "the border cliff (inset 50, width 100) eats the outer ~150 yards, so every pad stays well inside that.",
-    "Three WMO placements carry the real dungeon/raid interiors UNCHANGED: the Ragefire Chasm WMO at the west",
-    "anchor (RFC_ANCHOR) and the Onyxia's Lair WMO at the east anchor (ONY_ANCHOR). The middle leg has no WMO:",
-    "Molten Core is ADT terrain, not a model (see _molten_core below). Both WMO paths are confirmed against",
-    "the live client's archives; what still needs an in-game look is each model's real footprint ('bounds')",
-    "and its door-facing orientation, so the connective tunnels meet the doors (rebuild with --assets for the",
-    "real model boxes, as royale_v1.json's own note says).",
-    "Connective terrain between the anchors is new (the custom 20%): three flattened pads, a ramped tunnel",
-    "corridor west->centre (fire-cult cave, RFC_ANCHOR to the mid pad) and a causeway centre->east (scorched",
-    "basalt, mid pad to ONY_ANCHOR), closed by a border cliff ring so nobody falls off the map edge (royale's",
-    "'no holes: players drop in anywhere' approach, since this is a raid with a fixed entrance not a BG drop).",
-    "pois feed the raid's boss/trash anchor SQL the way bh_royale_poi feeds Royale's POI table (package.py",
-    "writes it): 'entrance' is the raid's start point, 'intro_boss' the RFC-leg custom boss spot, 'final_boss'",
-    "Onyxia's own spot inside her WMO (z_from the WMO, like royale's crate z_from), 'trash_anchor' points mark",
-    "where leg trash spawns cluster (consumed when the SQL for Phase 2 is written; harmless if package.py's",
-    "current POI kind set doesn't know these names yet -- that validation is Royale-specific per the README).",
-    "Every non-WMO texture path below is a verified stock 3.3.5a path (lava/basalt/ash tilesets used all over",
-    "Blackrock Mountain content); only the three wmo 'model' paths need VPS verification."
+    "Bleakhold: Crucible of Onyxia (map 902) -- a 10-man raid built as one continuous volcanic caldera.",
+    "Axes (MapForge, like royale_v1): a feature's [x, y] is world [X, Y]; tiles.x runs along world Y and tiles.y",
+    "along world X, so the block is X -533.33..533.33 by Y -1066.67..533.33 and the long axis is Y. The raid runs",
+    "north (Y+, the high entrance rim) to south (Y-, Onyxia at the caldera floor), descending the whole way.",
+    "The three legs, centred on X = 0:",
+    "  1. Fire-Cult Chasm  (Y ~ +230): the real Ragefire Chasm WMO (client name LavaDungeon) set in a rock pad.",
+    "  2. the Molten Basin  (Y ~ -150): the showpiece -- a lava lake (liquid_type 3) with a raised basalt",
+    "     causeway crossing it, lava flanking both sides. Molten Core has no WMO (it is ADT terrain on its own",
+    "     map), so its leg is built terrain in MC's register, not its rooms. This is where the 'molten core'",
+    "     feel is carried by the map itself.",
+    "  3. Onyxia's Own     (Y ~ -720): the real Onyxia's Lair WMO (KL_OnyxiasLair_B) sunk into the caldera floor.",
+    "An enclosing volcanic mountain range (the 'mountains' feature) walls the caldera instead of a plain cliff.",
+    "Both WMO paths are confirmed from the live client's archives (list_client_files.py). Still provisional until",
+    "a build with --assets reads the real model boxes (wmo_info.py gives them): each WMO's pad height (so players",
+    "enter at the model's own floor, floor = pad_z + bbox_min_z) and its facing (so the approach meets the door).",
+    "The pad z values below (RFC 16, Onyxia 1) and facings are first guesses to be corrected from wmo_info.py.",
+    "pois feed the raid's spawn-anchor SQL (package.py writes it from pois.json), the way bh_royale_poi does for",
+    "Royale: 'entrance' the start, 'intro_boss'/'final_boss' the two encounters, 'trash_anchor' the trash packs.",
+    "Texture 'color' values are tuned for the preview (which shades by them); the BLP paths are stock Blackrock",
+    "Mountain / lava tileset paths and are resolved against the client at build time (terrain/validate.py",
+    "--assets), the same as every MapForge spec."
   ],
   "format": "mapforge-terrain/1",
   "map": {"id": 902, "directory": "BleakholdCrucible", "tiles": {"x": [31, 33], "y": [31, 32]}},
-  "seed": 20261104,
+  "seed": 20261105,
   "area_id": 5220,
   "uid_base": 320000,
   "areas": [
-    {"_": "the Fire-Cult Chasm leg (RFC)", "area_id": 5221, "shape": {"circle": {"center": [0, 300], "radius": 170}}},
-    {"_": "connective tunnel, chasm -> mid pad", "area_id": 5221,
-     "shape": {"rect": {"min": [-60, 40], "max": [60, 260]}}},
-    {"_": "the Scorched Causeway (mid leg, no WMO)", "area_id": 5222, "shape": {"circle": {"center": [0, -150], "radius": 200}}},
-    {"_": "causeway, mid pad -> lair", "area_id": 5222, "shape": {"rect": {"min": [-90, -620], "max": [90, -240]}}},
-    {"_": "Onyxia's Own (the lair)", "area_id": 5223, "shape": {"circle": {"center": [0, -700], "radius": 220}}}
+    {"_": "Fire-Cult Chasm (RFC leg)", "area_id": 5221, "shape": {"circle": {"center": [0, 300], "radius": 180}}},
+    {"_": "the Molten Basin (mid leg)", "area_id": 5222, "shape": {"circle": {"center": [0, -150], "radius": 260}}},
+    {"_": "Onyxia's Own (end leg)", "area_id": 5223, "shape": {"circle": {"center": [0, -720], "radius": 230}}}
   ],
-  "heightmap": {"base": 6,
+  "heightmap": {"base": 5,
    "noise": [
-     {"scale": 220, "amplitude": 6, "octaves": 3, "persistence": 0.5},
-     {"scale": 40, "amplitude": 1.6, "octaves": 2, "seed": 11}
+     {"scale": 190, "amplitude": 7, "octaves": 4, "persistence": 0.52},
+     {"scale": 52, "amplitude": 2.6, "octaves": 3, "seed": 13},
+     {"scale": 17, "amplitude": 0.8, "octaves": 2, "seed": 31}
    ],
    "features": [
-     {"_": "RFC_ANCHOR pad: a shallow scorched bowl, entrance faces east into the tunnel", "type": "flatten",
-      "shape": {"circle": {"center": [0, 300], "radius": 60}}, "height": 6, "falloff": 24},
-     {"_": "the mid pad: a wide basalt shelf in Molten Core's register, the raid's midpoint", "type": "flatten",
-      "shape": {"circle": {"center": [0, -150], "radius": 90}}, "height": 4, "falloff": 36},
-     {"_": "ONY_ANCHOR pad: Onyxia's bowl mouth, slightly sunken for the dragon's lair feel", "type": "flatten",
-      "shape": {"circle": {"center": [0, -700], "radius": 100}}, "height": 1, "falloff": 42, "mode": "lower"},
-     {"_": "tunnel corridor RFC->MC: a sunken scorched-rock ramp", "type": "ramp",
-      "from": [0, 240, 6], "to": [0, -60, 4], "width": 34, "falloff": 18},
-     {"_": "causeway MC->Onyxia: a wider basalt path, lava-flanked", "type": "ramp",
-      "from": [0, -240, 4], "to": [0, -600, 2], "width": 40, "falloff": 20},
-     {"_": "shallow lava-adjacent gullies either side of the causeway", "type": "hill",
-      "center": [-130, -420], "radius": 90, "height": -3, "shape": "dome"},
-     {"type": "hill", "center": [130, -420], "radius": 90, "height": -3, "shape": "dome"},
-     {"_": "closing ring, outer foothill: a jittered rise up to the cliff foot (same two-ring form as royale_v1)",
-      "type": "border", "inset": 50, "width": 90, "height": 18, "jitter": 18, "jitter_scale": 160, "seed": 21},
-     {"_": "closing ring, inner wall: a short steep cliff (height 60 over width 20 is ~72 deg, past the 50 deg walkable limit) so nobody climbs or swims out; one fixed entrance, no gaps needed",
-      "type": "border", "inset": 10, "width": 20, "height": 60, "jitter": 6, "jitter_scale": 120, "seed": 22},
-     {"type": "clamp", "min": -4, "max": 100}
+     {"_": "north entrance terrace: the raid spawns on a high shelf, kept inside the mountain foot (Y<383)",
+      "type": "flatten", "shape": {"circle": {"center": [0, 300], "radius": 62}}, "height": 26, "falloff": 36},
+     {"_": "ramp down from the terrace to the Fire-Cult Chasm pad", "type": "ramp",
+      "from": [0, 260, 26], "to": [0, 215, 16], "width": 46, "falloff": 18},
+     {"_": "Fire-Cult Chasm pad: flat ground the Ragefire WMO stands on (z adjusts to the model floor)",
+      "type": "flatten", "shape": {"circle": {"center": [0, 180], "radius": 78}}, "height": 16, "falloff": 30},
+     {"_": "gentle descent from the chasm shoulder down to the molten basin", "type": "ramp",
+      "from": [0, 130, 16], "to": [0, 40, 4], "width": 72, "falloff": 42},
+     {"_": "the molten basin FLOOR: a broad dry basalt flat at z 3. The lava pools are separate lake shapes cut",
+      "type": "flatten", "shape": {"circle": {"center": [0, -230], "radius": 310}}, "height": 3, "falloff": 70,
+      "mode": "lower"},
+     {"_": "keep the central causeway spine a touch higher so the path between the two lava fields reads as a road",
+      "type": "flatten", "shape": {"rect": {"min": [-46, -520], "max": [46, 90]}}, "height": 5, "falloff": 16},
+     {"_": "the land-bridge shoulder rising from the basin floor toward Onyxia", "type": "ramp",
+      "from": [0, -500, 5], "to": [0, -610, 7], "width": 80, "falloff": 36},
+     {"_": "Onyxia's bowl: the sunken caldera floor her lair sits in (dry, ember-lit; z adjusts to model floor)",
+      "type": "flatten", "shape": {"circle": {"center": [0, -760], "radius": 150}}, "height": 1, "falloff": 64,
+      "mode": "lower"},
+     {"_": "the caldera wall: a jagged volcanic range on every edge, ledged faces, a steep foot that seals it",
+      "type": "mountains", "width": 150, "height": [72, 152], "cliff": {"height": 58, "width": 14}, "layers": 4,
+      "peak_scale": 150, "saddles": 0.45, "ledges": {"step": 18, "flat": 0.4, "coverage": 0.5}, "jitter": 36,
+      "jitter_scale": 200, "corner_radius": 180, "seed": 41},
+     {"type": "clamp", "min": -16, "max": 185}
    ]},
+  "lakes": [
+    {"_": "WEST lava field: a magma body (liquid_type 3), jagged polygon outline, all X < -46 (dry causeway east)",
+     "name": "lava_west", "liquid_type": 3, "level": -3,
+     "shape": {"polygon": {"points": [
+       [-50, 70], [-120, 100], [-190, 60], [-250, 95], [-300, 10], [-280, -90], [-320, -170],
+       [-290, -280], [-320, -360], [-230, -410], [-150, -360], [-110, -400], [-60, -300],
+       [-95, -210], [-55, -150], [-90, -60]
+     ]}},
+     "depth": 16, "shelf": 42, "shore": 16, "freeboard": 1.4, "min_depth": 0.8},
+    {"_": "EAST lava field: the other field across the causeway, its own jagged outline, all X > 46",
+     "name": "lava_east", "liquid_type": 3, "level": -3,
+     "shape": {"polygon": {"points": [
+       [50, 100], [130, 120], [200, 80], [260, 110], [320, 20], [290, -80], [325, -170],
+       [300, -270], [330, -360], [240, -420], [150, -370], [110, -420], [60, -310],
+       [100, -220], [55, -150], [95, -50]
+     ]}},
+     "depth": 16, "shelf": 42, "shore": 16, "freeboard": 1.4, "min_depth": 0.8},
+    {"_": "lair moat, WEST half: lava guarding Onyxia's left; the dry land-bridge passes through the X=0 gap",
+     "name": "lair_moat_w", "liquid_type": 3, "level": -2,
+     "shape": {"polygon": {"points": [
+       [-250, -560], [-150, -520], [-66, -545], [-66, -660], [-150, -645], [-250, -648]
+     ]}},
+     "depth": 12, "shelf": 34, "shore": 18, "freeboard": 1.0, "min_depth": 0.6},
+    {"_": "lair moat, EAST half: the matching crescent on Onyxia's right side of the land-bridge",
+     "name": "lair_moat_e", "liquid_type": 3, "level": -2,
+     "shape": {"polygon": {"points": [
+       [66, -540], [150, -525], [250, -565], [255, -645], [150, -660], [66, -655]
+     ]}},
+     "depth": 12, "shelf": 34, "shore": 18, "freeboard": 1.0, "min_depth": 0.6}
+  ],
+  "_lake_note": "Each lake floods its whole shape (the shape is the lava's extent), so the dry basalt causeway and floor are the ground OUTSIDE these polygons. The two basin fields sit either side of the X=0 causeway spine (z 5); the lair moat is crossed by the land-bridge on the way to Onyxia.",
   "textures": [
-    {"name": "ash", "path": "TILESET\\Generic\\BurntGround01.blp", "color": "#2c2420"},
-    {"name": "basalt", "path": "TILESET\\BlackRock\\BlackrockTrollRubble.blp", "color": "#453a36"},
-    {"name": "lavarock", "path": "TILESET\\BlackRock\\BlackrockBrick.blp", "color": "#55433a"},
-    {"name": "scorchedgrass", "path": "TILESET\\Generic\\BurntGrass.blp", "color": "#3b3326"},
-    {"name": "bonedust", "path": "TILESET\\Felwood\\FelwoodDirt01.blp", "color": "#6b5c4a"}
+    {"name": "ash", "path": "TILESET\\BlackRock\\BlackrockAsh.blp", "color": "#4a423a"},
+    {"name": "basalt", "path": "TILESET\\BlackRock\\BlackrockBrick.blp", "color": "#2a241e"},
+    {"name": "obsidian", "path": "TILESET\\BlackRock\\BlackrockTrollRubble.blp", "color": "#17141a"},
+    {"name": "emberrock", "path": "TILESET\\BlackRock\\BlackrockLava.blp", "color": "#8a361a"},
+    {"name": "cindergrass", "path": "TILESET\\Generic\\BurntGrass.blp", "color": "#41362a"}
   ],
   "texture_rules": [
-    {"_": "global base: scorched rock everywhere", "texture": "basalt",
-     "noise": {"scale": 60, "threshold": 0.22, "fade": 0.2, "seed": 4}},
-    {"_": "global: roads paint here", "roads": true},
-    {"_": "regional: RFC pad ash", "texture": "ash", "fade": 18, "strength": 0.85,
-     "shape": {"circle": {"center": [0, 300], "radius": 70}}},
-    {"_": "regional: scorched grass fringe around the RFC pad", "texture": "scorchedgrass", "fade": 24,
-     "strength": 0.6, "shape": {"circle": {"center": [0, 300], "radius": 110}}},
-    {"_": "regional: MC pad lava-rock", "texture": "lavarock", "fade": 22, "strength": 0.85,
-     "shape": {"circle": {"center": [0, -150], "radius": 100}}},
-    {"_": "regional: Onyxia pad bone dust", "texture": "bonedust", "fade": 26, "strength": 0.8,
-     "shape": {"circle": {"center": [0, -700], "radius": 110}}},
-    {"_": "global: rock on steep ground (border cliffs)", "texture": "lavarock", "slope": {"min": 24, "max": 40}}
+    {"_": "obsidian-black rock on the high steep ground only (mountain faces); low pool rims stay ember",
+     "texture": "obsidian", "slope": {"min": 24, "max": 46}, "height": {"min": 22, "max": 200, "fade": 10}},
+    {"_": "broken basalt patches over the base ash on the open ground (the dominant floor tone)",
+     "texture": "basalt", "noise": {"scale": 54, "threshold": 0.12, "fade": 0.24, "seed": 5}, "strength": 0.9},
+    {"_": "a tight glowing-ember rim only at the lava's edge (the lowest ground), nowhere else",
+     "texture": "emberrock", "height": {"min": -6, "max": 6, "fade": 4}, "slope": {"min": 0, "max": 20},
+     "strength": 0.85},
+    {"_": "cinder grass clinging to the high north terrace (the only ground that is not scorched bare)",
+     "texture": "cindergrass", "fade": 22, "strength": 0.5, "shape": {"circle": {"center": [0, 300], "radius": 95}}},
+    {"_": "the roads (causeway and approaches) paint their basalt here", "roads": true}
   ],
   "roads": [
-    {"name": "chasm_to_mid", "points": [[0, 300], [0, 240], [0, 60], [0, -60], [0, -150]], "width": 10,
-     "fade": 5, "texture": "ash"},
-    {"name": "mid_to_lair", "points": [[0, -150], [0, -240], [0, -420], [0, -600], [0, -700]],
-     "width": 12, "fade": 5, "texture": "lavarock"}
+    {"name": "terrace_to_chasm", "points": [[0, 360], [0, 300], [0, 250], [0, 230]], "width": 14, "fade": 5,
+     "texture": "basalt"},
+    {"name": "chasm_to_basin", "points": [[0, 230], [0, 170], [0, 60], [0, 40]], "width": 13, "fade": 5,
+     "texture": "ash"},
+    {"name": "the_causeway", "points": [[0, 60], [0, -120], [0, -260], [0, -380]], "width": 16, "fade": 4,
+     "texture": "basalt"},
+    {"name": "basin_to_lair", "points": [[0, -380], [0, -500], [0, -640], [0, -700]], "width": 14, "fade": 5,
+     "texture": "basalt"}
   ],
   "wmos": [
     {
-      "_comment": [
-        "Ragefire Chasm. Its client name is the Orgrimmar Lava Dungeon, which is why nothing called 'ragefire'",
-        "exists: path confirmed from the live client's archives (list_client_files.py over common.MPQ).",
-        "Facing and the exact position still need a look in game: the model carries its own entrance, so the",
-        "connective tunnel's mouth (the ramp from RFC_ANCHOR towards the mid pad) has to meet that door."
-      ],
+      "_comment": "Ragefire Chasm (client name: Orgrimmar Lava Dungeon). Path confirmed from the client. Pad z and facing provisional until wmo_info.py gives the real box and door.",
       "model": "World\\wmo\\Dungeon\\KL_OrgrimmarLavaDungeon\\LavaDungeon.wmo",
-      "position": [0, 300, 6],
+      "position": [0, 180, 16],
       "facing": 180,
       "label": "RFC_ANCHOR"
     },
     {
-      "_comment": [
-        "Onyxia's Lair, the main cavern. The client holds KL_OnyxiasLair.wmo, _A and _B; only _A and _B are",
-        "referenced by the game (both are in the realm's extracted vmaps, the bare one is not), and _B is the",
-        "large hall (441 KB of vmap against _A's 158 KB), so _B is the lair the raid ends in. _A (the entrance",
-        "stretch) can be added beside it once the two are seen together in game: their relative offset comes",
-        "from map 249's own placement, which is not copied here.",
-        "Facing and position need the same in-game check as the RFC anchor."
-      ],
+      "_comment": "Onyxia's Lair main hall (KL_OnyxiasLair_B; the _A entrance stretch can be added once their real offset is read). Pad z and facing provisional until wmo_info.py gives the real box and door.",
       "model": "World\\wmo\\Dungeon\\KL_OnyxiasLair\\KL_OnyxiasLair_B.wmo",
-      "position": [0, -700, 1],
+      "position": [0, -760, 2],
       "facing": 0,
       "label": "ONY_ANCHOR"
     }
   ],
-  "_molten_core": [
-    "There is no Molten Core WMO. The client's whole Dungeon\\ WMO tree was listed and MC is not in it; the",
-    "AZ_Blackrock models are Blackrock Depths (_lower_) and Blackrock Spire (_upper_). Molten Core is built",
-    "from ADT terrain on its own map (409), so it cannot be placed as a model the way RFC and Onyxia are.",
-    "The middle leg is therefore MapForge's own lava terrain in MC's register (the lavarock/ash texturing and",
-    "the sunken gullies flanking the causeway below), not MC's actual rooms. Importing MC's real geometry",
-    "would mean copying its ADT tiles, which this generator does not do."
+  "_molten_core_note": [
+    "There is no Molten Core WMO: the whole client Dungeon\\ WMO tree was listed and MC is not in it (the",
+    "AZ_Blackrock models are Blackrock Depths and Spire). MC is ADT terrain on its own map, so its leg is the",
+    "lava basin and causeway built here, not MC's rooms. Importing MC's real geometry would mean copying its",
+    "ADT tiles, which this generator does not do."
   ],
   "pois": [
-    {"name": "raid_entrance", "title": "Raid Entrance", "kind": "entrance", "position": [0, 370, 6],
+    {"name": "raid_entrance", "title": "Raid Entrance", "kind": "entrance", "position": [0, 300, 30],
      "facing": 180, "radius": 8, "weight": 1},
-    {"name": "firecult_warden", "title": "Fire-Cult Warden", "kind": "intro_boss", "position": [0, 300, 6],
-     "facing": 0, "radius": 20, "weight": 1},
-    {"name": "rfc_trash", "title": "RFC Trash", "kind": "trash_anchor", "position": [0, 250, 6], "facing": 0,
-     "radius": 40, "weight": 1},
-    {"name": "causeway_trash", "title": "Causeway Trash", "kind": "trash_anchor", "position": [0, -420, 3],
-     "facing": 0, "radius": 60, "weight": 1},
-    {"name": "onyxia", "title": "Onyxia", "kind": "final_boss", "position": [0, -700], "facing": 0,
-     "radius": 60, "weight": 1, "z_from": "ONY_ANCHOR"}
+    {"name": "firecult_warden", "title": "Fire-Cult Warden", "kind": "intro_boss", "position": [0, 180, 20],
+     "facing": 180, "radius": 24, "weight": 1},
+    {"name": "chasm_trash", "title": "Chasm Trash", "kind": "trash_anchor", "position": [0, 120, 16],
+     "facing": 180, "radius": 40, "weight": 1},
+    {"name": "causeway_trash", "title": "Causeway Trash", "kind": "trash_anchor", "position": [0, -150, 8],
+     "facing": 0, "radius": 70, "weight": 1},
+    {"name": "onyxia", "title": "Onyxia", "kind": "final_boss", "position": [0, -760], "facing": 0,
+     "radius": 70, "weight": 1, "z_from": "ONY_ANCHOR"}
   ]
 }
