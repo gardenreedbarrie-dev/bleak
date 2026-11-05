@@ -23,25 +23,84 @@ Usage (on the VPS, with the real client):
 from __future__ import annotations
 
 import argparse
+import bz2
 import os
 import struct
 import sys
+import zlib
 
 MPQPACK_DIR = os.environ.get("MPQPACK_DIR", os.path.dirname(os.path.abspath(__file__)))
+# Look for mpqpack.py next to this script first, then where MPQPACK_DIR points.
 sys.path.insert(0, MPQPACK_DIR)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 try:
     import mpqpack
 except Exception as exc:  # pragma: no cover
-    sys.exit(f"could not import mpqpack from {MPQPACK_DIR}: {exc}")
+    sys.exit(f"could not import mpqpack (set MPQPACK_DIR to the folder holding mpqpack.py): {exc}")
 
-# The CRC-tolerant reader: Blizzard's files carry a sector-CRC block that mpqpack.py's own reader refuses.
-try:
-    from list_client_files import read_block_crc_tolerant
+MpqError = mpqpack.MpqError
+_COMPRESSION_ZLIB = 0x02
+_COMPRESSION_BZIP2 = 0x10
 
-    mpqpack.MpqArchive.read_block = read_block_crc_tolerant
-except Exception:
-    print("note: list_client_files.py not next to this script; retail archives may fail to read", file=sys.stderr)
+
+# CRC-tolerant reader, inlined so this script needs no other file. Blizzard's archives carry a sector-CRC block,
+# so the sector offset table has one extra entry and mpqpack.py's own reader refuses them with
+# "sector CRCs are not supported". This accepts that layout (skipping the trailing CRC sector) and takes bzip2
+# and stored sectors too, which Blizzard mixes in.
+def _decompress(chunk, expected, where):
+    if not chunk:
+        raise MpqError(f"{where}: empty compressed unit")
+    mask, body = chunk[0], chunk[1:]
+    if mask == _COMPRESSION_ZLIB:
+        data = zlib.decompress(body)
+    elif mask == _COMPRESSION_BZIP2:
+        data = bz2.decompress(body)
+    else:
+        raise MpqError(f"{where}: compression 0x{mask:02X} not supported (zlib 0x02, bzip2 0x10)")
+    if len(data) != expected:
+        raise MpqError(f"{where}: decompressed to {len(data)} instead of {expected}")
+    return data
+
+
+def read_block_crc_tolerant(self, block_index, name=""):
+    block = self.blocks[block_index]
+    where = name or f"block {block_index}"
+    if not block.flags & mpqpack.FILE_EXISTS:
+        raise MpqError(f"{where}: not FILE_EXISTS")
+    if block.flags & mpqpack.FILE_DELETE_MARKER:
+        raise MpqError(f"{where}: delete marker")
+    stored = self.data[block.offset:block.offset + block.compressed_size]
+    if len(stored) != block.compressed_size or block.offset + block.compressed_size > self.archive_end:
+        raise MpqError(f"{where}: data runs past the end of the archive")
+    if not block.flags & 0xFFF00:
+        return stored
+    if block.flags & (mpqpack.FILE_ENCRYPTED | mpqpack.FILE_FIX_KEY):
+        raise MpqError(f"{where}: encrypted files are not supported")
+    if block.file_size == 0:
+        return b""
+    if block.flags & mpqpack.FILE_SINGLE_UNIT:
+        return stored if block.compressed_size == block.file_size else _decompress(stored, block.file_size, where)
+    sector_count = (block.file_size + self.sector_size - 1) // self.sector_size
+    plain_table = 4 * (sector_count + 1)
+    crc_table = 4 * (sector_count + 2)
+    if len(stored) < plain_table:
+        raise MpqError(f"{where}: sector table is cut off")
+    first = struct.unpack_from("<I", stored)[0]
+    entries = sector_count + 2 if first == crc_table else sector_count + 1
+    offsets = struct.unpack_from(f"<{entries}I", stored)
+    if offsets[0] not in (plain_table, crc_table):
+        raise MpqError(f"{where}: first sector offset {offsets[0]} is neither {plain_table} nor {crc_table}")
+    out = bytearray()
+    last_size = block.file_size % self.sector_size or self.sector_size
+    for i in range(sector_count):
+        expected = last_size if i == sector_count - 1 else self.sector_size
+        chunk = stored[offsets[i]:offsets[i + 1]]
+        out += chunk if len(chunk) == expected else _decompress(chunk, expected, f"{where} sector {i}")
+    return bytes(out)
+
+
+mpqpack.MpqArchive.read_block = read_block_crc_tolerant
 
 
 def chunks(data: bytes):
