@@ -65,7 +65,8 @@
         "bounds": "auto"
     },
     "archives": {
-        "map": "patch-Q.MPQ",
+        "_comment": "patch-K.MPQ, NOT Royale's patch-Q: the two maps keep separate client archives so a Crucible build never clobbers a deployed Royale map (both would otherwise pack into patch-Q). K is free: it is not in reserved_letters (the realm-rebuild set) and not in the optional packs, and it was not among the realm's patches on the VPS. Verify it is free on the launcher before deploying.",
+        "map": "patch-K.MPQ",
         "marker_texture": "Interface\\Bleakhold\\Crucible\\Marker.blp",
         "dbc": "auto",
         "reserved_letters": "ABCDEGHIJLMNPRSTUVWXYZ",
