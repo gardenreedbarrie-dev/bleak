@@ -42,8 +42,8 @@
         "instance_type": 0,
         "pvp": 0,
         "flags": 0,
-        "description_horde": "Three lairs, one road: the fire-cult's chasm, the scorched causeway, and Onyxia's own.",
-        "description_alliance": "Three lairs, one road: the fire-cult's chasm, the scorched causeway, and Onyxia's own.",
+        "description_horde": "Down through Ragefire, across the Molten Basin, into Molten Core, and on to Onyxia's Lair.",
+        "description_alliance": "Down through Ragefire, across the Molten Basin, into Molten Core, and on to Onyxia's Lair.",
         "corpse_map": -1,
         "corpse_x": 0,
         "corpse_y": 0,
@@ -63,9 +63,9 @@
         "exploration_level": 0,
         "faction_group_mask": 0,
         "subzones": [
-            { "id": 5221, "name": "The Fire-Cult Chasm" },
+            { "id": 5221, "name": "Ragefire Canyon" },
             { "id": 5222, "name": "The Molten Basin" },
-            { "id": 5223, "name": "The Dragon's Nest" }
+            { "id": 5223, "name": "The Blackrock Gate" }
         ]
     },
     "loading_screen": null,

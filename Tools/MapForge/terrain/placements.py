@@ -184,7 +184,13 @@ def resolve_placements(spec, grid, assets=None, extra=None) -> tuple[list[Resolv
             wmos.append(r)
         if not r.footprint:
             raise SpecError(f"{where}: its footprint touches no chunk of the map")
-        if p.x - r.radius < wx0 or p.x + r.radius > wx1 or p.y - r.radius < wy0 or p.y + r.radius > wy1:
+        if bounds is not None:
+            # the model's real box, not a circle around its origin: a dungeon WMO's origin can lie hundreds of yards
+            # from its rooms (Molten Core's own map puts it ~1000 yards away), so the circle would always "reach past"
+            ex0, ex1, ey0, ey1 = lo[0], hi[0], lo[1], hi[1]
+        else:
+            ex0, ex1, ey0, ey1 = p.x - r.radius, p.x + r.radius, p.y - r.radius, p.y + r.radius
+        if ex0 < wx0 or ex1 > wx1 or ey0 < wy0 or ey1 > wy1:
             warnings.append(f"{where} reaches past the edge of the map's tiles")
     return doodads, wmos, warnings
 
