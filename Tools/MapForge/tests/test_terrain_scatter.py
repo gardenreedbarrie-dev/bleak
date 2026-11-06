@@ -171,6 +171,26 @@ class TestScatter(unittest.TestCase):
         self.assertGreaterEqual(min(gaps), 22.0 - 1e-6)
         self.assertLess(min(gaps), 34.0)  # closer than the default radius would allow
 
+    def test_buried_wmo_leaves_the_surface_free(self):
+        # A dungeon interior under the terrain must not empty the ground above it of scatter.
+        data = copy.deepcopy(SCATTER_SPEC)
+        box = [[-120, -120, -60], [120, 120, 40]]
+        data["scatter"] = data["scatter"][:1]
+        data["scatter"][0]["clearance"] = {"placements": 2}
+        data["wmos"] = [{"model": "World\\wmo\\X\\Cave.wmo", "position": [-200, -330, -300], "bounds": box}]
+        _, _, kept_off, _ = make(data)
+        near = lambda ps: [p for p in ps if math.hypot(p.x + 200, p.y + 330) < 100]  # noqa: E731
+        self.assertEqual(near(kept_off), [])
+        data["wmos"][0]["buried"] = True
+        _, _, buried, _ = make(data)
+        self.assertGreater(len(near(buried)), 5)
+
+    def test_buried_wmo_needs_a_depth(self):
+        data = copy.deepcopy(SCATTER_SPEC)
+        data["wmos"] = [{"model": "World\\wmo\\X\\Cave.wmo", "position": [-200, -330], "buried": True}]
+        with self.assertRaises(SpecError):
+            make(data)
+
     def test_noise_mask_thins_out(self):
         data = copy.deepcopy(SCATTER_SPEC)
         data["scatter"][0]["noise"] = {"scale": 80, "threshold": 0.4, "fade": 0.1}

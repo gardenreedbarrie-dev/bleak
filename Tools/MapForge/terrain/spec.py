@@ -144,7 +144,7 @@ class Texture:
 
 class Placement:
     def __init__(self, kind, model, x, y, z, z_offset, rotation, scale, uid, radius, flags, bounds, doodad_set,
-                 name_set, label, modern=False):
+                 name_set, label, modern=False, buried=False):
         self.kind = kind  # "doodad" | "wmo"
         self.model = model
         self.x = x
@@ -161,6 +161,9 @@ class Placement:
         self.name_set = name_set
         self.label = label
         self.modern = modern  # a resolved extra asset: client tiles only, never the server's extract tiles
+        # a WMO wholly under the terrain (a dungeon interior reached by teleport): it keeps no scattered doodad off
+        # the surface above it (scatter_placements); everything else about it is as for any WMO
+        self.buried = buried
 
 
 class Spec:
@@ -408,7 +411,7 @@ def _parse_placement(obj, kind: str, where: str, spec: Spec) -> Placement:
     allowed = {"model", "position", "z_offset", "rotation", "facing", "scale", "uid", "radius", "flags", "label"}
     allowed.add("bounds")
     if kind == "wmo":
-        allowed |= {"doodad_set", "name_set"}
+        allowed |= {"doodad_set", "name_set", "buried"}
     _check_keys(obj, allowed, {"model", "position"}, where)
     modern = False
     if kind == "doodad":
@@ -464,8 +467,13 @@ def _parse_placement(obj, kind: str, where: str, spec: Spec) -> Placement:
     label = obj.get("label", "")
     if not isinstance(label, str):
         raise SpecError(f"{where}.label: expected a string")
+    buried = obj.get("buried", False)
+    if not isinstance(buried, bool):
+        raise SpecError(f"{where}.buried: true or false")
+    if buried and z is None:
+        raise SpecError(f"{where}.buried: a buried WMO needs an explicit z (its depth under the terrain)")
     return Placement(kind, model, x, y, z, _num(obj, "z_offset", where, default=0.0), rotation, scale, uid, radius,
-                     flags, bounds, doodad_set, name_set, label, modern)
+                     flags, bounds, doodad_set, name_set, label, modern, buried)
 
 
 # POI kinds with fixed meanings (the Royale server's bh_royale_poi rows): the allowed `param` values and whether a

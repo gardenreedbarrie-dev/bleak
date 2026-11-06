@@ -286,7 +286,8 @@ def scatter_placements(spec, grid) -> tuple[list[Placement], list[dict]]:
     rivers = [(Polyline(list(f["path"]), f["width"]), f["width"] * 0.5) for f in spec.features
               if f["type"] == "river"]
     rivers += [(Polyline(list(r["points"]), r["width"]), r["width"] * 0.5) for r in spec.rivers]
-    fixed = [(p.x, p.y, _body_radius(p, 1.0)) for p in spec.wmos] + \
+    # a buried WMO (a dungeon interior under the terrain) leaves the surface above it free
+    fixed = [(p.x, p.y, _body_radius(p, 1.0)) for p in spec.wmos if not p.buried] + \
             [(p.x, p.y, _body_radius(p, 0.5)) for p in spec.doodads] + \
             [(p.x, p.y, _body_radius(p, 0.5)) for p in spec.generated]
     new_water = bool(spec.lakes or spec.rivers)
