@@ -19,7 +19,8 @@ from .config import AREA_FLAGS, EXPLORE_BITS, HARMLESS_TEMPLATE_FLAGS, Config, f
 from rflib.dbc import DbcError, DbcTable, to_signed  # noqa: E402
 
 # Tables the build writes, and tables only read to check references.
-WRITTEN = ("Map", "AreaTable", "LoadingScreens", "Light", "WorldMapArea", "BattlemasterList", "PvpDifficulty")
+WRITTEN = ("Map", "AreaTable", "LoadingScreens", "Light", "WorldMapArea", "BattlemasterList", "PvpDifficulty",
+           "AreaTrigger")
 REFERENCE = ("LightParams", "SoundAmbience", "ZoneMusic", "ZoneIntroMusicTable")
 
 # ADT tiles are 533.333 yards: tile (x, y) spans world Y from (32 - x) * TILE down by one tile, X likewise with y.
@@ -81,6 +82,9 @@ def tables_needed(config: Config) -> tuple[list[str], list[str]]:
 
     if config.battleground:
         required += ["BattlemasterList", "PvpDifficulty"]
+
+    if config.area_triggers:
+        required.append("AreaTrigger")
 
     optional = [n for n in ("LoadingScreens",) + REFERENCE if n not in required]
     return required, optional
@@ -209,6 +213,7 @@ class Forge:
         self._light()
         self._world_map_area()
         self._battleground()
+        self._area_triggers()
         return self.result
 
     def _check_map_free(self) -> None:
@@ -513,6 +518,32 @@ class Forge:
         self.result.world_map_bounds = bounds
         self.result.world_map_area_id = area_id
 
+    def _area_triggers(self) -> None:
+        """One AreaTrigger.dbc row per configured walk-in trigger, on this map. A row is this map's when its
+        continentID is the map's id: an id held by another map's trigger is refused (_place), and this map's triggers
+        that left the config are removed."""
+        if not self.config.area_triggers and "AreaTrigger" not in self.tables:
+            return
+        table = self._table("AreaTrigger")
+        m = self.config.map.id
+
+        def ours(row):
+            return table.get_signed(row, "continentID") == m
+
+        keep = set()
+        for t in self.config.area_triggers:
+            row = [0] * len(table.schema.columns)
+            table.set(row, "id", t.id)
+            table.set(row, "continentID", m)
+            for col, v in (("pos[0]", t.x), ("pos[1]", t.y), ("pos[2]", t.z), ("radius", t.radius)):
+                table.set(row, col, float_bits(v))
+            if t.box is not None:
+                for col, v in zip(("boxLength", "boxWidth", "boxHeight", "boxYaw"), t.box):
+                    table.set(row, col, float_bits(v))
+            self._place("AreaTrigger", t.id, row, ours)
+            keep.add(t.id)
+        self._remove_stale("AreaTrigger", keep, ours)
+
     def _battleground(self) -> None:
         cfg = self.config.battleground
 
@@ -611,6 +642,21 @@ def check(base: dict[str, bytes], output: dict[str, bytes], config: Config, resu
 
     m = config.map
     z = config.zone
+
+    if config.area_triggers and "AreaTrigger" in tables:
+        at = tables["AreaTrigger"]
+        by_id = at.by_id()
+        for t in config.area_triggers:
+            row = by_id.get(t.id)
+            if row is None:
+                problems.append(f"AreaTrigger.dbc: no row {t.id}")
+                continue
+            if at.get_signed(row, "continentID") != m.id:
+                problems.append(f"AreaTrigger.dbc row {t.id}: continentID is not {m.id}")
+            got = [at.float_value(row, c) for c in ("pos[0]", "pos[1]", "pos[2]", "radius")]
+            want = [t.x, t.y, t.z, t.radius]
+            if any(abs(a - b) > 1e-3 for a, b in zip(got, want)):
+                problems.append(f"AreaTrigger.dbc row {t.id}: position/radius {got} is not {want}")
 
     if "Map" in tables and "AreaTable" in tables:
         maps, areas = tables["Map"], tables["AreaTable"]

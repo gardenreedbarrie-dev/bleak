@@ -181,6 +181,12 @@ def build_tables() -> dict[str, bytes]:
     intro.row(60, "IntroWarsong", 8101, 1, 60)
     out["ZoneIntroMusicTable"] = intro.pack()
 
+    triggers = Packer("AreaTrigger")
+    #            id  map    x       y      z    radius  box length, width, height, yaw
+    triggers.row(45, 0, -100.0, 200.0, 30.0, 5.0, 0.0, 0.0, 0.0, 0.0)
+    triggers.row(46, 489, 1000.0, 1500.0, 350.0, 0.0, 10.0, 6.0, 8.0, 1.5)
+    out["AreaTrigger"] = triggers.pack()
+
     return out
 
 

@@ -68,6 +68,7 @@
             { "id": 5223, "name": "The Blackrock Gate" }
         ]
     },
+    "area_triggers": {"file": "specs/crucible_v2_portals.json"},
     "loading_screen": null,
     "light": {
         "params_from_map": 249

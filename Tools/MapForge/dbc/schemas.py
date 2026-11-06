@@ -43,6 +43,18 @@ SCHEMAS = {
         ('ambientMultiplier', 'float', 4),
         ('lightID', 'int', 4),
     )),
+    'AreaTrigger': ('DBFilesClient\\AreaTrigger.dbc', 10, 40, False, (
+        ('id', 'int', 4),
+        ('continentID', 'int', 4),
+        ('pos[0]', 'float', 4),
+        ('pos[1]', 'float', 4),
+        ('pos[2]', 'float', 4),
+        ('radius', 'float', 4),
+        ('boxLength', 'float', 4),
+        ('boxWidth', 'float', 4),
+        ('boxHeight', 'float', 4),
+        ('boxYaw', 'float', 4),
+    )),
     'BattlemasterList': ('DBFilesClient\\BattlemasterList.dbc', 32, 128, False, (
         ('id', 'int', 4),
         ('mapID[0]', 'int', 4),

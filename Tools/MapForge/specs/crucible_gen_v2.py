@@ -71,21 +71,21 @@ INTERIORS = {
     "rfc": {
         "model": "World\\wmo\\Dungeon\\KL_OrgrimmarLavaDungeon\\LavaDungeon.wmo", "map": 389,
         "box": [[-102.956, -275.379, -66.191], [416.286, 108.501, 59.434]],
-        "offset": (-83.7, 228.5, -95.0),
+        "offset": (-83.7, 228.5, -95.0), "entrance_facing": 4.39,
         "points": {"entrance": (3.8, -14.8, -17.8), "deep_end": (-385.1, 239.6, -4.8),
                    "deep_end_2": (-375.8, 256.3, -4.8)},
     },
     "mc": {
         "model": "World\\wmo\\Dungeon\\AZ_Blackrock\\Blackrock_lower_guild.wmo", "map": 409,
         "box": [[-1333.1, 271.3, -233.5], [-489.9, 1255.0, 72.9]],
-        "offset": (-910.0, -335.0, -80.0),
+        "offset": (-910.0, -335.0, -80.0), "entrance_facing": 3.142,
         "points": {"entrance": (1091.9, -467.0, -105.1), "ragnaros_lair": (848.933, -812.875, -229.601),
                    "ragnaros_lair_2": (830.964, -814.706, -228.973), "ragnaros": (838.308, -831.467, -232.185)},
     },
     "ony": {
         "model": "World\\wmo\\Dungeon\\KL_OnyxiasLair\\KL_OnyxiasLair_B.wmo", "map": 249,
         "box": [[-63.246, -26.112, -96.475], [218.833, 286.464, 49.591]],
-        "offset": (368.8, 436.5, -95.0),
+        "offset": (368.8, 436.5, -95.0), "entrance_facing": 4.58,
         "points": {"entrance": (29.2, -71.3, -8.2), "onyxia": (-10.6, -219.4, -87.7)},
     },
 }
@@ -821,40 +821,122 @@ def reach(region, point):
     return bool(m[int(round(r)) - grid.row0, int(round(c)) - grid.col0])
 
 
+TRIGGER_BASE = 5901        # AreaTrigger ids: just above the realm's highest (5872), so the client's table stays dense
+TRIGGER_RADIUS = 3.5       # yards: walk into the swirl
+SWIRL_DISPLAY = 4396       # the mage-portal swirl (the realm's "Portal to Stormwind", gameobject_template 176296)
+SWIRL_ENTRY = 902100
+SWIRL_GUID = 9029001
+BEHIND = 9.0               # a way back stands this far behind an arrival (where its tunnel came from)
+
+
 def portals(grid):
-    """The portal game objects and their targets: outdoor points on the ground, interior points from the original
-    maps moved into this map."""
-    def out(x, y, o):
-        return {"x": round(x, 2), "y": round(y, 2), "z": round(ground(grid, x, y) + 0.2, 2), "o": round(o, 3)}
+    """The walk-in doorways: per doorway an AreaTrigger (client AreaTrigger.dbc + server areatrigger, from the
+    config's area_triggers file), its teleport target, and a portal-swirl game object standing on it so it can be seen.
+    Outdoor points sit on the ground; interior points are the original maps' floors moved into this map. Every
+    arrival faces into the next area, and the way back stands BEHIND it (never on it: arriving inside a trigger would
+    send the player straight back)."""
+    def out(x, y, o=0.0):
+        return (round(x, 2), round(y, 2), round(ground(grid, x, y) + 0.3, 2), round(o % (2 * math.pi), 3))
 
-    def inn(key, name, o=0.0):
+    def inn(key, name, o=None):
         x, y, z = to_crucible(key, INTERIORS[key]["points"][name])
-        return {"x": x, "y": y, "z": round(z + 0.2, 2), "o": round(o, 3)}
+        if o is None:
+            o = INTERIORS[key]["entrance_facing"]
+        return (x, y, round(z + 0.3, 2), round(o % (2 * math.pi), 3))
 
-    gate_a = out(*GATE_PORTAL_A, 0.0)
-    arrival = out(*ARRIVAL_POINT, math.radians(270))
-    gate_c = out(*GATE_PORTAL_C, math.radians(270))
+    def behind(p):
+        x, y, z, o = p
+        return (round(x - BEHIND * math.cos(o), 2), round(y - BEHIND * math.sin(o), 2), z, o)
+
+    def toward(p, q):
+        return math.atan2(q[1] - p[1], q[0] - p[0])
+
+    south = math.radians(270)   # the server's orientation: 0 = +X, counter-clockwise toward +Y; the route runs -Y
+    north = math.radians(90)
+    # outdoor points
+    chamber_in = out(*GATE_PORTAL_A, toward(CHAMBER, CANYON[-3]))   # each swirl faces the way players walk up
+    chamber_back = out(CHAMBER[0] - 14 * math.cos(math.atan2(CHAMBER[1] - CANYON[-3][1], CHAMBER[0] - CANYON[-3][0])),
+                       CHAMBER[1] - 14 * math.sin(math.atan2(CHAMBER[1] - CANYON[-3][1], CHAMBER[0] - CANYON[-3][0])))
+    chamber_back = chamber_back[:3] + (round(toward(CHAMBER, CANYON[-3]) % (2 * math.pi), 3),)
+    basin_arrive = out(ARRIVAL[0], ARRIVAL[1] - 8, south)
+    basin_back = out(ARRIVAL[0], ARRIVAL[1] + 8, south)
+    gate_in = out(*GATE_PORTAL_C, north)
+    gate_arrive = out(GATE_PORTAL_C[0], GATE_PORTAL_C[1] + 22, north)
+    # interior points
+    rfc_arrive = inn("rfc", "entrance")
+    mc_arrive = inn("mc", "entrance")
+    ony_arrive = inn("ony", "entrance")
+    rfc_end = inn("rfc", "deep_end", 0.0)
+    rfc_end_arrive = inn("rfc", "deep_end_2", 0.0)
+    rfc_end_arrive = rfc_end_arrive[:3] + (round(toward(rfc_end, rfc_end_arrive) % (2 * math.pi), 3),)
+    rag_out = inn("mc", "ragnaros_lair_2", 0.0)
+    rag_arrive = inn("mc", "ragnaros_lair", 4.046)          # Majordomo's own spot in the lair, his facing
+
+    doorways = [
+        ("Ragefire Chasm", chamber_in, rfc_arrive),
+        ("Ragefire Canyon", behind(rfc_arrive), chamber_back),
+        ("The Molten Basin", rfc_end, basin_arrive),
+        ("Ragefire Chasm", basin_back, rfc_end_arrive),
+        ("Molten Core", gate_in, mc_arrive),
+        ("The Molten Basin", behind(mc_arrive), gate_arrive),
+        ("Onyxia's Lair", rag_out, ony_arrive),
+        ("Molten Core", behind(ony_arrive), rag_arrive),
+    ]
+    triggers, visuals = [], []
+    for i, (name, at, to) in enumerate(doorways):
+        # a doorway must never stand within reach of any arrival (that would bounce players back and forth)
+        for _, _, other in doorways:
+            gap = math.dist(at[:3], other[:3])
+            if gap < TRIGGER_RADIUS + 4.0:
+                raise SystemExit(f"doorway to {name} at {at[:3]} is only {gap:.1f} yd from an arrival {other[:3]}")
+        triggers.append({"id": TRIGGER_BASE + i, "name": f"Crucible: to {name}", "position": [at[0], at[1], at[2]],
+                         "radius": TRIGGER_RADIUS, "teleport": {"position": [to[0], to[1], to[2]],
+                                                                "orientation": to[3]}})
+        visuals.append({"guid": SWIRL_GUID + i, "name": f"to {name}", "x": at[0], "y": at[1], "z": round(at[2] - 0.3, 2),
+                        "o": at[3]})
     return {
-        "_comment": "GENERATED by crucible_gen_v2.py. map 902. 'at' = where the portal stands, 'to' = where it sends you.",
-        "entrance": out(PLAZA[0], PLAZA[1] - 8, math.radians(270)),
-        "portals": [
-            {"name": "Portal to Ragefire Chasm", "at": gate_a, "to": inn("rfc", "entrance")},
-            {"name": "Portal to Ragefire Canyon", "at": inn("rfc", "entrance"), "to": out(GATE_PORTAL_A[0] - 8,
-                                                                                         GATE_PORTAL_A[1] + 6, 1.6)},
-            {"name": "Portal to the Molten Basin", "at": inn("rfc", "deep_end"), "to": arrival},
-            {"name": "Portal to Ragefire Chasm", "at": arrival, "to": inn("rfc", "deep_end_2")},
-            {"name": "Portal to Molten Core", "at": gate_c, "to": inn("mc", "entrance")},
-            {"name": "Portal to the Molten Basin", "at": inn("mc", "entrance"), "to": out(GATE_PORTAL_C[0],
-                                                                                         GATE_PORTAL_C[1] + 14,
-                                                                                         math.radians(90))},
-            {"name": "Portal to Onyxia's Lair", "at": inn("mc", "ragnaros_lair_2"), "to": inn("ony", "entrance")},
-            {"name": "Portal to Molten Core", "at": inn("ony", "entrance"), "to": inn("mc", "ragnaros_lair",
-                                                                                     4.046)},
-        ],
+        "_comment": ["GENERATED by crucible_gen_v2.py. Map 902. area_triggers: read by bleakhold_crucible.json",
+                     "(MapForge writes the client AreaTrigger.dbc rows and the server areatrigger/areatrigger_teleport",
+                     "SQL from them). portal_visuals: the swirls standing on them (crucible_v2_portals.sql)."],
+        "entrance": dict(zip("xyzo", out(PLAZA[0], PLAZA[1] - 8, south))),
+        "area_triggers": triggers,
+        "portal_visuals": visuals,
         "onyxia": dict(zip("xyz", to_crucible("ony", INTERIORS["ony"]["points"]["onyxia"]))),
         "ragnaros": dict(zip("xyz", to_crucible("mc", INTERIORS["mc"]["points"]["ragnaros"]))),
         "interior_boxes": {k: [round(v, 1) for v in world_box(k)] for k in INTERIORS},
     }
+
+
+def visuals_sql(doc):
+    """The portal swirls (server game objects; the walk-in triggers themselves are MapForge's SQL)."""
+    v = doc["portal_visuals"]
+    guids = [p["guid"] for p in v]
+    lines = [
+        "-- Bleakhold: Crucible of Onyxia (map 902): the portal swirls that mark its walk-in doorways.",
+        "-- GENERATED by Tools/MapForge/specs/crucible_gen_v2.py (bleak): edit that and generate again.",
+        "-- Each stands on an AreaTrigger (the map's DBC SQL from MapForge's build: areatrigger + areatrigger_teleport);",
+        "-- walking into it sends the player on. The swirl only shows where: it is a plain GENERIC object, not used.",
+        f"DELETE FROM `gameobject_template` WHERE `entry` = {SWIRL_ENTRY};",
+        "INSERT INTO `gameobject_template` (`entry`, `type`, `displayId`, `name`, `IconName`, `castBarCaption`, `unk1`, "
+        "`size`, `Data0`, `Data1`, `Data2`, `Data3`, `Data4`, `Data5`, `Data6`, `Data7`, `Data8`, `Data9`, `Data10`, "
+        "`Data11`, `Data12`, `Data13`, `Data14`, `Data15`, `Data16`, `Data17`, `Data18`, `Data19`, `Data20`, `Data21`, "
+        "`Data22`, `Data23`, `AIName`, `ScriptName`, `VerifiedBuild`) VALUES",
+        f"({SWIRL_ENTRY}, 5, {SWIRL_DISPLAY}, 'Crucible Doorway', '', '', '', 1.3, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, "
+        "0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, '', '', 0);",
+        "",
+        f"DELETE FROM `gameobject` WHERE `id` = {SWIRL_ENTRY} AND `guid` BETWEEN {min(guids)} AND {max(guids)};",
+        "INSERT INTO `gameobject` (`guid`, `id`, `map`, `zoneId`, `areaId`, `spawnMask`, `phaseMask`, `position_x`, "
+        "`position_y`, `position_z`, `orientation`, `rotation0`, `rotation1`, `rotation2`, `rotation3`, `spawntimesecs`, "
+        "`animprogress`, `state`, `ScriptName`, `VerifiedBuild`, `Comment`) VALUES",
+    ]
+    rows = []
+    for p in v:
+        o = p["o"]
+        rows.append(f"({p['guid']}, {SWIRL_ENTRY}, 902, 0, 0, 1, 1, {p['x']}, {p['y']}, {round(p['z'], 2)}, {o}, 0, 0, "
+                    f"{round(math.sin(o / 2), 6)}, {round(math.cos(o / 2), 6)}, 300, 0, 1, '', 0, "
+                    f"'Crucible of Onyxia: doorway {p['name']}')")
+    lines.append(",\n".join(rows) + ";")
+    return "\n".join(lines) + "\n"
 
 
 def dump(o, indent=0):
@@ -880,8 +962,11 @@ if __name__ == "__main__":
     dropped, steep_landmarks = settle(SPEC, grid)
     with open(OUT, "w", encoding="utf-8", newline="\n") as f:
         f.write(dump(SPEC) + "\n")
+    doc = portals(grid)
     with open(OUT_PORTALS, "w", encoding="utf-8", newline="\n") as f:
-        f.write(dump(portals(grid)) + "\n")
+        f.write(dump(doc) + "\n")
+    with open(os.path.join(HERE, "crucible_v2_portals.sql"), "w", encoding="utf-8", newline="\n") as f:
+        f.write(visuals_sql(doc))
     print(f"wrote {OUT}: {len(SPEC['doodads'])} doodads ({dropped} dropped off steep ground), {len(LAKES)} lava lakes,"
           f" {len(F)} terrain features, {len(SCATTER)} scatter groups; canyon {CANYON_S[-1]:.0f} yd, causeway"
           f" {M_LEN:.0f} yd")

@@ -21,6 +21,7 @@ from rflib import recparse  # noqa: E402  (Tools/RaceForge, added to sys.path by
 # Tables MapForge writes, or reads to check references. Order is the order of dbc/schemas.py.
 TABLES = (
     "AreaTable",
+    "AreaTrigger",
     "BattlemasterList",
     "GameObjectDisplayInfo",
     "Light",
@@ -82,7 +83,14 @@ SERVER = {
         "HolidayWorldState", "Minlevel", "Maxlevel")),
     "PvpDifficulty": ("pvpdifficulty_dbc", "diiiii", _sql_columns(
         "ID", "MapID", "RangeIndex", "MinLevel", "MaxLevel", "Difficulty")),
+    # Not a *_dbc override: AzerothCore reads its area triggers from this table alone (ObjectMgr::LoadAreaTriggers),
+    # in the client's column order; the client needs the same row in AreaTrigger.dbc to report a player inside it.
+    "AreaTrigger": ("areatrigger", "niffffffff", (
+        "entry", "map", "x", "y", "z", "radius", "length", "width", "height", "orientation")),
 }
+
+# SERVER tables the server reads on their own, not as a *_dbc override of a DBC file (no DBCfmt.h format)
+OWN_SQL_TABLES = frozenset({"AreaTrigger"})
 
 _cache: dict[str, recparse.TableSchema] = {}
 

@@ -58,7 +58,7 @@ class LayoutTests(unittest.TestCase):
             schema = layout.get(name)
             self.assertEqual(len(fmt), schema.num_columns, name)
             self.assertEqual(len(columns), schema.num_columns, name)
-            self.assertTrue(table.endswith("_dbc"), name)
+            self.assertTrue(table.endswith("_dbc") or name in layout.OWN_SQL_TABLES, name)
 
             for column, char in zip(schema.columns, fmt):
                 if char == "f":

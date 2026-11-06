@@ -8,6 +8,7 @@ references to other tables point at rows the client already has.
 from __future__ import annotations
 
 import json
+import os
 import re
 from dataclasses import dataclass, field
 
@@ -182,6 +183,29 @@ class ArchiveConfig:
 
 
 @dataclass
+class TeleportConfig:
+    map_id: int | None  # None: this map
+    x: float
+    y: float
+    z: float
+    orientation: float
+
+
+@dataclass
+class AreaTriggerConfig:
+    """A walk-in trigger: an AreaTrigger.dbc row on this map (the client reports a player inside it) and the
+    server's `areatrigger` row (the same numbers), with an optional `areatrigger_teleport` target."""
+    id: int
+    name: str
+    x: float
+    y: float
+    z: float
+    radius: float
+    box: tuple[float, float, float, float] | None  # (length, width, height, yaw) instead of the radius
+    teleport: TeleportConfig | None
+
+
+@dataclass
 class Config:
     path: str
     map: MapConfig
@@ -192,6 +216,7 @@ class Config:
     battleground: BattlegroundConfig | None
     archives: ArchiveConfig
     warnings: list[str] = field(default_factory=list)
+    area_triggers: list[AreaTriggerConfig] = field(default_factory=list)
 
     def area_ids(self) -> list[int]:
         return [self.zone.id] + [a.id for a in self.zone.subzones]
@@ -558,6 +583,64 @@ def _archives(r: _Reader | None) -> ArchiveConfig:
     return out
 
 
+def _vec(value, n: int, where: str) -> tuple[float, ...]:
+    if not isinstance(value, list) or len(value) != n or any(isinstance(v, bool) or not isinstance(v, (int, float))
+                                                             for v in value):
+        raise ConfigError(f"{where} must be a list of {n} numbers")
+    return tuple(float(v) for v in value)
+
+
+def _area_triggers(value, path: str) -> list[AreaTriggerConfig]:
+    """area_triggers: a list of triggers, or {"file": <JSON with an "area_triggers" list>} (a path from the config's
+    folder): a generated layout keeps its trigger positions in its own output, next to the terrain they belong to."""
+    if value is None:
+        return []
+    where = "config.area_triggers"
+    if isinstance(value, dict):
+        r = _Reader(value, where)
+        rel = r.str("file")
+        r.finish()
+        full = rel if os.path.isabs(rel) else os.path.join(os.path.dirname(os.path.abspath(path)), rel)
+        try:
+            with open(full, encoding="utf-8") as f:
+                value = json.load(f).get("area_triggers")
+        except (OSError, json.JSONDecodeError, AttributeError) as e:
+            raise ConfigError(f"{where}.file {rel}: {e}") from None
+        where = f"{rel}: area_triggers"
+        if value is None:
+            raise ConfigError(f"{where} is missing")
+    if not isinstance(value, list):
+        raise ConfigError(f"{where} must be a list")
+    out, seen = [], set()
+    for i, item in enumerate(value):
+        w = f"{where}[{i}]"
+        r = _Reader(item, w)
+        tid = r.int("id", low=1, high=0xFFFFFF)
+        if tid in seen:
+            raise ConfigError(f"{w}.id {tid} is used twice")
+        seen.add(tid)
+        name = r.str("name", "")
+        x, y, z = _vec(r.raw("position"), 3, f"{w}.position")
+        radius = r.float("radius", 0.0)
+        box = r.raw("box")
+        if box is not None:
+            box = _vec(box, 4, f"{w}.box")
+            if min(box[:3]) <= 0:
+                raise ConfigError(f"{w}.box: length, width and height must be above 0")
+        elif not 0.5 <= radius <= 100.0:
+            raise ConfigError(f"{w}: give a radius 0.5..100 (yards) or a box [length, width, height, yaw]")
+        teleport = None
+        t = r.obj("teleport")
+        if t is not None:
+            tx, ty, tz = _vec(t.raw("position"), 3, f"{w}.teleport.position")
+            teleport = TeleportConfig(t.int("map", None, low=0, high=0xFFFF, null=True), tx, ty, tz,
+                                      t.float("orientation", 0.0))
+            t.finish()
+        r.finish()
+        out.append(AreaTriggerConfig(tid, name, x, y, z, radius if box is None else 0.0, box, teleport))
+    return out
+
+
 def load(path: str) -> Config:
     try:
         with open(path, encoding="utf-8") as f:
@@ -582,6 +665,7 @@ def parse(data: dict, path: str = "<config>") -> Config:
         battleground=_battleground(r.obj("battleground")),
         archives=_archives(r.obj("archives")),
     )
+    config.area_triggers = _area_triggers(r.raw("area_triggers"), path)
     r.finish()
 
     m = config.map

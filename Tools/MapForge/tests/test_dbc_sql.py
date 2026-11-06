@@ -143,7 +143,8 @@ class SqlTests(unittest.TestCase):
                  "PvpDifficulty": "PvPDifficultyfmt"}
 
         for name, (table, fmt, columns) in layout.SERVER.items():
-            self.assertEqual(formats[names[name]], fmt, name)
+            if name not in layout.OWN_SQL_TABLES:   # those have no DBC loader, so no DBCfmt.h format
+                self.assertEqual(formats[names[name]], fmt, name)
             path = os.path.join(SERVER_SRC, "data", "sql", "base", "db_world", f"{table}.sql")
 
             with open(path, encoding="utf-8") as f:

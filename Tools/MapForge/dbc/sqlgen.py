@@ -71,7 +71,7 @@ def our_ids(name: str, table: DbcTable, config: Config) -> list[int]:
     """The rows of this map in a table."""
     m = config.map.id
     column = {"Map": None, "AreaTable": "continentID", "Light": "continentID", "WorldMapArea": "mapID",
-              "BattlemasterList": "mapID[0]", "PvpDifficulty": "mapID"}[name]
+              "BattlemasterList": "mapID[0]", "PvpDifficulty": "mapID", "AreaTrigger": "continentID"}[name]
 
     if column is None:
         return [m] if m in table.ids() else []
@@ -119,6 +119,24 @@ def build(tables: dict[str, DbcTable], config: Config, result: ForgeResult) -> d
             check.append(f"SELECT 'areatable_dbc AreaBit' AS `table`, `ID` AS `id`, `AreaBit` FROM `areatable_dbc` "
                          f"WHERE `AreaBit` IN ({', '.join(map(str, bits))}) "
                          f"AND `ID` NOT IN ({', '.join(map(str, sorted(config.area_ids())))});")
+
+    teleports = [t for t in config.area_triggers if t.teleport is not None]
+    if teleports and "AreaTrigger" in result.changes:
+        # where each walk-in trigger sends a player (ObjectMgr::LoadAreaTriggerTeleports needs the trigger's
+        # `areatrigger` row above, written from the same AreaTrigger.dbc row the client gets)
+        ids = _ids_clause([t.id for t in teleports])
+        values = [f"({t.id}, {_text(t.name or f'{m.directory} trigger {t.id}')}, "
+                  f"{t.teleport.map_id if t.teleport.map_id is not None else m.id}, {_float(t.teleport.x)}, "
+                  f"{_float(t.teleport.y)}, {_float(t.teleport.z)}, {_float(t.teleport.orientation)})"
+                  for t in sorted(teleports, key=lambda t: t.id)]
+        install += ["-- areatrigger_teleport: where each walk-in trigger sends a player",
+                    f"DELETE FROM `areatrigger_teleport` WHERE `ID` {ids};",
+                    "INSERT INTO `areatrigger_teleport` (`ID`, `Name`, `target_map`, `target_position_x`, "
+                    "`target_position_y`, `target_position_z`, `target_orientation`) VALUES\n" + ",\n".join(values) + ";",
+                    ""]
+        remove.append(f"DELETE FROM `areatrigger_teleport` WHERE `ID` {ids};")
+        check.append(f"SELECT 'areatrigger_teleport' AS `table`, `ID` AS `id` FROM `areatrigger_teleport` "
+                     f"WHERE `ID` {ids};")
 
     if m.instance_type in (1, 2):
         # MapInstanced::CreateInstance aborts the server for a dungeon or raid map without an instance_template row.

@@ -277,5 +277,94 @@ class ForgeTests(unittest.TestCase):
             run_forge(data)
 
 
+class AreaTriggerTests(unittest.TestCase):
+    """Walk-in triggers: the client's AreaTrigger.dbc rows and the server's areatrigger / areatrigger_teleport SQL
+    come from the same config, so they always agree."""
+
+    TRIGGERS = [
+        {"id": 7001, "name": "Into the cave", "position": [10.0, 20.0, 5.0], "radius": 4.0,
+         "teleport": {"position": [-300.5, 400.25, -90.0], "orientation": 4.39}},
+        {"id": 7002, "name": "Out again", "position": [-300.0, 410.0, -90.0], "radius": 3.0,
+         "teleport": {"position": [12.0, 25.0, 5.0], "orientation": 1.6}},
+    ]
+
+    def config(self, triggers=None):
+        data = synth_dbc.default_config()
+        data["area_triggers"] = self.TRIGGERS if triggers is None else triggers
+        return data
+
+    def test_rows_on_this_map_as_configured(self):
+        cfg, tables, result, raw = run_forge(self.config())
+        at = tables["AreaTrigger"]
+        rows = at.by_id()
+        for t in self.TRIGGERS:
+            row = rows[t["id"]]
+            self.assertEqual(at.get_signed(row, "continentID"), cfg.map.id)
+            self.assertAlmostEqual(at.float_value(row, "pos[0]"), t["position"][0], places=3)
+            self.assertAlmostEqual(at.float_value(row, "pos[2]"), t["position"][2], places=3)
+            self.assertAlmostEqual(at.float_value(row, "radius"), t["radius"], places=3)
+        self.assertEqual(sorted(result.changes["AreaTrigger"].added), [7001, 7002])
+        # the other maps' triggers are untouched, and the build's own check passes
+        self.assertIn(45, rows)
+        self.assertIn(46, rows)
+        written = sorted(result.changes)
+        problems = forgemod.check({n: raw[n] for n in written}, {n: tables[n].to_bytes() for n in written}, cfg,
+                                  result)
+        self.assertEqual(problems, [])
+
+    def test_sql_matches_the_client_rows(self):
+        from dbc import sqlgen
+        cfg, tables, result, _ = run_forge(self.config())
+        files = sqlgen.build(tables, cfg, result)
+        install = files["bleakhold_royale.sql"]
+        self.assertIn("DELETE FROM `areatrigger` WHERE `entry` IN (7001, 7002);", install)
+        self.assertIn("INSERT INTO `areatrigger` (`entry`, `map`, `x`, `y`, `z`, `radius`, `length`, `width`, "
+                      "`height`, `orientation`) VALUES", install)
+        self.assertIn("(7001, 901, 10, 20, 5, 4, 0, 0, 0, 0)", install)
+        self.assertIn("DELETE FROM `areatrigger_teleport` WHERE `ID` IN (7001, 7002);", install)
+        self.assertIn("(7001, 'Into the cave', 901, -300.5, 400.25, -90, 4.39)", install)
+        self.assertIn("DELETE FROM `areatrigger_teleport` WHERE `ID` IN (7001, 7002);",
+                      files["bleakhold_royale_remove.sql"])
+        self.assertIn("FROM `areatrigger` WHERE `entry` IN (7001, 7002);", files["bleakhold_royale_check.sql"])
+
+    def test_another_maps_trigger_id_is_refused(self):
+        triggers = [dict(self.TRIGGERS[0], id=46)]   # 46 is map 489's
+        with self.assertRaises(forgemod.ForgeError):
+            run_forge(self.config(triggers))
+
+    def test_an_id_in_the_servers_sql_is_refused(self):
+        with self.assertRaises(forgemod.ForgeError):
+            run_forge(self.config(), reserved={"AreaTrigger": {7002: "data/sql/base/db_world/areatrigger.sql"}})
+
+    def test_a_rerun_replaces_this_maps_rows_and_drops_removed_ones(self):
+        cfg, tables, result, raw = run_forge(self.config())
+        again = {n: t.to_bytes() for n, t in tables.items()}
+        moved = [dict(self.TRIGGERS[0], position=[11.0, 21.0, 5.0])]
+        _, tables2, result2, _ = run_forge(self.config(moved), raw=again)
+        rows = tables2["AreaTrigger"].by_id()
+        self.assertAlmostEqual(tables2["AreaTrigger"].float_value(rows[7001], "pos[0]"), 11.0, places=3)
+        self.assertNotIn(7002, rows)
+        self.assertEqual(result2.changes["AreaTrigger"].replaced, [7001])
+        self.assertEqual(result2.changes["AreaTrigger"].removed, [7002])
+
+    def test_triggers_from_a_generated_file(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "portals.json"), "w", encoding="utf-8") as f:
+                json.dump({"area_triggers": self.TRIGGERS}, f)
+            data = self.config({"file": "portals.json"})
+            cfg = configmod.parse(data, os.path.join(tmp, "config.json"))
+        self.assertEqual([t.id for t in cfg.area_triggers], [7001, 7002])
+        self.assertEqual(cfg.area_triggers[0].teleport.orientation, 4.39)
+
+    def test_a_trigger_needs_a_size(self):
+        bad = [{"id": 7003, "position": [0, 0, 0]}]
+        with self.assertRaises(configmod.ConfigError):
+            configmod.parse(self.config(bad))
+        dup = [self.TRIGGERS[0], self.TRIGGERS[0]]
+        with self.assertRaises(configmod.ConfigError):
+            configmod.parse(self.config(dup))
+
+
 if __name__ == "__main__":
     unittest.main()
