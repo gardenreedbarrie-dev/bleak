@@ -1321,7 +1321,9 @@ int32_t CM2Shared::InitializeSkinProfile() {
         for (uint32_t i = 0; i < this->m_skinData->m_batches.m_count; i++) {
             M2Batch* batches = this->m_skinData->m_batches.Data();
 
-            if (batches[i].m_textureCount > 1) {
+            // BLEAKHOLD(x64): guard i - m_materialLayer; a mismatched HD-pack .skin can carry a layer past the first
+            // batch, and the 64-bit build then reads before m_batches and faults.
+            if (batches[i].m_textureCount > 1 && batches[i].m_materialLayer <= i) {
                 batches[i - batches[i].m_materialLayer].m_flags |= 0x40;
             }
         }
@@ -1330,7 +1332,7 @@ int32_t CM2Shared::InitializeSkinProfile() {
             M2Batch* batches = this->m_skinData->m_batches.Data();
             uint16_t layer = batches[i].m_materialLayer;
 
-            if (layer && (batches[i - layer].m_flags & 0x40)) {
+            if (layer && layer <= i && (batches[i - layer].m_flags & 0x40)) {   // BLEAKHOLD(x64): see above
                 batches[i].m_flags |= 0x40;
             }
         }

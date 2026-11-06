@@ -1982,7 +1982,13 @@ int32_t CM2Scene::Animate(const C3Vector& cameraPos) {
 
             M2Material* material = &data->m_materials[batch->m_materialIndex];
             int32_t projected = (batch->m_flags & 4) && this->m_projectTextureCallback;
-            M2Material* baseMaterial = batch->m_materialLayer ? &data->m_materials[batch->m_materialIndex - batch->m_materialLayer] : material;
+            // BLEAKHOLD(x64): the batch's base material sits at m_materialIndex - m_materialLayer. A model whose .skin
+            // does not match its .m2 (an HD pack's .m2 beside the old .skin, e.g. BADLANDSSKELETALKING.M2) can carry a
+            // layer greater than the index, so the subtraction is negative; M2Array::operator[] takes it as uint32 and
+            // the read faults far outside the image (the 32-bit client read just in front of the table and lived). Use
+            // the batch's own material then, as if it had no layer below it.
+            bool hasBaseMaterial = batch->m_materialLayer && batch->m_materialLayer <= batch->m_materialIndex;
+            M2Material* baseMaterial = hasBaseMaterial ? &data->m_materials[batch->m_materialIndex - batch->m_materialLayer] : material;
             int32_t transparent = baseMaterial->m_blendMode > 1 || alpha < 0.99998999f;
             CShaderEffect* effect = optimized ? model->m_optGeo->m_effects[i] : model->m_shared->m_effects[i];
 
