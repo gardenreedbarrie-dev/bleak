@@ -108,8 +108,9 @@ def check_model(client: Client, path: str) -> tuple[list[str], str]:
         return problems + [f"{skin_path.split(chr(92))[-1]} missing"], src
     if skin[:4] != b"SKIN":
         return problems + ["skin without SKIN magic"], src
-    if skin_src != src:
-        problems.append(f"skin from {skin_src}, model from {src}")
+    # A skin and model resolving from different archives is normal for stock models (an HD pack's patch.MPQ carries
+    # the .m2, the .skin still answers from a base archive) and is not itself a crash. It is only noted below, and
+    # then only when a real out-of-range batch or section is also found -- that mismatch alone is no longer a problem.
     n_sec, sec_off = arr(skin, 0x1C)
     n_bat, bat_off = arr(skin, 0x24)
     if sec_off + 48 * n_sec > len(skin) or bat_off + 24 * n_bat > len(skin):
@@ -143,6 +144,8 @@ def check_model(client: Client, path: str) -> tuple[list[str], str]:
             if len(problems) >= 4:
                 break
     _ = n_colors
+    if problems and skin_src != src:
+        problems.append(f"(skin from {skin_src}, model from {src})")
     return problems, src
 
 

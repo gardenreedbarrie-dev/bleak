@@ -85,7 +85,11 @@ def adt_area_ids(data: bytes) -> set[int]:
 #   ...EXPANSION03-09... Cataclysm-and-later models: not in a 3.3.5 client (or, from an HD pack, a newer format)
 #   ...COLLISION...      invisible collision walls (PvP blockers): players hit walls they cannot see
 #   WORLD\SCALE\...      the editor's size-reference mannequins, never meant to ship
-DEFAULT_DROP = r"^SPELLS\\|^WORLD\\EXPANSION0[3-9]\\|COLLISION|^WORLD\\SCALE\\"
+#   BADLANDSSKELETALKING a specific HD-pack model (patch-C) whose .skin batches name a material layer greater than the
+#                        material index; CM2Scene::Animate subtracts the two and the x64 client reads ~16 GB out and
+#                        dies. The client guard (M2Scene.cpp) fixes it everywhere; dropping it keeps older clients safe.
+DEFAULT_DROP = (r"^SPELLS\\|^WORLD\\EXPANSION0[3-9]\\|COLLISION|^WORLD\\SCALE\\"
+                r"|BADLANDSSKELETALKING")
 
 
 def _names(data: bytes, body: int, size: int) -> dict[int, str]:
