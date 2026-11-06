@@ -907,6 +907,11 @@ def portals(grid):
     }
 
 
+def sql_text(value):
+    """A SQL string literal: backslashes and quotes escaped (\"Onyxia's Lair\" must not end the string early)."""
+    return "'" + str(value).replace("\\", "\\\\").replace("'", "\\'") + "'"
+
+
 def visuals_sql(doc):
     """The portal swirls (server game objects; the walk-in triggers themselves are MapForge's SQL)."""
     v = doc["portal_visuals"]
@@ -934,7 +939,7 @@ def visuals_sql(doc):
         o = p["o"]
         rows.append(f"({p['guid']}, {SWIRL_ENTRY}, 902, 0, 0, 1, 1, {p['x']}, {p['y']}, {round(p['z'], 2)}, {o}, 0, 0, "
                     f"{round(math.sin(o / 2), 6)}, {round(math.cos(o / 2), 6)}, 300, 0, 1, '', 0, "
-                    f"'Crucible of Onyxia: doorway {p['name']}')")
+                    f"{sql_text('Crucible of Onyxia: doorway ' + p['name'])})")
     lines.append(",\n".join(rows) + ";")
     return "\n".join(lines) + "\n"
 

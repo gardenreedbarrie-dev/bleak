@@ -14,5 +14,5 @@ INSERT INTO `gameobject` (`guid`, `id`, `map`, `zoneId`, `areaId`, `spawnMask`, 
 (9029004, 902100, 902, 0, 0, 1, 1, 0.0, 46.0, 9.0, 4.712, 0, 0, 0.707244, -0.706969, 300, 0, 1, '', 0, 'Crucible of Onyxia: doorway to Ragefire Chasm'),
 (9029005, 902100, 902, 0, 0, 1, 1, 0.0, -520.0, 8.0, 1.571, 0, 0, 0.707179, 0.707035, 300, 0, 1, '', 0, 'Crucible of Onyxia: doorway to Molten Core'),
 (9029006, 902100, 902, 0, 0, 1, 1, 190.9, -802.0, -185.1, 3.142, 0, 0, 1.0, -0.000204, 300, 0, 1, '', 0, 'Crucible of Onyxia: doorway to The Molten Basin'),
-(9029007, 902100, 902, 0, 0, 1, 1, -79.04, -1149.71, -308.97, 0.0, 0, 0, 0.0, 1.0, 300, 0, 1, '', 0, 'Crucible of Onyxia: doorway to Onyxia's Lair'),
+(9029007, 902100, 902, 0, 0, 1, 1, -79.04, -1149.71, -308.97, 0.0, 0, 0, 0.0, 1.0, 300, 0, 1, '', 0, 'Crucible of Onyxia: doorway to Onyxia\'s Lair'),
 (9029008, 902100, 902, 0, 0, 1, 1, 399.19, 374.12, -103.2, 4.58, 0, 0, 0.752331, -0.658786, 300, 0, 1, '', 0, 'Crucible of Onyxia: doorway to Molten Core');
