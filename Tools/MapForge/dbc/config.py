@@ -161,6 +161,19 @@ class BracketConfig:
 
 
 @dataclass
+class ExtraBattlemaster:
+    # An extra BattlemasterList row on the same map: a second battleground type that shares the map's terrain and
+    # its PvpDifficulty brackets. It carries no brackets of its own (the map's come from BattlegroundConfig).
+    id: int
+    template: int
+    name: Text
+    groups_allowed: int
+    max_group_size: int
+    min_level: int
+    max_level: int
+
+
+@dataclass
 class BattlegroundConfig:
     id: int
     template: int
@@ -170,6 +183,7 @@ class BattlegroundConfig:
     min_level: int
     max_level: int
     brackets: list[BracketConfig]
+    extra: list[ExtraBattlemaster] = field(default_factory=list)
 
 
 @dataclass
@@ -534,6 +548,25 @@ def _battleground(r: _Reader | None) -> BattlegroundConfig | None:
     out = BattlegroundConfig(r.int("id", low=1, high=32), r.int("template", low=1), r.text("name"),
                              r.int("groups_allowed", low=0, high=1), r.int("max_group_size", low=0, high=40),
                              r.int("min_level", low=1, high=255), r.int("max_level", low=1, high=255), brackets)
+
+    # Optional extra battlemasters: more battleground types on the same map, sharing the brackets above. Their
+    # BattlemasterList rows are written beside the primary's; they add no PvpDifficulty rows of their own.
+    for i, item in enumerate(r.list("extra_battlemasters", []) or []):
+        e = _Reader(item, f"{r.where}.extra_battlemasters[{i}]")
+        out.extra.append(ExtraBattlemaster(e.int("id", low=1, high=32), e.int("template", low=1), e.text("name"),
+                                           e.int("groups_allowed", low=0, high=1),
+                                           e.int("max_group_size", low=0, high=40),
+                                           e.int("min_level", low=1, high=255), e.int("max_level", low=1, high=255)))
+        e.finish()
+        if out.extra[-1].min_level > out.extra[-1].max_level:
+            raise ConfigError(f"{e.where}: min_level is above max_level")
+        if out.extra[-1].template == out.extra[-1].id:
+            raise ConfigError(f"{e.where}: template must be an existing battleground, not the new one")
+
+    ids = [out.id] + [x.id for x in out.extra]
+    if len(set(ids)) != len(ids):
+        raise ConfigError(f"{r.where}: battleground ids must differ (primary id and extra_battlemasters)")
+
     r.finish()
     return out
 

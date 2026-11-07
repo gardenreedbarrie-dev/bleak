@@ -209,6 +209,37 @@ class ForgeTests(unittest.TestCase):
         self.assertEqual((pvp.get(ours[0], "minLevel"), pvp.get(ours[0], "maxLevel")), (80, 80))
         self.assertNotIn(to_signed(ours[0][0]), {100, 101})  # fresh id, not Warsong's brackets
 
+    def test_extra_battlemaster_rows(self):
+        # A second battleground type sharing the map: its own BattlemasterList row, no new PvpDifficulty rows.
+        data = synth_dbc.default_config()
+        data["battleground"]["extra_battlemasters"] = [
+            {"id": 13, "template": 2, "name": "Bleakhold Clash", "groups_allowed": 1,
+             "max_group_size": 5, "min_level": 30, "max_level": 80}
+        ]
+        _cfg, tables, _result, _ = run_forge(data)
+        bml = tables["BattlemasterList"]
+
+        self.assertEqual(bml.get(bml.by_id()[12], "mapID[0]"), 901)   # the primary is still there
+        extra = bml.by_id()[13]
+        self.assertEqual(bml.get(extra, "mapID[0]"), 901)
+        self.assertEqual([bml.get_signed(extra, f"mapID[{i}]") for i in range(1, 8)], [-1] * 7)
+        self.assertEqual(bml.get(extra, "instanceType"), 3)
+        self.assertEqual(bml.get(extra, "maxGroupSize"), 5)
+        self.assertEqual((bml.get(extra, "minLevel"), bml.get(extra, "maxLevel")), (30, 80))
+
+        # the extra carries no brackets of its own: the map's PvpDifficulty rows are unchanged
+        pvp = tables["PvpDifficulty"]
+        self.assertEqual(len([r for r in pvp.rows if pvp.get(r, "mapID") == 901]), 1)
+
+    def test_extra_battlemaster_duplicate_id_refused(self):
+        data = synth_dbc.default_config()
+        data["battleground"]["extra_battlemasters"] = [
+            {"id": 12, "template": 2, "name": "Clash", "groups_allowed": 0,
+             "max_group_size": 0, "min_level": 30, "max_level": 80}
+        ]
+        with self.assertRaisesRegex(configmod.ConfigError, "ids must differ"):
+            run_forge(data)
+
     def test_id_collisions_are_refused(self):
         data = synth_dbc.default_config()
         data["map"]["id"] = 532  # Karazhan's id

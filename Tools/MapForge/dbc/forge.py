@@ -552,24 +552,33 @@ class Forge:
 
         m = self.config.map
         bml = self._table("BattlemasterList")
-        row = self._template("BattlemasterList", cfg.template, "battleground")
 
-        if cfg.template == cfg.id:
-            raise ForgeError("battleground.template must be an existing battleground, not the new one")
+        # Write one BattlemasterList row. The primary and any extra_battlemasters all live on this map (mapID[0]);
+        # _place upserts each by its own id and never evicts a sibling, so several battlegrounds can share the map.
+        def write_bml(bg_id, template, name, groups_allowed, max_group_size, min_level, max_level):
+            if template == bg_id:
+                raise ForgeError("battleground template must be an existing battleground, not the new one")
 
-        bml.set(row, "id", cfg.id)
+            row = self._template("BattlemasterList", template, "battleground")
+            bml.set(row, "id", bg_id)
 
-        for i in range(8):
-            bml.set(row, f"mapID[{i}]", m.id if i == 0 else -1)
+            for i in range(8):
+                bml.set(row, f"mapID[{i}]", m.id if i == 0 else -1)
 
-        bml.set(row, "instanceType", m.instance_type)
-        bml.set(row, "groupsAllowed", cfg.groups_allowed)
-        self._set_text(bml, row, "name", cfg.name.slots())
-        bml.set(row, "maxGroupSize", cfg.max_group_size)
-        bml.set(row, "holidayWorldState", 0)
-        bml.set(row, "minLevel", cfg.min_level)
-        bml.set(row, "maxLevel", cfg.max_level)
-        self._place("BattlemasterList", cfg.id, row, lambda r: bml.get(r, "mapID[0]") == m.id)
+            bml.set(row, "instanceType", m.instance_type)
+            bml.set(row, "groupsAllowed", groups_allowed)
+            self._set_text(bml, row, "name", name.slots())
+            bml.set(row, "maxGroupSize", max_group_size)
+            bml.set(row, "holidayWorldState", 0)
+            bml.set(row, "minLevel", min_level)
+            bml.set(row, "maxLevel", max_level)
+            self._place("BattlemasterList", bg_id, row, lambda r: bml.get(r, "mapID[0]") == m.id)
+
+        write_bml(cfg.id, cfg.template, cfg.name, cfg.groups_allowed, cfg.max_group_size, cfg.min_level, cfg.max_level)
+
+        for extra in cfg.extra:
+            write_bml(extra.id, extra.template, extra.name, extra.groups_allowed, extra.max_group_size,
+                      extra.min_level, extra.max_level)
 
         pvp = self._table("PvpDifficulty")
 
@@ -731,6 +740,11 @@ def check(base: dict[str, bytes], output: dict[str, bytes], config: Config, resu
 
         if bml is None or tables["BattlemasterList"].get(bml, "mapID[0]") != m.id:
             problems.append(f"BattlemasterList.dbc: no row {config.battleground.id} for map {m.id}")
+
+        for extra in config.battleground.extra:
+            xb = tables["BattlemasterList"].by_id().get(extra.id)
+            if xb is None or tables["BattlemasterList"].get(xb, "mapID[0]") != m.id:
+                problems.append(f"BattlemasterList.dbc: no row {extra.id} for map {m.id}")
 
         pvp = tables["PvpDifficulty"]
         ranges = [pvp.get(r, "rangeIndex") for r in pvp.rows if pvp.get(r, "mapID") == m.id]
